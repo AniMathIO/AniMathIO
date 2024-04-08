@@ -1,0 +1,14 @@
+appId: com.kovacsbalinthunor.manim-studio
+productName: ManimStudio
+copyright: Copyright © 2024 Kovacs Balint-Hunor
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - from: .
+    filter:
+      - package.json
+      - app
+extraFiles:
+  - scripts
+publish: null # see https://www.electron.build/configuration/publish
