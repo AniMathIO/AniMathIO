@@ -13,7 +13,7 @@ export default function NextPage() {
         <div>
           <Image
             className="ml-auto mr-auto"
-            src="/images/logo.png"
+            src="/images/ManimStudioLogoDark.png"
             alt="Logo image"
             width="256"
             height="256"

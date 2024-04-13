@@ -33,15 +33,12 @@ export default function HomePage() {
         <div className="text-center mb-8">
           <Image
             className="mx-auto"
-            src="/images/logo.png"
+            src="/images/ManimStudioLogoDark.png"
             alt="Logo image"
             width="256"
             height="256"
           />
           <h1 className="text-4xl font-bold mb-4">ManimStudioNext</h1>
-          <p className="text-xl">
-            ⚡ Electron ⚡ + Next.js + Tailwind CSS = 💕
-          </p>
         </div>
         <div className="bg-white shadow-md rounded-lg p-6">
           <div className="mb-4">
