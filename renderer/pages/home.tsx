@@ -35,8 +35,8 @@ export default function HomePage() {
             className="mx-auto"
             src="/images/logo.png"
             alt="Logo image"
-            width="256px"
-            height="256px"
+            width="256"
+            height="256"
           />
           <h1 className="text-4xl font-bold mb-4">ManimStudioNext</h1>
           <p className="text-xl">
@@ -76,10 +76,8 @@ export default function HomePage() {
             </p>
           </div>
           <div className="text-center">
-            <Link href="/next">
-              <a className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
-                Go to next page
-              </a>
+            <Link href="/next" className='bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded'>
+              Go to next page
             </Link>
           </div>
         </div>

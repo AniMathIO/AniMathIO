@@ -15,15 +15,15 @@ export default function NextPage() {
             className="ml-auto mr-auto"
             src="/images/logo.png"
             alt="Logo image"
-            width="256px"
-            height="256px"
+            width="256"
+            height="256"
           />
         </div>
         <span>⚡ Nextron ⚡</span>
       </div>
       <div className="mt-1 w-full flex-wrap flex justify-center">
-        <Link href="/home">
-          <a className="btn-blue">Go to home page</a>
+        <Link href="/home" className='btn-blue'>
+          Go to home page
         </Link>
       </div>
     </React.Fragment>
