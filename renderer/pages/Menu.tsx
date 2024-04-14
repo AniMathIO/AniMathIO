@@ -51,24 +51,24 @@ export const Menu = observer(() => {
 
 const MENU_OPTIONS = [
   {
-    name: "Video",
+    name: "Videos",
     icon: FilmIcon,
     action: (state: State) => {
-      state.setSelectedMenuOption("Video");
+      state.setSelectedMenuOption("Videos");
     },
   },
   {
-    name: "Audio",
-    icon: MusicalNoteIcon,
-    action: (state: State) => {
-      state.setSelectedMenuOption("Audio");
-    },
-  },
-  {
-    name: "Image",
+    name: "Images",
     icon: PhotoIcon,
     action: (state: State) => {
-      state.setSelectedMenuOption("Image");
+      state.setSelectedMenuOption("Images");
+    },
+  },
+  {
+    name: "Audios",
+    icon: MusicalNoteIcon,
+    action: (state: State) => {
+      state.setSelectedMenuOption("Audios");
     },
   },
   {
@@ -82,21 +82,21 @@ const MENU_OPTIONS = [
     name: "Animations",
     icon: ArrowsPointingOutIcon,
     action: (state: State) => {
-      state.setSelectedMenuOption("Animation");
+      state.setSelectedMenuOption("Animations");
     },
   },
   {
     name: "Effects",
     icon: SparklesIcon,
     action: (state: State) => {
-      state.setSelectedMenuOption("Effect");
+      state.setSelectedMenuOption("Effects");
     },
   },
   {
     name: "Background Fill",
     icon: EyeDropperIcon,
     action: (state: State) => {
-      state.setSelectedMenuOption("Fill");
+      state.setSelectedMenuOption("Background Fill");
     },
   },
   {

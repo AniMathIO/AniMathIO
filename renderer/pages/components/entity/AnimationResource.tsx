@@ -10,6 +10,7 @@ import {
   Animation,
   FadeInAnimation,
   FadeOutAnimation,
+  BreatheAnimation,
   SlideDirection,
   SlideInAnimation,
   SlideOutAnimation,
@@ -65,10 +66,9 @@ export const FadeAnimation = observer(
       <div className="flex flex-col w-full items-start">
         {/* duration */}
         <div className="flex flex-row items-center justify-between my-1">
-          <div className="text-white text-xs">Duration(s)</div>
-          <label className="text-white text-xs" htmlFor="duration">
-            {props.animation.duration / 1000}
-          </label>
+          <div className="text-white text-xs">Duration (s):</div>
+          <label className="text-white text-xs" htmlFor="duration" />
+
           <input
             id="duration"
             className="bg-slate-100 text-black rounded-lg px-2 py-1 ml-2 w-16 text-xs"
@@ -103,9 +103,8 @@ export const SlideAnimation = observer(
       <div className="flex flex-col w-full items-start">
         {/* duration */}
         <div className="flex flex-row items-center justify-between my-1">
-          <div className="text-white text-xs">Duration(s)</div>
-          <label className="text-white text-xs" htmlFor="duration">
-            {props.animation.duration / 1000}
+          <label className="text-white text-xs" htmlFor="duration" >
+            Duration (s):
           </label>
           <input
             id="duration"

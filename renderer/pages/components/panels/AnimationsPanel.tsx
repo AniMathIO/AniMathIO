@@ -1,9 +1,9 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "../../states";
 import { observer } from "mobx-react";
-import { AnimationResource } from "../../entity/AnimationResource";
-import { getUid } from "../../../utils";
+import { AnimationResource } from "../entity/AnimationResource";
+import { getUid } from "../../utils";
 
 export const AnimationsPanel = observer(() => {
   const state = React.useContext(StateContext);
@@ -31,7 +31,7 @@ export const AnimationsPanel = observer(() => {
 
   return (
     <>
-      <div className="text-sm px-[16px] pt-[16px] pb-[8px] font-semibold">
+      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
         Animations
       </div>
       {selectedElement && !hasFadeInAnimation ? (

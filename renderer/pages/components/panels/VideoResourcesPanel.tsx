@@ -1,9 +1,9 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "../../states";
 import { observer } from "mobx-react";
-import { VideoResource } from "../../entity/VideoResource";
-import { UploadButton } from "../shared/UploadButton";
+import { VideoResource } from "../entity/VideoResource";
+import { UploadButton } from "../partials/shared/UploadButton";
 
 export const VideoResourcesPanel = observer(() => {
   const state = React.useContext(StateContext);
@@ -22,7 +22,7 @@ export const VideoResourcesPanel = observer(() => {
       })}
       <UploadButton
         accept="video/mp4,video/x-m4v,video/*"
-        className="ml-[15px] bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold text-center mx-5 py-2 px-4 rounded cursor-pointer"
+        className="ml-[15px]  bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold text-center mx-5 py-2 px-4 rounded cursor-pointer"
         onChange={handleFileChange}
       />
     </>

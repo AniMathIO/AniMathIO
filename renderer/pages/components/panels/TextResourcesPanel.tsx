@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { observer } from "mobx-react";
-import { TextResource } from "../../entity/TextResource";
+import { TextResource } from "../entity/TextResource";
 
 const TEXT_RESOURCES = [
   {
@@ -59,8 +59,8 @@ const TEXT_RESOURCES = [
 export const TextResourcesPanel = observer(() => {
   return (
     <div className="bg-slate-200 h-full">
-      <div className="text-sm px-[16px] pt-[16px] pb-[8px] font-semibold text-black">
-        Text
+      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold text-black">
+        Text Resources
       </div>
       <ul>
 

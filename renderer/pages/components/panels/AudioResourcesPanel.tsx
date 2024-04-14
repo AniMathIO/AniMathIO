@@ -1,9 +1,9 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "../../states";
 import { observer } from "mobx-react";
-import { AudioResource } from "../../entity/AudioResource";
-import { UploadButton } from "../shared/UploadButton";
+import { AudioResource } from "../entity/AudioResource";
+import { UploadButton } from "../partials/shared/UploadButton";
 
 export const AudioResourcesPanel = observer(() => {
   const state = React.useContext(StateContext);
@@ -14,8 +14,8 @@ export const AudioResourcesPanel = observer(() => {
   };
   return (
     <>
-      <div className="text-lg px-[16px] pt-[16px] pb-[8px] font-semibold">
-        Audios
+      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
+        Audio Resources
       </div>
       {state.audios.map((audio, index) => {
         return <AudioResource key={audio} audio={audio} index={index} />;

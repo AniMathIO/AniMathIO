@@ -112,11 +112,11 @@ export type Animation =
   | BreatheAnimation;
 
 export type MenuOption =
-  | "Video"
-  | "Audio"
+  | "Videos"
+  | "Audios"
   | "Text"
-  | "Image"
+  | "Images"
   | "Export"
-  | "Animation"
-  | "Effect"
-  | "Fill";
+  | "Animations"
+  | "Effects"
+  | "Background Fill";

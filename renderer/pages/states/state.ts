@@ -63,7 +63,7 @@ export class State {
       // Code that uses anime.js
       this.animationTimeLine = anime.timeline({ autoplay: false });
     }
-    this.selectedMenuOption = "Video";
+    this.selectedMenuOption = "Videos";
     this.selectedVideoFormat = "mp4";
     makeAutoObservable(this);
   }

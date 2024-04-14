@@ -3,7 +3,7 @@ import React from "react";
 import { EditorElement } from "../../../types";
 import { StateContext } from "../../states";
 import { observer } from "mobx-react";
-import { Bars3BottomLeftIcon, FilmIcon } from "@heroicons/react/24/solid";
+import { Bars3BottomLeftIcon, FilmIcon, PhotoIcon, MusicalNoteIcon, XMarkIcon } from "@heroicons/react/24/solid";
 
 export type ElementProps = {
   element: EditorElement;
@@ -12,7 +12,15 @@ export type ElementProps = {
 export const Element = observer((props: ElementProps) => {
   const state = React.useContext(StateContext);
   const { element } = props;
-  const Icon = element.type === "video" ? FilmIcon : Bars3BottomLeftIcon;
+  let Icon = Bars3BottomLeftIcon;
+  if (element.type === "video") {
+    Icon = FilmIcon;
+  } else if (element.type === "image") {
+    Icon = PhotoIcon;
+  } else if (element.type === "audio") {
+    Icon = MusicalNoteIcon;
+  }
+
   const isSelected = state.selectedElement?.id === element.id;
   const bgColor = isSelected ? "rgba(0, 160, 245, 0.1)" : "";
   return (
@@ -77,7 +85,8 @@ export const Element = observer((props: ElementProps) => {
         ) : null}
       </div>
       <button
-        className="bg-red-500 hover:bg-red-700 text-white mr-2 text-xs py-0 px-1 rounded"
+        aria-label="Remove element"
+        className="bg-red-500 hover:bg-red-700 text-white mr-2 text-sm py-1 px-1 rounded"
         onClick={(e) => {
           state.removeEditorElement(element.id);
           state.refreshElements();
@@ -85,7 +94,7 @@ export const Element = observer((props: ElementProps) => {
           e.stopPropagation();
         }}
       >
-        X
+        <XMarkIcon className="w-4 h-4" />
       </button>
     </div>
   );

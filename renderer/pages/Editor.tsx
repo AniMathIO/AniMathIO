@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { StateContext } from "./states";
 import { observer } from "mobx-react";
 import { Resources } from "./components/Resources";
-import { ElementsPanel } from "./components/partials/panels/ElementsPanel";
+import { ElementsPanel } from "./components/panels/ElementsPanel";
 import { Menu } from "./Menu";
 import { Timeline } from "./components/Timeline";
 import { State } from './states/state';
