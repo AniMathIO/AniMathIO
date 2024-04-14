@@ -1,6 +1,6 @@
 import path from "path";
 import { exec } from "child_process";
-import { app, ipcMain } from "electron";
+import { IpcMainEvent, app, ipcMain } from "electron";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
 
@@ -12,7 +12,7 @@ if (isProd) {
   app.setPath("userData", `${app.getPath("userData")} (development)`);
 }
 
-async function startProcess(event, value) {
+async function startProcess(event: IpcMainEvent, value: string) {
   if (event) {
     /*
       'parentDir' is used to get this folder -> /Applications/<youApp>.app/Contents/ 
@@ -48,18 +48,20 @@ async function startProcess(event, value) {
   await app.whenReady();
 
   const mainWindow = createWindow("main", {
-    width: 1000,
-    height: 600,
+    width: 1600,
+    height: 900,
+    minWidth: 1600,
+    minHeight: 900,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
   });
 
   if (isProd) {
-    await mainWindow.loadURL("app://./home");
+    await mainWindow.loadURL("app://./Home");
   } else {
     const port = process.argv[2];
-    await mainWindow.loadURL(`http://localhost:${port}/home`);
+    await mainWindow.loadURL(`http://localhost:${port}/Home`);
     // mainWindow.webContents.openDevTools();
   }
 })();

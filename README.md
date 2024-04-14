@@ -1,38 +1,29 @@
-<p align="center"><img src="https://i.imgur.com/a9QWW0v.png"></p>
+# ManimStudioNext
 
-## Usage
+## Development build
 
-### Create an App
+Clone project
 
-```
-# with npx
-$ npx create-nextron-app my-app --example with-tailwindcss
-
-# with yarn
-$ yarn create nextron-app my-app --example with-tailwindcss
-
-# with pnpm
-$ pnpm dlx create-nextron-app my-app --example with-tailwindcss
+```console
+git clone
 ```
 
-### Install Dependencies
+Install dependencies
 
-```
-$ cd my-app
+```console
+cd ManimStudioNext
+npm install
 
-# using yarn or npm
-$ yarn (or `npm install`)
-
-# using pnpm
-$ pnpm install --shamefully-hoist
+# if canvas errors occur regardig node mismatch run the following line
+npm rebuild canvas --update-binary
 ```
 
-### Use it
+Usage:
 
-```
+```console
 # development mode
-$ yarn dev (or `npm run dev` or `pnpm run dev`)
+npm run dev
 
 # production build
-$ yarn build (or `npm run build` or `pnpm run build`)
+npm run build
 ```
