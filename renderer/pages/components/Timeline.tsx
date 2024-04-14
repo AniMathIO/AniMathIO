@@ -9,7 +9,7 @@ export const Timeline = observer(() => {
     const state = React.useContext(StateContext);
     const percentOfCurrentTime = (state.currentTimeInMs / state.maxTime) * 100;
     return (
-        <div className="flex flex-col">
+        <div className="flex flex-col overflow-hidden">
             <SeekPlayer />
             <div className="flex-1 relative ">
                 {state.editorElements.map((element) => {

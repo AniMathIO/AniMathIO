@@ -34,7 +34,7 @@ export const SeekPlayer = observer((_props: SeekPlayerProps) => {
     const formattedTime = formatTimeToMinSecMili(state.currentTimeInMs);
     const formattedMaxTime = formatTimeToMinSecMili(state.maxTime);
     return (
-        <div className="seek-player flex flex-col">
+        <div className="seek-player flex flex-col overflow-hidden">
             <div className="flex flex-row items-center px-2">
                 <button
                     className="w-[80px] rounded  px-2 py-2"
@@ -46,7 +46,7 @@ export const SeekPlayer = observer((_props: SeekPlayerProps) => {
                     <Icon className="h-10 w-10"></Icon>
                 </button>
                 <span className="font-mono">{formattedTime}</span>
-                <div className="w-[1px] h-[25px] bg-slate-300 mx-[10px]"></div>
+                <div className="w-[1px] h-[24px] bg-slate-300 mx-[10px]"></div>
                 <span className="font-mono">{formattedMaxTime}</span>
             </div>
             <ScaleRangeInput
@@ -55,7 +55,7 @@ export const SeekPlayer = observer((_props: SeekPlayerProps) => {
                 onChange={(value) => {
                     state.handleSeek(value);
                 }}
-                height={30}
+                height={32}
                 markings={MARKINGS}
                 backgroundColor="white"
             />
