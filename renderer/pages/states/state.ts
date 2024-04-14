@@ -735,7 +735,7 @@ export class State {
       let sourceNode = ctx.createMediaElementSource(audioElement);
       let dest = ctx.createMediaStreamDestination();
       sourceNode.connect(dest);
-      sourceNode.connect(ctx.destination);
+      // sourceNode.connect(ctx.destination);
       audioStreams.push(dest.stream);
     });
     audioStreams.forEach((audioStream) => {
@@ -778,8 +778,18 @@ export class State {
             "-y",
             "-i",
             "video.webm",
-            "-c",
-            "copy",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "28",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            "-movflags",
+            "+faststart",
             "video.mp4",
           ]);
           // await ffmpeg.exec(["-y", "-i", "video.webm", "-c:v", "libx264", "video.mp4"]);
