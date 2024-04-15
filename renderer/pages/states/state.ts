@@ -46,6 +46,11 @@ export class State {
   possibleVideoFormats: string[] = ["mp4", "webm"];
   selectedVideoFormat: "mp4" | "webm";
 
+  audioContexts = new Map<
+    string,
+    { context: AudioContext; sourceNode: MediaElementAudioSourceNode }
+  >();
+
   constructor() {
     this.canvas = null;
     this.videos = [];
@@ -66,6 +71,17 @@ export class State {
     this.selectedMenuOption = "Videos";
     this.selectedVideoFormat = "mp4";
     makeAutoObservable(this);
+  }
+
+  getAudioContext(audioElement: HTMLAudioElement) {
+    let entry = this.audioContexts.get(audioElement.id);
+    if (!entry) {
+      const ctx = new AudioContext();
+      const sourceNode = ctx.createMediaElementSource(audioElement);
+      entry = { context: ctx, sourceNode };
+      this.audioContexts.set(audioElement.id, entry);
+    }
+    return entry;
   }
 
   get currentTimeInMs() {
@@ -723,20 +739,22 @@ export class State {
   saveCanvasToVideoWithAudioWebmMp4() {
     console.log("modified");
     let mp4 = this.selectedVideoFormat === "mp4";
+
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
     const stream = canvas.captureStream(30);
     const audioElements = this.editorElements.filter(isEditorAudioElement);
     const audioStreams: MediaStream[] = [];
+
     audioElements.forEach((audio) => {
       const audioElement = document.getElementById(
         audio.properties.elementId
       ) as HTMLAudioElement;
-      let ctx = new AudioContext();
-      let sourceNode = ctx.createMediaElementSource(audioElement);
-      let dest = ctx.createMediaStreamDestination();
-      sourceNode.connect(dest);
-      // sourceNode.connect(ctx.destination);
-      audioStreams.push(dest.stream);
+      if (audioElement) {
+        const { context, sourceNode } = this.getAudioContext(audioElement);
+        let dest = context.createMediaStreamDestination();
+        sourceNode.connect(dest);
+        audioStreams.push(dest.stream);
+      }
     });
     audioStreams.forEach((audioStream) => {
       stream.addTrack(audioStream.getAudioTracks()[0]);
