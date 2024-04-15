@@ -101,7 +101,7 @@ export const ExportVideoPanel = observer(() => {
           }, 1000);
         }}
       >
-        Export Video ({state.maxTime / 1000} seconds) {state.selectedVideoFormat === "mp4" ? ("ALPHA") : ""}
+        Export Video ({state.maxTime / 1000} seconds) {state.selectedVideoFormat === "mp4" ? ("experimental") : ""}
       </button>
     </>
   );
