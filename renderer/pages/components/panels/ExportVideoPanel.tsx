@@ -61,7 +61,7 @@ export const ExportVideoPanel = observer(() => {
         </div >
       </div >
       {/*  Format selection with radio button */}
-      <div div className="px-[16px]" >
+      <div className="px-[16px]" >
         <div className="text-base font-semibold mr-2">Video Format:</div>
         <div className="flex flex-row items-center my-2">
           <label htmlFor="video-format" className="sr-only">Video Format</label>
