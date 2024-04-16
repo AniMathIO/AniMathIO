@@ -745,6 +745,11 @@ export class State {
     const audioElements = this.editorElements.filter(isEditorAudioElement);
     const audioStreams: MediaStream[] = [];
 
+    // Remove previously added audio tracks from the stream
+    stream.getAudioTracks().forEach((track) => {
+      stream.removeTrack(track);
+    });
+
     audioElements.forEach((audio) => {
       const audioElement = document.getElementById(
         audio.properties.elementId
@@ -756,9 +761,19 @@ export class State {
         audioStreams.push(dest.stream);
       }
     });
+
+    // Create a new AudioContext and AudioDestinationNode for mixing the audio streams
+    const mixerContext = new AudioContext();
+    const mixerDestination = mixerContext.createMediaStreamDestination();
+
     audioStreams.forEach((audioStream) => {
-      stream.addTrack(audioStream.getAudioTracks()[0]);
+      const sourceNode = mixerContext.createMediaStreamSource(audioStream);
+      sourceNode.connect(mixerDestination);
     });
+
+    // Add the mixed audio stream to the main stream
+    stream.addTrack(mixerDestination.stream.getAudioTracks()[0]);
+
     const video = document.createElement("video");
     video.srcObject = stream;
     video.height = 500;
