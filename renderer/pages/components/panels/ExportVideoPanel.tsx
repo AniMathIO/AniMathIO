@@ -9,6 +9,10 @@ export const ExportVideoPanel = observer(() => {
   const state = React.useContext(StateContext);
   const [resolution, setResolution] = React.useState('1920x1080');
 
+  React.useEffect(() => {
+    setResolution('800x500');
+  }, []);
+
   const handleResolutionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setResolution(e.target.value);
   };
@@ -50,13 +54,14 @@ export const ExportVideoPanel = observer(() => {
             <option value="1920x1080">1920x1080 (Full HD)</option>
             <option value="1280x720">1280x720 (HD)</option>
             <option value="854x480">854x480 (SD)</option>
+            <option value="800x500">800x500 (SD)</option>
             <option value="640x360">640x360 (SD)</option>
           </select>
 
-        </div>
-      </div>
+        </div >
+      </div >
       {/*  Format selection with radio button */}
-      <div className="px-[16px]">
+      <div div className="px-[16px]" >
         <div className="text-base font-semibold mr-2">Video Format:</div>
         <div className="flex flex-row items-center my-2">
           <label htmlFor="video-format" className="sr-only">Video Format</label>
