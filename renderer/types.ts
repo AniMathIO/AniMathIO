@@ -119,4 +119,5 @@ export type MenuOption =
   | "Export"
   | "Animations"
   | "Effects"
-  | "Background Fill";
+  | "Background Fill"
+  | "Mathematical Objects";
