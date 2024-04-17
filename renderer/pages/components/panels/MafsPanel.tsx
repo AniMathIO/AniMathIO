@@ -1,43 +1,29 @@
-"use client";
 import React from "react";
-// import { StateContext } from "../../states";
 import { observer } from "mobx-react";
-import { Mafs, Coordinates, Text, useMovablePoint } from "mafs"
-
-
+import { Mafs, Coordinates, Line, Point } from "mafs";
+import { MafsResource } from "../entity/MafsResource";
 
 export const MafsPanel = observer(() => {
-  const point = useMovablePoint([1, 1])
   return (
     <>
       <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
         Mathematical Objects
       </div>
-      <div className="flex items-center justify-center ">
-        <Mafs viewBox={{ y: [0, 2], x: [-3, 5] }}>
-          <Coordinates.Cartesian />
-          <Text
-            x={point.x}
-            y={point.y}
-            size={20}
-            attach="w"
-            attachDistance={15}
-          >
-            ({point.x.toFixed(3)}, {point.y.toFixed(3)})
-          </Text>
-          <Text
-            x={point.x}
-            y={point.y}
-            size={20}
-            attach="e"
-            attachDistance={15}
-          >
-            ({point.x.toFixed(3)}, {point.y.toFixed(3)})
-          </Text>
-          {point.element}
-        </Mafs>
-
-      </div >
+      <div className="flex flex-col items-center justify-center">
+        <MafsResource index={0}>
+          <Mafs>
+            <Coordinates.Cartesian />
+            <Line.Segment point1={[-2, -1]} point2={[2, 1]} />
+          </Mafs>
+        </MafsResource>
+        <MafsResource index={1}>
+          <Mafs>
+            <Coordinates.Cartesian />
+            <Point x={1} y={1} />
+          </Mafs>
+        </MafsResource>
+        {/* Add more MafsResource components with different Mafs elements */}
+      </div>
     </>
   );
 });
