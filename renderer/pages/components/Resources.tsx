@@ -10,6 +10,7 @@ import { ImageResourcesPanel } from "./panels/ImageResourcesPanel";
 import { TextResourcesPanel } from "./panels/TextResourcesPanel";
 import { VideoResourcesPanel } from "./panels/VideoResourcesPanel";
 import { EffectsPanel } from "./panels/EffectsPanel";
+import { MafsPanel } from "./panels/MafsPanel";
 
 export const Resources = observer(() => {
     const state = React.useContext(StateContext);
@@ -24,6 +25,7 @@ export const Resources = observer(() => {
             {selectedMenuOption === "Effects" ? <EffectsPanel /> : null}
             {selectedMenuOption === "Export" ? <ExportVideoPanel /> : null}
             {selectedMenuOption === "Background Fill" ? <FillPanel /> : null}
+            {selectedMenuOption === "Mathematical Objects" ? <MafsPanel /> : null}
         </div>
     );
 });
