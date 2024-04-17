@@ -762,17 +762,20 @@ export class State {
       }
     });
 
-    // Create a new AudioContext and AudioDestinationNode for mixing the audio streams
-    const mixerContext = new AudioContext();
-    const mixerDestination = mixerContext.createMediaStreamDestination();
+    // Check if there are any audio streams available
+    if (audioStreams.length > 0) {
+      // Create a new AudioContext and AudioDestinationNode for mixing the audio streams
+      const mixerContext = new AudioContext();
+      const mixerDestination = mixerContext.createMediaStreamDestination();
 
-    audioStreams.forEach((audioStream) => {
-      const sourceNode = mixerContext.createMediaStreamSource(audioStream);
-      sourceNode.connect(mixerDestination);
-    });
+      audioStreams.forEach((audioStream) => {
+        const sourceNode = mixerContext.createMediaStreamSource(audioStream);
+        sourceNode.connect(mixerDestination);
+      });
 
-    // Add the mixed audio stream to the main stream
-    stream.addTrack(mixerDestination.stream.getAudioTracks()[0]);
+      // Add the mixed audio stream to the main stream
+      stream.addTrack(mixerDestination.stream.getAudioTracks()[0]);
+    }
 
     const video = document.createElement("video");
     video.srcObject = stream;
