@@ -10,7 +10,8 @@ import {
   DocumentTextIcon,
   MusicalNoteIcon,
   EyeDropperIcon,
-  SparklesIcon
+  SparklesIcon,
+  VariableIcon
 } from "@heroicons/react/24/solid";
 import { State } from "./states/state";
 
@@ -62,6 +63,13 @@ const MENU_OPTIONS = [
     icon: PhotoIcon,
     action: (state: State) => {
       state.setSelectedMenuOption("Images");
+    },
+  },
+  {
+    name: "Mathematical Objects",
+    icon: VariableIcon,
+    action: (state: State) => {
+      state.setSelectedMenuOption("Mathematical Objects");
     },
   },
   {
