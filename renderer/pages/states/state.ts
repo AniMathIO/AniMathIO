@@ -641,81 +641,49 @@ export class State {
         },
       };
 
-      this.addMafsElement(element);
+      // Render the Mafs element to an SVG string
+      const svgString = this.renderMafsElementToSvg(
+        mafsElement,
+        placement.width,
+        placement.height
+      );
+
+      // Create an image element and set the SVG string as its source
+      const imgElement = document.createElement("img");
+      imgElement.src = "data:image/svg+xml;base64," + btoa(svgString);
+      imgElement.id = properties.elementId;
+      // add group properties to img element
+
+      document.body.appendChild(imgElement);
+      element.properties.src = imgElement.src;
+      this.editorElements = [...this.editorElements, element];
+      this.refreshElements();
     }
   }
 
-  addMafsElement(element: MafsEditorElement) {
-    const fabricObject = new fabric.Group([], {
-      left: element.placement.x,
-      top: element.placement.y,
-      width: element.placement.width,
-      height: element.placement.height,
-      selectable: false,
-      evented: false,
-    });
-
+  renderMafsElementToSvg(
+    mafsElement: React.ReactNode,
+    width: number,
+    height: number
+  ): string {
     const container = document.createElement("div");
-    // ReactDOM.render(
-    //   <Mafs width={element.placement.width} height={element.placement.height}>
-    //     {element.properties.mafsElement}
-    //   </Mafs>,
-    //   container
-    // );
     const root = createRoot(container);
     root.render(
       React.createElement(Mafs, {
-        width: element.placement.width,
-        height: element.placement.height,
+        width: width,
+        height: height,
         pan: false,
         viewBox: { y: [-10, 5] },
+        children: mafsElement,
       })
     );
 
-    container.innerHTML = element.properties.src;
-
     const svgElement = container.querySelector("svg");
     if (svgElement) {
-      const fabricSvg = new fabric.Group([], {
-        width: element.placement.width,
-        height: element.placement.height,
-        selectable: false,
-        evented: false,
-      });
-
-      fabric.loadSVGFromString(svgElement.outerHTML, (objects, options) => {
-        objects.forEach((obj) => {
-          fabricSvg.addWithUpdate(obj);
-        });
-        fabricSvg.setCoords();
-        fabricObject.addWithUpdate(fabricSvg);
-        fabricObject.setCoords();
-      });
+      return svgElement.outerHTML;
     }
 
-    const editorElement: EditorElement = {
-      id: element.id,
-      name: element.name,
-      type: "mafs",
-      properties: {
-        // Ensure all required properties are included here
-        src: element.properties.src,
-        elementId: element.properties.elementId,
-        // Add other properties as required by the EditorElement type
-        effect: element.properties.effect,
-        // imageObject should be included if it's required and should be of the correct type
-        imageObject: element.properties.imageObject,
-      },
-      fabricObject: fabricObject,
-      timeFrame: {
-        start: element.timeFrame.start,
-        end: element.timeFrame.end,
-      },
-      placement: element.placement,
-    };
-
-    this.editorElements = [...this.editorElements, editorElement];
-    this.refreshElements();
+    return "";
   }
 
   addAudio(index: number) {
@@ -975,7 +943,6 @@ export class State {
     state.canvas.remove(...state.canvas.getObjects());
     for (let index = 0; index < state.editorElements.length; index++) {
       const element = state.editorElements[index];
-      const { fabricObject } = element;
       switch (element.type) {
         case "video": {
           console.log("elementid", element.properties.elementId);
@@ -1041,6 +1008,8 @@ export class State {
           });
           break;
         }
+        // case image or mafs
+        case "mafs":
         case "image": {
           if (document.getElementById(element.properties.elementId) == null)
             continue;
@@ -1160,10 +1129,7 @@ export class State {
           });
           break;
         }
-        case "mafs": {
-          this.canvas?.add(fabricObject as any);
-          break;
-        }
+
         default: {
           throw new Error("Not implemented");
         }
