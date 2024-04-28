@@ -23,6 +23,16 @@ export type ImageEditorElement = EditorElementBase<
   }
 >;
 
+export type MafsEditorElement = EditorElementBase<
+  "mafs",
+  {
+    src: string;
+    elementId: string;
+    imageObject?: fabric.Object;
+    effect: Effect;
+  }
+>;
+
 export type AudioEditorElement = EditorElementBase<
   "audio",
   { src: string; elementId: string }
@@ -41,7 +51,8 @@ export type EditorElement =
   | VideoEditorElement
   | ImageEditorElement
   | AudioEditorElement
-  | TextEditorElement;
+  | TextEditorElement
+  | MafsEditorElement;
 
 export type Placement = {
   x: number;
