@@ -1,29 +1,66 @@
 import React from "react";
 import { observer } from "mobx-react";
-import { Mafs, Coordinates, Line, Point } from "mafs";
+import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text } from "mafs";
 import { MafsResource } from "../entity/MafsResource";
 
+type MafsResourceType = {
+  index: number
+  name: string
+  children: React.ReactNode
+}
+
+const generateMafsResources = (): MafsResourceType[] => {
+  const resources: MafsResourceType[] = [
+    {
+      index: 1,
+      name: "Line",
+      children: <Line.Segment point1={[-2, -1]} point2={[2, 1]} />,
+    },
+    {
+      index: 2,
+      name: "Point",
+      children: <Point x={1} y={1} />,
+    },
+    {
+      index: 3,
+      name: "Circle",
+      children: <Circle center={[0, 0]} radius={1} />,
+    },
+    {
+      index: 4,
+      name: "Polygon",
+      children: <Polygon points={[[0, 0], [1, 1], [1, -1]]} />,
+    },
+    {
+      index: 5,
+      name: "Text",
+      children: <Text x={0} y={0} children="Hello, Mafs!" />,
+    },
+    // Add more Mafs components here
+  ];
+
+  return resources;
+};
+
+
+
 export const MafsPanel = observer(() => {
+  const mafsResources = generateMafsResources();
   return (
     <>
       <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
         Mathematical Objects
       </div>
       <div className="flex flex-col items-center justify-center">
-        <MafsResource index={0}>
-          <Mafs>
-            <Coordinates.Cartesian />
-            <Line.Segment point1={[-2, -1]} point2={[2, 1]} />
-          </Mafs>
-        </MafsResource>
-        <MafsResource index={1}>
-          <Mafs>
-            <Coordinates.Cartesian />
-            <Point x={1} y={1} />
-          </Mafs>
-        </MafsResource>
-        {/* Add more MafsResource components with different Mafs elements */}
-      </div>
+        {mafsResources.map((resource) => (
+          <MafsResource key={`mafs-${resource.index}`} index={resource.index} name={resource.name}>
+            <Mafs width={250} height={300} pan={false} viewBox={{ y: [-10, 5] }}>
+              <Coordinates.Cartesian />
+              {resource.children}
+            </Mafs>
+          </MafsResource>
+        ))}
+      </div >
     </>
   );
 });
