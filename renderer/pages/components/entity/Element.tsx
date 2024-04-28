@@ -3,7 +3,7 @@ import React from "react";
 import { EditorElement } from "../../../types";
 import { StateContext } from "../../states";
 import { observer } from "mobx-react";
-import { Bars3BottomLeftIcon, FilmIcon, PhotoIcon, MusicalNoteIcon, XMarkIcon } from "@heroicons/react/24/solid";
+import { Bars3BottomLeftIcon, FilmIcon, PhotoIcon, MusicalNoteIcon, XMarkIcon, VariableIcon } from "@heroicons/react/24/solid";
 
 export type ElementProps = {
   element: EditorElement;
@@ -19,6 +19,9 @@ export const Element = observer((props: ElementProps) => {
     Icon = PhotoIcon;
   } else if (element.type === "audio") {
     Icon = MusicalNoteIcon;
+  }
+  else if (element.type === "mafs") {
+    Icon = VariableIcon;
   }
 
   const isSelected = state.selectedElement?.id === element.id;
