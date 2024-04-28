@@ -6,20 +6,21 @@ import { PlusCircleIcon } from "@heroicons/react/24/solid";
 type MafsResourceProps = {
   index: number;
   children: React.ReactNode;
+  name: string;
 };
 
-export const MafsResource = observer(({ index, children }: MafsResourceProps) => {
+export const MafsResource = observer(({ index, children, name }: MafsResourceProps) => {
   const state = React.useContext(StateContext);
 
   return (
     <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative">
       <div className="bg-[rgba(0,0,0,.50)] rounded-xl text-white py-1 px-1 absolute text-base top-1.3 right-2">
-        Mafs Object Name
+        {name}
       </div>
       <button
         title="Add Image"
         className="hover:bg-[#00a0f5] rounded z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
-        onClick={() => state.addImage(index)}
+        onClick={() => state.addMafsResource(index, children)}
       >
         <PlusCircleIcon className="w-8 h-8 drop-shadow-lg" />
       </button>
