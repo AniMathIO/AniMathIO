@@ -609,7 +609,7 @@ export class State {
 
   addMafsResource(index: number, mafsElement: React.ReactNode, name: string) {
     if (mafsElement) {
-      const aspectRatio = 600 / 200;
+      const aspectRatio = 600 / 300;
       const placement: Placement = {
         x: 0,
         y: 0,
