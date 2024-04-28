@@ -18,6 +18,7 @@ import {
   ImageEditorElement,
   Effect,
   TextEditorElement,
+  MafsEditorElement,
 } from "../../types";
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -606,37 +607,117 @@ export class State {
     });
   }
 
-  addMafsResource(index: number, mafsElement: React.ReactNode) {
+  addMafsResource(index: number, mafsElement: React.ReactNode, name: string) {
     if (mafsElement) {
-      const aspectRatio = 300 / 250;
-      const id = getUid();
-      this.addEditorElement({
-        id,
-        name: `Media(mafs) ${index + 1}`,
-        type: "mafs",
-        placement: {
-          x: 0,
-          y: 0,
-          width: 100 * aspectRatio,
-          height: 100,
-          rotation: 0,
-          scaleX: 1,
-          scaleY: 1,
+      const aspectRatio = 600 / 200;
+      const placement: Placement = {
+        x: 0,
+        y: 0,
+        width: 100 * aspectRatio,
+        height: 100,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+      };
+
+      const properties: MafsEditorElement["properties"] = {
+        src: "",
+        elementId: `mafs-${index}`,
+        imageObject: undefined,
+        effect: {
+          type: "none",
         },
+      };
+      const id = getUid();
+      const element: MafsEditorElement = {
+        id: id,
+        name: `Mafs (${name})`,
+        type: "mafs",
+        placement,
+        properties,
         timeFrame: {
           start: 0,
           end: this.maxTime,
         },
-        properties: {
-          elementId: `mafs-${id}`,
-          src: mafsElement.toString(),
-          effect: {
-            type: "none",
-          },
-        },
-      });
+      };
+
+      this.addMafsElement(element);
     }
   }
+
+  addMafsElement(element: MafsEditorElement) {
+    const fabricObject = new fabric.Group([], {
+      left: element.placement.x,
+      top: element.placement.y,
+      width: element.placement.width,
+      height: element.placement.height,
+      selectable: false,
+      evented: false,
+    });
+
+    const container = document.createElement("div");
+    // ReactDOM.render(
+    //   <Mafs width={element.placement.width} height={element.placement.height}>
+    //     {element.properties.mafsElement}
+    //   </Mafs>,
+    //   container
+    // );
+    const root = createRoot(container);
+    root.render(
+      React.createElement(Mafs, {
+        width: element.placement.width,
+        height: element.placement.height,
+        pan: false,
+        viewBox: { y: [-10, 5] },
+      })
+    );
+
+    container.innerHTML = element.properties.src;
+
+    const svgElement = container.querySelector("svg");
+    if (svgElement) {
+      const fabricSvg = new fabric.Group([], {
+        width: element.placement.width,
+        height: element.placement.height,
+        selectable: false,
+        evented: false,
+      });
+
+      fabric.loadSVGFromString(svgElement.outerHTML, (objects, options) => {
+        objects.forEach((obj) => {
+          fabricSvg.addWithUpdate(obj);
+        });
+        fabricSvg.setCoords();
+        fabricObject.addWithUpdate(fabricSvg);
+        fabricObject.setCoords();
+      });
+    }
+
+    const editorElement: EditorElement = {
+      id: element.id,
+      name: element.name,
+      type: "mafs",
+      properties: {
+        // Ensure all required properties are included here
+        src: element.properties.src,
+        elementId: element.properties.elementId,
+        // Add other properties as required by the EditorElement type
+        effect: element.properties.effect,
+        // imageObject should be included if it's required and should be of the correct type
+        imageObject: element.properties.imageObject,
+      },
+      fabricObject: fabricObject,
+      timeFrame: {
+        start: element.timeFrame.start,
+        end: element.timeFrame.end,
+      },
+      placement: element.placement,
+    };
+
+    this.editorElements = [...this.editorElements, editorElement];
+    this.refreshElements();
+  }
+
   addAudio(index: number) {
     const audioElement = document.getElementById(`audio-${index}`);
     if (!isHtmlAudioElement(audioElement)) {
@@ -894,6 +975,7 @@ export class State {
     state.canvas.remove(...state.canvas.getObjects());
     for (let index = 0; index < state.editorElements.length; index++) {
       const element = state.editorElements[index];
+      const { fabricObject } = element;
       switch (element.type) {
         case "video": {
           console.log("elementid", element.properties.elementId);
@@ -1079,67 +1161,7 @@ export class State {
           break;
         }
         case "mafs": {
-          const mafsElement = element;
-          const mafsContainer = document.createElement("div");
-          mafsContainer.id = `mafs-container-${element.id}`;
-          mafsContainer.style.position = "absolute";
-          mafsContainer.style.left = `${element.placement.x}px`;
-          mafsContainer.style.top = `${element.placement.y}px`;
-          mafsContainer.style.width = `${element.placement.width}px`;
-          mafsContainer.style.height = `${element.placement.height}px`;
-          mafsContainer.style.transform = `rotate(${element.placement.rotation}deg) scale(${element.placement.scaleX}, ${element.placement.scaleY})`;
-
-          //TODO: Render the Mafs element using React
-          const root = createRoot(mafsContainer);
-          root.render(
-            React.createElement(Mafs, {
-              children: mafsElement.properties.src,
-            })
-          );
-
-          const mafsObject = new fabric.Group([]);
-          mafsObject.set({
-            name: element.id,
-            left: element.placement.x,
-            top: element.placement.y,
-            width: element.placement.width,
-            height: element.placement.height,
-            angle: element.placement.rotation,
-            scaleX: element.placement.scaleX,
-            scaleY: element.placement.scaleY,
-            objectCaching: false,
-            selectable: true,
-            lockUniScaling: true,
-          });
-
-          element.fabricObject = mafsObject;
-          canvas.add(mafsObject);
-
-          canvas.on("object:modified", function (e) {
-            if (!e.target) return;
-            const target = e.target;
-            if (target !== mafsObject) return;
-            const placement = element.placement;
-            const newPlacement: Placement = {
-              ...placement,
-              x: target.left ?? placement.x,
-              y: target.top ?? placement.y,
-              rotation: target.angle ?? placement.rotation,
-              scaleX: target.scaleX ?? placement.scaleX,
-              scaleY: target.scaleY ?? placement.scaleY,
-            };
-            const newElement = {
-              ...element,
-              placement: newPlacement,
-            };
-            state.updateEditorElement(newElement);
-
-            // Update the Mafs container position and transform
-            mafsContainer.style.left = `${newPlacement.x}px`;
-            mafsContainer.style.top = `${newPlacement.y}px`;
-            mafsContainer.style.transform = `rotate(${newPlacement.rotation}deg) scale(${newPlacement.scaleX}, ${newPlacement.scaleY})`;
-          });
-
+          this.canvas?.add(fabricObject as any);
           break;
         }
         default: {

@@ -20,7 +20,7 @@ export const MafsResource = observer(({ index, children, name }: MafsResourcePro
       <button
         title="Add Image"
         className="hover:bg-[#00a0f5] rounded z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
-        onClick={() => state.addMafsResource(index, children)}
+        onClick={() => state.addMafsResource(index, children, name)}
       >
         <PlusCircleIcon className="w-8 h-8 drop-shadow-lg" />
       </button>
