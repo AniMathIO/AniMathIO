@@ -22,7 +22,10 @@ import {
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
-
+import { Mafs } from "mafs";
+import React from "react";
+import ReactDOM from "react-dom";
+import { createRoot } from "react-dom/client";
 export class State {
   canvas: fabric.Canvas | null;
 
@@ -603,6 +606,37 @@ export class State {
     });
   }
 
+  addMafsResource(index: number, mafsElement: React.ReactNode) {
+    if (mafsElement) {
+      const aspectRatio = 300 / 250;
+      const id = getUid();
+      this.addEditorElement({
+        id,
+        name: `Media(mafs) ${index + 1}`,
+        type: "mafs",
+        placement: {
+          x: 0,
+          y: 0,
+          width: 100 * aspectRatio,
+          height: 100,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
+        },
+        timeFrame: {
+          start: 0,
+          end: this.maxTime,
+        },
+        properties: {
+          elementId: `mafs-${id}`,
+          src: mafsElement.toString(),
+          effect: {
+            type: "none",
+          },
+        },
+      });
+    }
+  }
   addAudio(index: number) {
     const audioElement = document.getElementById(`audio-${index}`);
     if (!isHtmlAudioElement(audioElement)) {
@@ -1042,6 +1076,70 @@ export class State {
             };
             state.updateEditorElement(newElement);
           });
+          break;
+        }
+        case "mafs": {
+          const mafsElement = element;
+          const mafsContainer = document.createElement("div");
+          mafsContainer.id = `mafs-container-${element.id}`;
+          mafsContainer.style.position = "absolute";
+          mafsContainer.style.left = `${element.placement.x}px`;
+          mafsContainer.style.top = `${element.placement.y}px`;
+          mafsContainer.style.width = `${element.placement.width}px`;
+          mafsContainer.style.height = `${element.placement.height}px`;
+          mafsContainer.style.transform = `rotate(${element.placement.rotation}deg) scale(${element.placement.scaleX}, ${element.placement.scaleY})`;
+
+          //TODO: Render the Mafs element using React
+          const root = createRoot(mafsContainer);
+          root.render(
+            React.createElement(Mafs, {
+              children: mafsElement.properties.src,
+            })
+          );
+
+          const mafsObject = new fabric.Group([]);
+          mafsObject.set({
+            name: element.id,
+            left: element.placement.x,
+            top: element.placement.y,
+            width: element.placement.width,
+            height: element.placement.height,
+            angle: element.placement.rotation,
+            scaleX: element.placement.scaleX,
+            scaleY: element.placement.scaleY,
+            objectCaching: false,
+            selectable: true,
+            lockUniScaling: true,
+          });
+
+          element.fabricObject = mafsObject;
+          canvas.add(mafsObject);
+
+          canvas.on("object:modified", function (e) {
+            if (!e.target) return;
+            const target = e.target;
+            if (target !== mafsObject) return;
+            const placement = element.placement;
+            const newPlacement: Placement = {
+              ...placement,
+              x: target.left ?? placement.x,
+              y: target.top ?? placement.y,
+              rotation: target.angle ?? placement.rotation,
+              scaleX: target.scaleX ?? placement.scaleX,
+              scaleY: target.scaleY ?? placement.scaleY,
+            };
+            const newElement = {
+              ...element,
+              placement: newPlacement,
+            };
+            state.updateEditorElement(newElement);
+
+            // Update the Mafs container position and transform
+            mafsContainer.style.left = `${newPlacement.x}px`;
+            mafsContainer.style.top = `${newPlacement.y}px`;
+            mafsContainer.style.transform = `rotate(${newPlacement.rotation}deg) scale(${newPlacement.scaleX}, ${newPlacement.scaleY})`;
+          });
+
           break;
         }
         default: {
