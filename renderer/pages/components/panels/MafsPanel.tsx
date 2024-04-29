@@ -1,6 +1,6 @@
 import React from "react";
 import { observer } from "mobx-react";
-import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text } from "mafs";
+import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text, LaTeX } from "mafs";
 import { MafsResource } from "../entity/MafsResource";
 
 type MafsResourceType = {
@@ -36,6 +36,15 @@ const generateMafsResources = (): MafsResourceType[] => {
       name: "Text",
       children: <Text x={0} y={0} children="Hello, Mafs!" />,
     },
+    {
+      index: 6,
+      name: "LaTex",
+      children: <LaTeX
+        at={[3, 2]}
+        tex={String.raw`
+      \begin{bmatrix} ${[1, 0]} \\ ${[0, 1]} \end{bmatrix}
+    `} />,
+    }
     // Add more Mafs components here
   ];
 
