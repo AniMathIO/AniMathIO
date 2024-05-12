@@ -1,4 +1,4 @@
-# ManimStudioNext
+# AniMathIO
 
 ## Development build
 
@@ -11,7 +11,7 @@ git clone
 Install dependencies
 
 ```console
-cd ManimStudioNext
+cd AniMathIO
 npm install
 
 # if canvas errors occur regardig node mismatch run the following line
