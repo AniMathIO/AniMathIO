@@ -23,10 +23,7 @@ import {
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
-import { Mafs } from "mafs";
 import React from "react";
-import ReactDOM from "react-dom";
-import { createRoot } from "react-dom/client";
 export class State {
   canvas: fabric.Canvas | null;
 
@@ -607,83 +604,56 @@ export class State {
     });
   }
 
-  addMafsResource(index: number, mafsElement: React.ReactNode, name: string) {
-    if (mafsElement) {
-      const aspectRatio = 600 / 300;
-      const placement: Placement = {
-        x: 0,
-        y: 0,
-        width: 100 * aspectRatio,
-        height: 100,
-        rotation: 0,
-        scaleX: 1,
-        scaleY: 1,
-      };
+  public addMafsResource(index: number, svgContent: string, name: string) {
+    fabric.loadSVGFromString(svgContent, (objects, options) => {
+      const svgObject = fabric.util.groupSVGElements(objects, options);
 
-      const properties: MafsEditorElement["properties"] = {
-        src: "",
-        elementId: `mafs-${index}`,
-        imageObject: undefined,
-        effect: {
-          type: "none",
-        },
-      };
+      // Set initial properties for the SVG object
+      svgObject.set({
+        left: 100,
+        top: 100,
+        angle: 0,
+        cornerSize: 6,
+        hasRotatingPoint: true,
+      });
+
+      // Add the SVG object to the canvas
+      this.canvas?.add(svgObject);
+      this.canvas?.renderAll();
+
+      // Calculate the aspect ratio of the SVG object
+      const aspectRatio = svgObject.width! / svgObject.height!;
+
+      // Generate a unique ID for the SVG object
       const id = getUid();
-      const element: MafsEditorElement = {
-        id: id,
-        name: `Mafs (${name})`,
+
+      // Add the SVG object to the editor elements
+      this.addEditorElement({
+        id,
+        name: `Mafs(${name}) ${index + 1}`,
         type: "mafs",
-        placement,
-        properties,
+        placement: {
+          x: svgObject.left!,
+          y: svgObject.top!,
+          width: svgObject.width!,
+          height: svgObject.height!,
+          rotation: svgObject.angle!,
+          scaleX: svgObject.scaleX!,
+          scaleY: svgObject.scaleY!,
+        },
         timeFrame: {
           start: 0,
           end: this.maxTime,
         },
-      };
-
-      // Render the Mafs element to an SVG string
-      const svgString = this.renderMafsElementToSvg(
-        mafsElement,
-        placement.width,
-        placement.height
-      );
-
-      // Create an image element and set the SVG string as its source
-      const imgElement = document.createElement("img");
-      imgElement.src = "data:image/svg+xml;base64," + btoa(svgString);
-      imgElement.id = properties.elementId;
-      // add group properties to img element
-
-      document.body.appendChild(imgElement);
-      element.properties.src = imgElement.src;
-      this.editorElements = [...this.editorElements, element];
-      this.refreshElements();
-    }
-  }
-
-  renderMafsElementToSvg(
-    mafsElement: React.ReactNode,
-    width: number,
-    height: number
-  ): string {
-    const container = document.createElement("div");
-    const root = createRoot(container);
-    root.render(
-      React.createElement(Mafs, {
-        width: width,
-        height: height,
-        pan: false,
-        viewBox: { y: [-10, 5] },
-        children: mafsElement,
-      })
-    );
-
-    const svgElement = container.querySelector("svg");
-    if (svgElement) {
-      return svgElement.outerHTML;
-    }
-
-    return "";
+        properties: {
+          elementId: `mafs-${id}`,
+          src: "", // Not needed when loading SVG directly
+          effect: {
+            type: "none",
+          },
+        },
+      });
+    });
   }
 
   addAudio(index: number) {
