@@ -605,41 +605,43 @@ export class State {
   }
 
   public addMafsResource(index: number, svgContent: string, name: string) {
+    // console.log("Adding Mafs resource:", svgContent);
     fabric.loadSVGFromString(svgContent, (objects, options) => {
       const svgObject = fabric.util.groupSVGElements(objects, options);
 
       // Set initial properties for the SVG object
       svgObject.set({
-        left: 100,
-        top: 100,
         angle: 0,
         cornerSize: 6,
         hasRotatingPoint: true,
       });
 
       // Add the SVG object to the canvas
-      this.canvas?.add(svgObject);
-      this.canvas?.renderAll();
-
-      // Calculate the aspect ratio of the SVG object
-      const aspectRatio = svgObject.width! / svgObject.height!;
+      if (this.canvas) {
+        this.canvas.add(svgObject);
+        this.canvas.renderAll();
+        console.log("SVG added to canvas");
+      } else {
+        console.error("Canvas is not initialized");
+      }
 
       // Generate a unique ID for the SVG object
       const id = getUid();
 
+      console.log("Generated ID:", id);
       // Add the SVG object to the editor elements
       this.addEditorElement({
         id,
         name: `Mafs(${name}) ${index + 1}`,
         type: "mafs",
         placement: {
-          x: svgObject.left!,
-          y: svgObject.top!,
-          width: svgObject.width!,
-          height: svgObject.height!,
-          rotation: svgObject.angle!,
-          scaleX: svgObject.scaleX!,
-          scaleY: svgObject.scaleY!,
+          x: 0,
+          y: 0,
+          width: 300,
+          height: 300,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
         },
         timeFrame: {
           start: 0,
@@ -647,7 +649,7 @@ export class State {
         },
         properties: {
           elementId: `mafs-${id}`,
-          src: "", // Not needed when loading SVG directly
+          src: svgContent,
           effect: {
             type: "none",
           },
