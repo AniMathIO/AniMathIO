@@ -2,50 +2,13 @@ import React from "react";
 import { StateContext } from "../../states";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
-import { Mafs } from "mafs";
 import { createRoot } from "react-dom/client";
-import ReactDOM from "react-dom";
 
 type MafsResourceProps = {
   index: number;
   children: React.ReactNode;
   name: string;
 };
-
-function extractSVG(mafsElement: React.ReactNode): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const container = document.createElement('div');
-    // Set dimensions to ensure that the SVG has space to render properly
-    container.style.position = 'absolute';
-    container.style.top = '-9999px'; // Move off-screen without hiding
-    container.style.width = '1000px'; // Assume sufficient width for rendering
-    container.style.height = '1000px'; // Assume sufficient height for rendering
-
-    document.body.appendChild(container);
-
-    const root = createRoot(container);
-    root.render(
-      <div ref={el => {
-        if (el) {
-          // Wait long enough for all elements to be rendered and styled
-          setTimeout(() => {
-            const svg = el.querySelector('svg');
-            console.log(svg);
-            if (svg) {
-              resolve(svg.outerHTML);
-            } else {
-              reject('SVG not found in Mafs component');
-            }
-            root.unmount();
-            document.body.removeChild(container);
-          }, 1000); // Increase timeout to ensure everything is rendered
-        }
-      }}>
-        {mafsElement}
-      </div>
-    );
-  });
-}
 
 
 export const MafsResource = observer(({ index, children, name }: MafsResourceProps) => {
