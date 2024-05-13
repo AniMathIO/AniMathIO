@@ -50,7 +50,6 @@ function extractSVG(mafsElement: React.ReactNode): Promise<string> {
 
 export const MafsResource = observer(({ index, children, name }: MafsResourceProps) => {
   const state = React.useContext(StateContext);
-  const containerRef = React.useRef(null);
 
   const handleAddResource = async () => {
     try {
@@ -102,7 +101,7 @@ export const MafsResource = observer(({ index, children, name }: MafsResourcePro
       >
         <PlusCircleIcon className="w-8 h-8 drop-shadow-lg" />
       </button>
-      <div ref={containerRef} className="w-full flex justify-center">
+      <div className="w-full flex justify-center">
         <div
           className="min-h-[130px] min-w-[200px] max-h-[130px] max-w-[300px] object-scale-down">
           {children}
