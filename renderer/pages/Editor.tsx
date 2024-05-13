@@ -50,7 +50,7 @@ export const Editor = observer(() => {
   return (
     <React.Fragment>
       <Head>
-        <title>Manim Studio Next - Editor</title>
+        <title>AniMathIO - Editor</title>
       </Head>
 
       <div className="grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh]">

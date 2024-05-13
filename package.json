@@ -1,7 +1,7 @@
 {
   "private": true,
-  "name": "manim-studio-next",
-  "description": "ManimStudioNext is a video editor application for editing Manim-like video projects ",
+  "name": "animathio",
+  "description": "AniMathIO is a video editor application for editing Manim-like video projects ",
   "version": "1.0.0",
   "author": "Kovacs Balint-Hunor",
   "main": "app/background.js",
