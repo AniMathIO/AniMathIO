@@ -72,7 +72,6 @@ export const MafsPanel = observer(() => {
         {mafsResources.map((resource) => (
           <MafsResource key={`mafs-${resource.index}`} index={resource.index} name={resource.name}>
             <Mafs pan={false} width={250} height={300} zoom={false}>
-              {/* {resource.coordinates ? <Coordinates.Cartesian /> : null} */}
               {resource.coordinates ? resource.coordinateType === "cartesian" ? <Coordinates.Cartesian /> : <Coordinates.Polar /> : null}
               {resource.children}
             </Mafs>

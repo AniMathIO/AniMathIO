@@ -51,6 +51,7 @@ export const Editor = observer(() => {
     <React.Fragment>
       <Head>
         <title>AniMathIO - Editor</title>
+        <link rel="icon" href="../images/AniMathIO.png" />
       </Head>
 
       <div className="grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh]">
