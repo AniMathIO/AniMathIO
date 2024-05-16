@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
-import { formatTimeToMinSec } from "../../../utils";
+import { StateContext } from "@/states";
+import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
 

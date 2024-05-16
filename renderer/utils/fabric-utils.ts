@@ -1,4 +1,4 @@
-import { EditorElement, EffectType } from "../types";
+import { EditorElement, EffectType } from "@/types";
 import { fabric } from "fabric";
 // https://jsfiddle.net/i_prikot/pw7yhaLf/
 

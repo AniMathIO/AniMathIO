@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
-import { EditorElement } from "../../../types";
-import { StateContext } from "../../../states";
+import { EditorElement } from "@/types";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { Bars3BottomLeftIcon, FilmIcon, PhotoIcon, MusicalNoteIcon, XMarkIcon, VariableIcon } from "@heroicons/react/24/solid";
 

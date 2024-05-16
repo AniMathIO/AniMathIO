@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import SeekPlayer from "./partials/timeline/SeekPlayer";
-import { StateContext } from "../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import TimeFrame from "./partials/timeline/Timeframe";
 

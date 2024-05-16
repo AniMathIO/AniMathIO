@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import EffectResource from "../entity/EffectResource";
 import { isEditorImageElement, isEditorVideoElement } from "../../../states/state";

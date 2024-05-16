@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import ImageResource from "../entity/ImageResource";
 import UploadButton from "../partials/shared/UploadButton";

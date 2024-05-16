@@ -1,5 +1,5 @@
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
 import { createRoot } from "react-dom/client";

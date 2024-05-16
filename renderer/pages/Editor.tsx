@@ -2,7 +2,7 @@
 
 import { fabric } from "fabric";
 import React, { useEffect, useState } from "react";
-import { StateContext } from "../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import Resources from "./components/Resources";
 import ElementsPanel from "./components/panels/ElementsPanel";

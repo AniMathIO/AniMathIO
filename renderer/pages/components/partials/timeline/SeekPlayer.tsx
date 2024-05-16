@@ -1,7 +1,7 @@
 "use client";
 
-import { StateContext } from "../../../../states";
-import { formatTimeToMinSecMili } from "../../../../utils";
+import { StateContext } from "@/states";
+import { formatTimeToMinSecMili } from "@/utils";
 import { observer } from "mobx-react-lite";
 import { useContext } from "react";
 import { PlayIcon } from "@heroicons/react/24/solid";

@@ -1,9 +1,9 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "@/states";
 // import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
-import { VideoEditorElement, ImageEditorElement, EffectType } from "../../../types";
+import { VideoEditorElement, ImageEditorElement, EffectType } from "@/types";
 
 const EFFECT_TYPE_TO_LABEL: Record<string, string> = {
   blackAndWhite: "Black and White",

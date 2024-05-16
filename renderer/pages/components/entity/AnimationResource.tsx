@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "@/states";
 // import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
 import {
@@ -10,12 +10,12 @@ import {
   Animation,
   FadeInAnimation,
   FadeOutAnimation,
-  BreatheAnimation,
   SlideDirection,
   SlideInAnimation,
   SlideOutAnimation,
   SlideTextType,
-} from "../../../types";
+} from "@/types";
+
 
 const ANIMATION_TYPE_TO_LABEL: Record<string, string> = {
   fadeIn: "Fade In",

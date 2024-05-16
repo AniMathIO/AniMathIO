@@ -1,9 +1,9 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import AnimationResource from "../entity/AnimationResource";
-import { getUid } from "../../../utils";
+import { getUid } from "@/utils";
 
 const AnimationsPanel = observer(() => {
   const state = React.useContext(StateContext);
