@@ -12,3 +12,4 @@ files:
 extraFiles:
   - scripts
 publish: null
+npmRebuild: false

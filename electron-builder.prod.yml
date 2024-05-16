@@ -12,3 +12,4 @@ files:
 extraFiles:
   - scripts
 publish: null # see https://www.electron.build/configuration/publish
+npmRebuild: false
