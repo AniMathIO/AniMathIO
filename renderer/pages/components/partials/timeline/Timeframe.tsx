@@ -1,12 +1,12 @@
 "use client";
 import React from "react";
 import { EditorElement } from "../../../../types";
-import { StateContext } from "../../../states";
+import { StateContext } from "../../../../states";
 import { observer } from "mobx-react";
 import Dragable from "./Dragable";
 import WavesurferPlayer from "@wavesurfer/react";
 
-export const TimeFrame = observer((props: { element: EditorElement }) => {
+const TimeFrame = observer((props: { element: EditorElement }) => {
     const state = React.useContext(StateContext);
     const { element } = props;
     const disabled = element.type === "audio";
@@ -144,3 +144,5 @@ export const TimeFrame = observer((props: { element: EditorElement }) => {
         </div >
     );
 });
+
+export default TimeFrame;

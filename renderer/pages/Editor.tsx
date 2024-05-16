@@ -2,13 +2,13 @@
 
 import { fabric } from "fabric";
 import React, { useEffect, useState } from "react";
-import { StateContext } from "./states";
+import { StateContext } from "../states";
 import { observer } from "mobx-react";
-import { Resources } from "./components/Resources";
-import { ElementsPanel } from "./components/panels/ElementsPanel";
-import { Menu } from "./Menu";
-import { Timeline } from "./components/Timeline";
-import { State } from './states/state';
+import Resources from "./components/Resources";
+import ElementsPanel from "./components/panels/ElementsPanel";
+import Menu from "./Menu";
+import Timeline from "./components/Timeline";
+import { State } from '../states/state';
 import Head from "next/head";
 
 export const EditorWithStore = () => {
@@ -20,7 +20,7 @@ export const EditorWithStore = () => {
   );
 }
 
-export const Editor = observer(() => {
+const Editor = observer(() => {
   const state = React.useContext(StateContext);
 
   useEffect(() => {
@@ -74,3 +74,5 @@ export const Editor = observer(() => {
     </React.Fragment>
   );
 });
+
+export default Editor;

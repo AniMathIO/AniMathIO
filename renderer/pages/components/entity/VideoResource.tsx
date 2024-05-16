@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
-import { formatTimeToMinSec } from "../../utils";
+import { StateContext } from "../../../states";
+import { formatTimeToMinSec } from "../../../utils";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
 
@@ -9,7 +9,7 @@ type VideoResourceProps = {
   video: string;
   index: number;
 };
-export const VideoResource = observer(
+const VideoResource = observer(
   ({ video, index }: VideoResourceProps) => {
     const state = React.useContext(StateContext);
     const ref = React.useRef<HTMLVideoElement>(null);
@@ -44,3 +44,5 @@ export const VideoResource = observer(
     );
   }
 );
+
+export default VideoResource;

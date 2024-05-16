@@ -1,5 +1,5 @@
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "../../../states";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
 import { createRoot } from "react-dom/client";
@@ -11,7 +11,7 @@ type MafsResourceProps = {
 };
 
 
-export const MafsResource = observer(({ index, children, name }: MafsResourceProps) => {
+const MafsResource = observer(({ index, children, name }: MafsResourceProps) => {
   const state = React.useContext(StateContext);
 
   const handleAddResource = async () => {
@@ -73,3 +73,5 @@ export const MafsResource = observer(({ index, children, name }: MafsResourcePro
     </div>
   );
 });
+
+export default MafsResource;

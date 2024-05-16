@@ -19,7 +19,7 @@ import {
   Effect,
   TextEditorElement,
   MafsEditorElement,
-} from "../../types";
+} from "../types";
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";

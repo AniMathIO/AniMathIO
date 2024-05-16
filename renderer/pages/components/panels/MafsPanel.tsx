@@ -1,7 +1,7 @@
 import React from "react";
 import { observer } from "mobx-react";
 import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text, LaTeX } from "mafs";
-import { MafsResource } from "../entity/MafsResource";
+import MafsResource from "../entity/MafsResource";
 
 type MafsResourceType = {
   index: number
@@ -61,7 +61,7 @@ const generateMafsResources = (): MafsResourceType[] => {
 
 
 
-export const MafsPanel = observer(() => {
+const MafsPanel = observer(() => {
   const mafsResources = generateMafsResources();
   return (
     <>
@@ -81,3 +81,5 @@ export const MafsPanel = observer(() => {
     </>
   );
 });
+
+export default MafsPanel;

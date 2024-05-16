@@ -1,10 +1,10 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "../../../states";
 import { observer } from "mobx-react";
-import { Element } from "../entity/Element";
+import Element from "../entity/Element";
 
-export const ElementsPanel = observer((_props: {}) => {
+const ElementsPanel = observer((_props: {}) => {
   const state = React.useContext(StateContext);
   return (
     <div className="bg-slate-200 h-full overflow-scroll">
@@ -19,3 +19,5 @@ export const ElementsPanel = observer((_props: {}) => {
     </div>
   );
 });
+
+export default ElementsPanel;

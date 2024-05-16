@@ -1,11 +1,11 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "../../../states";
 import { observer } from "mobx-react";
 
 
 
-export const ExportVideoPanel = observer(() => {
+const ExportVideoPanel = observer(() => {
   const state = React.useContext(StateContext);
   const [resolution, setResolution] = React.useState('1920x1080');
 
@@ -111,3 +111,5 @@ export const ExportVideoPanel = observer(() => {
     </>
   );
 });
+
+export default ExportVideoPanel

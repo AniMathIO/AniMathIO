@@ -1,11 +1,11 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "../../../states";
 import { observer } from "mobx-react";
-import { EffectResource } from "../entity/EffectResource";
-import { isEditorImageElement, isEditorVideoElement } from "../../states/state";
+import EffectResource from "../entity/EffectResource";
+import { isEditorImageElement, isEditorVideoElement } from "../../../states/state";
 
-export const EffectsPanel = observer(() => {
+const EffectsPanel = observer(() => {
   const state = React.useContext(StateContext);
   const selectedElement = state.selectedElement;
   return (
@@ -21,3 +21,5 @@ export const EffectsPanel = observer(() => {
     </>
   );
 });
+
+export default EffectsPanel;
