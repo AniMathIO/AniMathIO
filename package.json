@@ -14,7 +14,7 @@
     "build:win": "nextron build --win --ia32",
     "build:linux": "nextron build --linux",
     "build-native": "next build renderer && electron-builder",
-    "postinstall": "electron-builder install-app-deps && npm rebuild canvas --update-binary"
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.10",
@@ -34,6 +34,7 @@
     "react-color": "^2.19.3"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
     "@types/animejs": "^3.1.12",
     "@types/fabric": "^5.3.7",
     "@types/node": "^20.11.16",
