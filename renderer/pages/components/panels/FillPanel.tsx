@@ -2,7 +2,7 @@
 import React from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
-import { TwitterPicker } from "react-color";
+import { TwitterPicker } from "@hello-pangea/color-picker";
 
 const professionalVideoColors = [
   "#000000", // Black
