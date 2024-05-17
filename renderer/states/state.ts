@@ -604,35 +604,26 @@ export class State {
     });
   }
 
-  public addMafsResource(index: number, svgContent: string, name: string) {
-    // console.log("Adding Mafs resource:", svgContent);
-    fabric.loadSVGFromString(svgContent, (objects, options) => {
-      const svgObject = fabric.util.groupSVGElements(objects, options);
-
-      // Set initial properties for the SVG object
-      svgObject.set({
+  addMafsResource(index: number, pngSrc: string, name: string) {
+    fabric.Image.fromURL(pngSrc, (image) => {
+      image.set({
         cornerSize: 6,
         hasRotatingPoint: true,
         scaleX: 1,
         scaleY: 1,
       });
-
-      // Add the SVG object to the canvas
       if (this.canvas) {
-        this.canvas.add(svgObject);
+        this.canvas.add(image);
         this.canvas.renderAll();
-        console.log("SVG added to canvas");
+        console.log("mafs image added");
       } else {
-        console.error("Canvas is not initialized");
+        console.error("canvas not found");
       }
 
-      // Generate a unique ID for the SVG object
       const id = getUid();
-
       console.log("Generated ID:", id);
+      console.log("Dimensions:", image.width, image.height);
 
-      console.log("SVG object:", svgObject.width!, svgObject.height!);
-      // Add the SVG object to the editor elements
       this.addEditorElement({
         id,
         name: `Mafs(${name}) ${index + 1}`,
@@ -640,9 +631,9 @@ export class State {
         placement: {
           x: 0,
           y: 0,
-          width: svgObject.width! || 100,
-          height: svgObject.height! || 100,
-          rotation: svgObject.angle! || 0,
+          width: image.width! || 100,
+          height: image.height! || 100,
+          rotation: image.angle! || 0,
           scaleX: 1,
           scaleY: 1,
         },
@@ -652,7 +643,7 @@ export class State {
         },
         properties: {
           elementId: `mafs-${id}`,
-          src: svgContent,
+          src: pngSrc,
           effect: {
             type: "none",
           },
@@ -915,6 +906,11 @@ export class State {
     const state = this;
     if (!state.canvas) return;
     const canvas = state.canvas;
+    // Deselect all objects before removing them
+    canvas.discardActiveObject();
+    canvas.getObjects().forEach((obj) => {
+      obj.onDeselect = () => false; // Release deselect
+    });
     state.canvas.remove(...state.canvas.getObjects());
     for (let index = 0; index < state.editorElements.length; index++) {
       const element = state.editorElements[index];
@@ -984,55 +980,48 @@ export class State {
           break;
         }
         case "mafs": {
-          fabric.loadSVGFromString(
-            element.properties.src,
-            (objects, options) => {
-              const svgObject = fabric.util.groupSVGElements(objects, options);
+          fabric.Image.fromURL(element.properties.src, (image) => {
+            image.set({
+              name: element.id,
+              left: element.placement.x,
+              top: element.placement.y,
+              width: element.placement.width,
+              height: element.placement.height,
+              scaleX: element.placement.scaleX,
+              scaleY: element.placement.scaleY,
+              angle: element.placement.rotation,
+              objectCaching: false,
+              selectable: true,
+              lockUniScaling: true,
+            });
+            element.fabricObject = image;
+            canvas.add(image);
+            canvas.renderAll();
 
-              // Set initial properties for the SVG object
-              svgObject.set({
-                name: element.id,
-                left: element.placement.x,
-                top: element.placement.y,
-                width: element.placement.width,
-                height: element.placement.height,
-                scaleX: element.placement.scaleX,
-                scaleY: element.placement.scaleY,
-                angle: element.placement.rotation,
-                objectCaching: false,
-                selectable: true,
-                lockUniScaling: true,
-              });
+            console.log("Canvas objects:", canvas.getObjects());
 
-              element.fabricObject = svgObject;
-              canvas.add(svgObject);
-              canvas.renderAll();
-
-              console.log("Canvas objects:", canvas.getObjects());
-
-              canvas.on("object:modified", function (e) {
-                if (!e.target) return;
-                const target = e.target;
-                if (target != svgObject) return;
-                const placement = element.placement;
-                const newPlacement: Placement = {
-                  ...placement,
-                  x: target.left ?? placement.x,
-                  y: target.top ?? placement.y,
-                  rotation: target.angle ?? placement.rotation,
-                  width: target.width ?? placement.width,
-                  height: target.height ?? placement.height,
-                  scaleX: target.scaleX ?? placement.scaleX,
-                  scaleY: target.scaleY ?? placement.scaleY,
-                };
-                const newElement = {
-                  ...element,
-                  placement: newPlacement,
-                };
-                state.updateEditorElement(newElement);
-              });
-            }
-          );
+            canvas.on("object:modified", function (e) {
+              if (!e.target) return;
+              const target = e.target;
+              if (target != image) return;
+              const placement = element.placement;
+              const newPlacement: Placement = {
+                ...placement,
+                x: target.left ?? placement.x,
+                y: target.top ?? placement.y,
+                rotation: target.angle ?? placement.rotation,
+                width: target.width ?? placement.width,
+                height: target.height ?? placement.height,
+                scaleX: target.scaleX ?? placement.scaleX,
+                scaleY: target.scaleY ?? placement.scaleY,
+              };
+              const newElement = {
+                ...element,
+                placement: newPlacement,
+              };
+              state.updateEditorElement(newElement);
+            });
+          });
           break;
         }
         case "image": {

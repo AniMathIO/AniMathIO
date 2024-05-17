@@ -1,8 +1,8 @@
-import React from "react";
+import React, { useRef } from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
-import { createRoot } from "react-dom/client";
+import * as htmlToImage from 'html-to-image';
 
 type MafsResourceProps = {
   index: number;
@@ -10,47 +10,32 @@ type MafsResourceProps = {
   name: string;
 };
 
-
 const MafsResource = observer(({ index, children, name }: MafsResourceProps) => {
   const state = React.useContext(StateContext);
+  const mafsRef = useRef<HTMLDivElement>(null);
 
   const handleAddResource = async () => {
     try {
-      const svgContent = await extractSVG(children);
-      state.addMafsResource(index, svgContent, name);
+      const pngSrc = await extractPNG();
+      state.addMafsResource(index, pngSrc, name);
     } catch (error) {
-      console.error('Failed to extract SVG from Mafs component:', error);
+      console.error('Failed to extract PNG from Mafs component:', error);
     }
   };
 
-  function extractSVG(mafsElement: React.ReactNode): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const container = document.createElement('div');
-      container.style.display = 'none';
-      document.body.appendChild(container);
+  const extractPNG = async (): Promise<string> => {
+    try {
+      const dataUrl = await htmlToImage.toPng(mafsRef.current as HTMLElement, {
+        filter: (node) => node.tagName !== 'I'
+      });
+      return dataUrl;
+    } catch (error) {
+      console.error('Failed to generate PNG data URL', error);
+      throw new Error('Failed to generate PNG data URL');
+    }
+  };
 
-      const root = createRoot(container);
-      root.render(
-        <div ref={el => {
-          if (el) {
-            // Use requestAnimationFrame to wait for the next animation frame
-            requestAnimationFrame(() => {
-              const svg = el.querySelector('svg');
-              if (svg) {
-                resolve(svg.outerHTML);
-              } else {
-                reject('SVG not found in Mafs component');
-              }
-              root.unmount();
-              document.body.removeChild(container);
-            });
-          }
-        }}>
-          {mafsElement}
-        </div>
-      );
-    });
-  }
+
 
   return (
     <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative">
@@ -66,7 +51,10 @@ const MafsResource = observer(({ index, children, name }: MafsResourceProps) => 
       </button>
       <div className="w-full flex justify-center">
         <div
-          className="min-h-[130px] min-w-[200px] max-h-[130px] max-w-[300px] object-scale-down">
+          ref={mafsRef}
+          id={`mafs-container-${index}`}
+          className="min-h-[130px] min-w-[200px] max-h-[130px] max-w-[300px] object-scale-down"
+        >
           {children}
         </div>
       </div>
