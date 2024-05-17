@@ -23,7 +23,6 @@ import {
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
-import React from "react";
 export class State {
   canvas: fabric.Canvas | null;
 
@@ -51,6 +50,8 @@ export class State {
     string,
     { context: AudioContext; sourceNode: MediaElementAudioSourceNode }
   >();
+  canvas_width: number;
+  canvas_height: number;
 
   constructor() {
     this.canvas = null;
@@ -65,6 +66,8 @@ export class State {
     this.selectedElement = null;
     this.fps = 60;
     this.animations = [];
+    this.canvas_width = 500;
+    this.canvas_height = 800;
     if (typeof window !== "undefined") {
       // Code that uses anime.js
       this.animationTimeLine = anime.timeline({ autoplay: false });
@@ -611,6 +614,7 @@ export class State {
         hasRotatingPoint: true,
         scaleX: 1,
         scaleY: 1,
+        angle: 0,
       });
       if (this.canvas) {
         this.canvas.add(image);
