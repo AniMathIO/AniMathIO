@@ -4,7 +4,7 @@ import { EditorElement } from "@/types";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { Bars3BottomLeftIcon, FilmIcon, PhotoIcon, MusicalNoteIcon, XMarkIcon, VariableIcon } from "@heroicons/react/24/solid";
-
+import dynamic from "next/dynamic";
 export type ElementProps = {
   element: EditorElement;
 };
@@ -103,4 +103,4 @@ const Element = observer((props: ElementProps) => {
   );
 });
 
-export default Element;
+export default dynamic(() => Promise.resolve(Element), { ssr: false });

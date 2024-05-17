@@ -16,6 +16,7 @@ import {
   SlideTextType,
 } from "@/types";
 
+import dynamic from "next/dynamic";
 
 const ANIMATION_TYPE_TO_LABEL: Record<string, string> = {
   fadeIn: "Fade In",
@@ -190,4 +191,4 @@ export const SlideAnimation = observer(
   }
 );
 
-export default AnimationResource;
+export default dynamic(() => Promise.resolve(AnimationResource), { ssr: false });

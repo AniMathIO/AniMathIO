@@ -4,6 +4,7 @@ import { StateContext } from "@/states";
 // import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
 import { VideoEditorElement, ImageEditorElement, EffectType } from "@/types";
+import dynamic from "next/dynamic";
 
 const EFFECT_TYPE_TO_LABEL: Record<string, string> = {
   blackAndWhite: "Black and White",
@@ -48,4 +49,4 @@ const EffectResource = observer((props: EffectResourceProps) => {
   );
 });
 
-export default EffectResource;
+export default dynamic(() => Promise.resolve(EffectResource), { ssr: false });

@@ -5,6 +5,7 @@ import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import Dragable from "./Dragable";
 import WavesurferPlayer from "@wavesurfer/react";
+import dynamic from "next/dynamic";
 
 const TimeFrame = observer((props: { element: EditorElement }) => {
     const state = React.useContext(StateContext);
@@ -145,4 +146,4 @@ const TimeFrame = observer((props: { element: EditorElement }) => {
     );
 });
 
-export default TimeFrame;
+export default dynamic(() => Promise.resolve(TimeFrame), { ssr: false });
