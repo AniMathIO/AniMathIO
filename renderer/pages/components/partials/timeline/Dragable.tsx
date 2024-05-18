@@ -1,4 +1,12 @@
-import React, { MouseEventHandler, useEffect, useRef } from "react";
+import React, { MouseEventHandler, useEffect, useRef, useCallback } from "react";
+
+function debounce(func: Function, wait: number) {
+    let timeout: NodeJS.Timeout;
+    return (...args: any[]) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+    };
+}
 
 function Dragable(props: {
     children?: React.ReactNode;
@@ -19,6 +27,9 @@ function Dragable(props: {
         initialMouseX: 0,
     });
     const { current: data } = ref;
+
+    const debouncedOnChange = useCallback(debounce(props.onChange, 100), [props.onChange]);
+
     function calculateNewValue(mouseX: number): number {
         if (!data.div) return 0;
         const deltaX = mouseX - data.initialMouseX;
@@ -36,8 +47,7 @@ function Dragable(props: {
     const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
         if (!data.div) return;
         if (!data.isDragging) return;
-        data.div.style.left = `${(calculateNewValue(event.clientX) / props.total) * 100
-            }%`;
+        data.div.style.left = `${(calculateNewValue(event.clientX) / props.total) * 100}%`;
         event.stopPropagation();
         event.preventDefault();
     };
@@ -47,7 +57,7 @@ function Dragable(props: {
         if (!data.div) return;
         if (!data.isDragging) return;
         data.isDragging = false;
-        props.onChange(calculateNewValue(event.clientX));
+        debouncedOnChange(calculateNewValue(event.clientX));
         event.stopPropagation();
         event.preventDefault();
     };
