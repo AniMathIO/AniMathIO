@@ -431,19 +431,19 @@ export class State {
   }
 
   setEditorElements(editorElements: EditorElement[]) {
-    console.log("Updating editor elements:", editorElements);
+    // console.log("Updating editor elements:", editorElements);
     this.editorElements = editorElements;
     this.updateSelectedElement();
-    console.log("Updated selected element:", this.selectedElement);
-    console.log("Calling refreshElements");
+    // console.log("Updated selected element:", this.selectedElement);
+    // console.log("Calling refreshElements");
     this.refreshElements();
-    console.log("Calling refreshAnimations");
+    // console.log("Calling refreshAnimations");
     this.refreshAnimations();
   }
 
   async updateEditorElement(editorElement: EditorElement): Promise<void> {
     try {
-      console.log("Updating editor element:", editorElement);
+      // console.log("Updating editor element:", editorElement);
 
       await this.setEditorElements(
         this.editorElements.map((element) =>
@@ -475,8 +475,8 @@ export class State {
         timeFrame.end = this.maxTime;
       }
 
-      console.log("Updating time frame for element:", editorElement);
-      console.log("New time frame values:", timeFrame);
+      // console.log("Updating time frame for element:", editorElement);
+      // console.log("New time frame values:", timeFrame);
 
       const newEditorElement = {
         ...editorElement,
@@ -500,7 +500,7 @@ export class State {
   addEditorElement(editorElement: EditorElement) {
     return new Promise<void>((resolve) => {
       this.setEditorElements([...this.editorElements, editorElement]);
-      console.log("Added editor element:", editorElement);
+      // console.log("Added editor element:", editorElement);
       this.refreshElements();
       this.setSelectedElement(
         this.editorElements[this.editorElements.length - 1]
@@ -527,8 +527,8 @@ export class State {
     if (playing) {
       this.startedTime = Date.now();
       this.startedTimePlay = this.currentTimeInMs;
-      console.log("Started time:", this.startedTime);
-      console.log("Started time play:", this.startedTimePlay);
+      // console.log("Started time:", this.startedTime);
+      // console.log("Started time play:", this.startedTimePlay);
 
       requestAnimationFrame(() => {
         this.playFrames();
@@ -550,8 +550,8 @@ export class State {
       this.currentKeyFrame = 0;
       this.setPlaying(false);
     } else {
-      console.log("New time:", newTime);
-      console.log("Current key frame:", this.currentKeyFrame);
+      // console.log("New time:", newTime);
+      // console.log("Current key frame:", this.currentKeyFrame);
       requestAnimationFrame(() => {
         this.playFrames();
       });
@@ -655,8 +655,8 @@ export class State {
       img.crossOrigin = "anonymous";
       img.onload = () => {
         const id = getUid();
-        console.log("Generated ID:", id);
-        console.log("Dimensions:", img.width, img.height);
+        // console.log("Generated ID:", id);
+        // console.log("Dimensions:", img.width, img.height);
 
         const coverImage = new fabric.CoverImage(img, {
           name: `Mafs(${name}) ${index + 1}`,
@@ -703,7 +703,7 @@ export class State {
           },
         });
 
-        console.log("Element added:", coverImage);
+        // console.log("Element added:", coverImage);
 
         resolve();
       };
@@ -846,7 +846,7 @@ export class State {
   }
 
   saveCanvasToVideoWithAudioWebmMp4() {
-    console.log("modified");
+    // console.log("modified");
     let mp4 = this.selectedVideoFormat === "mp4";
 
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
@@ -897,7 +897,7 @@ export class State {
       const chunks: Blob[] = [];
       mediaRecorder.ondataavailable = function (e) {
         chunks.push(e.data);
-        console.log("data available");
+        // console.log("data available");
       };
       mediaRecorder.onstop = async function (e) {
         const blob = new Blob(chunks, { type: "video/webm" });
