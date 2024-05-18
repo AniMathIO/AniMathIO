@@ -59,8 +59,6 @@ const generateMafsResources = (): MafsResourceType[] => {
   return resources;
 };
 
-
-
 const MafsPanel = observer(() => {
   const mafsResources = generateMafsResources();
   return (

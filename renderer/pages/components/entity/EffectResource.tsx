@@ -3,7 +3,7 @@ import React from "react";
 import { StateContext } from "@/states";
 // import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
-import { VideoEditorElement, ImageEditorElement, EffectType } from "@/types";
+import { VideoEditorElement, ImageEditorElement, EffectType, MafsEditorElement } from "@/types";
 import dynamic from "next/dynamic";
 
 const EFFECT_TYPE_TO_LABEL: Record<string, string> = {
@@ -14,7 +14,7 @@ const EFFECT_TYPE_TO_LABEL: Record<string, string> = {
   invert: "Invert",
 };
 export type EffectResourceProps = {
-  editorElement: VideoEditorElement | ImageEditorElement;
+  editorElement: VideoEditorElement | ImageEditorElement | MafsEditorElement;
 };
 const EffectResource = observer((props: EffectResourceProps) => {
   const state = React.useContext(StateContext);

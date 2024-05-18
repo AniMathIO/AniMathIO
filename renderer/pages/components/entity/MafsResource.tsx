@@ -17,8 +17,10 @@ const MafsResource = observer(({ index, children, name }: MafsResourceProps) => 
   const handleAddResource = async () => {
     try {
       const pngSrc = await extractPNG();
-      await state.addMafsResource(index, pngSrc, name);
-      console.log("Mafs resource added successfully");
+      state.addMafsResource(index, pngSrc, name).then(() => {
+        console.log("Mafs resource added successfully");
+      });
+      // console.log("Mafs resource added successfully");
     } catch (error) {
       console.error('Failed to extract PNG from Mafs component:', error);
     }

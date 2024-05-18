@@ -43,6 +43,7 @@ function Dragable(props: {
     };
 
     const handleMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
+        console.log("mouse up");
         if (!data.div) return;
         if (!data.isDragging) return;
         data.isDragging = false;

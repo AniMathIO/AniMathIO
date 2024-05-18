@@ -117,7 +117,11 @@ export class State {
   updateEffect(id: string, effect: Effect) {
     const index = this.editorElements.findIndex((element) => element.id === id);
     const element = this.editorElements[index];
-    if (isEditorVideoElement(element) || isEditorImageElement(element)) {
+    if (
+      isEditorVideoElement(element) ||
+      isEditorImageElement(element) ||
+      isEditorMafsElement(element)
+    ) {
       element.properties.effect = effect;
     }
     this.refreshElements();
@@ -427,58 +431,82 @@ export class State {
   }
 
   setEditorElements(editorElements: EditorElement[]) {
+    console.log("Updating editor elements:", editorElements);
     this.editorElements = editorElements;
-    console.log("Updated editor elements:", this.editorElements);
     this.updateSelectedElement();
+    console.log("Updated selected element:", this.selectedElement);
+    console.log("Calling refreshElements");
     this.refreshElements();
+    console.log("Calling refreshAnimations");
     this.refreshAnimations();
   }
 
-  updateEditorElement(editorElement: EditorElement) {
-    console.log("Updating editor element:", editorElement);
+  async updateEditorElement(editorElement: EditorElement): Promise<void> {
+    try {
+      console.log("Updating editor element:", editorElement);
 
-    this.setEditorElements(
-      this.editorElements.map((element) =>
-        element.id === editorElement.id ? editorElement : element
-      )
-    );
+      await this.setEditorElements(
+        this.editorElements.map((element) =>
+          element.id === editorElement.id ? editorElement : element
+        )
+      );
 
-    this.refreshElements();
+      this.updateSelectedElement();
+      this.refreshElements();
+    } catch (error) {
+      console.error("Failed to update editor element:", error);
+      throw error; // Rethrow the error to propagate it to the caller
+    }
   }
 
-  updateEditorElementTimeFrame(
+  async updateEditorElementTimeFrame(
     editorElement: EditorElement,
     timeFrame: Partial<TimeFrame>
-  ) {
-    if (timeFrame.start != undefined && timeFrame.start < 0) {
-      timeFrame.start = 0;
-    }
-    if (timeFrame.end != undefined && timeFrame.end > this.maxTime) {
-      timeFrame.end = this.maxTime;
-    }
+  ): Promise<void> {
+    try {
+      if (timeFrame.start === undefined && timeFrame.end === undefined) {
+        return;
+      }
 
-    console.log("Updating time frame for element:", editorElement);
-    console.log("New time frame values:", timeFrame);
+      if (timeFrame.start !== undefined && timeFrame.start < 0) {
+        timeFrame.start = 0;
+      }
+      if (timeFrame.end !== undefined && timeFrame.end > this.maxTime) {
+        timeFrame.end = this.maxTime;
+      }
 
-    const newEditorElement = {
-      ...editorElement,
-      timeFrame: {
-        ...editorElement.timeFrame,
-        ...timeFrame,
-      },
-    };
-    this.updateVideoElements();
-    this.updateAudioElements();
-    this.updateEditorElement(newEditorElement);
-    this.refreshAnimations();
+      console.log("Updating time frame for element:", editorElement);
+      console.log("New time frame values:", timeFrame);
+
+      const newEditorElement = {
+        ...editorElement,
+        timeFrame: {
+          ...editorElement.timeFrame,
+          ...timeFrame,
+        },
+      };
+
+      this.updateVideoElements();
+      this.updateAudioElements();
+
+      await this.updateEditorElement(newEditorElement);
+      this.refreshAnimations();
+    } catch (error) {
+      console.error("Failed to update editor element time frame:", error);
+      throw error; // Rethrow the error to propagate it to the caller
+    }
   }
 
   addEditorElement(editorElement: EditorElement) {
-    this.setEditorElements([...this.editorElements, editorElement]);
-    this.refreshElements();
-    this.setSelectedElement(
-      this.editorElements[this.editorElements.length - 1]
-    );
+    return new Promise<void>((resolve) => {
+      this.setEditorElements([...this.editorElements, editorElement]);
+      console.log("Added editor element:", editorElement);
+      this.refreshElements();
+      this.setSelectedElement(
+        this.editorElements[this.editorElements.length - 1]
+      );
+      resolve();
+    });
   }
 
   removeEditorElement(id: string) {
@@ -499,6 +527,9 @@ export class State {
     if (playing) {
       this.startedTime = Date.now();
       this.startedTimePlay = this.currentTimeInMs;
+      console.log("Started time:", this.startedTime);
+      console.log("Started time play:", this.startedTimePlay);
+
       requestAnimationFrame(() => {
         this.playFrames();
       });
@@ -519,6 +550,8 @@ export class State {
       this.currentKeyFrame = 0;
       this.setPlaying(false);
     } else {
+      console.log("New time:", newTime);
+      console.log("Current key frame:", this.currentKeyFrame);
       requestAnimationFrame(() => {
         this.playFrames();
       });
@@ -616,37 +649,66 @@ export class State {
     });
   }
 
-  async addMafsResource(index: number, pngSrc: string, name: string) {
-    await fabric.Image.fromURL(pngSrc, (image) => {
-      const id = getUid();
-      console.log("Generated ID:", id);
-      console.log("Dimensions:", image.width, image.height);
+  addMafsResource(index: number, pngSrc: string, name: string) {
+    return new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const id = getUid();
+        console.log("Generated ID:", id);
+        console.log("Dimensions:", img.width, img.height);
 
-      this.addEditorElement({
-        id,
-        name: `Mafs(${name}) ${index + 1}`,
-        type: "mafs",
-        placement: {
-          x: 0,
-          y: 0,
-          width: image.width! || 100,
-          height: image.height! || 100,
-          rotation: image.angle! || 0,
+        const coverImage = new fabric.CoverImage(img, {
+          name: `Mafs(${name}) ${index + 1}`,
+          left: 0,
+          top: 0,
           scaleX: 1,
           scaleY: 1,
-        },
-        timeFrame: {
-          start: 0,
-          end: this.maxTime,
-        },
-        properties: {
-          elementId: `mafs-${id}`,
-          src: pngSrc,
-          effect: {
-            type: "none",
+          angle: 0,
+          width: img.width,
+          height: img.height,
+          originX: "left",
+          originY: "top",
+          selectable: false,
+          crossOrigin: "anonymous",
+          objectCaching: false,
+          lockUniScaling: true,
+          customFilter: "none",
+        } as any);
+
+        this.addEditorElement({
+          id,
+          name: `Mafs(${name}) ${index + 1}`,
+          type: "mafs",
+          placement: {
+            x: 0,
+            y: 0,
+            width: img.width || 100,
+            height: img.height || 100,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
           },
-        },
-      });
+          timeFrame: {
+            start: 0,
+            end: this.maxTime,
+          },
+          properties: {
+            elementId: `mafs-${id}`,
+            src: pngSrc,
+            effect: {
+              type: "none",
+            },
+            imageObject: coverImage,
+          },
+        });
+
+        console.log("Element added:", coverImage);
+
+        resolve();
+      };
+      img.onerror = reject;
+      img.src = pngSrc;
     });
   }
 
@@ -947,7 +1009,9 @@ export class State {
       setActive = true
     ) => {
       element.fabricObject = fabricObject;
-      canvas.add(fabricObject);
+      if (element && element.fabricObject) {
+        canvas.add(element.fabricObject);
+      }
       fabricObject.on("modified", handleObjectModified(element, fabricObject));
       fabricObject.on("selected", () => {
         state.setSelectedElement(element);
@@ -961,7 +1025,7 @@ export class State {
     const loadMafsImage = (element: any) => {
       return new Promise<void>((resolve, reject) => {
         const img = new Image();
-        img.crossOrigin = "Anonymous";
+        img.crossOrigin = "anonymous";
         img.onload = () => {
           try {
             const imageObject = new fabric.CoverImage(img, {
@@ -1003,6 +1067,7 @@ export class State {
             addElementToCanvas(element, imageObject, false);
             resolve();
           } catch (error) {
+            console.error("Error loading Mafs image:", error);
             reject(error);
           }
         };
@@ -1104,15 +1169,19 @@ export class State {
         }
       }
     });
-    Promise.all(elementPromises).then(() => {
-      const selectedEditorElement = state.selectedElement;
-      if (selectedEditorElement && selectedEditorElement.fabricObject) {
-        canvas.setActiveObject(selectedEditorElement.fabricObject);
-      }
-      this.refreshAnimations();
-      this.updateTimeTo(this.currentTimeInMs);
-      canvas.renderAll();
-    });
+    Promise.all(elementPromises)
+      .then(() => {
+        const selectedEditorElement = state.selectedElement;
+        if (selectedEditorElement && selectedEditorElement.fabricObject) {
+          canvas.setActiveObject(selectedEditorElement.fabricObject);
+        }
+        this.refreshAnimations();
+        this.updateTimeTo(this.currentTimeInMs);
+        canvas.renderAll();
+      })
+      .catch((error) => {
+        console.error("Error processing elements:", error);
+      });
   }
 }
 
@@ -1131,6 +1200,12 @@ export function isEditorImageElement(
   element: EditorElement
 ): element is ImageEditorElement {
   return element.type === "image";
+}
+
+export function isEditorMafsElement(
+  element: EditorElement
+): element is MafsEditorElement {
+  return element.type === "mafs";
 }
 
 function getTextObjectsPartitionedByCharacters(
