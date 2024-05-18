@@ -609,21 +609,6 @@ export class State {
 
   addMafsResource(index: number, pngSrc: string, name: string) {
     fabric.Image.fromURL(pngSrc, (image) => {
-      image.set({
-        cornerSize: 6,
-        hasRotatingPoint: true,
-        scaleX: 1,
-        scaleY: 1,
-        angle: 0,
-      });
-      if (this.canvas) {
-        this.canvas.add(image);
-        this.canvas.renderAll();
-        console.log("mafs image added");
-      } else {
-        console.error("canvas not found");
-      }
-
       const id = getUid();
       console.log("Generated ID:", id);
       console.log("Dimensions:", image.width, image.height);
@@ -1022,6 +1007,10 @@ export class State {
               const newElement = {
                 ...element,
                 placement: newPlacement,
+                properties: {
+                  ...element.properties,
+                  src: element.properties.src,
+                },
               };
               state.updateEditorElement(newElement);
             });
