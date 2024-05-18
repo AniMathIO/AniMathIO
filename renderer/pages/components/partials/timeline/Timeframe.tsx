@@ -65,6 +65,16 @@ const TimeFrame = observer((props: { element: EditorElement }) => {
                         <p className="text-4xl">{element.properties.text}</p>
                     </div>
                 );
+            case "mafs":
+                return (
+                    <div className={`${commonClasses} py-1`}>
+                        <img
+                            alt="mafs"
+                            src={element.properties.src}
+                            className="h-[64px]"
+                        />
+                    </div>
+                );
             default:
                 return null;
         }

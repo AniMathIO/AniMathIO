@@ -86,6 +86,22 @@ const Element = observer((props: ElementProps) => {
             id={element.properties.elementId}
           ></audio>
         ) : null}
+        {element.type === "mafs" ? (
+          <img
+            alt={element.name}
+            className="opacity-0 max-w-[20px] max-h-[20px]"
+            src={element.properties.src}
+            onLoad={() => {
+              state.refreshElements();
+            }}
+            onLoadedData={() => {
+              state.refreshElements();
+            }}
+            height={20}
+            width={20}
+            id={element.properties.elementId}
+          ></img>
+        ) : null}
       </div>
       <button
         aria-label="Remove element"
