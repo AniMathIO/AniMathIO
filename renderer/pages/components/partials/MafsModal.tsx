@@ -13,12 +13,14 @@ import { StateContext } from "@/states";
 import * as htmlToImage from 'html-to-image';
 import { MafsModalProps } from "@/types";
 import { KatexOptions } from "katex";
+
 declare interface LatexProps {
     tex: string;
     at: vec.Vector2;
     color?: string;
     katexOptions?: KatexOptions;
 }
+
 const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) => {
     const [mafsConfig, setMafsConfig] = useState({
         width: 500,
@@ -43,9 +45,11 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
         radius: 1,
     });
 
-    const [polygonProps, setPolygonProps] = useState<PolygonProps>({
-        points: [[-1, 2], [1, 1.5], [1, 3]],
-    });
+    const [polygonPoints, setPolygonPoints] = useState<vec.Vector2[]>([
+        [-1, 2],
+        [1, 1.5],
+        [1, 3],
+    ]);
 
     const [textProps, setTextProps] = useState<TextProps>({
         x: 0,
@@ -123,7 +127,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             case "Circle":
                 return <Circle {...circleProps} />;
             case "Polygon":
-                return <Polygon {...polygonProps} />;
+                return <Polygon points={polygonPoints} />;
             case "Text":
                 return <Text {...textProps} />;
             case "LaTeX":
@@ -140,8 +144,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
     };
 
     return (
-        <div className="fixed h-full p-5 inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
-            <div className=" bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl">
+        <div className="fixed inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-start justify-center pt-16">
+            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl max-h-[calc(100vh-8rem)] overflow-auto">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-bold">{mafsElement.name}</h2>
                     <button
@@ -239,35 +243,69 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                 {mafsElement.name === "Line" && (
                     <>
                         <div className="mb-4">
-                            <label htmlFor="linePoint1" className="block font-medium mb-1">
-                                Point 1
+                            <label htmlFor="lineX1" className="block font-medium mb-1">
+                                X1
                             </label>
                             <input
-                                type="text"
-                                id="linePoint1"
+                                type="number"
+                                id="lineX1"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={lineProps.point1.join(",")}
+                                value={lineProps.point1[0]}
                                 onChange={(e) =>
                                     setLineProps({
                                         ...lineProps,
-                                        point1: e.target.value.split(",").map(parseFloat),
+                                        point1: [parseFloat(e.target.value), lineProps.point1[1]],
                                     })
                                 }
                             />
                         </div>
                         <div className="mb-4">
-                            <label htmlFor="linePoint2" className="block font-medium mb-1">
-                                Point 2
+                            <label htmlFor="lineY1" className="block font-medium mb-1">
+                                Y1
                             </label>
                             <input
-                                type="text"
-                                id="linePoint2"
+                                type="number"
+                                id="lineY1"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={lineProps.point2.join(",")}
+                                value={lineProps.point1[1]}
                                 onChange={(e) =>
                                     setLineProps({
                                         ...lineProps,
-                                        point2: e.target.value.split(",").map(parseFloat),
+                                        point1: [lineProps.point1[0], parseFloat(e.target.value)],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="lineX2" className="block font-medium mb-1">
+                                X2
+                            </label>
+                            <input
+                                type="number"
+                                id="lineX2"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={lineProps.point2[0]}
+                                onChange={(e) =>
+                                    setLineProps({
+                                        ...lineProps,
+                                        point2: [parseFloat(e.target.value), lineProps.point2[1]],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="lineY2" className="block font-medium mb-1">
+                                Y2
+                            </label>
+                            <input
+                                type="number"
+                                id="lineY2"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={lineProps.point2[1]}
+                                onChange={(e) =>
+                                    setLineProps({
+                                        ...lineProps,
+                                        point2: [lineProps.point2[0], parseFloat(e.target.value)],
                                     })
                                 }
                             />
@@ -315,18 +353,35 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                 {mafsElement.name === "Circle" && (
                     <>
                         <div className="mb-4">
-                            <label htmlFor="circleCenter" className="block font-medium mb-1">
-                                Center
+                            <label htmlFor="circleCenterX" className="block font-medium mb-1">
+                                Center X
                             </label>
                             <input
-                                type="text"
-                                id="circleCenter"
+                                type="number"
+                                id="circleCenterX"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={circleProps.center.join(",")}
+                                value={circleProps.center[0]}
                                 onChange={(e) =>
                                     setCircleProps({
                                         ...circleProps,
-                                        center: e.target.value.split(",").map(parseFloat),
+                                        center: [parseFloat(e.target.value), circleProps.center[1]],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="circleCenterY" className="block font-medium mb-1">
+                                Center Y
+                            </label>
+                            <input
+                                type="number"
+                                id="circleCenterY"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={circleProps.center[1]}
+                                onChange={(e) =>
+                                    setCircleProps({
+                                        ...circleProps,
+                                        center: [circleProps.center[0], parseFloat(e.target.value)],
                                     })
                                 }
                             />
@@ -351,26 +406,48 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                     </>
                 )}
                 {mafsElement.name === "Polygon" && (
-                    <div className="mb-4">
-                        <label htmlFor="polygonPoints" className="block font-medium mb-1">
-                            Points
-                        </label>
-                        <textarea
-                            id="polygonPoints"
-                            className="w-full border border-gray-300 rounded px-3 py-2"
-                            value={polygonProps.points
-                                .map((point) => point.join(","))
-                                .join("\n")}
-                            onChange={(e) =>
-                                setPolygonProps({
-                                    ...polygonProps,
-                                    points: e.target.value
-                                        .split("\n")
-                                        .map((line) => line.split(",").map(parseFloat)),
-                                })
+                    <>
+                        {polygonPoints.map((point, index) => (
+                            <div key={index} className="mb-4">
+                                <label htmlFor={`polygonX${index}`} className="block font-medium mb-1">
+                                    X{index + 1}
+                                </label>
+                                <input
+                                    type="number"
+                                    id={`polygonX${index}`}
+                                    className="w-full border border-gray-300 rounded px-3 py-2"
+                                    value={point[0]}
+                                    onChange={(e) => {
+                                        const newPoints = [...polygonPoints];
+                                        newPoints[index][0] = parseFloat(e.target.value);
+                                        setPolygonPoints(newPoints);
+                                    }}
+                                />
+                                <label htmlFor={`polygonY${index}`} className="block font-medium mb-1">
+                                    Y{index + 1}
+                                </label>
+                                <input
+                                    type="number"
+                                    id={`polygonY${index}`}
+                                    className="w-full border border-gray-300 rounded px-3 py-2"
+                                    value={point[1]}
+                                    onChange={(e) => {
+                                        const newPoints = [...polygonPoints];
+                                        newPoints[index][1] = parseFloat(e.target.value);
+                                        setPolygonPoints(newPoints);
+                                    }}
+                                />
+                            </div>
+                        ))}
+                        <button
+                            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                            onClick={() =>
+                                setPolygonPoints([...polygonPoints, [0, 0]])
                             }
-                        />
-                    </div>
+                        >
+                            Add Point
+                        </button>
+                    </>
                 )}
                 {mafsElement.name === "Text" && (
                     <>
@@ -430,18 +507,35 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                 {mafsElement.name === "LaTeX" && (
                     <>
                         <div className="mb-4">
-                            <label htmlFor="latexAt" className="block font-medium mb-1">
-                                At
+                            <label htmlFor="latexAtX" className="block font-medium mb-1">
+                                At X
                             </label>
                             <input
-                                type="text"
-                                id="latexAt"
+                                type="number"
+                                id="latexAtX"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={latexProps.at.join(",")}
+                                value={latexProps.at[0]}
                                 onChange={(e) =>
                                     setLatexProps({
                                         ...latexProps,
-                                        at: e.target.value.split(",").map(parseFloat),
+                                        at: [parseFloat(e.target.value), latexProps.at[1]],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="latexAtY" className="block font-medium mb-1">
+                                At Y
+                            </label>
+                            <input
+                                type="number"
+                                id="latexAtY"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={latexProps.at[1]}
+                                onChange={(e) =>
+                                    setLatexProps({
+                                        ...latexProps,
+                                        at: [latexProps.at[0], parseFloat(e.target.value)],
                                     })
                                 }
                             />
@@ -467,35 +561,69 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                 {mafsElement.name === "Ellipse" && (
                     <>
                         <div className="mb-4">
-                            <label htmlFor="ellipseCenter" className="block font-medium mb-1">
-                                Center
+                            <label htmlFor="ellipseCenterX" className="block font-medium mb-1">
+                                Center X
                             </label>
                             <input
-                                type="text"
-                                id="ellipseCenter"
+                                type="number"
+                                id="ellipseCenterX"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={ellipseProps.center.join(",")}
+                                value={ellipseProps.center[0]}
                                 onChange={(e) =>
                                     setEllipseProps({
                                         ...ellipseProps,
-                                        center: e.target.value.split(",").map(parseFloat),
+                                        center: [parseFloat(e.target.value), ellipseProps.center[1]],
                                     })
                                 }
                             />
                         </div>
                         <div className="mb-4">
-                            <label htmlFor="ellipseRadius" className="block font-medium mb-1">
-                                Radius
+                            <label htmlFor="ellipseCenterY" className="block font-medium mb-1">
+                                Center Y
                             </label>
                             <input
-                                type="text"
-                                id="ellipseRadius"
+                                type="number"
+                                id="ellipseCenterY"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={ellipseProps.radius.join(",")}
+                                value={ellipseProps.center[1]}
                                 onChange={(e) =>
                                     setEllipseProps({
                                         ...ellipseProps,
-                                        radius: e.target.value.split(",").map(parseFloat),
+                                        center: [ellipseProps.center[0], parseFloat(e.target.value)],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="ellipseRadiusX" className="block font-medium mb-1">
+                                Radius X
+                            </label>
+                            <input
+                                type="number"
+                                id="ellipseRadiusX"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={ellipseProps.radius[0]}
+                                onChange={(e) =>
+                                    setEllipseProps({
+                                        ...ellipseProps,
+                                        radius: [parseFloat(e.target.value), ellipseProps.radius[1]],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="ellipseRadiusY" className="block font-medium mb-1">
+                                Radius Y
+                            </label>
+                            <input
+                                type="number"
+                                id="ellipseRadiusY"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={ellipseProps.radius[1]}
+                                onChange={(e) =>
+                                    setEllipseProps({
+                                        ...ellipseProps,
+                                        radius: [ellipseProps.radius[0], parseFloat(e.target.value)],
                                     })
                                 }
                             />
@@ -524,35 +652,69 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                 {mafsElement.name === "Vector" && (
                     <>
                         <div className="mb-4">
-                            <label htmlFor="vectorTail" className="block font-medium mb-1">
-                                Tail
+                            <label htmlFor="vectorTailX" className="block font-medium mb-1">
+                                Tail X
                             </label>
                             <input
-                                type="text"
-                                id="vectorTail"
+                                type="number"
+                                id="vectorTailX"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={vectorProps.tail.join(",")}
+                                value={vectorProps?.tail[0]}
                                 onChange={(e) =>
                                     setVectorProps({
                                         ...vectorProps,
-                                        tail: e.target.value.split(",").map(parseFloat),
+                                        tail: [parseFloat(e.target.value), vectorProps?.tail[1]],
                                     })
                                 }
                             />
                         </div>
                         <div className="mb-4">
-                            <label htmlFor="vectorTip" className="block font-medium mb-1">
-                                Tip
+                            <label htmlFor="vectorTailY" className="block font-medium mb-1">
+                                Tail Y
                             </label>
                             <input
-                                type="text"
-                                id="vectorTip"
+                                type="number"
+                                id="vectorTailY"
                                 className="w-full border border-gray-300 rounded px-3 py-2"
-                                value={vectorProps.tip.join(",")}
+                                value={vectorProps.tail[1]}
                                 onChange={(e) =>
                                     setVectorProps({
                                         ...vectorProps,
-                                        tip: e.target.value.split(",").map(parseFloat),
+                                        tail: [vectorProps?.tail[0], parseFloat(e.target.value)],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="vectorTipX" className="block font-medium mb-1">
+                                Tip X
+                            </label>
+                            <input
+                                type="number"
+                                id="vectorTipX"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={vectorProps.tip[0]}
+                                onChange={(e) =>
+                                    setVectorProps({
+                                        ...vectorProps,
+                                        tip: [parseFloat(e.target.value), vectorProps.tip[1]],
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className="mb-4">
+                            <label htmlFor="vectorTipY" className="block font-medium mb-1">
+                                Tip Y
+                            </label>
+                            <input
+                                type="number"
+                                id="vectorTipY"
+                                className="w-full border border-gray-300 rounded px-3 py-2"
+                                value={vectorProps.tip[1]}
+                                onChange={(e) =>
+                                    setVectorProps({
+                                        ...vectorProps,
+                                        tip: [vectorProps.tip[0], parseFloat(e.target.value)],
                                     })
                                 }
                             />
@@ -579,7 +741,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                     </button>
                 </div>
             </div>
-        </div>
+        </div >
     );
 });
 
