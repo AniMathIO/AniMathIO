@@ -132,3 +132,16 @@ export type MenuOption =
   | "Effects"
   | "Background Fill"
   | "Mathematical Objects";
+
+export type MafsResourceProps = {
+  index: number;
+  children: React.ReactNode;
+  name: string;
+  onAddResource: () => void;
+};
+
+export type MafsModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  mafsElement: MafsResourceProps;
+};
