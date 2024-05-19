@@ -11,7 +11,7 @@ import { StateContext } from "@/states";
 import * as htmlToImage from 'html-to-image';
 import { MafsModalProps, LatexProps } from "@/types";
 import katex from "katex";
-
+import Modal from 'react-modal';
 import LineInputs from "./mafsmodal/LineInputs";
 import PointInputs from "./mafsmodal/PointInputs";
 import CircleInputs from "./mafsmodal/CircleInputs";
@@ -30,6 +30,9 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
         zoom: true,
         coordinateType: mafsElement.coordinateType || "cartesian",
     });
+
+    const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
 
     const [lineProps, setLineProps] = useState<SegmentProps>({
         point1: [-2, 1],
@@ -95,7 +98,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             });
         } catch (error) {
             console.error('Invalid plot function:', error);
-            alert('Invalid plot function. Please enter a valid function using Math.sin, Math.cos, Math.tan, Math.exp, Math.log, or Math.sqrt.');
+            setErrorMessage('Invalid plot function. Please enter a valid function using Math.sin, Math.cos, Math.tan, Math.exp, Math.log, or Math.sqrt.');
+            setIsErrorModalOpen(true);
         }
     };
 
@@ -108,7 +112,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             }));
         } catch (error) {
             console.error('Invalid LaTeX string:', error);
-            alert('Invalid LaTeX string. Please enter a valid LaTeX expression.');
+            setErrorMessage('Invalid LaTeX string. Please enter a valid LaTeX expression.');
+            setIsErrorModalOpen(true);
         }
     };
 
@@ -125,7 +130,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             }));
         } catch (error) {
             console.error('Failed to update Mafs config:', error);
-            alert('An error occurred while updating the Mafs configuration. Please try again.');
+            setErrorMessage('An error occurred while updating the Mafs configuration. Please try again.');
+            setIsErrorModalOpen(true);
         }
     };
 
@@ -138,7 +144,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             });
         } catch (error) {
             console.error('Failed to extract PNG from Mafs component:', error);
-            alert('An error occurred while adding the Mafs resource. Please try again.');
+            setErrorMessage('An error occurred while adding the Mafs resource. Please try again.');
+            setIsErrorModalOpen(true);
         }
     };
 
@@ -180,7 +187,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             }
         } catch (error) {
             console.error('Failed to render Mafs element:', error);
-            return <div>Failed to render Mafs element. Please check the input values.</div>;
+            setErrorMessage('An error occurred while rendering the Mafs element. Please try again.');
+            setIsErrorModalOpen(true);
         }
     };
 
@@ -306,6 +314,29 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                         Add Element
                     </button>
                 </div>
+                <Modal
+                    isOpen={isErrorModalOpen}
+                    onRequestClose={() => setIsErrorModalOpen(false)}
+                    contentLabel="Error Modal"
+                    className="fixed inset-0 flex items-center justify-center z-[9999] bg-black bg-opacity-50"
+                    overlayClassName="fixed inset-0 z-[9999] bg-black bg-opacity-50"
+                    shouldCloseOnOverlayClick={true}
+                >
+                    <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-2xl font-bold text-red-800">Error</h2>
+                        </div>
+                        <p className="text-gray-700 mb-4">{errorMessage}</p>
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => setIsErrorModalOpen(false)}
+                                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
             </div>
         </div >
     );
