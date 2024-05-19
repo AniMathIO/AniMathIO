@@ -133,15 +133,16 @@ export type MenuOption =
   | "Background Fill"
   | "Mathematical Objects";
 
-export type MafsResourceProps = {
+export type MafsResourceType = {
   index: number;
-  children: React.ReactNode;
   name: string;
-  onAddResource: () => void;
+  children: React.ReactNode;
+  coordinates?: boolean;
+  coordinateType?: "cartesian" | "polar";
 };
 
 export type MafsModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  mafsElement: MafsResourceProps;
+  mafsElement: MafsResourceType;
 };

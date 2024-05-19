@@ -1,9 +1,9 @@
 import React from "react";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
-import { MafsResourceProps } from "@/types";
+import { MafsResourceType } from "@/types";
 
-const MafsResource = observer(({ index, children, name, onAddResource }: MafsResourceProps) => {
+const MafsResource = observer(({ name, children, onAddResource }: { name: string, children: React.ReactNode, onAddResource: () => void }) => {
   return (
     <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative">
       <div className="bg-[rgba(0,0,0,.50)] rounded-xl text-white py-1 px-1 absolute text-base top-1.3 right-2">

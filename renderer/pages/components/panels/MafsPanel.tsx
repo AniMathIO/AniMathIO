@@ -1,17 +1,10 @@
-// MafsPanel.tsx
 import React, { useState } from "react";
 import { observer } from "mobx-react";
 import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text, LaTeX } from "mafs";
 import MafsResource from "../entity/MafsResource";
 import MafsModal from "../partials/MafsModal";
+import { MafsResourceType } from "@/types";
 
-type MafsResourceType = {
-  index: number
-  name: string
-  children: React.ReactNode
-  coordinates?: true | false
-  coordinateType?: "cartesian" | "polar"
-}
 
 const generateMafsResources = (): MafsResourceType[] => {
   const resources: MafsResourceType[] = [
@@ -84,7 +77,6 @@ const MafsPanel = observer(() => {
         {mafsResources.map((resource) => (
           <MafsResource
             key={`mafs-${resource.index}`}
-            index={resource.index}
             name={resource.name}
             onAddResource={() => openModal(resource)}
           >

@@ -1,16 +1,14 @@
-// MafsModal.tsx
 import React, { useState, useRef, useContext } from "react";
 import { observer } from "mobx-react";
-import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text, LaTeX } from "mafs";
+import { Mafs, Coordinates } from "mafs";
 import { StateContext } from "@/states";
 import * as htmlToImage from 'html-to-image';
 import { MafsModalProps } from "@/types";
 
-
 const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) => {
     const [mafsConfig, setMafsConfig] = useState({
         width: 500,
-        height: 500,
+        height: 200,
         pan: true,
         zoom: true,
         coordinateType: mafsElement.coordinateType || "cartesian",
@@ -145,33 +143,21 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                         <option value="polar">Polar</option>
                     </select>
                 </div>
-                <div className="border border-gray-300 rounded p-4" ref={mafsRef}>
-                    <Mafs
-                        width={mafsConfig.width}
-                        height={mafsConfig.height}
-                        pan={mafsConfig.pan}
-                        zoom={mafsConfig.zoom}
-                    >
-                        {mafsConfig.coordinateType === "cartesian" ? (
-                            <Coordinates.Cartesian />
-                        ) : (
-                            <Coordinates.Polar />
-                        )}
-                        {mafsElement.children}
-                    </Mafs>
+                <div className="border border-gray-300 rounded p-4 flex justify-center">
+                    <div ref={mafsRef}>
+                        <Mafs width={mafsConfig.width} height={mafsConfig.height} pan={mafsConfig.pan} zoom={mafsConfig.zoom} >
+                            {mafsConfig.coordinateType === "cartesian" ? (
+                                <Coordinates.Cartesian />
+                            ) : (
+                                <Coordinates.Polar />
+                            )}
+                            {mafsElement.children}
+                        </Mafs>
+                    </div>
                 </div>
                 <div className="mt-4 flex justify-end">
-                    <button
-                        className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mr-2"
-                        onClick={handleAddResource}
-                    >
+                    <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mr-2" onClick={handleAddResource} >
                         Add Element
-                    </button>
-                    <button
-                        className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
-                        onClick={onClose}
-                    >
-                        Close
                     </button>
                 </div>
             </div>
