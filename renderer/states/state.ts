@@ -5,7 +5,7 @@ import {
   isHtmlAudioElement,
   isHtmlImageElement,
   isHtmlVideoElement,
-} from "../utils";
+} from "@/utils";
 import anime, { get } from "animejs";
 import {
   MenuOption,
@@ -18,11 +18,11 @@ import {
   ImageEditorElement,
   Effect,
   TextEditorElement,
-} from "../../types";
+  MafsEditorElement,
+} from "@/types";
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
-
 export class State {
   canvas: fabric.Canvas | null;
 
@@ -50,6 +50,8 @@ export class State {
     string,
     { context: AudioContext; sourceNode: MediaElementAudioSourceNode }
   >();
+  canvas_width: number;
+  canvas_height: number;
 
   constructor() {
     this.canvas = null;
@@ -64,6 +66,8 @@ export class State {
     this.selectedElement = null;
     this.fps = 60;
     this.animations = [];
+    this.canvas_width = 500;
+    this.canvas_height = 800;
     if (typeof window !== "undefined") {
       // Code that uses anime.js
       this.animationTimeLine = anime.timeline({ autoplay: false });
@@ -113,7 +117,11 @@ export class State {
   updateEffect(id: string, effect: Effect) {
     const index = this.editorElements.findIndex((element) => element.id === id);
     const element = this.editorElements[index];
-    if (isEditorVideoElement(element) || isEditorImageElement(element)) {
+    if (
+      isEditorVideoElement(element) ||
+      isEditorImageElement(element) ||
+      isEditorMafsElement(element)
+    ) {
       element.properties.effect = effect;
     }
     this.refreshElements();
@@ -423,49 +431,82 @@ export class State {
   }
 
   setEditorElements(editorElements: EditorElement[]) {
+    // console.log("Updating editor elements:", editorElements);
     this.editorElements = editorElements;
     this.updateSelectedElement();
+    // console.log("Updated selected element:", this.selectedElement);
+    // console.log("Calling refreshElements");
     this.refreshElements();
-    // this.refreshAnimations();
-  }
-
-  updateEditorElement(editorElement: EditorElement) {
-    this.setEditorElements(
-      this.editorElements.map((element) =>
-        element.id === editorElement.id ? editorElement : element
-      )
-    );
-  }
-
-  updateEditorElementTimeFrame(
-    editorElement: EditorElement,
-    timeFrame: Partial<TimeFrame>
-  ) {
-    if (timeFrame.start != undefined && timeFrame.start < 0) {
-      timeFrame.start = 0;
-    }
-    if (timeFrame.end != undefined && timeFrame.end > this.maxTime) {
-      timeFrame.end = this.maxTime;
-    }
-    const newEditorElement = {
-      ...editorElement,
-      timeFrame: {
-        ...editorElement.timeFrame,
-        ...timeFrame,
-      },
-    };
-    this.updateVideoElements();
-    this.updateAudioElements();
-    this.updateEditorElement(newEditorElement);
+    // console.log("Calling refreshAnimations");
     this.refreshAnimations();
   }
 
+  async updateEditorElement(editorElement: EditorElement): Promise<void> {
+    try {
+      // console.log("Updating editor element:", editorElement);
+
+      await this.setEditorElements(
+        this.editorElements.map((element) =>
+          element.id === editorElement.id ? editorElement : element
+        )
+      );
+
+      this.updateSelectedElement();
+      this.refreshElements();
+    } catch (error) {
+      console.error("Failed to update editor element:", error);
+      throw error; // Rethrow the error to propagate it to the caller
+    }
+  }
+
+  async updateEditorElementTimeFrame(
+    editorElement: EditorElement,
+    timeFrame: Partial<TimeFrame>
+  ): Promise<void> {
+    try {
+      if (timeFrame.start === undefined && timeFrame.end === undefined) {
+        return;
+      }
+
+      if (timeFrame.start !== undefined && timeFrame.start < 0) {
+        timeFrame.start = 0;
+      }
+      if (timeFrame.end !== undefined && timeFrame.end > this.maxTime) {
+        timeFrame.end = this.maxTime;
+      }
+
+      // console.log("Updating time frame for element:", editorElement);
+      // console.log("New time frame values:", timeFrame);
+
+      const newEditorElement = {
+        ...editorElement,
+        timeFrame: {
+          ...editorElement.timeFrame,
+          ...timeFrame,
+        },
+      };
+
+      this.updateVideoElements();
+      this.updateAudioElements();
+
+      await this.updateEditorElement(newEditorElement);
+      this.refreshAnimations();
+    } catch (error) {
+      console.error("Failed to update editor element time frame:", error);
+      throw error; // Rethrow the error to propagate it to the caller
+    }
+  }
+
   addEditorElement(editorElement: EditorElement) {
-    this.setEditorElements([...this.editorElements, editorElement]);
-    this.refreshElements();
-    this.setSelectedElement(
-      this.editorElements[this.editorElements.length - 1]
-    );
+    return new Promise<void>((resolve) => {
+      this.setEditorElements([...this.editorElements, editorElement]);
+      // console.log("Added editor element:", editorElement);
+      this.refreshElements();
+      this.setSelectedElement(
+        this.editorElements[this.editorElements.length - 1]
+      );
+      resolve();
+    });
   }
 
   removeEditorElement(id: string) {
@@ -486,6 +527,9 @@ export class State {
     if (playing) {
       this.startedTime = Date.now();
       this.startedTimePlay = this.currentTimeInMs;
+      // console.log("Started time:", this.startedTime);
+      // console.log("Started time play:", this.startedTimePlay);
+
       requestAnimationFrame(() => {
         this.playFrames();
       });
@@ -506,6 +550,8 @@ export class State {
       this.currentKeyFrame = 0;
       this.setPlaying(false);
     } else {
+      // console.log("New time:", newTime);
+      // console.log("Current key frame:", this.currentKeyFrame);
       requestAnimationFrame(() => {
         this.playFrames();
       });
@@ -600,6 +646,69 @@ export class State {
           type: "none",
         },
       },
+    });
+  }
+
+  addMafsResource(index: number, pngSrc: string, name: string) {
+    return new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const id = getUid();
+        // console.log("Generated ID:", id);
+        // console.log("Dimensions:", img.width, img.height);
+
+        const coverImage = new fabric.CoverImage(img, {
+          name: `Mafs(${name}) ${index + 1}`,
+          left: 0,
+          top: 0,
+          scaleX: 1,
+          scaleY: 1,
+          angle: 0,
+          width: img.width,
+          height: img.height,
+          originX: "left",
+          originY: "top",
+          selectable: false,
+          crossOrigin: "anonymous",
+          objectCaching: false,
+          lockUniScaling: true,
+          customFilter: "none",
+        } as any);
+
+        this.addEditorElement({
+          id,
+          name: `Mafs(${name}) ${index + 1}`,
+          type: "mafs",
+          placement: {
+            x: 0,
+            y: 0,
+            width: img.width || 100,
+            height: img.height || 100,
+            rotation: 0,
+            scaleX: 1,
+            scaleY: 1,
+          },
+          timeFrame: {
+            start: 0,
+            end: this.maxTime,
+          },
+          properties: {
+            elementId: `mafs-${id}`,
+            src: pngSrc,
+            effect: {
+              type: "none",
+            },
+            imageObject: coverImage,
+          },
+        });
+
+        // console.log("Element added:", coverImage);
+
+        resolve();
+      };
+      img.onerror = reject;
+      img.src = pngSrc;
     });
   }
 
@@ -737,7 +846,7 @@ export class State {
   }
 
   saveCanvasToVideoWithAudioWebmMp4() {
-    console.log("modified");
+    // console.log("modified");
     let mp4 = this.selectedVideoFormat === "mp4";
 
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
@@ -788,7 +897,7 @@ export class State {
       const chunks: Blob[] = [];
       mediaRecorder.ondataavailable = function (e) {
         chunks.push(e.data);
-        console.log("data available");
+        // console.log("data available");
       };
       mediaRecorder.onstop = async function (e) {
         const blob = new Blob(chunks, { type: "video/webm" });
@@ -857,22 +966,123 @@ export class State {
     const state = this;
     if (!state.canvas) return;
     const canvas = state.canvas;
+
+    // Deselect all objects before removing them
+    canvas.discardActiveObject();
+    canvas.getObjects().forEach((obj) => {
+      obj.onDeselect = () => false; // Release deselect
+    });
     state.canvas.remove(...state.canvas.getObjects());
-    for (let index = 0; index < state.editorElements.length; index++) {
-      const element = state.editorElements[index];
+
+    const handleObjectModified =
+      (element: any, fabricObject: any) => (e: any) => {
+        if (!e.target) return;
+        const target = e.target;
+        if (target !== fabricObject) return;
+        const placement = element.placement;
+        const newPlacement: Placement = {
+          ...placement,
+          x: target.left ?? placement.x,
+          y: target.top ?? placement.y,
+          rotation: target.angle ?? placement.rotation,
+          width: target.width ?? placement.width,
+          height: target.height ?? placement.height,
+          scaleX: target.scaleX ?? placement.scaleX,
+          scaleY: target.scaleY ?? placement.scaleY,
+        };
+
+        const newElement = {
+          ...element,
+          placement: newPlacement,
+          properties: {
+            ...element.properties,
+            src: element.properties.src,
+            text: fabricObject.text ?? element.properties.text,
+          },
+        };
+        state.updateEditorElement(newElement);
+      };
+
+    const addElementToCanvas = (
+      element: any,
+      fabricObject: any,
+      setActive = true
+    ) => {
+      element.fabricObject = fabricObject;
+      if (element && element.fabricObject) {
+        canvas.add(element.fabricObject);
+      }
+      fabricObject.on("modified", handleObjectModified(element, fabricObject));
+      fabricObject.on("selected", () => {
+        state.setSelectedElement(element);
+      });
+      if (setActive) {
+        canvas.setActiveObject(fabricObject);
+      }
+      canvas.renderAll();
+    };
+
+    const loadMafsImage = (element: any) => {
+      return new Promise<void>((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          try {
+            const imageObject = new fabric.CoverImage(img, {
+              name: element.id,
+              left: element.placement.x,
+              top: element.placement.y,
+              angle: element.placement.rotation,
+              objectCaching: false,
+              selectable: true,
+              lockUniScaling: true,
+              customFilter: element.properties.effect?.type as any,
+            } as any);
+
+            const image = {
+              w: img.naturalWidth,
+              h: img.naturalHeight,
+            };
+
+            imageObject.width = image.w;
+            imageObject.height = image.h;
+
+            img.width = image.w;
+            img.height = image.h;
+
+            imageObject.scaleToHeight(image.h);
+            imageObject.scaleToWidth(image.w);
+
+            const toScale = {
+              x: element.placement.width / image.w,
+              y: element.placement.height / image.h,
+            };
+
+            imageObject.scaleX = toScale.x * element.placement.scaleX;
+            imageObject.scaleY = toScale.y * element.placement.scaleY;
+
+            element.fabricObject = imageObject;
+            element.properties.imageObject = imageObject;
+
+            addElementToCanvas(element, imageObject, false);
+            resolve();
+          } catch (error) {
+            console.error("Error loading Mafs image:", error);
+            reject(error);
+          }
+        };
+        img.onerror = reject;
+        img.src = element.properties.src;
+      });
+    };
+
+    const elementPromises = state.editorElements.map(async (element: any) => {
       switch (element.type) {
         case "video": {
-          console.log("elementid", element.properties.elementId);
-          if (document.getElementById(element.properties.elementId) == null)
-            continue;
           const videoElement = document.getElementById(
             element.properties.elementId
           );
-          if (!isHtmlVideoElement(videoElement)) continue;
-          // const filters = [];
-          // if (element.properties.effect?.type === "blackAndWhite") {
-          //   filters.push(new fabric.Image.filters.Grayscale());
-          // }
+          if (!videoElement || !isHtmlVideoElement(videoElement)) return;
           const videoObject = new fabric.CoverVideo(videoElement, {
             name: element.id,
             left: element.placement.x,
@@ -885,57 +1095,23 @@ export class State {
             objectCaching: false,
             selectable: true,
             lockUniScaling: true,
-            // filters: filters,
-            // @ts-ignore
-            customFilter: element.properties.effect.type,
-          });
-
-          element.fabricObject = videoObject;
-          element.properties.imageObject = videoObject;
+            customFilter: element.properties.effect?.type as any,
+          } as any);
           videoElement.width = 100;
           videoElement.height =
             (videoElement.videoHeight * 100) / videoElement.videoWidth;
-          canvas.add(videoObject);
-          canvas.on("object:modified", function (e) {
-            if (!e.target) return;
-            const target = e.target;
-            if (target != videoObject) return;
-            const placement = element.placement;
-            const newPlacement: Placement = {
-              ...placement,
-              x: target.left ?? placement.x,
-              y: target.top ?? placement.y,
-              rotation: target.angle ?? placement.rotation,
-              width:
-                target.width && target.scaleX
-                  ? target.width * target.scaleX
-                  : placement.width,
-              height:
-                target.height && target.scaleY
-                  ? target.height * target.scaleY
-                  : placement.height,
-              scaleX: 1,
-              scaleY: 1,
-            };
-            const newElement = {
-              ...element,
-              placement: newPlacement,
-            };
-            state.updateEditorElement(newElement);
-          });
+          addElementToCanvas(element, videoObject, false);
+          break;
+        }
+        case "mafs": {
+          await loadMafsImage(element);
           break;
         }
         case "image": {
-          if (document.getElementById(element.properties.elementId) == null)
-            continue;
           const imageElement = document.getElementById(
             element.properties.elementId
           );
-          if (!isHtmlImageElement(imageElement)) continue;
-          // const filters = [];
-          // if (element.properties.effect?.type === "blackAndWhite") {
-          //   filters.push(new fabric.Image.filters.Grayscale());
-          // }
+          if (!imageElement || !isHtmlImageElement(imageElement)) return;
           const imageObject = new fabric.CoverImage(imageElement, {
             name: element.id,
             left: element.placement.x,
@@ -944,18 +1120,12 @@ export class State {
             objectCaching: false,
             selectable: true,
             lockUniScaling: true,
-            // filters
-            // @ts-ignore
-            customFilter: element.properties.effect.type,
-          });
-          // imageObject.applyFilters();
-          element.fabricObject = imageObject;
-          element.properties.imageObject = imageObject;
+            customFilter: element.properties.effect?.type as any,
+          } as any);
           const image = {
             w: imageElement.naturalWidth,
             h: imageElement.naturalHeight,
           };
-
           imageObject.width = image.w;
           imageObject.height = image.h;
           imageElement.width = image.w;
@@ -968,30 +1138,7 @@ export class State {
           };
           imageObject.scaleX = toScale.x * element.placement.scaleX;
           imageObject.scaleY = toScale.y * element.placement.scaleY;
-          canvas.add(imageObject);
-          canvas.on("object:modified", function (e) {
-            if (!e.target) return;
-            const target = e.target;
-            if (target != imageObject) return;
-            const placement = element.placement;
-            let fianlScale = 1;
-            if (target.scaleX && target.scaleX > 0) {
-              fianlScale = target.scaleX / toScale.x;
-            }
-            const newPlacement: Placement = {
-              ...placement,
-              x: target.left ?? placement.x,
-              y: target.top ?? placement.y,
-              rotation: target.angle ?? placement.rotation,
-              scaleX: fianlScale,
-              scaleY: fianlScale,
-            };
-            const newElement = {
-              ...element,
-              placement: newPlacement,
-            };
-            state.updateEditorElement(newElement);
-          });
+          addElementToCanvas(element, imageObject, false);
           break;
         }
         case "audio": {
@@ -1014,53 +1161,27 @@ export class State {
             lockUniScaling: true,
             fill: "#ffffff",
           });
-          element.fabricObject = textObject;
-          canvas.add(textObject);
-          canvas.on("object:modified", function (e) {
-            if (!e.target) return;
-            const target = e.target;
-            if (target != textObject) return;
-            const placement = element.placement;
-            const newPlacement: Placement = {
-              ...placement,
-              x: target.left ?? placement.x,
-              y: target.top ?? placement.y,
-              rotation: target.angle ?? placement.rotation,
-              width: target.width ?? placement.width,
-              height: target.height ?? placement.height,
-              scaleX: target.scaleX ?? placement.scaleX,
-              scaleY: target.scaleY ?? placement.scaleY,
-            };
-            const newElement = {
-              ...element,
-              placement: newPlacement,
-              properties: {
-                ...element.properties,
-                // @ts-ignore
-                text: target?.text,
-              },
-            };
-            state.updateEditorElement(newElement);
-          });
+          addElementToCanvas(element, textObject, false);
           break;
         }
         default: {
           throw new Error("Not implemented");
         }
       }
-      if (element.fabricObject) {
-        element.fabricObject.on("selected", function (e) {
-          state.setSelectedElement(element);
-        });
-      }
-    }
-    const selectedEditorElement = state.selectedElement;
-    if (selectedEditorElement && selectedEditorElement.fabricObject) {
-      canvas.setActiveObject(selectedEditorElement.fabricObject);
-    }
-    this.refreshAnimations();
-    this.updateTimeTo(this.currentTimeInMs);
-    state.canvas.renderAll();
+    });
+    Promise.all(elementPromises)
+      .then(() => {
+        const selectedEditorElement = state.selectedElement;
+        if (selectedEditorElement && selectedEditorElement.fabricObject) {
+          canvas.setActiveObject(selectedEditorElement.fabricObject);
+        }
+        this.refreshAnimations();
+        this.updateTimeTo(this.currentTimeInMs);
+        canvas.renderAll();
+      })
+      .catch((error) => {
+        console.error("Error processing elements:", error);
+      });
   }
 }
 
@@ -1079,6 +1200,12 @@ export function isEditorImageElement(
   element: EditorElement
 ): element is ImageEditorElement {
   return element.type === "image";
+}
+
+export function isEditorMafsElement(
+  element: EditorElement
+): element is MafsEditorElement {
+  return element.type === "mafs";
 }
 
 function getTextObjectsPartitionedByCharacters(

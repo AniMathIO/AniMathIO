@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "@/states";
 // import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
 import {
@@ -10,12 +10,13 @@ import {
   Animation,
   FadeInAnimation,
   FadeOutAnimation,
-  BreatheAnimation,
   SlideDirection,
   SlideInAnimation,
   SlideOutAnimation,
   SlideTextType,
-} from "../../../types";
+} from "@/types";
+
+import dynamic from "next/dynamic";
 
 const ANIMATION_TYPE_TO_LABEL: Record<string, string> = {
   fadeIn: "Fade In",
@@ -27,7 +28,7 @@ const ANIMATION_TYPE_TO_LABEL: Record<string, string> = {
 export type AnimationResourceProps = {
   animation: Animation;
 };
-export const AnimationResource = observer((props: AnimationResourceProps) => {
+const AnimationResource = observer((props: AnimationResourceProps) => {
   const state = React.useContext(StateContext);
   return (
     <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative min-h-[100px] p-2">
@@ -189,3 +190,5 @@ export const SlideAnimation = observer(
     );
   }
 );
+
+export default dynamic(() => Promise.resolve(AnimationResource), { ssr: false });

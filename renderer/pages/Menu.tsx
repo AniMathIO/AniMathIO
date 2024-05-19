@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { StateContext } from "./states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import {
   ArrowDownTrayIcon,
@@ -10,11 +10,12 @@ import {
   DocumentTextIcon,
   MusicalNoteIcon,
   EyeDropperIcon,
-  SparklesIcon
+  SparklesIcon,
+  VariableIcon
 } from "@heroicons/react/24/solid";
-import { State } from "./states/state";
+import { State } from "../states/state";
 
-export const Menu = observer(() => {
+const Menu = observer(() => {
   const state = React.useContext(StateContext);
 
   return (
@@ -65,6 +66,13 @@ const MENU_OPTIONS = [
     },
   },
   {
+    name: "Mathematical Objects",
+    icon: VariableIcon,
+    action: (state: State) => {
+      state.setSelectedMenuOption("Mathematical Objects");
+    },
+  },
+  {
     name: "Audios",
     icon: MusicalNoteIcon,
     action: (state: State) => {
@@ -107,3 +115,5 @@ const MENU_OPTIONS = [
     },
   },
 ];
+
+export default Menu;

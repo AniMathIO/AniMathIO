@@ -1,7 +1,19 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "baseUrl": "",
+    "paths": {
+      "@/types": [
+        "./types"
+      ],
+      "@/states": [
+        "./states"
+      ],
+      "@/utils": [
+        "./utils"
+      ]
+    }
   },
   "include": [
     "next-env.d.ts",

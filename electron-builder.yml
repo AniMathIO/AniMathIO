@@ -1,5 +1,5 @@
-appId: com.kovacsbalinthunor.manim-studio
-productName: ManimStudio
+appId: com.kovacsbalinthunor.animathio
+productName: AniMathIO
 copyright: Copyright © 2024 Kovacs Balint-Hunor
 directories:
   output: dist
@@ -12,3 +12,4 @@ files:
 extraFiles:
   - scripts
 publish: null
+npmRebuild: false

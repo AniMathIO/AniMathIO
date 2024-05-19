@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
 
@@ -10,7 +10,7 @@ type TextResourceProps = {
   fontWeight: number;
   sampleText: string;
 };
-export const TextResource = observer(
+const TextResource = observer(
   ({ fontSize, fontWeight, sampleText }: TextResourceProps) => {
     const state = React.useContext(StateContext);
     return (
@@ -41,3 +41,5 @@ export const TextResource = observer(
     );
   }
 );
+
+export default TextResource;

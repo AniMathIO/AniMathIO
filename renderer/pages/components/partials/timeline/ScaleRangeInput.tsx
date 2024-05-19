@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-export const ScaleRangeInput: React.FC<ScaleRangeInputProps> = (props) => {
+const ScaleRangeInput: React.FC<ScaleRangeInputProps> = (props) => {
     const { max, value, onChange } = props;
     const ref = useRef<HTMLCanvasElement>(null);
     const refIsMouseDown = useRef(false);
@@ -101,3 +101,5 @@ export type Marking = {
     width: number;
 
 };
+
+export default ScaleRangeInput

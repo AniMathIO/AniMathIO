@@ -1,9 +1,10 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "@/states";
 // import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
-import { VideoEditorElement, ImageEditorElement, EffectType } from "../../../types";
+import { VideoEditorElement, ImageEditorElement, EffectType, MafsEditorElement } from "@/types";
+import dynamic from "next/dynamic";
 
 const EFFECT_TYPE_TO_LABEL: Record<string, string> = {
   blackAndWhite: "Black and White",
@@ -13,9 +14,9 @@ const EFFECT_TYPE_TO_LABEL: Record<string, string> = {
   invert: "Invert",
 };
 export type EffectResourceProps = {
-  editorElement: VideoEditorElement | ImageEditorElement;
+  editorElement: VideoEditorElement | ImageEditorElement | MafsEditorElement;
 };
-export const EffectResource = observer((props: EffectResourceProps) => {
+const EffectResource = observer((props: EffectResourceProps) => {
   const state = React.useContext(StateContext);
   return (
     <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative min-h-[100px] p-2">
@@ -47,3 +48,5 @@ export const EffectResource = observer((props: EffectResourceProps) => {
     </div>
   );
 });
+
+export default dynamic(() => Promise.resolve(EffectResource), { ssr: false });
