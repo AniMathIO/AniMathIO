@@ -10,6 +10,7 @@ import {
 import { StateContext } from "@/states";
 import * as htmlToImage from 'html-to-image';
 import { MafsModalProps, LatexProps } from "@/types";
+import katex from "katex";
 
 import LineInputs from "./mafsmodal/LineInputs";
 import PointInputs from "./mafsmodal/PointInputs";
@@ -82,6 +83,11 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
 
     const handlePlotSubmit = () => {
         try {
+            const supportedMathFunctions = ['Math.sin', 'Math.cos', 'Math.tan', 'Math.exp', 'Math.log', 'Math.sqrt'];
+            const hasMathFunction = supportedMathFunctions.some(func => plotInput.includes(func));
+            if (!hasMathFunction) {
+                throw new Error('Invalid plot function');
+            }
             const newPlotFunction = eval(plotInput);
             setPlotProps({
                 ...plotProps,
@@ -89,19 +95,21 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             });
         } catch (error) {
             console.error('Invalid plot function:', error);
-            alert('Invalid plot function. Please enter a valid function.');
+            alert('Invalid plot function. Please enter a valid function using Math.sin, Math.cos, Math.tan, Math.exp, Math.log, or Math.sqrt.');
         }
     };
 
     const handleLatexSubmit = () => {
-        // console.log(latexInput);
-        setLatexProps((prevProps) => ({
-            ...prevProps,
-            tex: latexInput,
-        }));
-        // console.log("state set");
-        // console log div ref mafs element
-        // console.log(mafsRef.current);
+        try {
+            katex.renderToString(latexInput);
+            setLatexProps((prevProps) => ({
+                ...prevProps,
+                tex: latexInput,
+            }));
+        } catch (error) {
+            console.error('Invalid LaTeX string:', error);
+            alert('Invalid LaTeX string. Please enter a valid LaTeX expression.');
+        }
     };
 
     const state = useContext(StateContext);
@@ -110,10 +118,15 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
     if (!isOpen) return null;
 
     const handleMafsConfigChange = (key: keyof typeof mafsConfig, value: any) => {
-        setMafsConfig((prevConfig) => ({
-            ...prevConfig,
-            [key]: value,
-        }));
+        try {
+            setMafsConfig((prevConfig) => ({
+                ...prevConfig,
+                [key]: value,
+            }));
+        } catch (error) {
+            console.error('Failed to update Mafs config:', error);
+            alert('An error occurred while updating the Mafs configuration. Please try again.');
+        }
     };
 
     const handleAddResource = async () => {
@@ -125,6 +138,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
             });
         } catch (error) {
             console.error('Failed to extract PNG from Mafs component:', error);
+            alert('An error occurred while adding the Mafs resource. Please try again.');
         }
     };
 
@@ -141,29 +155,32 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
     };
 
     const renderMafsElement = () => {
-        // console.log(mafsElement.name);
-        // console.log(latexProps.tex);
-        switch (mafsElement.name) {
-            case "Line":
-                return <Line.Segment {...lineProps} />;
-            case "Point":
-                return <Point {...pointProps} />;
-            case "Circle":
-                return <Circle {...circleProps} />;
-            case "Polygon":
-                return <Polygon points={polygonPoints} />;
-            case "Text":
-                return <Text {...textProps} />;
-            case "LaTex":
-                return <LaTeX at={latexProps.at} tex={latexProps.tex} />;
-            case "Ellipse":
-                return <Ellipse {...ellipseProps} />;
-            case "Plot":
-                return <Plot.OfX {...plotProps} />;
-            case "Vector":
-                return <Vector {...vectorProps} />;
-            default:
-                return null;
+        try {
+            switch (mafsElement.name) {
+                case "Line":
+                    return <Line.Segment {...lineProps} />;
+                case "Point":
+                    return <Point {...pointProps} />;
+                case "Circle":
+                    return <Circle {...circleProps} />;
+                case "Polygon":
+                    return <Polygon points={polygonPoints} />;
+                case "Text":
+                    return <Text {...textProps} />;
+                case "LaTex":
+                    return <LaTeX at={latexProps.at} tex={latexProps.tex} />;
+                case "Ellipse":
+                    return <Ellipse {...ellipseProps} />;
+                case "Plot":
+                    return <Plot.OfX {...plotProps} />;
+                case "Vector":
+                    return <Vector {...vectorProps} />;
+                default:
+                    return null;
+            }
+        } catch (error) {
+            console.error('Failed to render Mafs element:', error);
+            return <div>Failed to render Mafs element. Please check the input values.</div>;
         }
     };
 
