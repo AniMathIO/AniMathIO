@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
-import { formatTimeToMinSec } from "../../utils";
+import { StateContext } from "@/states";
+import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
 import { PlusCircleIcon, PlayIcon, PauseIcon } from "@heroicons/react/24/solid";
 import WavesurferPlayer from "@wavesurfer/react";
@@ -10,7 +10,7 @@ export type AudioResourceProps = {
   audio: string;
   index: number;
 };
-export const AudioResource = observer(
+const AudioResource = observer(
   ({ audio, index }: AudioResourceProps) => {
     const state = React.useContext(StateContext);
     const ref = React.useRef<HTMLAudioElement>(null);
@@ -76,3 +76,5 @@ export const AudioResource = observer(
     );
   }
 );
+
+export default AudioResource;

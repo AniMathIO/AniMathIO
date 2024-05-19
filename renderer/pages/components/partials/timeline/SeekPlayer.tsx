@@ -1,12 +1,12 @@
 "use client";
 
-import { StateContext } from "../../../states";
-import { formatTimeToMinSecMili } from "../../../utils";
+import { StateContext } from "@/states";
+import { formatTimeToMinSecMili } from "@/utils";
 import { observer } from "mobx-react-lite";
 import { useContext } from "react";
 import { PlayIcon } from "@heroicons/react/24/solid";
 import { PauseIcon } from "@heroicons/react/24/solid";
-import { ScaleRangeInput } from "./ScaleRangeInput";
+import ScaleRangeInput from "./ScaleRangeInput";
 
 
 
@@ -28,7 +28,7 @@ const MARKINGS = [
 export type SeekPlayerProps = {};
 
 
-export const SeekPlayer = observer((_props: SeekPlayerProps) => {
+const SeekPlayer = observer((_props: SeekPlayerProps) => {
     const state = useContext(StateContext);
     const Icon = state.playing ? PauseIcon : PlayIcon;
     const formattedTime = formatTimeToMinSecMili(state.currentTimeInMs);
@@ -52,7 +52,7 @@ export const SeekPlayer = observer((_props: SeekPlayerProps) => {
             <ScaleRangeInput
                 max={state.maxTime}
                 value={state.currentTimeInMs}
-                onChange={(value) => {
+                onChange={(value: any) => {
                     state.handleSeek(value);
                 }}
                 height={32}
@@ -62,3 +62,5 @@ export const SeekPlayer = observer((_props: SeekPlayerProps) => {
         </div>
     );
 });
+
+export default SeekPlayer

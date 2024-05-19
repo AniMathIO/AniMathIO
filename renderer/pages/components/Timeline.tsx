@@ -1,11 +1,11 @@
 "use client";
 import React from "react";
-import { SeekPlayer } from "./partials/timeline/SeekPlayer";
-import { StateContext } from "../states";
+import SeekPlayer from "./partials/timeline/SeekPlayer";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
-import { TimeFrame } from "./partials/timeline/Timeframe";
+import TimeFrame from "./partials/timeline/Timeframe";
 
-export const Timeline = observer(() => {
+const Timeline = observer(() => {
     const state = React.useContext(StateContext);
     const percentOfCurrentTime = (state.currentTimeInMs / state.maxTime) * 100;
     return (
@@ -25,3 +25,5 @@ export const Timeline = observer(() => {
         </div>
     );
 });
+
+export default Timeline;

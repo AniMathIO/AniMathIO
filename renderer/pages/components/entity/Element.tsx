@@ -1,15 +1,15 @@
 "use client";
 import React from "react";
-import { EditorElement } from "../../../types";
-import { StateContext } from "../../states";
+import { EditorElement } from "@/types";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
-import { Bars3BottomLeftIcon, FilmIcon, PhotoIcon, MusicalNoteIcon, XMarkIcon } from "@heroicons/react/24/solid";
-
+import { Bars3BottomLeftIcon, FilmIcon, PhotoIcon, MusicalNoteIcon, XMarkIcon, VariableIcon } from "@heroicons/react/24/solid";
+import dynamic from "next/dynamic";
 export type ElementProps = {
   element: EditorElement;
 };
 
-export const Element = observer((props: ElementProps) => {
+const Element = observer((props: ElementProps) => {
   const state = React.useContext(StateContext);
   const { element } = props;
   let Icon = Bars3BottomLeftIcon;
@@ -19,6 +19,9 @@ export const Element = observer((props: ElementProps) => {
     Icon = PhotoIcon;
   } else if (element.type === "audio") {
     Icon = MusicalNoteIcon;
+  }
+  else if (element.type === "mafs") {
+    Icon = VariableIcon;
   }
 
   const isSelected = state.selectedElement?.id === element.id;
@@ -83,6 +86,22 @@ export const Element = observer((props: ElementProps) => {
             id={element.properties.elementId}
           ></audio>
         ) : null}
+        {element.type === "mafs" ? (
+          <img
+            alt={element.name}
+            className="opacity-0 max-w-[20px] max-h-[20px]"
+            src={element.properties.src}
+            onLoad={() => {
+              state.refreshElements();
+            }}
+            onLoadedData={() => {
+              state.refreshElements();
+            }}
+            height={20}
+            width={20}
+            id={element.properties.elementId}
+          ></img>
+        ) : null}
       </div>
       <button
         aria-label="Remove element"
@@ -99,3 +118,5 @@ export const Element = observer((props: ElementProps) => {
     </div>
   );
 });
+
+export default dynamic(() => Promise.resolve(Element), { ssr: false });
