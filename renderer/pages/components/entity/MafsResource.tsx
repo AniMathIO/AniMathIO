@@ -1,7 +1,5 @@
-import React from "react";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
-import { MafsResourceType } from "@/types";
 
 const MafsResource = observer(({ name, children, onAddResource }: { name: string, children: React.ReactNode, onAddResource: () => void }) => {
   return (

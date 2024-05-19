@@ -1,4 +1,6 @@
 import { fabric } from "fabric";
+import { KatexOptions } from "katex";
+import { vec } from "mafs";
 
 export type EditorElementBase<T extends string, P> = {
   readonly id: string;
@@ -138,11 +140,18 @@ export type MafsResourceType = {
   name: string;
   children: React.ReactNode;
   coordinates?: boolean;
-  coordinateType?: "cartesian" | "polar";
+  coordinateType?: "cartesian" | "polar" | "none";
 };
 
 export type MafsModalProps = {
   isOpen: boolean;
   onClose: () => void;
   mafsElement: MafsResourceType;
+};
+
+export type LatexProps = {
+  tex: string;
+  at: vec.Vector2;
+  color?: string;
+  katexOptions?: KatexOptions;
 };
