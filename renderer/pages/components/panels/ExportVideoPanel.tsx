@@ -2,12 +2,13 @@
 import React from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
-
+import Modal from "react-modal";
 
 
 const ExportVideoPanel = observer(() => {
   const state = React.useContext(StateContext);
   const [resolution, setResolution] = React.useState('1920x1080');
+  const [isRenderingModalOpen, setIsRenderingModalOpen] = React.useState(false);
 
   React.useEffect(() => {
     setResolution('800x500');
@@ -96,7 +97,7 @@ const ExportVideoPanel = observer(() => {
       </div>
 
       <button
-        className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-2 rounded-lg m-4"
+        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg m-4"
         onClick={() => {
           state.handleSeek(0);
           state.setSelectedElement(null);
@@ -104,10 +105,53 @@ const ExportVideoPanel = observer(() => {
             state.setPlaying(true);
             state.saveCanvasToVideoWithAudio();
           }, 1000);
+          setIsRenderingModalOpen(true);
+          setTimeout(() => {
+            setIsRenderingModalOpen(false);
+          }, state.maxTime + 1000);
         }}
       >
         Export Video ({state.maxTime / 1000} seconds) {state.selectedVideoFormat === "mp4" ? ("experimental") : ""}
-      </button>
+      </button >
+      <Modal
+        isOpen={isRenderingModalOpen}
+        onRequestClose={() => setIsRenderingModalOpen(false)}
+        contentLabel="Video Rendering Modal"
+        className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50"
+        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-50"
+        shouldCloseOnOverlayClick={false}
+      >
+        <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
+          <div className="flex items-center mb-4">
+            <div className="mr-4">
+              <svg
+                className="animate-spin h-8 w-8 text-blue-500"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Video Rendering</h2>
+              <p className="text-gray-700">Please wait while the video is being rendered...</p>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 });
