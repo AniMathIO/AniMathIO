@@ -51,8 +51,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
     };
 
     return (
-        <div className="fixed inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
-            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl">
+        <div className="fixed h-full p-5 inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
+            <div className=" bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-bold">{mafsElement.name}</h2>
                     <button
@@ -84,6 +84,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                     <input
                         type="number"
                         id="width"
+                        max={835}
+                        maxLength={3}
                         className="w-full border border-gray-300 rounded px-3 py-2"
                         value={mafsConfig.width}
                         onChange={(e) =>
@@ -98,6 +100,8 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                     <input
                         type="number"
                         id="height"
+                        max={235}
+                        maxLength={3}
                         className="w-full border border-gray-300 rounded px-3 py-2"
                         value={mafsConfig.height}
                         onChange={(e) =>
