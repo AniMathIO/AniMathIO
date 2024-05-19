@@ -1,11 +1,11 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
-import { VideoResource } from "../entity/VideoResource";
-import { UploadButton } from "../partials/shared/UploadButton";
+import VideoResource from "../entity/VideoResource";
+import UploadButton from "../partials/shared/UploadButton";
 
-export const VideoResourcesPanel = observer(() => {
+const VideoResourcesPanel = observer(() => {
   const state = React.useContext(StateContext);
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -28,3 +28,5 @@ export const VideoResourcesPanel = observer(() => {
     </>
   );
 });
+
+export default VideoResourcesPanel;

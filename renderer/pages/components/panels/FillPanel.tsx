@@ -1,8 +1,8 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
-import { GithubPicker, SwatchesPicker, TwitterPicker } from "react-color";
+import { TwitterPicker } from "@hello-pangea/color-picker";
 
 const professionalVideoColors = [
   "#000000", // Black
@@ -48,7 +48,7 @@ const professionalVideoColors = [
   "#FFFFCC"  // Pale Yellow
 ];
 
-export const FillPanel = observer(() => {
+const FillPanel = observer(() => {
   const state = React.useContext(StateContext);
   // Color Picker
   return (
@@ -70,3 +70,5 @@ export const FillPanel = observer(() => {
     </>
   );
 });
+
+export default FillPanel;

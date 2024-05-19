@@ -1,12 +1,13 @@
 "use client";
 import React from "react";
-import { EditorElement } from "../../../../types";
-import { StateContext } from "../../../states";
+import { EditorElement } from "@/types";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import Dragable from "./Dragable";
 import WavesurferPlayer from "@wavesurfer/react";
+import dynamic from "next/dynamic";
 
-export const TimeFrame = observer((props: { element: EditorElement }) => {
+const TimeFrame = observer((props: { element: EditorElement }) => {
     const state = React.useContext(StateContext);
     const { element } = props;
     const disabled = element.type === "audio";
@@ -32,10 +33,6 @@ export const TimeFrame = observer((props: { element: EditorElement }) => {
                             interact={false}
                             cursorWidth={0}
                             fillParent={true}
-                        // TODO: implement cursor based on the current time
-                        // onReady={onReady}
-                        // onPlay={() => setIsPlaying(true)}
-                        // onPause={() => setIsPlaying(false)}
                         />
                     </div>
                 );
@@ -64,11 +61,20 @@ export const TimeFrame = observer((props: { element: EditorElement }) => {
                         <p className="text-4xl">{element.properties.text}</p>
                     </div>
                 );
+            case "mafs":
+                return (
+                    <div className={`${commonClasses} py-1`}>
+                        <img
+                            alt="mafs"
+                            src={element.properties.src}
+                            className="h-[64px]"
+                        />
+                    </div>
+                );
             default:
                 return null;
         }
     };
-
 
     return (
         <div
@@ -76,22 +82,25 @@ export const TimeFrame = observer((props: { element: EditorElement }) => {
                 state.setSelectedElement(element);
             }}
             key={element.id}
-            className={`relative width-full h-[64px] my-2 z-2  ${isSelected ? "border-2 border-indigo-600 bg-slate-200" : ""
-                }`}
+            className={`relative width-full h-[64px] my-2 z-2 ${isSelected ? "border-2 border-indigo-600 bg-slate-200" : ""}`}
         >
             <Dragable
                 className="z-10"
                 value={element.timeFrame.start}
                 total={state.maxTime}
                 disabled={disabled}
-                onChange={(value) => {
-                    state.updateEditorElementTimeFrame(element, {
-                        start: value,
-                    });
+                onChange={async (value) => {
+                    try {
+                        await state.updateEditorElementTimeFrame(element, {
+                            start: value,
+                        });
+                    } catch (error) {
+                        console.error("Failed to update element time frame start:", error);
+                    }
                 }}
             >
                 <div
-                    className={`bg-white border-2 border-blue-400 w-[10px] h-[64px] mt-[calc(64px/2)]  translate-y-[-50%] transform translate-x-[-50%] ${disabledCursor}`}
+                    className={`bg-white border-2 border-blue-400 w-[10px] h-[64px] mt-[calc(64px/2)] translate-y-[-50%] transform translate-x-[-50%] ${disabledCursor}`}
                 ></div>
             </Dragable>
 
@@ -100,47 +109,52 @@ export const TimeFrame = observer((props: { element: EditorElement }) => {
                 value={element.timeFrame.start}
                 disabled={disabled}
                 style={{
-                    width: `${((element.timeFrame.end - element.timeFrame.start) /
-                        state.maxTime) *
-                        100
-                        }%`,
+                    width: `${((element.timeFrame.end - element.timeFrame.start) / state.maxTime) * 100}%`,
                 }}
                 total={state.maxTime}
-                onChange={(value) => {
-                    const { start, end } = element.timeFrame;
-                    state.updateEditorElementTimeFrame(element, {
-                        start: value,
-                        end: value + (end - start),
-                    });
+                onChange={async (value) => {
+                    try {
+                        const { start, end } = element.timeFrame;
+                        await state.updateEditorElementTimeFrame(element, {
+                            start: value,
+                            end: value + (end - start),
+                        });
+                    } catch (error) {
+                        console.error("Failed to update element time frame:", error);
+                    }
                 }}
             >
                 <div
                     className={`${bgColorOnSelected} h-full w-full text-white text-xs min-w-[0px] px-2 leading-[25px] overflow-hidden`}
                 >
-                    {/* fet element name on top of wavesurfer */}
                     <div className="w-28 top-0 left-0 relative z-20 rounded-b-xl px-2 bg-[rgba(0,0,0,.80)]">
                         {element.name}
                     </div>
 
                     {renderElementContent(element)}
-
                 </div>
-            </Dragable >
+            </Dragable>
             <Dragable
                 className="z-10"
                 disabled={disabled}
                 value={element.timeFrame.end}
                 total={state.maxTime}
-                onChange={(value) => {
-                    state.updateEditorElementTimeFrame(element, {
-                        end: value,
-                    });
+                onChange={async (value) => {
+                    try {
+                        await state.updateEditorElementTimeFrame(element, {
+                            end: value,
+                        });
+                    } catch (error) {
+                        console.error("Failed to update element time frame end:", error);
+                    }
                 }}
             >
                 <div
                     className={`bg-white border-2 border-blue-400 w-[10px] h-[64px] mt-[calc(64px/2)] translate-y-[-50%] transform translate-x-[-50%] ${disabledCursor}`}
                 ></div>
             </Dragable>
-        </div >
+        </div>
     );
 });
+
+export default dynamic(() => Promise.resolve(TimeFrame), { ssr: false });

@@ -1,4 +1,6 @@
 import { fabric } from "fabric";
+import { KatexOptions } from "katex";
+import { vec } from "mafs";
 
 export type EditorElementBase<T extends string, P> = {
   readonly id: string;
@@ -15,6 +17,16 @@ export type VideoEditorElement = EditorElementBase<
 >;
 export type ImageEditorElement = EditorElementBase<
   "image",
+  {
+    src: string;
+    elementId: string;
+    imageObject?: fabric.Object;
+    effect: Effect;
+  }
+>;
+
+export type MafsEditorElement = EditorElementBase<
+  "mafs",
   {
     src: string;
     elementId: string;
@@ -41,7 +53,8 @@ export type EditorElement =
   | VideoEditorElement
   | ImageEditorElement
   | AudioEditorElement
-  | TextEditorElement;
+  | TextEditorElement
+  | MafsEditorElement;
 
 export type Placement = {
   x: number;
@@ -119,4 +132,26 @@ export type MenuOption =
   | "Export"
   | "Animations"
   | "Effects"
-  | "Background Fill";
+  | "Background Fill"
+  | "Mathematical Objects";
+
+export type MafsResourceType = {
+  index: number;
+  name: string;
+  children: React.ReactNode;
+  coordinates?: boolean;
+  coordinateType?: "cartesian" | "polar" | "none";
+};
+
+export type MafsModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  mafsElement: MafsResourceType;
+};
+
+export type LatexProps = {
+  tex: string;
+  at: vec.Vector2;
+  color?: string;
+  katexOptions?: KatexOptions;
+};

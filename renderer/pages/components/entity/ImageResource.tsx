@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { StateContext } from "../../states";
+import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { PlusCircleIcon } from "@heroicons/react/24/solid";
 
@@ -9,7 +9,7 @@ type ImageResourceProps = {
   image: string;
   index: number;
 };
-export const ImageResource = observer(
+const ImageResource = observer(
   ({ image, index }: ImageResourceProps) => {
     const state = React.useContext(StateContext);
     const ref = React.useRef<HTMLImageElement>(null);
@@ -48,3 +48,5 @@ export const ImageResource = observer(
     );
   }
 );
+
+export default ImageResource;
