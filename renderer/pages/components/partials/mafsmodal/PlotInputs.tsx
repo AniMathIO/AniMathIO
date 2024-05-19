@@ -14,6 +14,7 @@ const PlotInputs = ({ plotProps, setPlotProps, plotInput, setPlotInput, handlePl
                 <label htmlFor="plotFunction" className="block font-medium mb-1">
                     Function
                 </label>
+                <span className="text-gray-500 text-sm">Currently supported functions: Math.sin, Math.cos, Math.tan, Math.exp, Math.log, or Math.sqrt</span>
                 <input
                     type="text"
                     id="plotFunction"
