@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/AniMathIO/AniMathIO/compare/v1.0.0...v1.1.0) (2024-05-20)
+
+
+### Features
+
+* package version update v1.1.0 ([e99f203](https://github.com/AniMathIO/AniMathIO/commit/e99f203d817d7d5afacd81748ce00ee59a79533e))
+* **v1.0.0:** updated readme v1.0.0 ([9e2a3ab](https://github.com/AniMathIO/AniMathIO/commit/9e2a3abcdada1be67161b57cdd61ff72ae5cd5a1))
+
+
+### Bug Fixes
+
+* configurations for electron builds ([46ab1a7](https://github.com/AniMathIO/AniMathIO/commit/46ab1a7d3f58b71c8f3a9bc1d6e6ea628ddf7698))
+
 ## 1.0.0 (2024-05-20)
 
 
