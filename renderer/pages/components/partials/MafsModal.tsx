@@ -12,6 +12,8 @@ import * as htmlToImage from 'html-to-image';
 import { MafsModalProps, LatexProps } from "@/types";
 import katex from "katex";
 import Modal from 'react-modal';
+import dynamic from "next/dynamic";
+
 import LineInputs from "./mafsmodal/LineInputs";
 import PointInputs from "./mafsmodal/PointInputs";
 import CircleInputs from "./mafsmodal/CircleInputs";
@@ -342,4 +344,4 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
     );
 });
 
-export default MafsModal;
+export default dynamic(() => Promise.resolve(MafsModal), { ssr: false });

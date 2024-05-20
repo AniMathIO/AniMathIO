@@ -1,4 +1,5 @@
 import { CircleProps } from "mafs";
+import dynamic from "next/dynamic";
 
 type CircleInputsProps = {
     circleProps: CircleProps;
@@ -63,4 +64,4 @@ const CircleInputs = ({ circleProps, setCircleProps }: CircleInputsProps) => {
     )
 }
 
-export default CircleInputs;
+export default dynamic(() => Promise.resolve(CircleInputs), { ssr: false });

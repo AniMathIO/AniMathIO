@@ -9,7 +9,7 @@
 
 - [Table of Contents](#table-of-contents)
 - [OS Support](#os-support)
-- [Installation (binaries are coming soon)](#installation-binaries-are-coming-soon)
+- [Installation](#installation)
 - [Development build](#development-build)
   - [Canvas build fix](#canvas-build-fix)
     - [NOTE: If you want proper development you will need to follow the steps regarding the canvas build and install all the necessary dependencies](#note-if-you-want-proper-development-you-will-need-to-follow-the-steps-regarding-the-canvas-build-and-install-all-the-necessary-dependencies)
@@ -20,7 +20,7 @@
 
 We are supporting the following operating systems: macOS(coming soon), Windows, Linux (via AppImage).
 
-## Installation (binaries are coming soon)
+## Installation
 
 Please download the latest version of the project binaries from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
 
