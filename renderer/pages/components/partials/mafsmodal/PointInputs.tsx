@@ -1,4 +1,5 @@
 import { PointProps } from "mafs";
+import dynamic from "next/dynamic";
 
 type PointInputsProps = {
     pointProps: PointProps;
@@ -45,4 +46,4 @@ const PointInputs = ({ pointProps, setPointProps }: PointInputsProps) => {
     );
 }
 
-export default PointInputs;
+export default dynamic(() => Promise.resolve(PointInputs), { ssr: false });

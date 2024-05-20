@@ -10,7 +10,7 @@ import Menu from "./Menu";
 import Timeline from "./components/Timeline";
 import { State } from '../states/state';
 import Head from "next/head";
-
+import AniMathIO from "../public/images/AniMathIO.png";
 export const EditorWithStore = () => {
   const [state] = useState(new State());
   return (
@@ -51,7 +51,7 @@ const Editor = observer(() => {
     <React.Fragment>
       <Head>
         <title>AniMathIO - Editor</title>
-        <link rel="icon" href="../images/AniMathIO.png" />
+        <link rel="icon" href={AniMathIO.src} />
       </Head>
 
       <div className="grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh]">

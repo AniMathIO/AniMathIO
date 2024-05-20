@@ -1,4 +1,5 @@
 import { vec } from "mafs";
+import dynamic from "next/dynamic";
 
 type PolygonInputsProps = {
     polygonPoints: vec.Vector2[];
@@ -50,4 +51,4 @@ const PolygonInputs = ({ polygonPoints, setPolygonPoints }: PolygonInputsProps) 
         </>
     );
 }
-export default PolygonInputs;
+export default dynamic(() => Promise.resolve(PolygonInputs), { ssr: false });

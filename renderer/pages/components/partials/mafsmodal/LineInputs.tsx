@@ -1,5 +1,5 @@
 import { SegmentProps } from "mafs"
-
+import dynamic from "next/dynamic";
 type LineInputsProps = {
     lineProps: SegmentProps;
     setLineProps: (props: SegmentProps) => void;
@@ -79,4 +79,4 @@ const LineInputs = ({ lineProps, setLineProps }: LineInputsProps) => {
         </>
     );
 }
-export default LineInputs;
+export default dynamic(() => Promise.resolve(LineInputs), { ssr: false });

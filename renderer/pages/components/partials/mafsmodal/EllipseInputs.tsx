@@ -1,4 +1,5 @@
 import { EllipseProps } from "mafs";
+import dynamic from "next/dynamic";
 
 type EllipseInputsProps = {
     ellipseProps: EllipseProps;
@@ -80,4 +81,4 @@ const EllipseInputs = ({ ellipseProps, setEllipseProps }: EllipseInputsProps) =>
     );
 }
 
-export default EllipseInputs;
+export default dynamic(() => Promise.resolve(EllipseInputs), { ssr: false });

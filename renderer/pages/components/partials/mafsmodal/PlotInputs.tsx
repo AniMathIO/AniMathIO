@@ -1,3 +1,5 @@
+import dynamic from "next/dynamic";
+
 type PlotInputsProps = {
     plotProps: {
         y: (x: number) => number;
@@ -30,4 +32,4 @@ const PlotInputs = ({ plotProps, setPlotProps, plotInput, setPlotInput, handlePl
     );
 }
 
-export default PlotInputs;
+export default dynamic(() => Promise.resolve(PlotInputs), { ssr: false });

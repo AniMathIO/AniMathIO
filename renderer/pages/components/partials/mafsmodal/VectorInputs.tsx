@@ -1,4 +1,5 @@
 import { VectorProps } from "mafs";
+import dynamic from "next/dynamic";
 
 type VectorInputsProps = {
     vectorProps: VectorProps;
@@ -78,4 +79,4 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
         </>
     );
 }
-export default VectorInputs;
+export default dynamic(() => Promise.resolve(VectorInputs), { ssr: false });

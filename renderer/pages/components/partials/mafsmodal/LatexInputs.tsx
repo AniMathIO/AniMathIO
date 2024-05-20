@@ -1,4 +1,5 @@
 import { LatexProps } from "@/types";
+import dynamic from "next/dynamic";
 
 type LatexInputsProps = {
     latexProps: LatexProps;
@@ -72,4 +73,4 @@ const LatexInputs = ({
     );
 };
 
-export default LatexInputs;
+export default dynamic(() => Promise.resolve(LatexInputs), { ssr: false });

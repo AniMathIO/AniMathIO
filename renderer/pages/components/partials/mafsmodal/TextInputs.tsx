@@ -1,4 +1,5 @@
 import { TextProps } from "mafs";
+import dynamic from "next/dynamic";
 
 type TextInputsProps = {
     textProps: TextProps;
@@ -62,4 +63,4 @@ const TextInputs = ({ textProps, setTextProps }: TextInputsProps) => {
     );
 }
 
-export default TextInputs;
+export default dynamic(() => Promise.resolve(TextInputs), { ssr: false });
