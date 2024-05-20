@@ -18,7 +18,7 @@
 
 ## OS Support
 
-We are supporting the following operating systems: macOS(coming soon), Windows, Linux (via AppImage).
+We are supporting the following operating systems: macOS(coming soon), Windows, Linux (via AppImage, Snap and unpacked).
 
 ## Installation
 
