@@ -1,6 +1,6 @@
 appId: com.kovacsbalinthunor.animathio
 productName: AniMathIO
-copyright: Copyright © 2024 Kovacs Balint-Hunor
+copyright: Copyright © 2024 Kovács Bálint-Hunor
 directories:
   output: dist
   buildResources: resources
@@ -13,3 +13,10 @@ extraFiles:
   - scripts
 publish: null
 npmRebuild: false
+mac:
+  icon: resources/icons/icon.icns
+win:
+  icon: resources/icons/icon.ico
+linux:
+  icon: resources/icons/icon.png
+  category: Sound & Video
