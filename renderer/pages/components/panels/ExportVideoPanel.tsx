@@ -90,7 +90,7 @@ const ExportVideoPanel = observer(() => {
             type="radio"
             className="mr-2"
             name="video-format"
-            value="gif"
+            value="webm"
             checked={state.selectedVideoFormat === "webm"}
             onChange={(e) => {
               state.setVideoFormat("webm");
