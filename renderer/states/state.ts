@@ -66,8 +66,8 @@ export class State {
     this.selectedElement = null;
     this.fps = 60;
     this.animations = [];
-    this.canvas_width = 500;
-    this.canvas_height = 800;
+    this.canvas_width = 800;
+    this.canvas_height = 600;
     if (typeof window !== "undefined") {
       // Code that uses anime.js
       this.animationTimeLine = anime.timeline({ autoplay: false });
@@ -100,11 +100,25 @@ export class State {
     this.selectedMenuOption = selectedMenuOption;
   }
 
-  setCanvas(canvas: fabric.Canvas | null) {
+  setCanvas(canvas: fabric.Canvas | null, width: number, height: number) {
     this.canvas = canvas;
     if (canvas) {
+      canvas.setWidth(width);
+      canvas.setHeight(height);
       canvas.backgroundColor = this.backgroundColor;
     }
+    this.canvas_width = width;
+    this.canvas_height = height;
+  }
+
+  setCanvasSize(width: number, height: number) {
+    if (this.canvas) {
+      this.canvas.setWidth(width);
+      this.canvas.setHeight(height);
+    }
+    this.canvas_width = width;
+    this.canvas_height = height;
+    this.refreshElements();
   }
 
   setBackgroundColor(backgroundColor: string) {
@@ -966,6 +980,10 @@ export class State {
     const state = this;
     if (!state.canvas) return;
     const canvas = state.canvas;
+
+    // Update canvas dimensions
+    canvas.setWidth(state.canvas_width);
+    canvas.setHeight(state.canvas_height);
 
     // Deselect all objects before removing them
     canvas.discardActiveObject();

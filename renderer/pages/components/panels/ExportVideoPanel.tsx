@@ -10,12 +10,19 @@ const ExportVideoPanel = observer(() => {
   const [resolution, setResolution] = React.useState('1920x1080');
   const [isRenderingModalOpen, setIsRenderingModalOpen] = React.useState(false);
 
-  React.useEffect(() => {
-    setResolution('800x500');
-  }, []);
-
+  const resolutionOptions = [
+    { value: '1920x1080', label: '1920x1080 (16:9 - Full HD)' },
+    { value: '1280x720', label: '1280x720 (16:9 - HD)' },
+    { value: '1080x1080', label: '1080x1080 (1:1 - Square)' },
+    { value: '1080x1920', label: '1080x1920 (9:16 - Vertical Full HD)' },
+    { value: '720x1280', label: '720x1280 (9:16 - Vertical HD)' },
+    { value: '854x480', label: '854x480 (16:9 - SD)' },
+    { value: '800x600', label: '800x600 (4:3 - SD)' },
+    { value: '640x360', label: '640x360 (16:9 - SD)' },
+  ];
   const handleResolutionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setResolution(e.target.value);
+    const [width, height] = e.target.value.split('x').map(Number);
+    state.setCanvasSize(width, height);
   };
 
   return (
@@ -47,19 +54,17 @@ const ExportVideoPanel = observer(() => {
           <select
             id="canvas-resolution"
             name="canvas-resolution"
-            value={resolution}
+            value={`${state.canvas_width}x${state.canvas_height}`}
             onChange={handleResolutionChange}
-            disabled={true}
             className="rounded-md text-base border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500"
           >
-            <option value="1920x1080">1920x1080 (Full HD)</option>
-            <option value="1280x720">1280x720 (HD)</option>
-            <option value="854x480">854x480 (SD)</option>
-            <option value="800x500">800x500 (SD)</option>
-            <option value="640x360">640x360 (SD)</option>
+            {resolutionOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
-
-        </div >
+        </div>
       </div >
       {/*  Format selection with radio button */}
       <div className="px-[16px]" >

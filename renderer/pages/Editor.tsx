@@ -11,6 +11,7 @@ import Timeline from "./components/Timeline";
 import { State } from '../states/state';
 import Head from "next/head";
 import AniMathIO from "../public/images/AniMathIO.png";
+
 export const EditorWithStore = () => {
   const [state] = useState(new State());
   return (
@@ -22,11 +23,12 @@ export const EditorWithStore = () => {
 
 const Editor = observer(() => {
   const state = React.useContext(StateContext);
+  const [scaleFactor, setScaleFactor] = React.useState(20);
 
   useEffect(() => {
     const canvas = new fabric.Canvas("canvas", {
-      height: 500,
-      width: 800,
+      height: state.canvas_height,
+      width: state.canvas_width,
       backgroundColor: "#ededed",
     });
     fabric.Object.prototype.transparentCorners = false;
@@ -41,12 +43,17 @@ const Editor = observer(() => {
       }
     });
 
-    state.setCanvas(canvas);
+    state.setCanvas(canvas, state.canvas_width, state.canvas_height);
     fabric.util.requestAnimFrame(function render() {
       canvas.renderAll();
       fabric.util.requestAnimFrame(render);
     });
   }, []);
+
+  const handleScaleChange = (event: any) => {
+    setScaleFactor(parseInt(event.target.value));
+  };
+
   return (
     <React.Fragment>
       <Head>
@@ -54,7 +61,7 @@ const Editor = observer(() => {
         <link rel="icon" href={AniMathIO.src} />
       </Head>
 
-      <div className="grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh]">
+      <div className="grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh] mt-2">
         <div className="tile row-span-2 flex flex-col">
           <Menu />
         </div>
@@ -64,14 +71,37 @@ const Editor = observer(() => {
         <div className="col-start-3 row-start-1">
           <ElementsPanel />
         </div>
-        <div id="grid-canvas-container" className="col-start-4 bg-slate-100 flex justify-center items-center">
-          <canvas id="canvas" className="h-[500px] w-[800px] row" />
+
+        <div id="grid-canvas-container" className="col-start-4 bg-red-200 grid w-[900px] h-[500px] place-self-center place-content-center">
+          <div
+            style={{
+              transformOrigin: "",
+              transform: `scale(${scaleFactor / 100})`,
+            }}
+            className={`flex w-fit h-fit`}
+          >
+            <canvas id="canvas" className=""></canvas>
+          </div>
+          <div className="mt-4 absolute justify-self-start self-end p-2">
+            <p>Canva Scale:</p>
+            <input
+              type="range"
+              min="20"
+              max="50"
+              value={scaleFactor}
+              onChange={handleScaleChange}
+              className="w-48 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+            />
+            <span className="ml-2">{scaleFactor}%</span>
+          </div>
         </div>
+
         <div className="col-start-3 row-start-2 col-span-2 relative px-[10px] py-[4px] overflow-scroll">
           <Timeline />
         </div>
       </div>
-    </React.Fragment>
+
+    </React.Fragment >
   );
 });
 
