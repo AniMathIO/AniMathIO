@@ -54,6 +54,17 @@ const Editor = observer(() => {
     setScaleFactor(parseInt(event.target.value));
   };
 
+  // TODO: on resolution change change the max and default scale factor
+  // 640x360 should be 100%
+  // 800x600 should be 70%
+  // 854x480 should be 85%
+  // 720x1280 should be 38%
+  // 1080x1920 should be 25%
+  // 1080x1080 should be 40%
+  // 1280x720 should be 55%
+  // 1920x1080 should be 37%
+
+
   return (
     <React.Fragment>
       <Head>
@@ -86,8 +97,8 @@ const Editor = observer(() => {
             <p>Canva Scale:</p>
             <input
               type="range"
-              min="20"
-              max="50"
+              min="25"
+              max="100"
               value={scaleFactor}
               onChange={handleScaleChange}
               className="w-48 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
