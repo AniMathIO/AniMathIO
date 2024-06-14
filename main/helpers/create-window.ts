@@ -8,6 +8,7 @@ import {
   ipcMain,
 } from "electron";
 import Store from "electron-store";
+import path from "path";
 
 export const createWindow = (
   windowName: string,
@@ -81,6 +82,7 @@ export const createWindow = (
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
       ...options.webPreferences,
     },
   });
@@ -101,14 +103,12 @@ export const createWindow = (
     {
       label: "Settings",
       click: () => {
-        // Open the settings modal
         win.webContents.send("open-settings-modal");
       },
     },
     {
       label: "Documentation",
       click: () => {
-        // Open the AniMathIO documentation in the default web browser
         shell.openExternal("https://animathio.com");
       },
     },

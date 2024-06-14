@@ -1,20 +1,11 @@
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
+const { contextBridge, ipcRenderer } = require("electron");
 
-const handler = {
-  send(channel: string, value: unknown) {
-    ipcRenderer.send(channel, value)
+contextBridge.exposeInMainWorld("electron", {
+  ipcRenderer: {
+    send: (channel: string, data: any) => ipcRenderer.send(channel, data),
+    on: (channel: string, func: (...args: any[]) => void) =>
+      ipcRenderer.on(channel, (event, ...args) => func(...args)),
+    removeListener: (channel: string, func: (...args: any[]) => void) =>
+      ipcRenderer.removeListener(channel, func),
   },
-  on(channel: string, callback: (...args: unknown[]) => void) {
-    const subscription = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...args)
-    ipcRenderer.on(channel, subscription)
-
-    return () => {
-      ipcRenderer.removeListener(channel, subscription)
-    }
-  },
-}
-
-contextBridge.exposeInMainWorld('ipc', handler)
-
-export type IpcHandler = typeof handler
+});

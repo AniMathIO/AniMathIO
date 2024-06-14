@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { SunIcon, MoonIcon, XMarkIcon } from '@heroicons/react/24/solid';
+import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
+
+declare global {
+    interface Window {
+        electron: {
+            ipcRenderer: {
+                send(channel: string, data: any): void;
+                on(channel: string, func: (...args: any[]) => void): () => void;
+                removeListener(channel: string, func: (...args: any[]) => void): void;
+            };
+        };
+    }
+}
+
 const SettingsModal: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isDarkMode, setIsDarkMode] = useState(false);
@@ -9,7 +22,11 @@ const SettingsModal: React.FC = () => {
             setIsOpen(true);
         };
 
+        const unsubscribe = window.electron.ipcRenderer.on('open-settings-modal', handleOpenModal);
 
+        return () => {
+            unsubscribe();
+        };
     }, []);
 
     const handleCloseModal = () => {
@@ -32,7 +49,6 @@ const SettingsModal: React.FC = () => {
                 <h2 className="text-2xl font-bold mb-4 dark:text-white">Settings</h2>
                 <div className="flex items-center mb-4">
                     <label className="mr-2 dark:text-white">Dark Mode:</label>
-                    {/* Dark mode toggle with heroicons */}
                     <button
                         className="bg-gray-200 hover:bg-gray-400 dark:bg-gray-700 dark:hover:bg-gray-500 p-2 rounded-full"
                         onClick={handleToggleDarkMode}
