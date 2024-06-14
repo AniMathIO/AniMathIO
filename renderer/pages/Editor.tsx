@@ -23,7 +23,18 @@ export const EditorWithStore = () => {
 
 const Editor = observer(() => {
   const state = React.useContext(StateContext);
-  const [scaleFactor, setScaleFactor] = React.useState(20);
+  const [scaleFactor, setScaleFactor] = React.useState(25);
+
+  const canvasScaleMap: Record<string, { max: number; default: number }> = {
+    "640x360": { max: 100, default: 100 },
+    "800x600": { max: 70, default: 70 },
+    "854x480": { max: 85, default: 85 },
+    "720x1280": { max: 38, default: 38 },
+    "1080x1920": { max: 25, default: 25 },
+    "1080x1080": { max: 40, default: 40 },
+    "1280x720": { max: 55, default: 55 },
+    "1920x1080": { max: 37, default: 37 },
+  };
 
   useEffect(() => {
     const canvas = new fabric.Canvas("canvas", {
@@ -48,22 +59,24 @@ const Editor = observer(() => {
       canvas.renderAll();
       fabric.util.requestAnimFrame(render);
     });
+
+    // Set the default scale factor based on the initial canvas dimensions
+    const defaultScaleFactor = canvasScaleMap[`${state.canvas_width}x${state.canvas_height}`]?.default || 37;
+    setScaleFactor(defaultScaleFactor);
   }, []);
 
+  useEffect(() => {
+    // Update the scale factor when the canvas dimensions change
+    const defaultScaleFactor = canvasScaleMap[`${state.canvas_width}x${state.canvas_height}`]?.default || 37;
+    setScaleFactor(defaultScaleFactor);
+  }, [state.canvas_width, state.canvas_height]);
+
   const handleScaleChange = (event: any) => {
-    setScaleFactor(parseInt(event.target.value));
+    const newScaleFactor = parseInt(event.target.value);
+    const key = `${state.canvas_width}x${state.canvas_height}`;
+    const maxScaleFactor = canvasScaleMap[key]?.max || 100;
+    setScaleFactor(Math.min(newScaleFactor, maxScaleFactor));
   };
-
-  // TODO: on resolution change change the max and default scale factor
-  // 640x360 should be 100%
-  // 800x600 should be 70%
-  // 854x480 should be 85%
-  // 720x1280 should be 38%
-  // 1080x1920 should be 25%
-  // 1080x1080 should be 40%
-  // 1280x720 should be 55%
-  // 1920x1080 should be 37%
-
 
   return (
     <React.Fragment>
@@ -83,7 +96,7 @@ const Editor = observer(() => {
           <ElementsPanel />
         </div>
 
-        <div id="grid-canvas-container" className="col-start-4 bg-red-200 grid w-[900px] h-[500px] place-self-center place-content-center">
+        <div id="grid-canvas-container" className="col-start-4 bg-gray-200 grid w-[900px] h-[500px] place-self-center place-content-center">
           <div
             style={{
               transformOrigin: "",
@@ -98,7 +111,7 @@ const Editor = observer(() => {
             <input
               type="range"
               min="25"
-              max="100"
+              max={canvasScaleMap[`${state.canvas_width}x${state.canvas_height}`]?.max || 100}
               value={scaleFactor}
               onChange={handleScaleChange}
               className="w-48 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
