@@ -940,13 +940,13 @@ export class State {
             "-c:v",
             "libx264",
             "-preset",
-            "ultrafast",
+            "superfast",
             "-crf",
-            "28",
+            "24",
             "-c:a",
             "aac",
             "-b:a",
-            "96k",
+            "64k",
             "-movflags",
             "+faststart",
             "video.mp4",
@@ -961,10 +961,12 @@ export class State {
           a.href = outputUrl;
           a.click();
         } else {
+          // TODO: Add length as metadata to the webm video
+
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
-          a.href = url;
           a.download = "video.webm";
+          a.href = url;
           a.click();
         }
       };

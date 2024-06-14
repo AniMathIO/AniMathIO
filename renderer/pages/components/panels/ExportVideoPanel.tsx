@@ -113,10 +113,11 @@ const ExportVideoPanel = observer(() => {
           setIsRenderingModalOpen(true);
           setTimeout(() => {
             setIsRenderingModalOpen(false);
-          }, state.maxTime + 1000);
+            // If the rendering option is mp4 we need to wait additional 15 seconds to do the conversion
+          }, state.maxTime + 1000 + (state.selectedVideoFormat === "mp4" ? 15000 : 0));
         }}
       >
-        Export Video ({state.maxTime / 1000} seconds) {state.selectedVideoFormat === "mp4" ? ("experimental") : ""}
+        Export Video ({state.maxTime / 1000} seconds)
       </button >
       <Modal
         isOpen={isRenderingModalOpen}
@@ -153,6 +154,7 @@ const ExportVideoPanel = observer(() => {
             <div>
               <h2 className="text-xl font-bold">Video Rendering</h2>
               <p className="text-gray-700">Please wait while the video is being rendered...</p>
+              <p className="text-gray-700">Note: rendering in MP4 results in higher quality, but takes longer.</p>
             </div>
           </div>
         </div>
