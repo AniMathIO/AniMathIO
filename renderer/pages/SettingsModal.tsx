@@ -8,6 +8,7 @@ declare global {
                 send(channel: string, data: any): void;
                 on(channel: string, func: (...args: any[]) => void): () => void;
                 removeListener(channel: string, func: (...args: any[]) => void): void;
+                invoke(channel: string, data?: any): Promise<any>;
             };
         };
     }
@@ -24,6 +25,15 @@ const SettingsModal: React.FC = () => {
 
         const unsubscribe = window.electron.ipcRenderer.on('open-settings-modal', handleOpenModal);
 
+        // Load the saved theme mode when the component mounts
+        const loadThemeMode = async () => {
+            const savedThemeMode = await window.electron.ipcRenderer.invoke('get-theme-mode');
+            setIsDarkMode(savedThemeMode === 'dark');
+            document.documentElement.classList.toggle('dark', savedThemeMode === 'dark');
+        };
+
+        loadThemeMode();
+
         return () => {
             unsubscribe();
         };
@@ -34,8 +44,11 @@ const SettingsModal: React.FC = () => {
     };
 
     const handleToggleDarkMode = () => {
+        const newThemeMode = !isDarkMode ? 'dark' : 'light';
         setIsDarkMode(!isDarkMode);
         document.documentElement.classList.toggle('dark');
+        // Save the updated theme mode
+        window.electron.ipcRenderer.send('set-theme-mode', newThemeMode);
     };
 
     if (!isOpen) {
