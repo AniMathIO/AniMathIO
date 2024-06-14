@@ -7,7 +7,7 @@ import Element from "../entity/Element";
 const ElementsPanel = observer((_props: {}) => {
   const state = React.useContext(StateContext);
   return (
-    <div className="bg-slate-200 h-full overflow-scroll">
+    <div className="bg-slate-200 text-black dark:bg-gray-700 dark:text-white h-full overflow-scroll">
       <div className="flex flex-row justify-between">
         <div className="text-lg px-[16px] pt-[16px] pb-[8px] font-semibold">Media Pool</div>
       </div>

@@ -25,7 +25,7 @@ const LatexInputs = ({
                 <input
                     type="number"
                     id="latexAtX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={latexProps.at[0]}
                     onChange={(e) =>
                         setLatexProps({
@@ -42,7 +42,7 @@ const LatexInputs = ({
                 <input
                     type="number"
                     id="latexAtY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={latexProps.at[1]}
                     onChange={(e) =>
                         setLatexProps({
@@ -58,7 +58,7 @@ const LatexInputs = ({
                 </label>
                 <textarea
                     id="latexTex"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={latexInput}
                     onChange={(e) => setLatexInput(e.target.value)}
                 />

@@ -3,7 +3,9 @@ import { exec } from "child_process";
 import { IpcMainEvent, app, ipcMain } from "electron";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
+import Store from "electron-store";
 
+const store = new Store();
 const isProd = process.env.NODE_ENV === "production";
 
 if (isProd) {
@@ -78,4 +80,12 @@ ipcMain.on("run-sh", async (event, value) => {
 
 ipcMain.on("message", async (event, arg) => {
   event.reply("message", `${arg} World!`);
+});
+
+ipcMain.handle("get-theme-mode", () => {
+  return store.get("themeMode", "light");
+});
+
+ipcMain.on("set-theme-mode", (event, themeMode) => {
+  store.set("themeMode", themeMode);
 });

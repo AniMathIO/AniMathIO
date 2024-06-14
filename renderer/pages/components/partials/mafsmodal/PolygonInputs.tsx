@@ -16,7 +16,7 @@ const PolygonInputs = ({ polygonPoints, setPolygonPoints }: PolygonInputsProps) 
                     <input
                         type="number"
                         id={`polygonX${index}`}
-                        className="w-full border border-gray-300 rounded px-3 py-2"
+                        className="w-full border text-black border-gray-300 rounded px-3 py-2"
                         value={point[0]}
                         onChange={(e) => {
                             const newPoints = [...polygonPoints];
@@ -30,7 +30,7 @@ const PolygonInputs = ({ polygonPoints, setPolygonPoints }: PolygonInputsProps) 
                     <input
                         type="number"
                         id={`polygonY${index}`}
-                        className="w-full border border-gray-300 rounded px-3 py-2"
+                        className="w-full border text-black border-gray-300 rounded px-3 py-2"
                         value={point[1]}
                         onChange={(e) => {
                             const newPoints = [...polygonPoints];

@@ -15,7 +15,7 @@ const LineInputs = ({ lineProps, setLineProps }: LineInputsProps) => {
                 <input
                     type="number"
                     id="lineX1"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={lineProps.point1[0]}
                     onChange={(e) =>
                         setLineProps({
@@ -32,7 +32,7 @@ const LineInputs = ({ lineProps, setLineProps }: LineInputsProps) => {
                 <input
                     type="number"
                     id="lineY1"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={lineProps.point1[1]}
                     onChange={(e) =>
                         setLineProps({
@@ -49,7 +49,7 @@ const LineInputs = ({ lineProps, setLineProps }: LineInputsProps) => {
                 <input
                     type="number"
                     id="lineX2"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={lineProps.point2[0]}
                     onChange={(e) =>
                         setLineProps({
@@ -66,7 +66,7 @@ const LineInputs = ({ lineProps, setLineProps }: LineInputsProps) => {
                 <input
                     type="number"
                     id="lineY2"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={lineProps.point2[1]}
                     onChange={(e) =>
                         setLineProps({

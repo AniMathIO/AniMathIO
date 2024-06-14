@@ -16,7 +16,7 @@ const Resources = observer(() => {
     const state = React.useContext(StateContext);
     const selectedMenuOption = state.selectedMenuOption;
     return (
-        <div className="bg-slate-200 h-full">
+        <div className="bg-slate-200 dark:bg-gray-700 text-black dark:text-white h-full">
             {selectedMenuOption === "Videos" ? <VideoResourcesPanel /> : null}
             {selectedMenuOption === "Audios" ? <AudioResourcesPanel /> : null}
             {selectedMenuOption === "Images" ? <ImageResourcesPanel /> : null}

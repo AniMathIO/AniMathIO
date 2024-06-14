@@ -38,7 +38,7 @@ const ExportVideoPanel = observer(() => {
           <input
             id="video-length"
             type="number"
-            className="rounded text-center border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500 max-w-[50px] mr-2"
+            className="rounded text-center text-black border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500 max-w-[50px] mr-2"
             value={state.maxTime / 1000}
             onChange={(e) => {
               const value = e.target.value;
@@ -56,7 +56,7 @@ const ExportVideoPanel = observer(() => {
             name="canvas-resolution"
             value={`${state.canvas_width}x${state.canvas_height}`}
             onChange={handleResolutionChange}
-            className="rounded-md text-base border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500"
+            className="rounded-md text-base text-black w-24 border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500"
           >
             {resolutionOptions.map((option) => (
               <option key={option.value} value={option.value}>
