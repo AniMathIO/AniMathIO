@@ -3,6 +3,9 @@ import {
   BrowserWindow,
   BrowserWindowConstructorOptions,
   Rectangle,
+  Menu,
+  shell,
+  ipcMain,
 } from "electron";
 import Store from "electron-store";
 
@@ -81,6 +84,38 @@ export const createWindow = (
       ...options.webPreferences,
     },
   });
+
+  const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Quit",
+          accelerator: "CommandOrControl+Q",
+          click: () => {
+            win.close();
+          },
+        },
+      ],
+    },
+    {
+      label: "Settings",
+      click: () => {
+        // Open the settings modal
+        win.webContents.send("open-settings-modal");
+      },
+    },
+    {
+      label: "Documentation",
+      click: () => {
+        // Open the AniMathIO documentation in the default web browser
+        shell.openExternal("https://animathio.com");
+      },
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  win.setMenu(menu);
 
   win.on("close", saveState);
 
