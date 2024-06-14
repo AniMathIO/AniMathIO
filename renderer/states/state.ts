@@ -602,9 +602,12 @@ export class State {
     }
     const videoDurationMs = videoElement.duration * 1000;
     const aspectRatio = videoElement.videoWidth / videoElement.videoHeight;
-    const id = getUid();
+    const videoId = getUid();
+    const audioId = getUid();
+
+    // Create video element without sound
     this.addEditorElement({
-      id,
+      id: videoId,
       name: `Media(video) ${index + 1}`,
       type: "video",
       placement: {
@@ -621,11 +624,36 @@ export class State {
         end: videoDurationMs,
       },
       properties: {
-        elementId: `video-${id}`,
+        elementId: `video-${videoId}`,
         src: videoElement.src,
         effect: {
           type: "none",
         },
+        muted: true, // Mute the video element
+      },
+    });
+
+    // Create separate audio element
+    this.addEditorElement({
+      id: audioId,
+      name: `Media(audio) ${index + 1}`,
+      type: "audio",
+      placement: {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+      },
+      timeFrame: {
+        start: 0,
+        end: videoDurationMs,
+      },
+      properties: {
+        elementId: `audio-${audioId}`,
+        src: videoElement.src,
       },
     });
   }
@@ -1124,6 +1152,7 @@ export class State {
           videoElement.width = 100;
           videoElement.height =
             (videoElement.videoHeight * 100) / videoElement.videoWidth;
+          videoElement.muted = true; // Mute the video element
           addElementToCanvas(element, videoObject, false);
           break;
         }
