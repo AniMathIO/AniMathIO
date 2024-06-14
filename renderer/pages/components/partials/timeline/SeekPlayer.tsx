@@ -13,13 +13,15 @@ import ScaleRangeInput from "./ScaleRangeInput";
 const MARKINGS = [
     {
         interval: 5000,
-        color: 'black',
+        // color: 'black',
+        // if tailwind dark mode is set to true then color white otherwise black
+        color: 'gray',
         size: 16,
         width: 1
     },
     {
         interval: 1000,
-        color: 'black',
+        color: 'gray',
         size: 8,
         width: 1
     }
@@ -34,7 +36,7 @@ const SeekPlayer = observer((_props: SeekPlayerProps) => {
     const formattedTime = formatTimeToMinSecMili(state.currentTimeInMs);
     const formattedMaxTime = formatTimeToMinSecMili(state.maxTime);
     return (
-        <div className="seek-player flex flex-col overflow-hidden">
+        <div className="seek-player bg-slate-200 dark:bg-gray-800 dark:text-white flex flex-col overflow-hidden">
             <div className="flex flex-row items-center px-2">
                 <button
                     className="w-[80px] rounded  px-2 py-2"
@@ -57,7 +59,7 @@ const SeekPlayer = observer((_props: SeekPlayerProps) => {
                 }}
                 height={32}
                 markings={MARKINGS}
-                backgroundColor="white"
+                backgroundColor="#2f2f2f2f"
             />
         </div>
     );

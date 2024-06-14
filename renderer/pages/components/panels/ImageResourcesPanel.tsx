@@ -13,12 +13,12 @@ const ImageResourcesPanel = observer(() => {
     state.addImageResource(URL.createObjectURL(file));
   };
   return (
-    <>
+    <div className="bg-slate-200 dark:bg-gray-700 ">
       <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
         Image Resources
       </div>
 
-      <div >
+      <div className="" >
         {state.images.map((image, index) => {
           return <ImageResource key={image} image={image} index={index} />;
         })}
@@ -29,7 +29,7 @@ const ImageResourcesPanel = observer(() => {
         onChange={handleFileChange}
       />
 
-    </>
+    </div >
   );
 });
 

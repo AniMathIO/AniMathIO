@@ -15,7 +15,7 @@ const PointInputs = ({ pointProps, setPointProps }: PointInputsProps) => {
                 <input
                     type="number"
                     id="pointX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={pointProps.x}
                     onChange={(e) =>
                         setPointProps({
@@ -32,7 +32,7 @@ const PointInputs = ({ pointProps, setPointProps }: PointInputsProps) => {
                 <input
                     type="number"
                     id="pointY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={pointProps.y}
                     onChange={(e) =>
                         setPointProps({

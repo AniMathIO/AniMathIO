@@ -4,3 +4,24 @@
 @import "mafs/core.css";
 @import "mafs/font.css";
 @import "katex/dist/katex.min.css";
+
+/* width */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+  background: rgb(203 213 225);
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+  background: rgba(17, 24, 39, 0.322);
+  border-radius: 5px;
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(17, 24, 39, 0.623);
+}

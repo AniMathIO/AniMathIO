@@ -15,7 +15,7 @@ const TextInputs = ({ textProps, setTextProps }: TextInputsProps) => {
                 <input
                     type="number"
                     id="textX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={textProps.x}
                     onChange={(e) =>
                         setTextProps({
@@ -32,7 +32,7 @@ const TextInputs = ({ textProps, setTextProps }: TextInputsProps) => {
                 <input
                     type="number"
                     id="textY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={textProps.y}
                     onChange={(e) =>
                         setTextProps({
@@ -49,7 +49,7 @@ const TextInputs = ({ textProps, setTextProps }: TextInputsProps) => {
                 <input
                     type="text"
                     id="textContent"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={textProps?.children?.toString() || ""}
                     onChange={(e) =>
                         setTextProps({

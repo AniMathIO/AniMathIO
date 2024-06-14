@@ -85,7 +85,7 @@ const Editor = observer(() => {
         <link rel="icon" href={AniMathIO.src} />
       </Head>
 
-      <div className="grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh] mt-2">
+      <div className="bg-slate-200 dark:bg-gray-800 grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh]">
         <div className="tile row-span-2 flex flex-col">
           <Menu />
         </div>
@@ -96,7 +96,7 @@ const Editor = observer(() => {
           <ElementsPanel />
         </div>
 
-        <div id="grid-canvas-container" className="col-start-4 bg-gray-200 grid w-[900px] h-[500px] place-self-center place-content-center">
+        <div id="grid-canvas-container" className="col-start-4 bg-gray-200 dark:bg-gray-700 dark:text-white grid w-[900px] h-[500px] place-self-center place-content-center">
           <div
             style={{
               transformOrigin: "",
@@ -114,7 +114,7 @@ const Editor = observer(() => {
               max={canvasScaleMap[`${state.canvas_width}x${state.canvas_height}`]?.max || 100}
               value={scaleFactor}
               onChange={handleScaleChange}
-              className="w-48 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+              className="w-48 bg-gray-700 dark:bg-gray-900 rounded-lg appearance-none cursor-pointer"
             />
             <span className="ml-2">{scaleFactor}%</span>
           </div>

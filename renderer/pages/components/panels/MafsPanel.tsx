@@ -91,7 +91,7 @@ const MafsPanel = observer(() => {
       <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
         Mathematical Objects
       </div>
-      <div className="flex flex-col items-center justify-center">
+      <div className="flex bg-slate-200 dark:bg-gray-700 flex-col items-center justify-center">
         {mafsResources.map((resource) => (
           <MafsResource
             key={`mafs - ${resource.index} `}
@@ -116,6 +116,7 @@ const MafsPanel = observer(() => {
           isOpen={modalOpen}
           onClose={closeModal}
           mafsElement={selectedResource}
+          className="bg-white dark:bg-gray-800 text-black dark:text-white"
         />
       )}
     </>

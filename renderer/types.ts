@@ -153,6 +153,7 @@ export type MafsModalProps = {
   isOpen: boolean;
   onClose: () => void;
   mafsElement: MafsResourceType;
+  className?: string;
 };
 
 export type LatexProps = {

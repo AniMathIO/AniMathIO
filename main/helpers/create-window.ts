@@ -112,6 +112,13 @@ export const createWindow = (
         shell.openExternal("https://animathio.com");
       },
     },
+    // developer tools
+    {
+      label: "Toggle Developer Tools",
+      click: () => {
+        win.webContents.toggleDevTools();
+      },
+    },
   ];
 
   const menu = Menu.buildFromTemplate(menuTemplate);

@@ -6,10 +6,10 @@ import SettingsModal from './SettingsModal';
 
 function MyApp({ Component, pageProps }: AppProps) {
   return (
-    <>
+    <div className='bg-white dark:bg-gray-900'>
       <Component {...pageProps} />
       <SettingsModal /> {/* Add this line */}
-    </>
+    </div>
   );
 }
 

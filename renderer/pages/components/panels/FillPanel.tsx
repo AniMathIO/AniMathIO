@@ -53,10 +53,10 @@ const FillPanel = observer(() => {
   // Color Picker
   return (
     <>
-      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
+      <div className="bg-slate-200 dark:bg-gray-700 tex-black dark:text-white text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
         Background Colour Fill
       </div>
-      <div className="flex items-center justify-center ">
+      <div className="bg-slate-200 dark:bg-gray-700 flex items-center justify-center ">
         <TwitterPicker
           width="250px"
           colors={professionalVideoColors}

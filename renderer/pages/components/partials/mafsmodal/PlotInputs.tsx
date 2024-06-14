@@ -20,7 +20,7 @@ const PlotInputs = ({ plotProps, setPlotProps, plotInput, setPlotInput, handlePl
                 <input
                     type="text"
                     id="plotFunction"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={plotInput}
                     onChange={(e) => setPlotInput(e.target.value)}
                 />

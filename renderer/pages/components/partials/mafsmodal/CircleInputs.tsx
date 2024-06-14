@@ -16,7 +16,7 @@ const CircleInputs = ({ circleProps, setCircleProps }: CircleInputsProps) => {
                 <input
                     type="number"
                     id="circleCenterX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 text-black rounded px-3 py-2"
                     value={circleProps.center[0]}
                     onChange={(e) =>
                         setCircleProps({
@@ -33,7 +33,7 @@ const CircleInputs = ({ circleProps, setCircleProps }: CircleInputsProps) => {
                 <input
                     type="number"
                     id="circleCenterY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 text-black rounded px-3 py-2"
                     value={circleProps.center[1]}
                     onChange={(e) =>
                         setCircleProps({
@@ -50,7 +50,7 @@ const CircleInputs = ({ circleProps, setCircleProps }: CircleInputsProps) => {
                 <input
                     type="number"
                     id="circleRadius"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 text-black rounded px-3 py-2"
                     value={circleProps.radius}
                     onChange={(e) =>
                         setCircleProps({

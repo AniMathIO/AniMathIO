@@ -16,7 +16,7 @@ const EllipseInputs = ({ ellipseProps, setEllipseProps }: EllipseInputsProps) =>
                 <input
                     type="number"
                     id="ellipseCenterX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={ellipseProps.center[0]}
                     onChange={(e) =>
                         setEllipseProps({
@@ -33,7 +33,7 @@ const EllipseInputs = ({ ellipseProps, setEllipseProps }: EllipseInputsProps) =>
                 <input
                     type="number"
                     id="ellipseCenterY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={ellipseProps.center[1]}
                     onChange={(e) =>
                         setEllipseProps({
@@ -50,7 +50,7 @@ const EllipseInputs = ({ ellipseProps, setEllipseProps }: EllipseInputsProps) =>
                 <input
                     type="number"
                     id="ellipseRadiusX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={ellipseProps.radius[0]}
                     onChange={(e) =>
                         setEllipseProps({
@@ -67,7 +67,7 @@ const EllipseInputs = ({ ellipseProps, setEllipseProps }: EllipseInputsProps) =>
                 <input
                     type="number"
                     id="ellipseRadiusY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={ellipseProps.radius[1]}
                     onChange={(e) =>
                         setEllipseProps({
