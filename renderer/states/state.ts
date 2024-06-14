@@ -23,6 +23,7 @@ import {
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
+import fixWebmDuration from "webm-duration-fix";
 export class State {
   canvas: fabric.Canvas | null;
 
@@ -914,7 +915,10 @@ export class State {
         // console.log("data available");
       };
       mediaRecorder.onstop = async function (e) {
-        const blob = new Blob(chunks, { type: "video/webm" });
+        // const blob = new Blob(chunks, { type: "video/webm" });
+        const blob = await fixWebmDuration(
+          new Blob([...chunks], { type: "video/webm" })
+        );
 
         if (mp4) {
           // lets use ffmpeg to convert webm to mp4
