@@ -124,7 +124,7 @@ const ExportVideoPanel = observer(() => {
         onRequestClose={() => setIsRenderingModalOpen(false)}
         contentLabel="Video Rendering Modal"
         className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50"
-        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-50"
+        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-60"
         shouldCloseOnOverlayClick={false}
       >
         <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
@@ -154,7 +154,8 @@ const ExportVideoPanel = observer(() => {
             <div>
               <h2 className="text-xl font-bold">Video Rendering</h2>
               <p className="text-gray-700">Please wait while the video is being rendered...</p>
-              <p className="text-gray-700">Note: rendering in MP4 results in higher quality, but takes longer.</p>
+              <br />
+              <p className="text-gray-800"><b>Note:</b> rendering in MP4 results in higher quality, but takes longer.</p>
             </div>
           </div>
         </div>
