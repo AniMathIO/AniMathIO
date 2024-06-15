@@ -33,6 +33,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
         coordinateType: mafsElement.coordinateType || "cartesian",
     });
 
+
     const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
 
@@ -304,7 +305,12 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                 {mafsElement.name === "Vector" && <VectorInputs vectorProps={vectorProps} setVectorProps={setVectorProps} />}
                 <div className="border border-gray-300 rounded p-4 flex justify-center">
                     <div ref={mafsRef}>
-                        <Mafs width={mafsConfig.width} height={mafsConfig.height} pan={mafsConfig.pan} zoom={mafsConfig.zoom} >
+                        <Mafs
+                            width={mafsConfig.width}
+                            height={mafsConfig.height}
+                            pan={mafsConfig.pan}
+                            zoom={mafsConfig.zoom}
+                        >
                             {mafsConfig.coordinateType === "cartesian" && <Coordinates.Cartesian />}
                             {mafsConfig.coordinateType === "polar" && <Coordinates.Polar />}
                             {renderMafsElement()}
