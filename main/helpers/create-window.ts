@@ -113,12 +113,12 @@ export const createWindow = (
       },
     },
     // developer tools
-    {
-      label: "Toggle Developer Tools",
-      click: () => {
-        win.webContents.toggleDevTools();
-      },
-    },
+    // {
+    //   label: "Toggle Developer Tools",
+    //   click: () => {
+    //     win.webContents.toggleDevTools();
+    //   },
+    // },
   ];
 
   const menu = Menu.buildFromTemplate(menuTemplate);
