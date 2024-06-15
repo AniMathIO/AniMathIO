@@ -25,3 +25,25 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(17, 24, 39, 0.623);
 }
+
+.MafsView {
+  --mafs-fg: black;
+  --mafs-bg: rgba(0, 0, 0, 0); /*for transparent background*/
+  --mafs-line-color: #555;
+  --mafs-line-stroke-dash-style: 4, 3;
+  --mafs-axis-stroke-width: 1px;
+  --grid-line-subdivision-color: #222;
+
+  --mafs-red: #f11d0e;
+  --mafs-orange: #f14e0e;
+  --mafs-yellow: #ffe44a;
+  --mafs-green: #15e272;
+  --mafs-blue: #58a6ff;
+  --mafs-indigo: #7c58ff;
+  --mafs-violet: #ae58ff;
+  --mafs-pink: #ee00ab;
+}
+
+.dark .MafsView {
+  --mafs-fg: white;
+}
