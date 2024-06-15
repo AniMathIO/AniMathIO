@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.2.0](https://github.com/AniMathIO/AniMathIO/compare/v1.1.0...v1.2.0) (2024-06-15)
+
+
+### Features
+
+* **app:** added visual corrections to rendering modal ([59d55d6](https://github.com/AniMathIO/AniMathIO/commit/59d55d6244e44095abba2524f9a0471d3a4cceab))
+* **app:** implemented dark mode in the components ([463f461](https://github.com/AniMathIO/AniMathIO/commit/463f4610843448f88c188c31516c87d1ebfebb87))
+* **app:** implemented default scaling for certain aspect ratios ([0ced7c7](https://github.com/AniMathIO/AniMathIO/commit/0ced7c7e33f2f6de4abf460760953868079facbb))
+* **app:** implemented separate audio track for video inputs ([ff811b2](https://github.com/AniMathIO/AniMathIO/commit/ff811b2c9ce27ce0e3ff68b4e649d8652d94f796))
+* **app:** made dark/light mode persistent ([6227958](https://github.com/AniMathIO/AniMathIO/commit/622795837bc6a33a2d8d652d33b75639f3c5d06e))
+* **app:** updated packages ([cddafcf](https://github.com/AniMathIO/AniMathIO/commit/cddafcf02d790340f5073f94ff5b229be5b964b0))
+* **app:** working on basic settings modal ([23a8ae3](https://github.com/AniMathIO/AniMathIO/commit/23a8ae3d9f67b08609a0a19135502fb69fb32143))
+* **app:** working on canvas scaling ([77d4dec](https://github.com/AniMathIO/AniMathIO/commit/77d4decf592d10bebe7d09e5478f07b18e0f2cb7))
+* **app:** working on scaling ([2584ae8](https://github.com/AniMathIO/AniMathIO/commit/2584ae82f67f7d0bc4007f6d4ca11633572325f9))
+* **app:** working on settings modal ([279eb2a](https://github.com/AniMathIO/AniMathIO/commit/279eb2aca2b17bf0f29ab87dae25edfdb7753bdc))
+* package version update v1.2.0 ([bf38960](https://github.com/AniMathIO/AniMathIO/commit/bf3896035cfe414d86f6408585f7468f94053518))
+
+
+### Bug Fixes
+
+* **app:** [#38](https://github.com/AniMathIO/AniMathIO/issues/38) ([8e9e0d8](https://github.com/AniMathIO/AniMathIO/commit/8e9e0d8e4cf06d384da6f89d3c2e80177d40126e))
+* **app:** fixed app typo ([7e2394d](https://github.com/AniMathIO/AniMathIO/commit/7e2394db13b223733829ca7f471b95e9c30ba9f8))
+* **app:** fixed mp4 rendering ([e3dc0c5](https://github.com/AniMathIO/AniMathIO/commit/e3dc0c52e6c9aee91a432db91a9739006d12004e))
+
 ## [1.1.0](https://github.com/AniMathIO/AniMathIO/compare/v1.0.0...v1.1.0) (2024-05-20)
 
 
