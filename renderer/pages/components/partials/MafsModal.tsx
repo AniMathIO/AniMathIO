@@ -24,7 +24,7 @@ import EllipseInputs from "./mafsmodal/EllipseInputs";
 import PlotInputs from "./mafsmodal/PlotInputs";
 import VectorInputs from "./mafsmodal/VectorInputs";
 
-const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) => {
+const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsModalProps) => {
     const [mafsConfig, setMafsConfig] = useState({
         width: 500,
         height: 200,
@@ -32,6 +32,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
         zoom: true,
         coordinateType: mafsElement.coordinateType || "cartesian",
     });
+
 
     const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
@@ -196,11 +197,11 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
 
     return (
         <div className="fixed inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-start justify-center pt-16">
-            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl max-h-[calc(100vh-8rem)] overflow-auto">
+            <div className={`${className} rounded-lg shadow-lg p-6 w-full max-w-4xl max-h-[calc(100vh-8rem)] overflow-auto`}>
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-bold">{mafsElement.name}</h2>
                     <button
-                        className="text-gray-500 hover:text-gray-700"
+                        className="text-gray-500 hover:text-gray-700 dark:hover:text-white"
                         onClick={onClose}
                     >
                         <span className="sr-only">Close</span>
@@ -230,7 +231,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                         id="width"
                         max={835}
                         maxLength={3}
-                        className="w-full border border-gray-300 rounded px-3 py-2"
+                        className="w-full border border-gray-300 text-black rounded px-3 py-2"
                         value={mafsConfig.width}
                         onChange={(e) =>
                             handleMafsConfigChange("width", parseInt(e.target.value))
@@ -246,7 +247,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                         id="height"
                         max={235}
                         maxLength={3}
-                        className="w-full border border-gray-300 rounded px-3 py-2"
+                        className="w-full border border-gray-300 text-black rounded px-3 py-2"
                         value={mafsConfig.height}
                         onChange={(e) =>
                             handleMafsConfigChange("height", parseInt(e.target.value))
@@ -281,7 +282,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                     </label>
                     <select
                         id="coordinateType"
-                        className="w-full border border-gray-300 rounded px-3 py-2"
+                        className="w-full border border-gray-300 text-black rounded px-3 py-2"
                         value={mafsConfig.coordinateType}
                         onChange={(e) =>
                             handleMafsConfigChange("coordinateType", e.target.value)
@@ -304,7 +305,12 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement }: MafsModalProps) =>
                 {mafsElement.name === "Vector" && <VectorInputs vectorProps={vectorProps} setVectorProps={setVectorProps} />}
                 <div className="border border-gray-300 rounded p-4 flex justify-center">
                     <div ref={mafsRef}>
-                        <Mafs width={mafsConfig.width} height={mafsConfig.height} pan={mafsConfig.pan} zoom={mafsConfig.zoom} >
+                        <Mafs
+                            width={mafsConfig.width}
+                            height={mafsConfig.height}
+                            pan={mafsConfig.pan}
+                            zoom={mafsConfig.zoom}
+                        >
                             {mafsConfig.coordinateType === "cartesian" && <Coordinates.Cartesian />}
                             {mafsConfig.coordinateType === "polar" && <Coordinates.Polar />}
                             {renderMafsElement()}

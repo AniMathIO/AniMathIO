@@ -16,7 +16,7 @@ const TextResource = observer(
     return (
       <div className="items-center m-[15px] flex flex-row">
         <div
-          className="flex-1 text-black px-2 py-1"
+          className="flex-1 text-black dark:text-white px-2 py-1"
           style={{
             fontSize: `${fontSize}px`,
             fontWeight: `${fontWeight}`,

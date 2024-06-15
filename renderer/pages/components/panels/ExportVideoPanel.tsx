@@ -10,12 +10,19 @@ const ExportVideoPanel = observer(() => {
   const [resolution, setResolution] = React.useState('1920x1080');
   const [isRenderingModalOpen, setIsRenderingModalOpen] = React.useState(false);
 
-  React.useEffect(() => {
-    setResolution('800x500');
-  }, []);
-
+  const resolutionOptions = [
+    { value: '1920x1080', label: '1920x1080 (16:9 - Full HD)' },
+    { value: '1280x720', label: '1280x720 (16:9 - HD)' },
+    { value: '1080x1080', label: '1080x1080 (1:1 - Square)' },
+    { value: '1080x1920', label: '1080x1920 (9:16 - Vertical Full HD)' },
+    { value: '720x1280', label: '720x1280 (9:16 - Vertical HD)' },
+    { value: '854x480', label: '854x480 (16:9 - SD)' },
+    { value: '800x600', label: '800x600 (4:3 - SD)' },
+    { value: '640x360', label: '640x360 (16:9 - SD)' },
+  ];
   const handleResolutionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setResolution(e.target.value);
+    const [width, height] = e.target.value.split('x').map(Number);
+    state.setCanvasSize(width, height);
   };
 
   return (
@@ -31,7 +38,7 @@ const ExportVideoPanel = observer(() => {
           <input
             id="video-length"
             type="number"
-            className="rounded text-center border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500 max-w-[50px] mr-2"
+            className="rounded text-center text-black border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500 max-w-[50px] mr-2"
             value={state.maxTime / 1000}
             onChange={(e) => {
               const value = e.target.value;
@@ -47,19 +54,17 @@ const ExportVideoPanel = observer(() => {
           <select
             id="canvas-resolution"
             name="canvas-resolution"
-            value={resolution}
+            value={`${state.canvas_width}x${state.canvas_height}`}
             onChange={handleResolutionChange}
-            disabled={true}
-            className="rounded-md text-base border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500"
+            className="rounded-md text-base text-black w-24 border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500"
           >
-            <option value="1920x1080">1920x1080 (Full HD)</option>
-            <option value="1280x720">1280x720 (HD)</option>
-            <option value="854x480">854x480 (SD)</option>
-            <option value="800x500">800x500 (SD)</option>
-            <option value="640x360">640x360 (SD)</option>
+            {resolutionOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
-
-        </div >
+        </div>
       </div >
       {/*  Format selection with radio button */}
       <div className="px-[16px]" >
@@ -85,7 +90,7 @@ const ExportVideoPanel = observer(() => {
             type="radio"
             className="mr-2"
             name="video-format"
-            value="gif"
+            value="webm"
             checked={state.selectedVideoFormat === "webm"}
             onChange={(e) => {
               state.setVideoFormat("webm");
@@ -108,17 +113,18 @@ const ExportVideoPanel = observer(() => {
           setIsRenderingModalOpen(true);
           setTimeout(() => {
             setIsRenderingModalOpen(false);
-          }, state.maxTime + 1000);
+            // If the rendering option is mp4 we need to wait additional 15 seconds to do the conversion
+          }, state.maxTime + 1000 + (state.selectedVideoFormat === "mp4" ? 15000 : 0));
         }}
       >
-        Export Video ({state.maxTime / 1000} seconds) {state.selectedVideoFormat === "mp4" ? ("experimental") : ""}
+        Export Video ({state.maxTime / 1000} seconds)
       </button >
       <Modal
         isOpen={isRenderingModalOpen}
         onRequestClose={() => setIsRenderingModalOpen(false)}
         contentLabel="Video Rendering Modal"
         className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50"
-        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-50"
+        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-60"
         shouldCloseOnOverlayClick={false}
       >
         <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
@@ -148,6 +154,8 @@ const ExportVideoPanel = observer(() => {
             <div>
               <h2 className="text-xl font-bold">Video Rendering</h2>
               <p className="text-gray-700">Please wait while the video is being rendered...</p>
+              <br />
+              <p className="text-gray-800"><b>Note:</b> rendering in MP4 results in higher quality, but takes longer.</p>
             </div>
           </div>
         </div>

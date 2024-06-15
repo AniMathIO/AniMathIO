@@ -23,6 +23,7 @@ import {
 import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
+import fixWebmDuration from "webm-duration-fix";
 export class State {
   canvas: fabric.Canvas | null;
 
@@ -66,8 +67,8 @@ export class State {
     this.selectedElement = null;
     this.fps = 60;
     this.animations = [];
-    this.canvas_width = 500;
-    this.canvas_height = 800;
+    this.canvas_width = 800;
+    this.canvas_height = 600;
     if (typeof window !== "undefined") {
       // Code that uses anime.js
       this.animationTimeLine = anime.timeline({ autoplay: false });
@@ -100,11 +101,25 @@ export class State {
     this.selectedMenuOption = selectedMenuOption;
   }
 
-  setCanvas(canvas: fabric.Canvas | null) {
+  setCanvas(canvas: fabric.Canvas | null, width: number, height: number) {
     this.canvas = canvas;
     if (canvas) {
+      canvas.setWidth(width);
+      canvas.setHeight(height);
       canvas.backgroundColor = this.backgroundColor;
     }
+    this.canvas_width = width;
+    this.canvas_height = height;
+  }
+
+  setCanvasSize(width: number, height: number) {
+    if (this.canvas) {
+      this.canvas.setWidth(width);
+      this.canvas.setHeight(height);
+    }
+    this.canvas_width = width;
+    this.canvas_height = height;
+    this.refreshElements();
   }
 
   setBackgroundColor(backgroundColor: string) {
@@ -587,9 +602,12 @@ export class State {
     }
     const videoDurationMs = videoElement.duration * 1000;
     const aspectRatio = videoElement.videoWidth / videoElement.videoHeight;
-    const id = getUid();
+    const videoId = getUid();
+    const audioId = getUid();
+
+    // Create video element without sound
     this.addEditorElement({
-      id,
+      id: videoId,
       name: `Media(video) ${index + 1}`,
       type: "video",
       placement: {
@@ -606,11 +624,36 @@ export class State {
         end: videoDurationMs,
       },
       properties: {
-        elementId: `video-${id}`,
+        elementId: `video-${videoId}`,
         src: videoElement.src,
         effect: {
           type: "none",
         },
+        muted: true, // Mute the video element
+      },
+    });
+
+    // Create separate audio element
+    this.addEditorElement({
+      id: audioId,
+      name: `Media(audio) ${index + 1}`,
+      type: "audio",
+      placement: {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1,
+      },
+      timeFrame: {
+        start: 0,
+        end: videoDurationMs,
+      },
+      properties: {
+        elementId: `audio-${audioId}`,
+        src: videoElement.src,
       },
     });
   }
@@ -900,7 +943,10 @@ export class State {
         // console.log("data available");
       };
       mediaRecorder.onstop = async function (e) {
-        const blob = new Blob(chunks, { type: "video/webm" });
+        // const blob = new Blob(chunks, { type: "video/webm" });
+        const blob = await fixWebmDuration(
+          new Blob([...chunks], { type: "video/webm" })
+        );
 
         if (mp4) {
           // lets use ffmpeg to convert webm to mp4
@@ -926,13 +972,13 @@ export class State {
             "-c:v",
             "libx264",
             "-preset",
-            "ultrafast",
+            "superfast",
             "-crf",
-            "28",
+            "24",
             "-c:a",
             "aac",
             "-b:a",
-            "96k",
+            "64k",
             "-movflags",
             "+faststart",
             "video.mp4",
@@ -947,10 +993,12 @@ export class State {
           a.href = outputUrl;
           a.click();
         } else {
+          // TODO: Add length as metadata to the webm video
+
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
-          a.href = url;
           a.download = "video.webm";
+          a.href = url;
           a.click();
         }
       };
@@ -966,6 +1014,10 @@ export class State {
     const state = this;
     if (!state.canvas) return;
     const canvas = state.canvas;
+
+    // Update canvas dimensions
+    canvas.setWidth(state.canvas_width);
+    canvas.setHeight(state.canvas_height);
 
     // Deselect all objects before removing them
     canvas.discardActiveObject();
@@ -1100,6 +1152,7 @@ export class State {
           videoElement.width = 100;
           videoElement.height =
             (videoElement.videoHeight * 100) / videoElement.videoWidth;
+          videoElement.muted = true; // Mute the video element
           addElementToCanvas(element, videoObject, false);
           break;
         }

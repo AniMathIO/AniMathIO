@@ -15,7 +15,7 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
                 <input
                     type="number"
                     id="vectorTailX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={vectorProps ? vectorProps.tail![0] : 0}
                     onChange={(e) =>
                         setVectorProps({
@@ -32,7 +32,7 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
                 <input
                     type="number"
                     id="vectorTailY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={vectorProps ? vectorProps.tail![1] : 0}
                     onChange={(e) =>
                         setVectorProps({
@@ -49,7 +49,7 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
                 <input
                     type="number"
                     id="vectorTipX"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={vectorProps.tip[0]}
                     onChange={(e) =>
                         setVectorProps({
@@ -66,7 +66,7 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
                 <input
                     type="number"
                     id="vectorTipY"
-                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
                     value={vectorProps.tip[1]}
                     onChange={(e) =>
                         setVectorProps({

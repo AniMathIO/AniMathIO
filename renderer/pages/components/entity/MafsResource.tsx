@@ -3,7 +3,7 @@ import { PlusCircleIcon } from "@heroicons/react/24/solid";
 
 const MafsResource = observer(({ name, children, onAddResource }: { name: string, children: React.ReactNode, onAddResource: () => void }) => {
   return (
-    <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative">
+    <div className="rounded-lg overflow-hidden items-center bg-slate-100 dark:bg-gray-800 m-[15px] flex flex-col relative">
       <div className="bg-[rgba(0,0,0,.50)] rounded-xl text-white py-1 px-1 absolute text-base top-1.3 right-2">
         {name}
       </div>

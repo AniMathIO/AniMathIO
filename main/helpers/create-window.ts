@@ -3,8 +3,12 @@ import {
   BrowserWindow,
   BrowserWindowConstructorOptions,
   Rectangle,
+  Menu,
+  shell,
+  ipcMain,
 } from "electron";
 import Store from "electron-store";
+import path from "path";
 
 export const createWindow = (
   windowName: string,
@@ -78,9 +82,47 @@ export const createWindow = (
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
       ...options.webPreferences,
     },
   });
+
+  const menuTemplate: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Quit",
+          accelerator: "CommandOrControl+Q",
+          click: () => {
+            win.close();
+          },
+        },
+      ],
+    },
+    {
+      label: "Settings",
+      click: () => {
+        win.webContents.send("open-settings-modal");
+      },
+    },
+    {
+      label: "Documentation",
+      click: () => {
+        shell.openExternal("https://animathio.com");
+      },
+    },
+    // developer tools
+    // {
+    //   label: "Toggle Developer Tools",
+    //   click: () => {
+    //     win.webContents.toggleDevTools();
+    //   },
+    // },
+  ];
+
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  win.setMenu(menu);
 
   win.on("close", saveState);
 

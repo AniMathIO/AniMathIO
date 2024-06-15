@@ -2,7 +2,7 @@
   "private": true,
   "name": "animathio",
   "description": "AniMathIO is a video editor application for editing Manim-like video projects ",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Kovács Bálint-Hunor",
   "main": "app/background.js",
   "scripts": {
@@ -35,7 +35,8 @@
     "mobx": "^6.12.3",
     "mobx-react": "^9.1.1",
     "mobx-react-lite": "^4.0.7",
-    "react-modal": "^3.16.1"
+    "react-modal": "^3.16.1",
+    "webm-duration-fix": "^1.0.4"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",

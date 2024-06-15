@@ -25,7 +25,7 @@ const Element = observer((props: ElementProps) => {
   }
 
   const isSelected = state.selectedElement?.id === element.id;
-  const bgColor = isSelected ? "rgba(0, 160, 245, 0.1)" : "";
+  const bgColor = isSelected ? "rgba(0, 155, 245, 0.336)" : "";
   return (
     <div
       style={{

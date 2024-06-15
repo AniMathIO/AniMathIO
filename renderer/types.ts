@@ -13,7 +13,13 @@ export type EditorElementBase<T extends string, P> = {
 };
 export type VideoEditorElement = EditorElementBase<
   "video",
-  { src: string; elementId: string; imageObject?: fabric.Image; effect: Effect }
+  {
+    src: string;
+    elementId: string;
+    imageObject?: fabric.Image;
+    effect: Effect;
+    muted: boolean;
+  }
 >;
 export type ImageEditorElement = EditorElementBase<
   "image",
@@ -147,6 +153,7 @@ export type MafsModalProps = {
   isOpen: boolean;
   onClose: () => void;
   mafsElement: MafsResourceType;
+  className?: string;
 };
 
 export type LatexProps = {
