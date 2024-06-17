@@ -5,6 +5,14 @@
   <h1 align="center">AniMathIO</h1>
 </p>
 
+AniMathIO revolutionizes the creation of mathematical videos, tailored for educators, students, and professionals seeking to bring complex concepts to life
+
+
+## Special thanks for these projects
+They are core part of the AniMathIO software! Check them out!
+- [mafs](https://github.com/stevenpetryk/mafs)
+- [nextron](https://github.com/saltyshiomix/nextron)
+
 ## Table of Contents
 
 - [Table of Contents](#table-of-contents)
