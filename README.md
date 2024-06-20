@@ -26,7 +26,7 @@ They are core part of the AniMathIO software! Check them out!
 
 ## OS Support
 
-We are supporting the following operating systems: macOS(coming soon), Windows, Linux (via AppImage, Snap and unpacked).
+We are supporting the following operating systems: macOS, Windows, Linux (via universal dmg, exe, AppImage, Snap and unpacked).
 
 ## Installation
 
