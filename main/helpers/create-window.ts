@@ -102,26 +102,38 @@ export const createWindow = (
     },
     {
       label: "Settings",
-      click: () => {
-        win.webContents.send("open-settings-modal");
-      },
+      submenu: [
+        {
+          label: "Open Settings",
+          click: () => {
+            win.webContents.send("open-settings-modal");
+          },
+        },
+      ],
     },
     {
-      label: "Documentation",
-      click: () => {
-        shell.openExternal("https://animathio.com");
-      },
+      label: "Help",
+      submenu: [
+        {
+          label: "Documentation",
+          click: () => {
+            shell.openExternal("https://animathio.com");
+          },
+        },
+      ],
     },
-    // developer tools
     // {
-    //   label: "Toggle Developer Tools",
-    //   click: () => {
-    //     win.webContents.toggleDevTools();
-    //   },
+    //   label: "View",
+    //   submenu: [
+    //     {
+    //       role: "toggleDevTools",
+    //     },
+    //   ],
     // },
   ];
 
   const menu = Menu.buildFromTemplate(menuTemplate);
+
   win.setMenu(menu);
 
   win.on("close", saveState);
