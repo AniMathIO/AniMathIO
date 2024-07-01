@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.0](https://github.com/AniMathIO/AniMathIO/compare/v1.2.0...v1.3.0) (2024-07-01)
+
+
+### Features
+
+* README.md update ([7f20f9b](https://github.com/AniMathIO/AniMathIO/commit/7f20f9b188e7b4a94663c82202423d152a2d7b9f))
+* README.md update about os support ([0668383](https://github.com/AniMathIO/AniMathIO/commit/0668383fd8b1e7fcbeff894dffcc9fc148451aa6))
+* update README.md with star history ([1ccb475](https://github.com/AniMathIO/AniMathIO/commit/1ccb47515e8891ce2841216cfca4aaacf4b76c82))
+* updateREADME.md removed multiple star history title ([2708500](https://github.com/AniMathIO/AniMathIO/commit/2708500272b906aee9a654c2fced866719d5e112))
+
 ## [1.2.0](https://github.com/AniMathIO/AniMathIO/compare/v1.1.0...v1.2.0) (2024-06-15)
 
 
