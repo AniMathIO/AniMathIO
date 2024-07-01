@@ -79,8 +79,4 @@ We welcome contributions to AniMathIO. Please read our [contributing guidelines]
 
 ## Star History
 
-## Star History
-
-## Star History
-
 [![Star History Chart](https://api.star-history.com/svg?repos=animathio/animathio&type=Date)](https://star-history.com/#animathio/animathio&Date)
