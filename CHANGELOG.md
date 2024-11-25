@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.3.0](https://github.com/AniMathIO/AniMathIO/compare/v1.2.0...v1.3.0) (2024-11-25)
+
+
+### Features
+
+* added missing package dependency for macos build ([492033a](https://github.com/AniMathIO/AniMathIO/commit/492033a5f0721775f17a0c85c3d4975c3aaa7b59))
+* implemented basic guidelines ([b696001](https://github.com/AniMathIO/AniMathIO/commit/b696001ab7bef67b09f716bcac65ef318718d751))
+* implemented basic keyboard shortcuts ([f6c48b9](https://github.com/AniMathIO/AniMathIO/commit/f6c48b9b71be8e4716d2a792b880ab8b4f555434))
+* implemented better multimedia controls ([2ccf431](https://github.com/AniMathIO/AniMathIO/commit/2ccf43176859b14d33890c777fd5ed2d9119c979))
+* metadata update v1.3.0 ([2a9800d](https://github.com/AniMathIO/AniMathIO/commit/2a9800d7bf95655ffafef2605039dcb71337e749))
+* README.md update ([7f20f9b](https://github.com/AniMathIO/AniMathIO/commit/7f20f9b188e7b4a94663c82202423d152a2d7b9f))
+* README.md update about os support ([0668383](https://github.com/AniMathIO/AniMathIO/commit/0668383fd8b1e7fcbeff894dffcc9fc148451aa6))
+* update node version ([495afaa](https://github.com/AniMathIO/AniMathIO/commit/495afaa6d5222f5011a09f7fe49d9890763d2165))
+* update README.md with star history ([1ccb475](https://github.com/AniMathIO/AniMathIO/commit/1ccb47515e8891ce2841216cfca4aaacf4b76c82))
+* updated package dependencies ([dfd9cc3](https://github.com/AniMathIO/AniMathIO/commit/dfd9cc3c9b3b6dcb8a7559d80db5f5c74c0d6804))
+* updateREADME.md removed multiple star history title ([2708500](https://github.com/AniMathIO/AniMathIO/commit/2708500272b906aee9a654c2fced866719d5e112))
+* updating project dependencies ([73b6651](https://github.com/AniMathIO/AniMathIO/commit/73b6651de04b0fe8b36b30cd60bd8aae1aa4d876))
+
+
+### Bug Fixes
+
+* fixed macos missing menubar bug ([58a81d5](https://github.com/AniMathIO/AniMathIO/commit/58a81d5ee99831e6aae620b2ab93aa38e15df9df))
+
 ## [1.2.0](https://github.com/AniMathIO/AniMathIO/compare/v1.1.0...v1.2.0) (2024-06-15)
 
 
