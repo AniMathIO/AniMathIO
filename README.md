@@ -15,6 +15,7 @@ They are core part of the AniMathIO software! Check them out!
 
 ## Table of Contents
 
+- [Special thanks for these projects](#special-thanks-for-these-projects)
 - [Table of Contents](#table-of-contents)
 - [OS Support](#os-support)
 - [Installation](#installation)
@@ -23,10 +24,13 @@ They are core part of the AniMathIO software! Check them out!
     - [NOTE: If you want proper development you will need to follow the steps regarding the canvas build and install all the necessary dependencies](#note-if-you-want-proper-development-you-will-need-to-follow-the-steps-regarding-the-canvas-build-and-install-all-the-necessary-dependencies)
   - [Running the app](#running-the-app)
 - [Contributing](#contributing)
+- [Star History](#star-history)
 
 ## OS Support
 
 We are supporting the following operating systems: macOS, Windows, Linux (via universal dmg, exe, AppImage, Snap and unpacked).
+
+NOTE: Help is needed for MacOS support.
 
 ## Installation
 
