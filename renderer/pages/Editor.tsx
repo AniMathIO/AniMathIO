@@ -109,6 +109,7 @@ const Editor = observer(() => {
           <div className="mt-4 absolute justify-self-start self-end p-2">
             <p>Canva Scale:</p>
             <input
+              title="Canva Scale"
               type="range"
               min="25"
               max={canvasScaleMap[`${state.canvas_width}x${state.canvas_height}`]?.max || 100}
