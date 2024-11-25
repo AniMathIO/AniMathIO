@@ -4,11 +4,10 @@ import { StateContext } from "@/states";
 import { formatTimeToMinSecMili } from "@/utils";
 import { observer } from "mobx-react-lite";
 import { useContext } from "react";
-import { PlayIcon } from "@heroicons/react/24/solid";
-import { PauseIcon } from "@heroicons/react/24/solid";
+import { PlayIcon, PauseIcon } from "@heroicons/react/24/solid";
+import { FaStepForward, FaStepBackward } from "react-icons/fa";
+import { MdForward10, MdReplay10 } from "react-icons/md";
 import ScaleRangeInput from "./ScaleRangeInput";
-
-
 
 const MARKINGS = [
     {
@@ -37,9 +36,28 @@ const SeekPlayer = observer((_props: SeekPlayerProps) => {
     const formattedMaxTime = formatTimeToMinSecMili(state.maxTime);
     return (
         <div className="seek-player bg-slate-200 dark:bg-gray-800 dark:text-white flex flex-col overflow-hidden">
-            <div className="flex flex-row items-center px-2">
+            <div className="flex flex-row items-center px-2 space-x-2">
+                {/* Skip to start */}
                 <button
-                    className="w-[80px] rounded  px-2 py-2"
+                    className="px-2 py-2"
+                    onClick={() => state.skipToStart()}
+                    aria-label="Skip to Start"
+                >
+                    <FaStepBackward className="w-8 h-8" />
+                </button>
+
+                {/* Skip 10 seconds backward */}
+                <button
+                    className="px-2 py-2"
+                    onClick={() => state.skipBackward()}
+                    aria-label="Skip Backward 10s"
+                >
+                    <MdReplay10 className="h-10 w-10" />
+                </button>
+
+                {/* Play/Pause Button */}
+                <button
+                    className="rounded  px-2 py-2"
                     onClick={() => {
                         state.setPlaying(!state.playing);
                     }}
@@ -47,9 +65,30 @@ const SeekPlayer = observer((_props: SeekPlayerProps) => {
                 >
                     <Icon className="h-10 w-10"></Icon>
                 </button>
-                <span className="font-mono">{formattedTime}</span>
-                <div className="w-[1px] h-[24px] bg-slate-300 mx-[10px]"></div>
-                <span className="font-mono">{formattedMaxTime}</span>
+
+                {/* Skip 10 seconds forward */}
+                <button
+                    className="px-2 py-2"
+                    onClick={() => state.skipForward()}
+                    aria-label="Skip Forward 10s"
+                >
+                    <MdForward10 className="h-10 w-10" />
+                </button>
+                {/* Skip to end */}
+                <button
+                    className="px-2 py-2"
+                    onClick={() => state.skipToEnd()}
+                    aria-label="Skip to End"
+                >
+                    <FaStepForward className="w-8 h-8" />
+                </button>
+
+                {/* Time display */}
+                <div className="flex flex-row items-center border border-black dark:border-white py-1 px-2 rounded-2xl">
+                    <span className="font-mono">{formattedTime}</span>
+                    <div className="w-[1px] h-[24px] bg-slate-300 mx-[10px]"></div>
+                    <span className="font-mono">{formattedMaxTime}</span>
+                </div>
             </div>
             <ScaleRangeInput
                 max={state.maxTime}
