@@ -24,9 +24,10 @@ import { FabricUtils } from "../utils/fabric-utils";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
 import fixWebmDuration from "webm-duration-fix";
+import { AlignGuidelines } from "fabric-guideline-plugin";
 export class State {
   canvas: fabric.Canvas | null;
-
+  canvasBox: fabric.Rect | null = null; // helper rect for guidelines
   backgroundColor: string;
 
   selectedMenuOption: MenuOption;
@@ -107,7 +108,21 @@ export class State {
       canvas.setWidth(width);
       canvas.setHeight(height);
       canvas.backgroundColor = this.backgroundColor;
+
+      // Add the transparent box to the canvas
+      this.createCanvasBox(width, height);
+
+      const guideline = new AlignGuidelines({
+        canvas: this.canvas as fabric.Canvas,
+        aligningOptions: {
+          lineWidth: 5,
+          lineColor: "#ff0000",
+        },
+      });
+
+      guideline.init();
     }
+
     this.canvas_width = width;
     this.canvas_height = height;
   }
@@ -119,7 +134,45 @@ export class State {
     }
     this.canvas_width = width;
     this.canvas_height = height;
+
+    // Update the size of the canvas box
+    this.updateCanvasBoxSize(width, height);
     this.refreshElements();
+  }
+
+  createCanvasBox(width: number, height: number) {
+    if (!this.canvas) return;
+
+    // Remove existing box if any
+    if (this.canvasBox) {
+      this.canvas.remove(this.canvasBox);
+    }
+
+    // Create a new transparent box
+    this.canvasBox = new fabric.Rect({
+      left: 0,
+      top: 0,
+      width: width,
+      height: height,
+      fill: "transparent", // Fully transparent
+      selectable: false, // Prevent selection
+      evented: false, // Prevent events like click
+    });
+
+    // Add it to the canvas and send to the back
+    this.canvas.add(this.canvasBox);
+    this.canvasBox.sendToBack();
+  }
+
+  updateCanvasBoxSize(width: number, height: number) {
+    if (this.canvasBox && this.canvas) {
+      this.canvasBox.set({
+        width: width,
+        height: height,
+      });
+      this.canvasBox.setCoords(); // Update the object's bounding box
+      this.canvas.renderAll(); // Re-render the canvas
+    }
   }
 
   setBackgroundColor(backgroundColor: string) {
@@ -551,21 +604,21 @@ export class State {
     }
   }
 
-  skipForward(){
+  skipForward() {
     const nextTime = this.currentTimeInMs + 10000;
     this.handleSeek(Math.min(nextTime, this.maxTime));
   }
 
-  skipBackward(){
+  skipBackward() {
     const nextTime = this.currentTimeInMs - 10000;
     this.handleSeek(Math.max(nextTime, 0));
   }
 
-  skipToStart(){
+  skipToStart() {
     this.handleSeek(0);
   }
 
-  skipToEnd(){
+  skipToEnd() {
     this.handleSeek(this.maxTime);
   }
 
@@ -1039,10 +1092,16 @@ export class State {
 
     // Deselect all objects before removing them
     canvas.discardActiveObject();
-    canvas.getObjects().forEach((obj) => {
-      obj.onDeselect = () => false; // Release deselect
-    });
-    state.canvas.remove(...state.canvas.getObjects());
+    canvas
+      .getObjects()
+      .filter((obj) => obj !== state.canvasBox)
+      .forEach((obj) => {
+        obj.onDeselect = () => false; // Release deselect
+      });
+    const objectsToRemove = canvas
+      .getObjects()
+      .filter((obj) => obj !== state.canvasBox);
+    state.canvas.remove(...objectsToRemove);
 
     const handleObjectModified =
       (element: any, fabricObject: any) => (e: any) => {
