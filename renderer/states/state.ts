@@ -551,6 +551,24 @@ export class State {
     }
   }
 
+  skipForward(){
+    const nextTime = this.currentTimeInMs + 10000;
+    this.handleSeek(Math.min(nextTime, this.maxTime));
+  }
+
+  skipBackward(){
+    const nextTime = this.currentTimeInMs - 10000;
+    this.handleSeek(Math.max(nextTime, 0));
+  }
+
+  skipToStart(){
+    this.handleSeek(0);
+  }
+
+  skipToEnd(){
+    this.handleSeek(this.maxTime);
+  }
+
   startedTime = 0;
   startedTimePlay = 0;
 
