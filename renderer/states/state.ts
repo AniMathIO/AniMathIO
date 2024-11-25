@@ -30,6 +30,8 @@ export class State {
   canvasBox: fabric.Rect | null = null; // helper rect for guidelines
   backgroundColor: string;
 
+  clipboard: EditorElement | null = null; // For storing copied objects temporarily
+
   selectedMenuOption: MenuOption;
   audios: string[];
   videos: string[];
@@ -77,6 +79,138 @@ export class State {
     this.selectedMenuOption = "Videos";
     this.selectedVideoFormat = "mp4";
     makeAutoObservable(this);
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(
+        "keydown",
+        this.handleKeyboardShortcut.bind(this)
+      );
+    }
+  }
+
+  handleKeyboardShortcut(event: KeyboardEvent) {
+    if (!this.canvas) return;
+
+    const activeObject = this.canvas.getActiveObject();
+    const activeGroup = this.canvas.getActiveObjects();
+
+    switch (event.key) {
+      case "Delete":
+      case "Backspace":
+        if (activeObject || activeGroup.length) {
+          if (this.selectedElement) {
+            this.deleteSelectedObjects([this.selectedElement]);
+          }
+          event.preventDefault();
+        }
+        break;
+
+      case "ArrowUp":
+      case "ArrowDown":
+      case "ArrowLeft":
+      case "ArrowRight":
+        if (event.ctrlKey || event.metaKey) {
+          this.moveSelectedObject(event.key);
+          event.preventDefault();
+        } else {
+          this.skipInTime(event.key);
+          event.preventDefault();
+        }
+        break;
+
+      case "c":
+        if (event.ctrlKey || event.metaKey) {
+          this.copyObject();
+          event.preventDefault();
+        }
+        break;
+
+      case "v":
+        if (event.ctrlKey || event.metaKey) {
+          this.pasteObject();
+          event.preventDefault();
+        }
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  skipInTime(key: string) {
+    if (key === "ArrowLeft") {
+      this.skipBackward();
+    }
+    if (key === "ArrowRight") {
+      this.skipForward();
+    }
+  }
+
+  deleteSelectedObjects(selectedObjects: EditorElement[] | null) {
+    selectedObjects?.forEach((selectedObject) => {
+      if (selectedObject) {
+        this.removeEditorElement(selectedObject.id);
+      }
+    });
+  }
+
+  copyObject() {
+    const activeObject = this.canvas?.getActiveObject();
+    if (activeObject) {
+      this.clipboard = this.selectedElement;
+    }
+  }
+
+  pasteObject() {
+    if (!this.clipboard) return;
+    // console.log("clipboard:", JSON.stringify(this.clipboard, null, 2));
+    const type = this.clipboard.type;
+    switch (type) {
+      case "text":
+        const textInElement = this.clipboard.properties.text;
+        const fontSize = this.clipboard.properties.fontSize;
+        const fontWeight = this.clipboard.properties.fontWeight;
+        this.addText({ text: textInElement, fontSize, fontWeight });
+        break;
+      case "image":
+        const imageIndex = parseInt(
+          this.clipboard.name.match(/(\d+)\s*$/)?.toString() || "",
+          10
+        );
+        this.addImage(imageIndex - 1);
+        break;
+      case "mafs":
+        const mafsIndex = parseInt(
+          this.clipboard.name.match(/(\d+)\s*$/)?.toString() || "",
+          10
+        );
+        const mafsName = this.clipboard.name.match(/\(([^)]+)\)/)?.[1] || "";
+        const mafsPngSrc = this.clipboard.properties.src;
+        this.addMafsResource(mafsIndex - 1, mafsPngSrc, mafsName);
+        break;
+      case "video":
+        const videoIndex = parseInt(
+          this.clipboard.name.match(/(\d+)\s*$/)?.toString() || "",
+          10
+        );
+        this.addVideo(videoIndex - 1);
+        break;
+      default:
+        break;
+    }
+  }
+
+  moveSelectedObject(direction: string) {
+    const activeObjects = this.canvas?.getActiveObjects() || [];
+    const delta = 10; // Movement increment
+    activeObjects.forEach((object) => {
+      if (direction === "ArrowUp") object.top = (object.top || 0) - delta;
+      if (direction === "ArrowDown") object.top = (object.top || 0) + delta;
+      if (direction === "ArrowLeft") object.left = (object.left || 0) - delta;
+      if (direction === "ArrowRight") object.left = (object.left || 0) + delta;
+      object.setCoords();
+    });
+    this.canvas?.renderAll();
   }
 
   getAudioContext(audioElement: HTMLAudioElement) {
@@ -764,6 +898,9 @@ export class State {
   }
 
   addMafsResource(index: number, pngSrc: string, name: string) {
+    // console.log("index", index);
+    // console.log("pngSrc", pngSrc);
+    // console.log("name", name);
     return new Promise<void>((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = "anonymous";
