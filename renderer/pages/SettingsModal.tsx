@@ -111,7 +111,7 @@ const SettingsModal: React.FC = () => {
                             </tr>
                             <tr className="hover:bg-gray-50 dark:hover:bg-gray-600">
                                 <td className="px-4 py-2 text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                                    <span className='font-bold'>Delete or Backspace</span>
+                                    <span className='font-bold'>Ctrl + Delete</span>
                                     <FaTrashAlt className="text-gray-500 dark:text-gray-400" />
                                 </td>
                                 <td className="px-4 py-2 text-gray-600 dark:text-gray-400">
@@ -120,7 +120,7 @@ const SettingsModal: React.FC = () => {
                             </tr>
                             <tr className="hover:bg-gray-50 dark:hover:bg-gray-600">
                                 <td className="px-4 py-2 text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                                    <span className="font-bold">Ctrl + C</span>
+                                    <span className="font-bold">Ctrl + Alt + C</span>
                                     <FaCopy className="text-gray-500 dark:text-gray-400" />
                                 </td>
                                 <td className="px-4 py-2 text-gray-600 dark:text-gray-400">
@@ -129,7 +129,7 @@ const SettingsModal: React.FC = () => {
                             </tr>
                             <tr className="hover:bg-gray-50 dark:hover:bg-gray-600">
                                 <td className="px-4 py-2 text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                                    <span className="font-bold">Ctrl + V</span>
+                                    <span className="font-bold">Ctrl + Alt + V</span>
                                     <FaPaste className="text-gray-500 dark:text-gray-400" />
                                 </td>
                                 <td className="px-4 py-2 text-gray-600 dark:text-gray-400">
