@@ -96,8 +96,7 @@ export class State {
 
     switch (event.key) {
       case "Delete":
-      case "Backspace":
-        if (activeObject || activeGroup.length) {
+        if ((activeObject || activeGroup.length) && (event.ctrlKey || event.metaKey)) {
           if (this.selectedElement) {
             this.deleteSelectedObjects([this.selectedElement]);
           }
@@ -119,14 +118,14 @@ export class State {
         break;
 
       case "c":
-        if (event.ctrlKey || event.metaKey) {
+        if ((event.ctrlKey || event.metaKey) && event.altKey) {
           this.copyObject();
           event.preventDefault();
         }
         break;
 
       case "v":
-        if (event.ctrlKey || event.metaKey) {
+        if ((event.ctrlKey || event.metaKey) && event.altKey) {
           this.pasteObject();
           event.preventDefault();
         }
