@@ -88,6 +88,55 @@ export class State {
     }
   }
 
+  serialize(): ArrayBuffer {
+    const stateObject = {
+      backgroundColor: this.backgroundColor,
+      selectedMenuOption: this.selectedMenuOption,
+      audios: this.audios,
+      videos: this.videos,
+      images: this.images,
+      editorElements: this.editorElements,
+      maxTime: this.maxTime,
+      animations: this.animations,
+      currentKeyFrame: this.currentKeyFrame,
+      fps: this.fps,
+      selectedVideoFormat: this.selectedVideoFormat,
+      canvas_width: this.canvas_width,
+      canvas_height: this.canvas_height,
+    };
+
+    const stateJSON = JSON.stringify(stateObject);
+    const encoder = new TextEncoder();
+    const stateBuffer = encoder.encode(stateJSON);
+    return stateBuffer.buffer;
+  }
+  deserialize(projectState: ArrayBuffer): void {
+    const decoder = new TextDecoder();
+    const stateJSON = decoder.decode(projectState);
+    const stateObject = JSON.parse(stateJSON);
+
+    this.backgroundColor = stateObject.backgroundColor;
+    this.selectedMenuOption = stateObject.selectedMenuOption;
+    this.audios = stateObject.audios;
+    this.videos = stateObject.videos;
+    this.images = stateObject.images;
+    this.editorElements = stateObject.editorElements;
+    this.maxTime = stateObject.maxTime;
+    this.animations = stateObject.animations;
+    this.currentKeyFrame = stateObject.currentKeyFrame;
+    this.fps = stateObject.fps;
+    this.selectedVideoFormat = stateObject.selectedVideoFormat;
+    this.canvas_width = stateObject.canvas_width;
+    this.canvas_height = stateObject.canvas_height;
+
+    // Reinitialize the animationTimeLine
+    this.animationTimeLine = anime.timeline({ autoplay: false });
+
+    // Refresh elements and animations
+    this.refreshElements();
+    this.refreshAnimations();
+  }
+
   handleKeyboardShortcut(event: KeyboardEvent) {
     if (!this.canvas) return;
 
@@ -96,7 +145,10 @@ export class State {
 
     switch (event.key) {
       case "Delete":
-        if ((activeObject || activeGroup.length) && (event.ctrlKey || event.metaKey)) {
+        if (
+          (activeObject || activeGroup.length) &&
+          (event.ctrlKey || event.metaKey)
+        ) {
           if (this.selectedElement) {
             this.deleteSelectedObjects([this.selectedElement]);
           }
