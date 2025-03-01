@@ -7,7 +7,8 @@
 | 1.0.0   | :x:                |
 | 1.1.0   | :x: |
 | 1.2.0   | :white_check_mark: |
-| 1.3.0   | :white_check_mark: |
+| 1.3.0   | :x: |
+| 1.3.1   | :white_check_mark: |
 | 1.4.0   | coming soon        |
 
 ## Reporting a Vulnerability
