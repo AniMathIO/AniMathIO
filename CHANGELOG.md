@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.1](https://github.com/AniMathIO/AniMathIO/compare/v1.3.0...v1.3.1) (2025-03-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* correcting the bugs caused by the shortcuts
+
+### Features
+
+* updated node version and packages ([8dd7538](https://github.com/AniMathIO/AniMathIO/commit/8dd7538fbe488b3ac9815005e8aa152f3faf95e3))
+
+
+### Bug Fixes
+
+* correcting the bugs caused by the shortcuts ([5e664d6](https://github.com/AniMathIO/AniMathIO/commit/5e664d6c589459f836241db2db92225bfeef5f99))
+
+
+### Miscellaneous Chores
+
+* release 1.0.3 ([e2941d6](https://github.com/AniMathIO/AniMathIO/commit/e2941d6946749543018c13cbf16ec2eaac304fbd))
+* release 1.3.1 ([58663cd](https://github.com/AniMathIO/AniMathIO/commit/58663cd859fec0c3a7de0586d1ebd4e3354b014c))
+
 ## [1.3.0](https://github.com/AniMathIO/AniMathIO/compare/v1.2.0...v1.3.0) (2024-11-25)
 
 
