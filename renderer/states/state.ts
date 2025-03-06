@@ -108,7 +108,7 @@ export class State {
     const stateJSON = JSON.stringify(stateObject);
     const encoder = new TextEncoder();
     const stateBuffer = encoder.encode(stateJSON);
-    return stateBuffer.buffer;
+    return new ArrayBuffer(stateBuffer.buffer.byteLength);
   }
   deserialize(projectState: ArrayBuffer): void {
     const decoder = new TextDecoder();
