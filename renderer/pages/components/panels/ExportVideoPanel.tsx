@@ -119,6 +119,48 @@ const ExportVideoPanel = observer(() => {
       >
         Export Video ({state.maxTime / 1000} seconds)
       </button >
+
+      {/* Button to save project as ArrayBuffer with .animathio extension using state.serialize */}
+      <button
+        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg m-4"
+        onClick={() => {
+          const buffer = state.serialize();
+          const blob = new Blob([buffer], { type: "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "project.animathio";
+          link.click();
+          URL.revokeObjectURL(url);
+        }}
+      >
+        Save Project
+      </button>
+
+      {/* Load the saved .animathio project with state.deserialize */}
+      <button
+        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg m-4"
+        onClick={() => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = ".animathio";
+          input.onchange = (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (file) {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                const buffer = new Uint8Array(e.target?.result as ArrayBuffer);
+                state.deserialize(buffer.buffer);
+              };
+              reader.readAsArrayBuffer(file);
+            }
+          };
+          input.click();
+        }}
+      >
+        Load Project
+      </button>
+
       <Modal
         isOpen={isRenderingModalOpen}
         onRequestClose={() => setIsRenderingModalOpen(false)}
