@@ -3,6 +3,8 @@ import React from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import Modal from "react-modal";
+import { IoIosSave } from "react-icons/io";
+import { PiUploadSimpleBold } from "react-icons/pi";
 
 
 const ExportVideoPanel = observer(() => {
@@ -270,21 +272,30 @@ const ExportVideoPanel = observer(() => {
         Export Video ({state.maxTime / 1000} seconds)
       </button >
 
+      <div className="text-base font-semibold m-4 mb-0">Save / Load Project:</div>
       {/* Button to save project as ArrayBuffer with .animathio extension using state.serialize */}
       <button
-        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg m-4"
+        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg ml-4 mr-0 mb-2"
         onClick={handleSaveProject}
       >
-        Save Project
+        <div className="flex justify-center align-middle gap-1">
+          <IoIosSave className="h-6 w-6" />
+          Save
+        </div>
       </button>
 
       {/* Load the saved .animathio project with state.deserialize */}
       <button
-        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg m-4"
+        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg ml-2 mr-4 mt-2"
         onClick={handleLoadProject}
       >
-        Load Project
+
+        <div className="flex justify-center align-middle gap-1">
+          <PiUploadSimpleBold className="h-6 w-6"/> 
+          Load
+        </div>
       </button>
+
 
       {/* Video Rendering Modal */}
       <Modal
