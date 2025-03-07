@@ -54,7 +54,7 @@ const ExportVideoPanel = observer(() => {
         try {
           // @ts-ignore - TypeScript might not recognize this API yet
           const fileHandle = await window.showSaveFilePicker({
-            suggestedName:`project-${currentDate.toISOString()}.animathio`,
+            suggestedName: `project-${currentDate.toISOString()}.animathio`,
             types: [{
               description: 'Animathio Project File',
               accept: { 'application/octet-stream': ['.animathio'] }
@@ -82,24 +82,26 @@ const ExportVideoPanel = observer(() => {
           console.log("File System Access API failed, falling back:", fsError);
         }
       }
+      else {
 
-      // Fallback to traditional download method
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "project.animathio";
+        // Fallback to traditional download method
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "project-${currentDate.toISOString()}.animathio";
 
-      // Click the link to start the download
-      link.click();
+        // Click the link to start the download
+        link.click();
 
-      // Clean up the URL object
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
+        // Clean up the URL object
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
 
-        // Show success modal after a short delay
-        setSaveModalStatus('success');
-        setIsSavingModalOpen(true);
-      }, 1000);
+          // Show success modal after a short delay
+          setSaveModalStatus('success');
+          setIsSavingModalOpen(true);
+        }, 1000);
+      }
 
     } catch (error) {
       console.error("Error saving project:", error);
