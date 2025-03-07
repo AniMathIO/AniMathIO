@@ -88,7 +88,50 @@ export class State {
     }
   }
 
-  serialize(): ArrayBuffer {
+  async serialize(): Promise<ArrayBuffer> {
+    // Create an array to store all media file promises
+    const mediaPromises: Promise<{ id: string; data: string; type: string }>[] =
+      [];
+
+    // For each media element in your editor, convert to base64
+    for (const element of this.editorElements) {
+      // Type narrowing to check if element is a media type
+      if (["image", "video", "audio"].includes(element.type)) {
+        // Type guard to check if properties has a src property
+        if ("src" in element.properties) {
+          const src = element.properties.src;
+          if (
+            typeof src === "string" &&
+            (src.startsWith("blob:") || src.startsWith("data:"))
+          ) {
+            // For blob URLs or data URLs, we need to fetch and encode
+            mediaPromises.push(
+              fetch(src)
+                .then((response) => response.blob())
+                .then(
+                  (blob) =>
+                    new Promise<{ id: string; data: string; type: string }>(
+                      (resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () =>
+                          resolve({
+                            id: element.id,
+                            data: reader.result as string,
+                            type: element.type,
+                          });
+                        reader.readAsDataURL(blob);
+                      }
+                    )
+                )
+            );
+          }
+        }
+      }
+    }
+
+    // Rest of the code remains the same
+    const mediaFiles = await Promise.all(mediaPromises);
+
     const stateObject = {
       backgroundColor: this.backgroundColor,
       selectedMenuOption: this.selectedMenuOption,
@@ -103,24 +146,26 @@ export class State {
       selectedVideoFormat: this.selectedVideoFormat,
       canvas_width: this.canvas_width,
       canvas_height: this.canvas_height,
+      mediaFiles: mediaFiles, // Add media files to the state
     };
 
     const stateJSON = JSON.stringify(stateObject);
     const encoder = new TextEncoder();
     const stateBuffer = encoder.encode(stateJSON);
-    
-    // Use a different approach to create a proper ArrayBuffer
+
     const arrayBuffer = new ArrayBuffer(stateBuffer.byteLength);
     const view = new Uint8Array(arrayBuffer);
     view.set(stateBuffer);
 
     return arrayBuffer;
   }
+
   deserialize(projectState: ArrayBuffer): void {
     const decoder = new TextDecoder();
     const stateJSON = decoder.decode(projectState);
     const stateObject = JSON.parse(stateJSON);
 
+    // First load basic state properties
     this.backgroundColor = stateObject.backgroundColor;
     this.selectedMenuOption = stateObject.selectedMenuOption;
     this.audios = stateObject.audios;
@@ -134,6 +179,25 @@ export class State {
     this.selectedVideoFormat = stateObject.selectedVideoFormat;
     this.canvas_width = stateObject.canvas_width;
     this.canvas_height = stateObject.canvas_height;
+
+    // If we have saved media files, restore them
+    if (stateObject.mediaFiles && Array.isArray(stateObject.mediaFiles)) {
+      for (const mediaFile of stateObject.mediaFiles) {
+        // Find the corresponding editor element
+        const element = this.editorElements.find(
+          (el) => el.id === mediaFile.id
+        );
+
+        // Check if element exists and is of a media type
+        if (element && ["image", "video", "audio"].includes(element.type)) {
+          // Type guard to ensure properties has a src property
+          if ("properties" in element && "src" in element.properties) {
+            // TypeScript now knows element.properties.src exists
+            element.properties.src = mediaFile.data;
+          }
+        }
+      }
+    }
 
     // Reinitialize the animationTimeLine
     this.animationTimeLine = anime.timeline({ autoplay: false });

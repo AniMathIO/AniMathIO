@@ -9,6 +9,9 @@ const ExportVideoPanel = observer(() => {
   const state = React.useContext(StateContext);
   const [resolution, setResolution] = React.useState('1920x1080');
   const [isRenderingModalOpen, setIsRenderingModalOpen] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(false);
+
 
   const resolutionOptions = [
     { value: '1920x1080', label: '1920x1080 (16:9 - Full HD)' },
@@ -123,18 +126,27 @@ const ExportVideoPanel = observer(() => {
       {/* Button to save project as ArrayBuffer with .animathio extension using state.serialize */}
       <button
         className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg m-4"
-        onClick={() => {
-          const buffer = state.serialize();
-          const blob = new Blob([buffer], { type: "application/octet-stream" });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = "project.animathio";
-          link.click();
-          URL.revokeObjectURL(url);
+        onClick={async () => {
+          try {
+            setIsSaving(true);
+            const buffer = await state.serialize();
+            const blob = new Blob([buffer], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "project.animathio";
+            link.click();
+            URL.revokeObjectURL(url);
+          } catch (error) {
+            console.error("Error saving project:", error);
+            alert("Failed to save project. Please try again.");
+          } finally {
+            setIsSaving(false);
+          }
         }}
+        disabled={isSaving}
       >
-        Save Project
+        {isSaving ? "Saving..." : "Save Project"}
       </button>
 
       {/* Load the saved .animathio project with state.deserialize */}
@@ -144,21 +156,41 @@ const ExportVideoPanel = observer(() => {
           const input = document.createElement("input");
           input.type = "file";
           input.accept = ".animathio";
+
           input.onchange = (e) => {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (file) {
+              setIsLoading(true);
+
               const reader = new FileReader();
+
               reader.onload = (e) => {
-                const buffer = new Uint8Array(e.target?.result as ArrayBuffer);
-                state.deserialize(buffer.buffer);
+                try {
+                  const buffer = new Uint8Array(e.target?.result as ArrayBuffer);
+                  state.deserialize(buffer.buffer);
+                } catch (error) {
+                  console.error("Error loading project:", error);
+                  alert("Failed to load project. The file might be corrupted or incompatible.");
+                } finally {
+                  setIsLoading(false);
+                }
               };
+
+              reader.onerror = () => {
+                console.error("File reading error");
+                alert("Failed to read the file. Please try again.");
+                setIsLoading(false);
+              };
+
               reader.readAsArrayBuffer(file);
             }
           };
+
           input.click();
         }}
+        disabled={isLoading}
       >
-        Load Project
+        {isLoading ? "Loading..." : "Load Project"}
       </button>
 
       <Modal
