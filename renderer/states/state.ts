@@ -25,6 +25,7 @@ import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
 import fixWebmDuration from "webm-duration-fix";
 import { AlignGuidelines } from "fabric-guideline-plugin";
+import * as pako from "pako";
 export class State {
   canvas: fabric.Canvas | null;
   canvasBox: fabric.Rect | null = null; // helper rect for guidelines
@@ -153,16 +154,42 @@ export class State {
     const encoder = new TextEncoder();
     const stateBuffer = encoder.encode(stateJSON);
 
-    const arrayBuffer = new ArrayBuffer(stateBuffer.byteLength);
-    const view = new Uint8Array(arrayBuffer);
-    view.set(stateBuffer);
-
-    return arrayBuffer;
+    // Compress the data using pako
+    try {
+      // Use higher compression level (9 is maximum)
+      const compressed = pako.deflate(stateBuffer, { level: 9 });
+      // Convert ArrayBufferLike to ArrayBuffer explicitly
+      const compressedArrayBuffer = compressed.buffer.slice(0);
+      return compressedArrayBuffer as ArrayBuffer;
+    } catch (error) {
+      console.error("Compression failed, returning uncompressed data:", error);
+      // Return uncompressed data as fallback
+      const arrayBuffer = new ArrayBuffer(stateBuffer.byteLength);
+      const view = new Uint8Array(arrayBuffer);
+      view.set(stateBuffer);
+      return arrayBuffer;
+    }
   }
 
   deserialize(projectState: ArrayBuffer): void {
-    const decoder = new TextDecoder();
-    const stateJSON = decoder.decode(projectState);
+    let stateJSON: string;
+
+    try {
+      // Try to decompress using pako
+      const decompressed = pako.inflate(new Uint8Array(projectState));
+      const decoder = new TextDecoder();
+      stateJSON = decoder.decode(decompressed);
+    } catch (error) {
+      // If decompression fails, assume it's an uncompressed file (for backward compatibility)
+      console.warn(
+        "Decompression failed, trying to parse as uncompressed data:",
+        error
+      );
+      const decoder = new TextDecoder();
+      stateJSON = decoder.decode(projectState);
+    }
+
+    // Parse the JSON
     const stateObject = JSON.parse(stateJSON);
 
     // First load basic state properties
