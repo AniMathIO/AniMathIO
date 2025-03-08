@@ -89,3 +89,12 @@ ipcMain.handle("get-theme-mode", () => {
 ipcMain.on("set-theme-mode", (event, themeMode) => {
   store.set("themeMode", themeMode);
 });
+
+ipcMain.handle('get-gemini-api-token', () => {
+  return store.get('geminiApiToken', '');
+});
+
+ipcMain.handle('set-gemini-api-token', (_, apiToken) => {
+  store.set('geminiApiToken', apiToken);
+  return true;
+});

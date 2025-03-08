@@ -17,6 +17,10 @@ declare global {
 const SettingsModal: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isDarkMode, setIsDarkMode] = useState(false);
+    const [geminiApiToken, setGeminiApiToken] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveMessage, setSaveMessage] = useState({ text: "", type: "" });
+
 
     useEffect(() => {
         const handleOpenModal = () => {
@@ -51,6 +55,29 @@ const SettingsModal: React.FC = () => {
         window.electron.ipcRenderer.send('set-theme-mode', newThemeMode);
     };
 
+    const handleSaveApiToken = async () => {
+        try {
+            setIsSaving(true);
+            setSaveMessage({ text: "", type: "" });
+
+            // Basic validation
+            if (!geminiApiToken.trim()) {
+                setSaveMessage({ text: "API token cannot be empty", type: "error" });
+                return;
+            }
+
+            // Save the API token
+            await window.electron.ipcRenderer.invoke('set-gemini-api-token', geminiApiToken);
+
+            setSaveMessage({ text: "API token saved successfully!", type: "success" });
+        } catch (error) {
+            console.error("Failed to save API token:", error);
+            setSaveMessage({ text: "Failed to save API token", type: "error" });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     if (!isOpen) {
         return null;
     }
@@ -73,6 +100,47 @@ const SettingsModal: React.FC = () => {
                         )}
                     </button>
                 </div>
+
+                <div className="mb-6">
+                    <h3 className="text-xl font-semibold mb-3 dark:text-white">AI Integration</h3>
+                    <div className="mb-4">
+                        <label htmlFor="geminiApiToken" className="block mb-2 dark:text-white">
+                            Gemini API Token:
+                        </label>
+                        <div className="flex gap-2">
+                            <input
+                                type="password"
+                                id="geminiApiToken"
+                                value={geminiApiToken}
+                                onChange={(e) => setGeminiApiToken(e.target.value)}
+                                className="flex-grow border text-black border-gray-300 rounded px-3 py-2"
+                                placeholder="Enter your Gemini API token"
+                            />
+                            <button
+                                className={`px-4 py-2 rounded ${isSaving
+                                        ? "bg-gray-400 cursor-not-allowed"
+                                        : "bg-blue-500 hover:bg-blue-600 text-white"
+                                    }`}
+                                onClick={handleSaveApiToken}
+                                disabled={isSaving}
+                            >
+                                {isSaving ? "Saving..." : "Save"}
+                            </button>
+                        </div>
+                        {saveMessage.text && (
+                            <p className={`mt-2 text-sm ${saveMessage.type === "error" ? "text-red-500" : "text-green-500"
+                                }`}>
+                                {saveMessage.text}
+                            </p>
+                        )}
+                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                            Your API token is stored locally and is used to access the Gemini AI for text-to-LaTeX conversion.
+                            <br />
+                            You can get a Gemini API token from the <a href="https://ai.google.dev/" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Google AI Studio</a>.
+                        </p>
+                    </div>
+                </div>
+
                 <div className='dark:text-white'>
                     <h2 className="mr-2 dark:text-white">Keyboard Shortcuts:</h2>
                     <table className="w-full border-collapse border border-gray-300 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 rounded-lg overflow-hidden">
