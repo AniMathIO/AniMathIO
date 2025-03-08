@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.4.0](https://github.com/AniMathIO/AniMathIO/compare/v1.3.1...v1.4.0) (2025-03-08)
+
+
+### Features
+
+* improved project saving and loading with compression ([1f98c63](https://github.com/AniMathIO/AniMathIO/commit/1f98c631d9942a968b6f877297565f2d51fc96f5))
+* improved text-to-latex conversion ui ([07c0c56](https://github.com/AniMathIO/AniMathIO/commit/07c0c56721d24fb2f432abb380a259595d9dea25))
+* integrated smart background removal for images ([26b5681](https://github.com/AniMathIO/AniMathIO/commit/26b568197a6dc187bac7e8d8beced86940c6c968))
+* update from main ([3f35cf2](https://github.com/AniMathIO/AniMathIO/commit/3f35cf253ac66947df1e469b732081600f810efe))
+* update from main ([999b6cd](https://github.com/AniMathIO/AniMathIO/commit/999b6cd4ba5d06b83ab6e4ae06346907409b7978))
+* WIP implemented save and load modals ([00aee67](https://github.com/AniMathIO/AniMathIO/commit/00aee675a5aea72399b99f567d61fab24e498bc5))
+* WIP working on project saving and loading ([2f42285](https://github.com/AniMathIO/AniMathIO/commit/2f42285a6d5aa44bae048b5453b2f8fec12c1ce9))
+* WIP working on proper project saving and loading ([0f4515c](https://github.com/AniMathIO/AniMathIO/commit/0f4515c6c2d96c44348c8dc1d74a93b06c4d07c7))
+* working on file saving and loading dialogs ([46dcf6f](https://github.com/AniMathIO/AniMathIO/commit/46dcf6f3a6c995214fdd866b4ad2b3dd5b2b9d75))
+* working on text-to-latex conversion with GeminiAPI ([7923981](https://github.com/AniMathIO/AniMathIO/commit/79239812a51d3fc8dfde2e86661b75c3b0928e52))
+
+
+### Bug Fixes
+
+* fixed double popup bug when save dialog closed ([68f6d08](https://github.com/AniMathIO/AniMathIO/commit/68f6d08ca5e026dddf32a8565c89a3d7f545de4f))
+* fixed type error in state ([1df9f9c](https://github.com/AniMathIO/AniMathIO/commit/1df9f9cd38880829a10172f586752f560bc87d1c))
+* the images, audio, and video are not loaded to the editor elements correctly ([4400c56](https://github.com/AniMathIO/AniMathIO/commit/4400c563484aa5bba8abac176f4d68d7660b2e05))
+
+
+### Miscellaneous Chores
+
+* release 1.4.0 ([7cfcc8e](https://github.com/AniMathIO/AniMathIO/commit/7cfcc8e714447801811ac789eee69c1c7874e42b))
+
 ## [1.3.1](https://github.com/AniMathIO/AniMathIO/compare/v1.3.0...v1.3.1) (2025-03-01)
 
 
