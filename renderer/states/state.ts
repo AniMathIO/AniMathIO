@@ -324,6 +324,43 @@ export class State {
     this.refreshAnimations();
   }
 
+  replaceImageResource(index: number, newImageUrl: string): void {
+    // Keep the old URL to properly clean up later
+    const oldImageUrl = this.images[index];
+
+    // Replace the image in the images array
+    this.images[index] = newImageUrl;
+
+    // Now we need to update any editor elements that use this image
+    for (const element of this.editorElements) {
+      if (
+        element.type === "image" &&
+        "properties" in element &&
+        "src" in element.properties &&
+        element.properties.src === oldImageUrl
+      ) {
+        // Update the element to use the new image URL
+        element.properties.src = newImageUrl;
+      }
+    }
+
+    // If the oldImageUrl was a blob URL and is no longer used elsewhere,
+    // we can revoke it to free up memory
+    const isStillInUse =
+      this.images.includes(oldImageUrl) ||
+      this.editorElements.some(
+        (el) =>
+          el.type === "image" &&
+          "properties" in el &&
+          "src" in el.properties &&
+          el.properties.src === oldImageUrl
+      );
+
+    if (!isStillInUse && oldImageUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(oldImageUrl);
+    }
+  }
+
   handleKeyboardShortcut(event: KeyboardEvent) {
     if (!this.canvas) return;
 
