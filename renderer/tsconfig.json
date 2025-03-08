@@ -2,6 +2,7 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "strict": true,
+    "downlevelIteration": true,
     "baseUrl": "",
     "paths": {
       "@/types": [

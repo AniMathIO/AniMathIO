@@ -168,9 +168,12 @@ export class State {
     // First load basic state properties
     this.backgroundColor = stateObject.backgroundColor;
     this.selectedMenuOption = stateObject.selectedMenuOption;
-    this.audios = stateObject.audios;
-    this.videos = stateObject.videos;
-    this.images = stateObject.images;
+
+    // Create new arrays for media resources
+    this.audios = [];
+    this.videos = [];
+    this.images = [];
+
     this.editorElements = stateObject.editorElements;
     this.maxTime = stateObject.maxTime;
     this.animations = stateObject.animations;
@@ -180,24 +183,111 @@ export class State {
     this.canvas_width = stateObject.canvas_width;
     this.canvas_height = stateObject.canvas_height;
 
-    // If we have saved media files, restore them
+    // Create a map to store data URLs by element ID
+    const mediaDataMap = new Map<string, string>();
+
+    // Track valid resources to clean up any invalid ones later
+    const validImages = new Set<string>();
+    const validVideos = new Set<string>();
+    const validAudios = new Set<string>();
+
+    // If we have saved media files, process them
     if (stateObject.mediaFiles && Array.isArray(stateObject.mediaFiles)) {
       for (const mediaFile of stateObject.mediaFiles) {
-        // Find the corresponding editor element
-        const element = this.editorElements.find(
-          (el) => el.id === mediaFile.id
-        );
+        // Store data URLs in our map
+        mediaDataMap.set(mediaFile.id, mediaFile.data);
 
-        // Check if element exists and is of a media type
-        if (element && ["image", "video", "audio"].includes(element.type)) {
-          // Type guard to ensure properties has a src property
-          if ("properties" in element && "src" in element.properties) {
-            // TypeScript now knows element.properties.src exists
-            element.properties.src = mediaFile.data;
+        // Add to the appropriate resource array based on type
+        if (mediaFile.type === "image") {
+          this.images.push(mediaFile.data);
+          validImages.add(mediaFile.data);
+        } else if (mediaFile.type === "video") {
+          this.videos.push(mediaFile.data);
+          validVideos.add(mediaFile.data);
+        } else if (mediaFile.type === "audio") {
+          this.audios.push(mediaFile.data);
+          validAudios.add(mediaFile.data);
+        }
+      }
+    }
+
+    // Now update all editor elements with the new data URLs
+    for (const element of this.editorElements) {
+      if (["image", "video", "audio"].includes(element.type)) {
+        if ("properties" in element && "src" in element.properties) {
+          const dataUrl = mediaDataMap.get(element.id);
+          if (dataUrl) {
+            element.properties.src = dataUrl;
+
+            // Track this as a valid resource
+            if (element.type === "image") validImages.add(dataUrl);
+            if (element.type === "video") validVideos.add(dataUrl);
+            if (element.type === "audio") validAudios.add(dataUrl);
+          } else if (typeof element.properties.src === "string") {
+            // If we didn't find it in our mediaFiles but it has a src, track it as valid
+            // This handles direct src values that might be in the elements
+            if (element.type === "image")
+              validImages.add(element.properties.src);
+            if (element.type === "video")
+              validVideos.add(element.properties.src);
+            if (element.type === "audio")
+              validAudios.add(element.properties.src);
           }
         }
       }
     }
+
+    // For older project formats, restore resources from direct arrays
+    // but filter out any that are blob URLs (which are no longer valid)
+    const isValidUrl = (url: string) => {
+      return (
+        url.startsWith("data:") || // Data URLs are preserved
+        !url.startsWith("blob:")
+      ); // Blob URLs are not valid after reload
+    };
+
+    if (Array.isArray(stateObject.audios)) {
+      stateObject.audios.forEach((audio: string) => {
+        if (isValidUrl(audio) && !this.audios.includes(audio)) {
+          this.audios.push(audio);
+          validAudios.add(audio);
+        }
+      });
+    }
+
+    if (Array.isArray(stateObject.videos)) {
+      stateObject.videos.forEach((video: string) => {
+        if (isValidUrl(video) && !this.videos.includes(video)) {
+          this.videos.push(video);
+          validVideos.add(video);
+        }
+      });
+    }
+
+    if (Array.isArray(stateObject.images)) {
+      stateObject.images.forEach((image: string) => {
+        if (isValidUrl(image) && !this.images.includes(image)) {
+          this.images.push(image);
+          validImages.add(image);
+        }
+      });
+    }
+
+    // Clean up any resources that are no longer valid or in use
+
+    // For images, keep only valid ones
+    this.images = this.images.filter((image) => validImages.has(image));
+
+    // For videos, keep only valid ones
+    this.videos = this.videos.filter((video) => validVideos.has(video));
+
+    // For audios, keep only valid ones
+    this.audios = this.audios.filter((audio) => validAudios.has(audio));
+
+    // Remove duplicate entries
+    this.images = [...new Set(this.images)];
+    this.videos = [...new Set(this.videos)];
+    this.audios = [...new Set(this.audios)];
 
     // Reinitialize the animationTimeLine
     this.animationTimeLine = anime.timeline({ autoplay: false });
