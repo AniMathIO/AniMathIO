@@ -25,6 +25,7 @@ import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
 import fixWebmDuration from "webm-duration-fix";
 import { AlignGuidelines } from "fabric-guideline-plugin";
+import * as pako from "pako";
 export class State {
   canvas: fabric.Canvas | null;
   canvasBox: fabric.Rect | null = null; // helper rect for guidelines
@@ -88,6 +89,278 @@ export class State {
     }
   }
 
+  async serialize(): Promise<ArrayBuffer> {
+    // Create an array to store all media file promises
+    const mediaPromises: Promise<{ id: string; data: string; type: string }>[] =
+      [];
+
+    // For each media element in your editor, convert to base64
+    for (const element of this.editorElements) {
+      // Type narrowing to check if element is a media type
+      if (["image", "video", "audio"].includes(element.type)) {
+        // Type guard to check if properties has a src property
+        if ("src" in element.properties) {
+          const src = element.properties.src;
+          if (
+            typeof src === "string" &&
+            (src.startsWith("blob:") || src.startsWith("data:"))
+          ) {
+            // For blob URLs or data URLs, we need to fetch and encode
+            mediaPromises.push(
+              fetch(src)
+                .then((response) => response.blob())
+                .then(
+                  (blob) =>
+                    new Promise<{ id: string; data: string; type: string }>(
+                      (resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () =>
+                          resolve({
+                            id: element.id,
+                            data: reader.result as string,
+                            type: element.type,
+                          });
+                        reader.readAsDataURL(blob);
+                      }
+                    )
+                )
+            );
+          }
+        }
+      }
+    }
+
+    // Rest of the code remains the same
+    const mediaFiles = await Promise.all(mediaPromises);
+
+    const stateObject = {
+      backgroundColor: this.backgroundColor,
+      selectedMenuOption: this.selectedMenuOption,
+      audios: this.audios,
+      videos: this.videos,
+      images: this.images,
+      editorElements: this.editorElements,
+      maxTime: this.maxTime,
+      animations: this.animations,
+      currentKeyFrame: this.currentKeyFrame,
+      fps: this.fps,
+      selectedVideoFormat: this.selectedVideoFormat,
+      canvas_width: this.canvas_width,
+      canvas_height: this.canvas_height,
+      mediaFiles: mediaFiles, // Add media files to the state
+    };
+
+    const stateJSON = JSON.stringify(stateObject);
+    const encoder = new TextEncoder();
+    const stateBuffer = encoder.encode(stateJSON);
+
+    // Compress the data using pako
+    try {
+      // Use higher compression level (9 is maximum)
+      const compressed = pako.deflate(stateBuffer, { level: 9 });
+      // Convert ArrayBufferLike to ArrayBuffer explicitly
+      const compressedArrayBuffer = compressed.buffer.slice(0);
+      return compressedArrayBuffer as ArrayBuffer;
+    } catch (error) {
+      console.error("Compression failed, returning uncompressed data:", error);
+      // Return uncompressed data as fallback
+      const arrayBuffer = new ArrayBuffer(stateBuffer.byteLength);
+      const view = new Uint8Array(arrayBuffer);
+      view.set(stateBuffer);
+      return arrayBuffer;
+    }
+  }
+
+  deserialize(projectState: ArrayBuffer): void {
+    let stateJSON: string;
+
+    try {
+      // Try to decompress using pako
+      const decompressed = pako.inflate(new Uint8Array(projectState));
+      const decoder = new TextDecoder();
+      stateJSON = decoder.decode(decompressed);
+    } catch (error) {
+      // If decompression fails, assume it's an uncompressed file (for backward compatibility)
+      console.warn(
+        "Decompression failed, trying to parse as uncompressed data:",
+        error
+      );
+      const decoder = new TextDecoder();
+      stateJSON = decoder.decode(projectState);
+    }
+
+    // Parse the JSON
+    const stateObject = JSON.parse(stateJSON);
+
+    // First load basic state properties
+    this.backgroundColor = stateObject.backgroundColor;
+    this.selectedMenuOption = stateObject.selectedMenuOption;
+
+    // Create new arrays for media resources
+    this.audios = [];
+    this.videos = [];
+    this.images = [];
+
+    this.editorElements = stateObject.editorElements;
+    this.maxTime = stateObject.maxTime;
+    this.animations = stateObject.animations;
+    this.currentKeyFrame = stateObject.currentKeyFrame;
+    this.fps = stateObject.fps;
+    this.selectedVideoFormat = stateObject.selectedVideoFormat;
+    this.canvas_width = stateObject.canvas_width;
+    this.canvas_height = stateObject.canvas_height;
+
+    // Create a map to store data URLs by element ID
+    const mediaDataMap = new Map<string, string>();
+
+    // Track valid resources to clean up any invalid ones later
+    const validImages = new Set<string>();
+    const validVideos = new Set<string>();
+    const validAudios = new Set<string>();
+
+    // If we have saved media files, process them
+    if (stateObject.mediaFiles && Array.isArray(stateObject.mediaFiles)) {
+      for (const mediaFile of stateObject.mediaFiles) {
+        // Store data URLs in our map
+        mediaDataMap.set(mediaFile.id, mediaFile.data);
+
+        // Add to the appropriate resource array based on type
+        if (mediaFile.type === "image") {
+          this.images.push(mediaFile.data);
+          validImages.add(mediaFile.data);
+        } else if (mediaFile.type === "video") {
+          this.videos.push(mediaFile.data);
+          validVideos.add(mediaFile.data);
+        } else if (mediaFile.type === "audio") {
+          this.audios.push(mediaFile.data);
+          validAudios.add(mediaFile.data);
+        }
+      }
+    }
+
+    // Now update all editor elements with the new data URLs
+    for (const element of this.editorElements) {
+      if (["image", "video", "audio"].includes(element.type)) {
+        if ("properties" in element && "src" in element.properties) {
+          const dataUrl = mediaDataMap.get(element.id);
+          if (dataUrl) {
+            element.properties.src = dataUrl;
+
+            // Track this as a valid resource
+            if (element.type === "image") validImages.add(dataUrl);
+            if (element.type === "video") validVideos.add(dataUrl);
+            if (element.type === "audio") validAudios.add(dataUrl);
+          } else if (typeof element.properties.src === "string") {
+            // If we didn't find it in our mediaFiles but it has a src, track it as valid
+            // This handles direct src values that might be in the elements
+            if (element.type === "image")
+              validImages.add(element.properties.src);
+            if (element.type === "video")
+              validVideos.add(element.properties.src);
+            if (element.type === "audio")
+              validAudios.add(element.properties.src);
+          }
+        }
+      }
+    }
+
+    // For older project formats, restore resources from direct arrays
+    // but filter out any that are blob URLs (which are no longer valid)
+    const isValidUrl = (url: string) => {
+      return (
+        url.startsWith("data:") || // Data URLs are preserved
+        !url.startsWith("blob:")
+      ); // Blob URLs are not valid after reload
+    };
+
+    if (Array.isArray(stateObject.audios)) {
+      stateObject.audios.forEach((audio: string) => {
+        if (isValidUrl(audio) && !this.audios.includes(audio)) {
+          this.audios.push(audio);
+          validAudios.add(audio);
+        }
+      });
+    }
+
+    if (Array.isArray(stateObject.videos)) {
+      stateObject.videos.forEach((video: string) => {
+        if (isValidUrl(video) && !this.videos.includes(video)) {
+          this.videos.push(video);
+          validVideos.add(video);
+        }
+      });
+    }
+
+    if (Array.isArray(stateObject.images)) {
+      stateObject.images.forEach((image: string) => {
+        if (isValidUrl(image) && !this.images.includes(image)) {
+          this.images.push(image);
+          validImages.add(image);
+        }
+      });
+    }
+
+    // Clean up any resources that are no longer valid or in use
+
+    // For images, keep only valid ones
+    this.images = this.images.filter((image) => validImages.has(image));
+
+    // For videos, keep only valid ones
+    this.videos = this.videos.filter((video) => validVideos.has(video));
+
+    // For audios, keep only valid ones
+    this.audios = this.audios.filter((audio) => validAudios.has(audio));
+
+    // Remove duplicate entries
+    this.images = [...new Set(this.images)];
+    this.videos = [...new Set(this.videos)];
+    this.audios = [...new Set(this.audios)];
+
+    // Reinitialize the animationTimeLine
+    this.animationTimeLine = anime.timeline({ autoplay: false });
+
+    // Refresh elements and animations
+    this.refreshElements();
+    this.refreshAnimations();
+  }
+
+  replaceImageResource(index: number, newImageUrl: string): void {
+    // Keep the old URL to properly clean up later
+    const oldImageUrl = this.images[index];
+
+    // Replace the image in the images array
+    this.images[index] = newImageUrl;
+
+    // Now we need to update any editor elements that use this image
+    for (const element of this.editorElements) {
+      if (
+        element.type === "image" &&
+        "properties" in element &&
+        "src" in element.properties &&
+        element.properties.src === oldImageUrl
+      ) {
+        // Update the element to use the new image URL
+        element.properties.src = newImageUrl;
+      }
+    }
+
+    // If the oldImageUrl was a blob URL and is no longer used elsewhere,
+    // we can revoke it to free up memory
+    const isStillInUse =
+      this.images.includes(oldImageUrl) ||
+      this.editorElements.some(
+        (el) =>
+          el.type === "image" &&
+          "properties" in el &&
+          "src" in el.properties &&
+          el.properties.src === oldImageUrl
+      );
+
+    if (!isStillInUse && oldImageUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(oldImageUrl);
+    }
+  }
+
   handleKeyboardShortcut(event: KeyboardEvent) {
     if (!this.canvas) return;
 
@@ -96,7 +369,10 @@ export class State {
 
     switch (event.key) {
       case "Delete":
-        if ((activeObject || activeGroup.length) && (event.ctrlKey || event.metaKey)) {
+        if (
+          (activeObject || activeGroup.length) &&
+          (event.ctrlKey || event.metaKey)
+        ) {
           if (this.selectedElement) {
             this.deleteSelectedObjects([this.selectedElement]);
           }

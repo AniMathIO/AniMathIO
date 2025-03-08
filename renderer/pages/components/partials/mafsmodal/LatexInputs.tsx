@@ -1,5 +1,6 @@
 import { LatexProps } from "@/types";
 import dynamic from "next/dynamic";
+import TextToLatex from "./TextToLatex";
 
 type LatexInputsProps = {
     latexProps: LatexProps;
@@ -18,6 +19,13 @@ const LatexInputs = ({
 }: LatexInputsProps) => {
     return (
         <>
+            <TextToLatex
+                latexProps={latexProps}
+                setLatexProps={setLatexProps}
+                latexInput={latexInput}
+                setLatexInput={setLatexInput}
+                handleLatexSubmit={handleLatexSubmit}
+            />
             <div className="mb-4">
                 <label htmlFor="latexAtX" className="block font-medium mb-1">
                     At X
@@ -54,7 +62,7 @@ const LatexInputs = ({
             </div>
             <div className="mb-4">
                 <label htmlFor="latexTex" className="block font-medium mb-1">
-                    TeX
+                    LaTeX
                 </label>
                 <textarea
                     id="latexTex"
