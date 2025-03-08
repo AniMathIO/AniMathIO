@@ -62,7 +62,7 @@ const LatexInputs = ({
             </div>
             <div className="mb-4">
                 <label htmlFor="latexTex" className="block font-medium mb-1">
-                    TeX
+                    LaTeX
                 </label>
                 <textarea
                     id="latexTex"

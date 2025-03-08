@@ -121,7 +121,7 @@ const TextToLatex: React.FC<TextToLatexProps> = ({
 
     return (
         <div className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800">
-            <h3 className="text-lg font-semibold mb-3 dark:text-white">Text to LaTeX Converter</h3>
+            <h3 className="text-lg font-semibold mb-3 dark:text-white">Text to LaTeX Converter ✨</h3>
 
             <div className="mb-4">
                 <label htmlFor="textInput" className="block font-medium mb-1 dark:text-white">
@@ -152,6 +152,9 @@ const TextToLatex: React.FC<TextToLatexProps> = ({
                     {isConverting ? 'Converting...' : 'Convert to LaTeX'}
                 </button>
             </div>
+
+
+            <p className=''>The LaTeX code will be displayed below in the LaTeX input field</p>
         </div>
     );
 };
