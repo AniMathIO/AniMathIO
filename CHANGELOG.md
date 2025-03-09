@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.1](https://github.com/AniMathIO/AniMathIO/compare/v1.4.0...v1.4.1) (2025-03-09)
+
+
+### Features
+
+* fixed [#84](https://github.com/AniMathIO/AniMathIO/issues/84) bug ([5907ac8](https://github.com/AniMathIO/AniMathIO/commit/5907ac881e9dc3a1f279779112dc025d9feb2026))
+* fixed [#84](https://github.com/AniMathIO/AniMathIO/issues/84) bug ([4c9dee2](https://github.com/AniMathIO/AniMathIO/commit/4c9dee242b6c79c22de7b16e20af45e17b6204ea))
+* update from main ([7530ffc](https://github.com/AniMathIO/AniMathIO/commit/7530ffc3d4810851d45ab827edc736ec8d2a3d57))
+
+
+### Miscellaneous Chores
+
+* release 1.4.1 ([8ef26b7](https://github.com/AniMathIO/AniMathIO/commit/8ef26b7f44b94d1e4bf0385616ec31a5c677ac59))
+
 ## [1.4.0](https://github.com/AniMathIO/AniMathIO/compare/v1.3.1...v1.4.0) (2025-03-08)
 
 
