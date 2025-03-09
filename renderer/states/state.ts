@@ -364,6 +364,19 @@ export class State {
   handleKeyboardShortcut(event: KeyboardEvent) {
     if (!this.canvas) return;
 
+    // Check if the target is an input field, textarea, or any element that needs arrow key navigation
+    const target = event.target as HTMLElement;
+    const isInputElement =
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.isContentEditable ||
+      target.tagName === "SELECT";
+
+    // If we're in an input element let the default behavior happen
+    if (isInputElement) {
+      return;
+    }
+
     const activeObject = this.canvas.getActiveObject();
     const activeGroup = this.canvas.getActiveObjects();
 
@@ -384,10 +397,13 @@ export class State {
       case "ArrowDown":
       case "ArrowLeft":
       case "ArrowRight":
+        // Only handle arrow keys if:
+        // 1. Ctrl/Meta is pressed (for moving objects), OR
+        // 2. We're not in an input field (for time skipping)
         if (event.ctrlKey || event.metaKey) {
           this.moveSelectedObject(event.key);
           event.preventDefault();
-        } else {
+        } else if (!isInputElement) {
           this.skipInTime(event.key);
           event.preventDefault();
         }
