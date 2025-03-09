@@ -7,9 +7,10 @@
 
 AniMathIO revolutionizes the creation of mathematical videos, tailored for educators, students, and professionals seeking to bring complex concepts to life
 
-
 ## Special thanks for these projects
+
 They are core part of the AniMathIO software! Check them out!
+
 - [mafs](https://github.com/stevenpetryk/mafs)
 - [nextron](https://github.com/saltyshiomix/nextron)
 
@@ -30,7 +31,8 @@ They are core part of the AniMathIO software! Check them out!
 
 We are supporting the following operating systems: macOS, Windows, Linux (via universal dmg, exe, AppImage, Snap and unpacked).
 
-NOTE: Help is needed for MacOS support.
+**NOTE**: Help is needed for MacOS support.
+Due to the lack of available resources, the latest version of AniMathIO that supports MacOS is the legacy 1.3.0 version.
 
 ## Installation
 
