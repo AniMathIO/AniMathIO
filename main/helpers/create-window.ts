@@ -115,9 +115,21 @@ export const createWindow = (
       label: "Help",
       submenu: [
         {
-          label: "Documentation",
+          label: "Website",
           click: () => {
             shell.openExternal("https://animathio.com");
+          },
+        },
+        {
+          label: "Documentation",
+          click: () => {
+            shell.openExternal("https://docs.animathio.com/");
+          },
+        },
+        {
+          label: "Discord",
+          click: () => {
+            shell.openExternal("https://discord.com/invite/cZMTYSAHRX");
           },
         },
       ],
