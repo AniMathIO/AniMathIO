@@ -21,8 +21,8 @@
     "plugins": [
       {
         "name": "next"
-      }
-    ]
+      },
+    ],
   },
   "exclude": [
     "node_modules",
