@@ -95,8 +95,8 @@ vi.mock(
         getClipMaskRect: vi.fn(() => ({ id: "clip-mask" })),
       },
     };
-  },
-//   { virtual: true }
+  }
+  //   { virtual: true }
 );
 
 vi.mock("fabric-guideline-plugin", () => {
@@ -609,6 +609,399 @@ describe("State", () => {
 
       expect(isEditorMafsElement(mafsElement as any)).toBe(true);
       expect(isEditorMafsElement(textElement as any)).toBe(false);
+    });
+  });
+
+  describe("Media Resource Management", () => {
+    it("should replace an image resource", () => {
+      state.images = ["old-url"];
+      state.editorElements = [
+        {
+          id: "test-id",
+          type: "image",
+          properties: { src: "old-url" },
+        } as any,
+      ];
+
+      state.replaceImageResource(0, "new-url");
+
+      expect(state.images[0]).toEqual("new-url");
+      expect(state.editorElements[0].properties.src).toEqual("new-url");
+    });
+
+    it("should add media resources", () => {
+      state.addVideoResource("video-url");
+      state.addAudioResource("audio-url");
+      state.addImageResource("image-url");
+
+      expect(state.videos).toContain("video-url");
+      expect(state.audios).toContain("audio-url");
+      expect(state.images).toContain("image-url");
+    });
+  });
+
+  describe("Element TimeFrame Management", () => {
+    it("should update an editor element's time frame", async () => {
+      const element = {
+        id: "test-id",
+        timeFrame: { start: 0, end: 1000 },
+      } as any;
+
+      vi.spyOn(state, "updateEditorElement").mockResolvedValue();
+      vi.spyOn(state, "updateVideoElements").mockImplementation(() => {});
+      vi.spyOn(state, "updateAudioElements").mockImplementation(() => {});
+      vi.spyOn(state, "refreshAnimations").mockImplementation(() => {});
+
+      await state.updateEditorElementTimeFrame(element, {
+        start: 500,
+        end: 2000,
+      });
+
+      expect(state.updateEditorElement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "test-id",
+          timeFrame: { start: 500, end: 2000 },
+        })
+      );
+    });
+
+    it("should clamp time frame values to valid range", async () => {
+      const element = {
+        id: "test-id",
+        timeFrame: { start: 0, end: 1000 },
+      } as any;
+
+      vi.spyOn(state, "updateEditorElement").mockResolvedValue();
+      vi.spyOn(state, "updateVideoElements").mockImplementation(() => {});
+      vi.spyOn(state, "updateAudioElements").mockImplementation(() => {});
+      vi.spyOn(state, "refreshAnimations").mockImplementation(() => {});
+
+      await state.updateEditorElementTimeFrame(element, {
+        start: -500,
+        end: 50000,
+      });
+
+      expect(state.updateEditorElement).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timeFrame: { start: 0, end: state.maxTime },
+        })
+      );
+    });
+  });
+
+  describe("Keyboard Shortcuts", () => {
+    it("should handle delete key shortcut", () => {
+      // Set up canvas to return an active object
+      mockCanvas.getActiveObject.mockReturnValue({ id: "fabric-obj" });
+      mockCanvas.getActiveObjects.mockReturnValue([{ id: "fabric-obj" }]);
+
+      const mockEvent = {
+        key: "Delete",
+        ctrlKey: true,
+        metaKey: false,
+        preventDefault: vi.fn(),
+        target: document.createElement("div"),
+      } as unknown as KeyboardEvent;
+
+      // Create a spy for the method
+      const deleteObjectsSpy = vi
+        .spyOn(state, "deleteSelectedObjects")
+        .mockImplementation(() => {});
+
+      // Set the selected element
+      const selectedElement = { id: "test-id" } as any;
+      state.selectedElement = selectedElement;
+
+      // Capture the expected argument before calling the method
+      const expectedArg = [selectedElement];
+
+      state.handleKeyboardShortcut(mockEvent);
+
+      // Test with the captured value
+      expect(deleteObjectsSpy).toHaveBeenCalledWith(expectedArg);
+    });
+
+    it("should handle arrow key shortcuts for object movement", () => {
+      const mockEvent = {
+        key: "ArrowUp",
+        ctrlKey: true,
+        preventDefault: vi.fn(),
+        target: document.createElement("div"),
+      } as any;
+
+      vi.spyOn(state, "moveSelectedObject").mockImplementation(() => {});
+
+      state.handleKeyboardShortcut(mockEvent);
+
+      expect(state.moveSelectedObject).toHaveBeenCalledWith("ArrowUp");
+      expect(mockEvent.preventDefault).toHaveBeenCalled();
+    });
+
+    it("should handle copy/paste shortcuts", () => {
+      const copyEvent = {
+        key: "c",
+        ctrlKey: true,
+        altKey: true,
+        preventDefault: vi.fn(),
+        target: document.createElement("div"),
+      } as any;
+
+      const pasteEvent = {
+        key: "v",
+        ctrlKey: true,
+        altKey: true,
+        preventDefault: vi.fn(),
+        target: document.createElement("div"),
+      } as any;
+
+      vi.spyOn(state, "copyObject").mockImplementation(() => {});
+      vi.spyOn(state, "pasteObject").mockImplementation(() => {});
+
+      state.handleKeyboardShortcut(copyEvent);
+      expect(state.copyObject).toHaveBeenCalled();
+
+      state.handleKeyboardShortcut(pasteEvent);
+      expect(state.pasteObject).toHaveBeenCalled();
+    });
+  });
+
+  describe("Object Copy & Paste", () => {
+    it("should copy the selected element", () => {
+      const element = {
+        id: "test-id",
+        type: "text",
+        properties: { text: "Test" },
+      } as any;
+
+      state.selectedElement = element;
+      mockCanvas.getActiveObject.mockReturnValue({});
+
+      state.copyObject();
+
+      expect(state.clipboard).toEqual(element);
+    });
+
+    it("should paste a text element", () => {
+      state.clipboard = {
+        id: "test-id",
+        type: "text",
+        properties: {
+          text: "Test Text",
+          fontSize: 20,
+          fontWeight: 400,
+        },
+      } as any;
+
+      vi.spyOn(state, "addText").mockImplementation(() => {});
+
+      state.pasteObject();
+
+      expect(state.addText).toHaveBeenCalledWith({
+        text: "Test Text",
+        fontSize: 20,
+        fontWeight: 400,
+      });
+    });
+
+    it("should paste an image element", () => {
+      state.clipboard = {
+        id: "test-id",
+        type: "image",
+        name: "Media(image) 3",
+      } as any;
+
+      vi.spyOn(state, "addImage").mockImplementation(() => {});
+
+      state.pasteObject();
+
+      expect(state.addImage).toHaveBeenCalledWith(2); // index 2 (3-1)
+    });
+  });
+
+  describe("Animation Management", () => {
+    it("should add an animation", () => {
+      const animation = {
+        id: "anim-1",
+        type: "fadeIn",
+        targetId: "element-1",
+        duration: 1000,
+        properties: {},
+      };
+
+      vi.spyOn(state, "refreshAnimations").mockImplementation(() => {});
+
+      state.addAnimation(animation);
+
+      // Check for ID match instead of using toContain
+      expect(state.animations.some((a) => a.id === animation.id)).toBe(true);
+      // Or check properties individually
+      expect(state.animations[0].id).toBe("anim-1");
+      expect(state.animations[0].type).toBe("fadeIn");
+      expect(state.refreshAnimations).toHaveBeenCalled();
+    });
+
+    it("should update an animation", () => {
+      const animation1 = {
+        id: "anim-1",
+        type: "fadeIn",
+        targetId: "element-1",
+        duration: 1000,
+        properties: {},
+      };
+
+      const animation2 = {
+        id: "anim-1",
+        type: "fadeOut",
+        targetId: "element-1",
+        duration: 2000,
+        properties: {},
+      };
+
+      state.animations = [animation1];
+      vi.spyOn(state, "refreshAnimations").mockImplementation(() => {});
+
+      state.updateAnimation("anim-1", animation2);
+
+      expect(state.animations[0]).toEqual(animation2);
+      expect(state.refreshAnimations).toHaveBeenCalled();
+    });
+
+    it("should remove an animation", () => {
+      const animation = {
+        id: "anim-1",
+        type: "fadeIn",
+        targetId: "element-1",
+        duration: 1000,
+        properties: {},
+      };
+
+      state.animations = [animation];
+      vi.spyOn(state, "refreshAnimations").mockImplementation(() => {});
+
+      state.removeAnimation("anim-1");
+
+      expect(state.animations).toEqual([]);
+      expect(state.refreshAnimations).toHaveBeenCalled();
+    });
+  });
+
+  describe("Canvas Size Management", () => {
+    it("should update canvas size", () => {
+      vi.spyOn(state, "updateCanvasBoxSize").mockImplementation(() => {});
+      vi.spyOn(state, "refreshElements").mockImplementation(() => {});
+
+      state.setCanvasSize(1024, 768);
+
+      expect(state.canvas_width).toBe(1024);
+      expect(state.canvas_height).toBe(768);
+      expect(mockCanvas.setWidth).toHaveBeenCalledWith(1024);
+      expect(mockCanvas.setHeight).toHaveBeenCalledWith(768);
+      expect(state.updateCanvasBoxSize).toHaveBeenCalledWith(1024, 768);
+      expect(state.refreshElements).toHaveBeenCalled();
+    });
+
+    it("should create canvas box", () => {
+      // Reset mock to ensure we test the actual implementation
+      mockCanvas.add.mockClear();
+
+      // Update the Rect mock to return an object with the expected properties
+      vi.mocked(fabric.Rect).mockImplementation(
+        () =>
+          ({
+            width: 800,
+            height: 600,
+            sendToBack: vi.fn(),
+            set: vi.fn(),
+            setCoords: vi.fn(),
+            _controlsVisibility: {},
+            controls: {},
+            initialize: vi.fn(),
+            setOptions: vi.fn(),
+          } as unknown as fabric.Rect)
+      );
+
+      state.createCanvasBox(800, 600);
+
+      expect(mockCanvas.add).toHaveBeenCalled();
+      expect(state.canvasBox).toBeDefined();
+      if (state.canvasBox) {
+        expect(state.canvasBox.width).toBe(800);
+        expect(state.canvasBox.height).toBe(600);
+      }
+    });
+  });
+
+  describe("Time Control", () => {
+    it("should skip forward in time", () => {
+      vi.spyOn(state, "handleSeek").mockImplementation(() => {});
+      state.setCurrentTimeInMs(5000);
+
+      state.skipForward();
+
+      expect(state.handleSeek).toHaveBeenCalledWith(15000);
+    });
+
+    it("should skip backward in time", () => {
+      vi.spyOn(state, "handleSeek").mockImplementation(() => {});
+      state.setCurrentTimeInMs(15000);
+
+      state.skipBackward();
+
+      expect(state.handleSeek).toHaveBeenCalledWith(5000);
+    });
+
+    it("should skip to start", () => {
+      vi.spyOn(state, "handleSeek").mockImplementation(() => {});
+
+      state.skipToStart();
+
+      expect(state.handleSeek).toHaveBeenCalledWith(0);
+    });
+
+    it("should skip to end", () => {
+      vi.spyOn(state, "handleSeek").mockImplementation(() => {});
+
+      state.skipToEnd();
+
+      expect(state.handleSeek).toHaveBeenCalledWith(state.maxTime);
+    });
+  });
+
+  describe("Audio Context Management", () => {
+    it("should create and cache audio contexts", () => {
+      // Create a mock audio element with an ID
+      const mockAudio = { id: "audio-test" } as HTMLAudioElement;
+
+      // Clear the audio contexts map first to ensure a clean test
+      state.audioContexts.clear();
+
+      // First, verify the cache is empty
+      expect(state.audioContexts.size).toBe(0);
+
+      // First call to get the context
+      const result = state.getAudioContext(mockAudio);
+      expect(result).toBeDefined();
+
+      // Verify the context was added to the cache
+      expect(state.audioContexts.size).toBe(1);
+      expect(state.audioContexts.has("audio-test")).toBe(true);
+
+      // Store the cached entry
+      const cachedEntry = state.audioContexts.get("audio-test");
+
+      // Call getAudioContext again with the same audio element
+      const secondResult = state.getAudioContext(mockAudio);
+
+      // Verify that the second call returns the same object
+      // by checking that the map size didn't change
+      expect(state.audioContexts.size).toBe(1);
+
+      // And check that the entry in the map is still the same
+      expect(state.audioContexts.get("audio-test")).toBe(cachedEntry);
+
+      // Finally, check that the returned object has the expected properties
+      expect(secondResult).toHaveProperty("context");
+      expect(secondResult).toHaveProperty("sourceNode");
     });
   });
 });
