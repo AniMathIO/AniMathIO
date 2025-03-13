@@ -5,16 +5,16 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [$(cat .nvmrc)]
 
     steps:
       - uses: actions/checkout@v3
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Read .nvmrc
+        id: nvmrc
+        run: echo "::set-output name=nodeVersion::$(cat .nvmrc)"
+      - name: Use Node.js ${{ steps.nvmrc.outputs.nodeVersion }}
         uses: actions/setup-node@v3
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: ${{ steps.nvmrc.outputs.nodeVersion }}
       - name: Install dependencies
         run: |
           sudo apt-get update
