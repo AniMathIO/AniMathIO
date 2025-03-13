@@ -13,6 +13,12 @@ jobs:
         with:
           node-version-file: ".nvmrc"
       - name: Install dependencies
-        run: npm ci
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpixman-1-dev
+          npm ci
+      - name: Rebuild canvas package
+        if: failure()
+        run: npm rebuild canvas --update-binary
       - name: Run tests
         run: npm test
