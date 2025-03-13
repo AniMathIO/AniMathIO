@@ -17,7 +17,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libpixman-1-dev
-          npm ci
+          npm install
       - name: Rebuild canvas package
         if: failure()
         run: npm rebuild canvas --update-binary
