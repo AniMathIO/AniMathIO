@@ -5,26 +5,14 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version-file: [".nvmrc"]
 
     steps:
       - uses: actions/checkout@v3
-      - name: Use Node.js ${{ matrix.node-version-file }}
+      - name: Use Node.js
         uses: actions/setup-node@v3
         with:
-          node-version-file: ${{ matrix.node-version-file }}
-      - name: Install node-gyp
-        run: |
-          npm install -g node-gyp
+          node-version-file: ".nvmrc"
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libpixman-1-dev
-          npm ci
-      - name: Rebuild canvas package
-        run: |
-          npm rebuild canvas --update-binary
+        run: npm ci
       - name: Run tests
         run: npm test
