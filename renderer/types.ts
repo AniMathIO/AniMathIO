@@ -43,7 +43,12 @@ export type MafsEditorElement = EditorElementBase<
 
 export type AudioEditorElement = EditorElementBase<
   "audio",
-  { src: string; elementId: string }
+  {
+    src: string;
+    elementId: string;
+    volume: number;
+    muted: boolean;
+  }
 >;
 export type TextEditorElement = EditorElementBase<
   "text",
@@ -133,6 +138,7 @@ export type Animation =
 export type MenuOption =
   | "Videos"
   | "Audios"
+  | "Audio Mixer"
   | "Text"
   | "Images"
   | "Export"

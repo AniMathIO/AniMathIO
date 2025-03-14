@@ -423,7 +423,7 @@ export class State {
         }
         break;
 
-      case " ":{
+      case " ": {
         this.setPlaying(!this.playing);
         break;
       }
@@ -1155,6 +1155,8 @@ export class State {
       properties: {
         elementId: `audio-${audioId}`,
         src: videoElement.src,
+        volume: 1, // Default volume,
+        muted: false
       },
     });
   }
@@ -1286,6 +1288,8 @@ export class State {
       properties: {
         elementId: `audio-${id}`,
         src: audioElement.src,
+        volume: 1, // Default volume,
+        muted: false
       },
     });
   }
