@@ -13,6 +13,7 @@ import {
   SparklesIcon,
   VariableIcon
 } from "@heroicons/react/24/solid";
+import { RiSoundModuleFill } from "react-icons/ri";
 import { State } from "../states/state";
 
 const Menu = observer(() => {
@@ -74,6 +75,13 @@ const MENU_OPTIONS = [
     icon: MusicalNoteIcon,
     action: (state: State) => {
       state.setSelectedMenuOption("Audios");
+    },
+  },
+  {
+    name: "Audio Mixer",
+    icon: RiSoundModuleFill,
+    action: (state: State) => {
+      state.setSelectedMenuOption("Audio Mixer");
     },
   },
   {

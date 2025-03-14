@@ -5,6 +5,7 @@ import { observer } from "mobx-react";
 import ExportVideoPanel from "./panels/ExportVideoPanel";
 import AnimationsPanel from "./panels/AnimationsPanel";
 import AudioResourcesPanel from "./panels/AudioResourcesPanel";
+import AudioMixerPanel from "./panels/AudioMixerPanel";
 import FillPanel from "./panels/FillPanel";
 import ImageResourcesPanel from "./panels/ImageResourcesPanel";
 import TextResourcesPanel from "./panels/TextResourcesPanel";
@@ -19,6 +20,7 @@ const Resources = observer(() => {
         <div className="bg-slate-200 dark:bg-gray-700 text-black dark:text-white h-full">
             {selectedMenuOption === "Videos" ? <VideoResourcesPanel /> : null}
             {selectedMenuOption === "Audios" ? <AudioResourcesPanel /> : null}
+            {selectedMenuOption === "Audio Mixer" ? <AudioMixerPanel /> : null}
             {selectedMenuOption === "Images" ? <ImageResourcesPanel /> : null}
             {selectedMenuOption === "Text" ? <TextResourcesPanel /> : null}
             {selectedMenuOption === "Animations" ? <AnimationsPanel /> : null}
