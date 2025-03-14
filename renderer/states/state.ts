@@ -133,13 +133,39 @@ export class State {
     // Rest of the code remains the same
     const mediaFiles = await Promise.all(mediaPromises);
 
+    // Create a clean version of editor elements that ensures all audio elements
+    // have volume and muted properties for serialization
+    const editorElementsForSerialization = this.editorElements.map(
+      (element) => {
+        if (element.type === "audio") {
+          return {
+            ...element,
+            properties: {
+              ...element.properties,
+              // Ensure volume and muted are saved
+              volume:
+                element.properties.volume !== undefined
+                  ? element.properties.volume
+                  : 1,
+              muted:
+                element.properties.muted !== undefined
+                  ? element.properties.muted
+                  : false,
+              masterVolume: element.properties.masterVolume,
+            },
+          };
+        }
+        return element;
+      }
+    );
+
     const stateObject = {
       backgroundColor: this.backgroundColor,
       selectedMenuOption: this.selectedMenuOption,
       audios: this.audios,
       videos: this.videos,
       images: this.images,
-      editorElements: this.editorElements,
+      editorElements: editorElementsForSerialization,
       maxTime: this.maxTime,
       animations: this.animations,
       currentKeyFrame: this.currentKeyFrame,
@@ -201,7 +227,29 @@ export class State {
     this.videos = [];
     this.images = [];
 
-    this.editorElements = stateObject.editorElements;
+    // Set editor elements with default audio settings for backward compatibility
+    this.editorElements = stateObject.editorElements.map((element: any) => {
+      if (element.type === "audio") {
+        return {
+          ...element,
+          properties: {
+            ...element.properties,
+            // Set default values if not present (backward compatibility)
+            volume:
+              element.properties.volume !== undefined
+                ? element.properties.volume
+                : 1,
+            muted:
+              element.properties.muted !== undefined
+                ? element.properties.muted
+                : false,
+            // masterVolume is optional
+          },
+        };
+      }
+      return element;
+    });
+
     this.maxTime = stateObject.maxTime;
     this.animations = stateObject.animations;
     this.currentKeyFrame = stateObject.currentKeyFrame;
@@ -1408,6 +1456,7 @@ export class State {
       }
 
       // Important: Don't call refreshElements or updateEditorElement here
+      // This keeps the updates lightweight and prevents canvas flickering
     }
   }
 

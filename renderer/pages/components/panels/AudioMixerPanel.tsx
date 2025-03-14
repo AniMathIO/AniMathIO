@@ -20,11 +20,11 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
         if (audioElement) {
             // Initialize volume and mute state from properties or audio element
             const volumeValue = element.properties.volume !== undefined ?
-                element.properties.volume * 100 : audioElement.volume * 100;
+                element.properties.volume * 100 : 100;
             setVolume(volumeValue);
 
             const mutedValue = element.properties.muted !== undefined ?
-                element.properties.muted : audioElement.muted;
+                element.properties.muted : false;
             setMuted(mutedValue);
 
             // Apply stored settings to audio element
@@ -40,11 +40,8 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
         if (audioElement) {
             audioElement.volume = newVolume / 100;
 
-            // Update the properties in the element without triggering a full refresh
-            element.properties.volume = newVolume / 100;
-
-            // Use a lightweight update approach instead of full element update
-            updateAudioSettings(element.id, { volume: newVolume / 100 });
+            // Use the state's updateAudioSettings method
+            state.updateAudioSettings(element.id, { volume: newVolume / 100 });
         }
     };
 
@@ -54,19 +51,9 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
             audioElement.muted = newMuted;
             setMuted(newMuted);
 
-            // Update the properties in the element without triggering a full refresh
-            element.properties.muted = newMuted;
-
-            // Use a lightweight update approach
-            updateAudioSettings(element.id, { muted: newMuted });
+            // Use the state's updateAudioSettings method
+            state.updateAudioSettings(element.id, { muted: newMuted });
         }
-    };
-
-    // This function updates audio settings without triggering canvas refresh
-    const updateAudioSettings = (elementId: string, settings: Partial<{ volume: number, muted: boolean }>) => {
-        // Optional: Store these settings somewhere that persists with the project
-        // This could be in a separate map in the state or by another mechanism
-        // that doesn't trigger canvas refresh
     };
 
     return (
@@ -104,6 +91,7 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
     );
 });
 
+
 const AudioMixerPanel = observer(() => {
     const state = React.useContext(StateContext);
 
@@ -131,8 +119,8 @@ const AudioMixerPanel = observer(() => {
                 const individualVolume = element.properties.volume || 1;
                 audioElement.volume = (newVolume / 100) * individualVolume;
 
-                // Also update the element properties
-                element.properties.masterVolume = newVolume / 100;
+                // Update master volume for each element
+                state.updateAudioSettings(element.id, { masterVolume: newVolume / 100 });
             }
         });
     };
