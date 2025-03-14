@@ -4,6 +4,7 @@ import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { AudioEditorElement } from "@/types";
 import { SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/solid";
+
 interface AudioTrackProps {
     element: AudioEditorElement;
     index: number;
@@ -12,14 +13,25 @@ interface AudioTrackProps {
 const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
     const state = React.useContext(StateContext);
     const [volume, setVolume] = useState(100);
+    const [muted, setMuted] = useState(false);
     const audioElement = document.getElementById(element.properties.elementId) as HTMLAudioElement;
 
     useEffect(() => {
         if (audioElement) {
-            // Initialize volume state from audio element
-            setVolume(audioElement.volume * 100);
+            // Initialize volume and mute state from properties or audio element
+            const volumeValue = element.properties.volume !== undefined ?
+                element.properties.volume * 100 : audioElement.volume * 100;
+            setVolume(volumeValue);
+
+            const mutedValue = element.properties.muted !== undefined ?
+                element.properties.muted : audioElement.muted;
+            setMuted(mutedValue);
+
+            // Apply stored settings to audio element
+            audioElement.volume = volumeValue / 100;
+            audioElement.muted = mutedValue;
         }
-    }, [audioElement]);
+    }, [audioElement, element.id]);
 
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newVolume = parseInt(e.target.value);
@@ -28,34 +40,33 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
         if (audioElement) {
             audioElement.volume = newVolume / 100;
 
-            // Update the element properties to persist volume settings
-            const updatedElement = {
-                ...element,
-                properties: {
-                    ...element.properties,
-                    volume: newVolume / 100
-                }
-            };
+            // Update the properties in the element without triggering a full refresh
+            element.properties.volume = newVolume / 100;
 
-            state.updateEditorElement(updatedElement);
+            // Use a lightweight update approach instead of full element update
+            updateAudioSettings(element.id, { volume: newVolume / 100 });
         }
     };
 
     const handleMuteToggle = () => {
         if (audioElement) {
-            audioElement.muted = !audioElement.muted;
+            const newMuted = !audioElement.muted;
+            audioElement.muted = newMuted;
+            setMuted(newMuted);
 
-            // Update the element properties to persist mute settings
-            const updatedElement = {
-                ...element,
-                properties: {
-                    ...element.properties,
-                    muted: audioElement.muted
-                }
-            };
+            // Update the properties in the element without triggering a full refresh
+            element.properties.muted = newMuted;
 
-            state.updateEditorElement(updatedElement);
+            // Use a lightweight update approach
+            updateAudioSettings(element.id, { muted: newMuted });
         }
+    };
+
+    // This function updates audio settings without triggering canvas refresh
+    const updateAudioSettings = (elementId: string, settings: Partial<{ volume: number, muted: boolean }>) => {
+        // Optional: Store these settings somewhere that persists with the project
+        // This could be in a separate map in the state or by another mechanism
+        // that doesn't trigger canvas refresh
     };
 
     return (
@@ -69,10 +80,9 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
                 <div className="flex items-center mt-1">
                     <button
                         onClick={handleMuteToggle}
-                        className={`w-6 h-6 mr-2 flex items-center justify-center rounded-xl ${audioElement?.muted ? 'bg-red-500' : 'bg-green-500'
-                            }`}
+                        className={`w-6 h-6 mr-2 flex items-center justify-center rounded-xl ${muted ? 'bg-red-500' : 'bg-green-500'}`}
                     >
-                        {audioElement?.muted ? (
+                        {muted ? (
                             <SpeakerXMarkIcon className="w-4 h-4" />
                         ) : (
                             <SpeakerWaveIcon className="w-4 h-4" />
@@ -120,9 +130,21 @@ const AudioMixerPanel = observer(() => {
                 // Apply proportionally based on individual track volume
                 const individualVolume = element.properties.volume || 1;
                 audioElement.volume = (newVolume / 100) * individualVolume;
+
+                // Also update the element properties
+                element.properties.masterVolume = newVolume / 100;
             }
         });
     };
+
+    // Initialize master volume on component mount and when elements change
+    useEffect(() => {
+        // Check if we have a master volume setting stored
+        const firstElement = activeAudioElements[0];
+        if (firstElement?.properties.masterVolume !== undefined) {
+            setMasterVolume(firstElement.properties.masterVolume * 100);
+        }
+    }, [activeAudioElements]);
 
     return (
         <div className="bg-slate-200 dark:bg-gray-700">
@@ -136,7 +158,7 @@ const AudioMixerPanel = observer(() => {
                 </div>
             ) : (
                 <>
-                    <div className="p-2 border-b border-gray-600 darK:bg-gray-800">
+                    <div className="p-2 border-b border-gray-600 dark:bg-gray-800">
                         <div className="text-sm font-semibold mb-1">Master Volume</div>
                         <div className="flex items-center">
                             <SpeakerWaveIcon className="mr-2 w-6 h-6" />

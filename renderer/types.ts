@@ -48,6 +48,7 @@ export type AudioEditorElement = EditorElementBase<
     elementId: string;
     volume: number;
     muted: boolean;
+    masterVolume?: number;
   }
 >;
 export type TextEditorElement = EditorElementBase<

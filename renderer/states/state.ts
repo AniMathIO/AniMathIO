@@ -1156,7 +1156,7 @@ export class State {
         elementId: `audio-${audioId}`,
         src: videoElement.src,
         volume: 1, // Default volume,
-        muted: false
+        muted: false,
       },
     });
   }
@@ -1289,7 +1289,7 @@ export class State {
         elementId: `audio-${id}`,
         src: audioElement.src,
         volume: 1, // Default volume,
-        muted: false
+        muted: false,
       },
     });
   }
@@ -1387,6 +1387,29 @@ export class State {
   //   }, this.maxTime);
 
   // }
+
+  updateAudioSettings(
+    id: string,
+    settings: Partial<{ volume: number; muted: boolean; masterVolume?: number }>
+  ) {
+    const index = this.editorElements.findIndex((element) => element.id === id);
+    if (index >= 0 && this.editorElements[index].type === "audio") {
+      const element = this.editorElements[index] as AudioEditorElement;
+
+      // Update properties
+      if (settings.volume !== undefined) {
+        element.properties.volume = settings.volume;
+      }
+      if (settings.muted !== undefined) {
+        element.properties.muted = settings.muted;
+      }
+      if (settings.masterVolume !== undefined) {
+        element.properties.masterVolume = settings.masterVolume;
+      }
+
+      // Important: Don't call refreshElements or updateEditorElement here
+    }
+  }
 
   setVideoFormat(format: "mp4" | "webm") {
     this.selectedVideoFormat = format;
