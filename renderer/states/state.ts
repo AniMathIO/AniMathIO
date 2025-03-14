@@ -423,6 +423,11 @@ export class State {
         }
         break;
 
+      case " ":{
+        this.setPlaying(!this.playing);
+        break;
+      }
+
       default:
         break;
     }
