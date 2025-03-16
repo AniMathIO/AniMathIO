@@ -1,8 +1,10 @@
 "use client";
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { MicrophoneIcon, StopIcon, TrashIcon, CheckIcon, AdjustmentsHorizontalIcon } from "@heroicons/react/24/solid";
+import WaveSurfer from "wavesurfer.js";
+import RecordPlugin from 'wavesurfer.js/dist/plugins/record';
 
 const AudioRecorder = observer(() => {
     const state = React.useContext(StateContext);
@@ -15,14 +17,18 @@ const AudioRecorder = observer(() => {
     const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
     const [showDeviceSelector, setShowDeviceSelector] = useState(false);
+    const [visualizerReady, setVisualizerReady] = useState(false);
+
+    // Element ID for the visualizer - must be unique
+    const visualizerContainerId = "audio-recorder-visualizer";
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
-    const requestAnimationRef = useRef<number | null>(null);
-    const audioContextRef = useRef<AudioContext | null>(null);
-    const analyserRef = useRef<AnalyserNode | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
-    const startTimeRef = useRef<number>(0);
+    const wavesurferRef = useRef<WaveSurfer | null>(null);
+    const recordPluginRef = useRef<any | null>(null);
+    const timeInterval = useRef<NodeJS.Timeout | null>(null);
+    const visualizerInitializedRef = useRef<boolean>(false);
 
     // Fetch available audio input devices
     const getAudioDevices = async () => {
@@ -37,7 +43,7 @@ const AudioRecorder = observer(() => {
             const devices = await navigator.mediaDevices.enumerateDevices();
             const audioInputs = devices.filter(device => device.kind === 'audioinput');
 
-            console.log("Available audio devices:", audioInputs);
+            console.info("Available audio devices:", audioInputs);
             setAudioDevices(audioInputs);
 
             // Set default device if we have devices and none is selected
@@ -52,6 +58,106 @@ const AudioRecorder = observer(() => {
         }
     };
 
+    // Cleanup function for WaveSurfer
+    const cleanupWaveSurfer = useCallback(() => {
+        if (recordPluginRef.current) {
+            try {
+                if (recordPluginRef.current.isRecording && recordPluginRef.current.isRecording()) {
+                    recordPluginRef.current.stopRecording();
+                }
+            } catch (err) {
+                console.error("Error stopping wavesurfer recording:", err);
+            }
+            recordPluginRef.current = null;
+        }
+
+        if (wavesurferRef.current) {
+            try {
+                wavesurferRef.current.destroy();
+            } catch (err) {
+                console.error("Error destroying wavesurfer:", err);
+            }
+            wavesurferRef.current = null;
+        }
+
+        if (timeInterval.current) {
+            clearInterval(timeInterval.current);
+            timeInterval.current = null;
+        }
+
+        visualizerInitializedRef.current = false;
+        setVisualizerReady(false);
+    }, []);
+
+    // Initialize WaveSurfer - separated from UI render cycle
+    const initializeVisualizer = useCallback(async () => {
+        // If already initialized or recording is in progress, skip
+        if (visualizerInitializedRef.current || isRecording) return;
+
+        // First clean up any existing instances
+        cleanupWaveSurfer();
+
+        // Wait for DOM to be ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Get the container element
+        const container = document.getElementById(visualizerContainerId);
+        if (!container) {
+            console.warn(`Visualizer container #${visualizerContainerId} not found`);
+            return;
+        }
+
+        try {
+            console.info("Creating WaveSurfer instance");
+
+            // Create WaveSurfer instance
+            const wavesurfer = WaveSurfer.create({
+                container: `#${visualizerContainerId}`,
+                waveColor: '#00a0f5', 
+                progressColor: '#027bbca9',
+                height: 80,
+                cursorWidth: 0,
+                interact: false,
+                fillParent: true,
+                minPxPerSec: 50,
+                normalize: true,
+                autoCenter: true,
+                barWidth: 2,
+                barGap: 1,
+                barRadius: 2,
+            });
+
+            wavesurferRef.current = wavesurfer;
+
+            // Create and register Record plugin
+            const recordPlugin = wavesurfer.registerPlugin(
+                RecordPlugin.create({
+                    renderRecordedAudio: false,
+                    scrollingWaveform: false,
+                    continuousWaveform: true,
+                    continuousWaveformDuration: 30,
+                })
+            );
+
+            recordPluginRef.current = recordPlugin;
+
+            // Add event listeners
+            // if (recordPlugin.on) {
+            //     recordPlugin.on('record-progress', (time: number) => {
+            //         console.info("WaveSurfer recording progress:", Math.floor(time / 1000));
+            //     });
+            // }
+
+            visualizerInitializedRef.current = true;
+            setVisualizerReady(true);
+            console.info("WaveSurfer initialized successfully");
+        } catch (error) {
+            console.error("Error initializing WaveSurfer:", error);
+            visualizerInitializedRef.current = false;
+            setVisualizerReady(false);
+        }
+    }, [cleanupWaveSurfer, isRecording, visualizerContainerId]);
+
     // Listen for device changes
     useEffect(() => {
         getAudioDevices();
@@ -64,18 +170,29 @@ const AudioRecorder = observer(() => {
         };
     }, []);
 
+    // Clean up on unmount
+    useEffect(() => {
+        return cleanupWaveSurfer;
+    }, [cleanupWaveSurfer]);
+
     // Recording timer effect
     useEffect(() => {
-        let interval: NodeJS.Timeout | null = null;
+        if (timeInterval.current) {
+            clearInterval(timeInterval.current);
+            timeInterval.current = null;
+        }
 
         if (isRecording && !isPaused) {
-            interval = setInterval(() => {
-                setRecordingTime((prev) => prev + 1);
+            timeInterval.current = setInterval(() => {
+                setRecordingTime(prev => prev + 1);
             }, 1000);
         }
 
         return () => {
-            if (interval) clearInterval(interval);
+            if (timeInterval.current) {
+                clearInterval(timeInterval.current);
+                timeInterval.current = null;
+            }
         };
     }, [isRecording, isPaused]);
 
@@ -83,31 +200,6 @@ const AudioRecorder = observer(() => {
     const isElectron = () => {
         // @ts-ignore
         return window?.electron !== undefined;
-    };
-
-    // Visualizer animation frame
-    const updateVisualizer = () => {
-        if (!analyserRef.current) return;
-
-        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getByteFrequencyData(dataArray);
-
-        // Reduce the data to a manageable size for visualization
-        const visualData = Array.from({ length: 30 }, (_, i) => {
-            const start = Math.floor(i * dataArray.length / 30);
-            const end = Math.floor((i + 1) * dataArray.length / 30);
-            let sum = 0;
-            for (let j = start; j < end; j++) {
-                sum += dataArray[j];
-            }
-            return sum / (end - start); // Average value
-        });
-
-        setVisualizerData(visualData);
-
-        if (isRecording && !isPaused) {
-            requestAnimationRef.current = requestAnimationFrame(updateVisualizer);
-        }
     };
 
     const requestElectronPermission = async () => {
@@ -132,6 +224,7 @@ const AudioRecorder = observer(() => {
 
     const startRecording = async () => {
         setPermissionError(null);
+        setRecordingTime(0);
 
         try {
             // First check if we need to request Electron-specific permissions
@@ -141,8 +234,14 @@ const AudioRecorder = observer(() => {
                 return;
             }
 
-            // Additional logging for debugging
-            console.log("Starting recording, requesting user media with device:", selectedDeviceId);
+            // Prepare the UI for recording - this will make the container visible
+            setIsRecording(true);
+
+            // Wait for render cycle to complete
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Initialize the visualizer now that the container is in the DOM
+            await initializeVisualizer();
 
             // Configure audio constraints based on selected device
             const audioConstraints: MediaTrackConstraints = {
@@ -156,12 +255,14 @@ const AudioRecorder = observer(() => {
                 audioConstraints.deviceId = { exact: selectedDeviceId };
             }
 
-            // Standard getUserMedia request with additional constraints
+            console.info("Starting recording with device:", selectedDeviceId);
+
+            // Get media stream
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: audioConstraints
             });
 
-            console.log("Media stream obtained successfully");
+            console.info("Media stream obtained successfully");
             streamRef.current = stream;
 
             // Check if we actually got audio tracks
@@ -169,22 +270,19 @@ const AudioRecorder = observer(() => {
                 throw new Error("No audio tracks found in the media stream");
             }
 
-            // Log audio track info for debugging
-            const audioTrack = stream.getAudioTracks()[0];
-            console.log("Audio track:", audioTrack.label, audioTrack.enabled, audioTrack.readyState);
-
-            // Set up audio context and analyser for visualization
-            // @ts-ignore - AudioContext might not be recognized in some TS configs
-            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-            const audioContext = new AudioContextClass();
-            audioContextRef.current = audioContext;
-
-            const source = audioContext.createMediaStreamSource(stream);
-            const analyser = audioContext.createAnalyser();
-            analyserRef.current = analyser;
-
-            analyser.fftSize = 2048;
-            source.connect(analyser);
+            // Start WaveSurfer recording if available
+            if (recordPluginRef.current && visualizerInitializedRef.current) {
+                try {
+                    await recordPluginRef.current.startRecording({
+                        deviceId: selectedDeviceId || undefined
+                    });
+                    console.info("WaveSurfer recording started successfully");
+                } catch (err) {
+                    console.warn("Could not start WaveSurfer recording:", err);
+                }
+            } else {
+                console.warn("Record plugin not initialized, continuing without visualization");
+            }
 
             // Check for supported MIME types
             const mimeTypes = [
@@ -199,7 +297,7 @@ const AudioRecorder = observer(() => {
             for (const type of mimeTypes) {
                 if (MediaRecorder.isTypeSupported(type)) {
                     selectedMimeType = type;
-                    console.log("Using MIME type:", selectedMimeType);
+                    console.info("Using MIME type:", selectedMimeType);
                     break;
                 }
             }
@@ -218,23 +316,22 @@ const AudioRecorder = observer(() => {
             mediaRecorderRef.current = mediaRecorder;
 
             mediaRecorder.ondataavailable = (event) => {
-                console.log("Data available event, size:", event.data.size);
                 if (event.data.size > 0) {
                     audioChunksRef.current.push(event.data);
                 }
             };
 
             mediaRecorder.onstop = () => {
-                console.log("MediaRecorder stopped, chunks:", audioChunksRef.current.length);
+                console.info("MediaRecorder stopped, chunks:", audioChunksRef.current.length);
                 if (audioChunksRef.current.length === 0) {
                     setPermissionError("No audio data was recorded. Please check your microphone settings.");
                     return;
                 }
 
                 const mimeType = mediaRecorder.mimeType || 'audio/webm';
-                console.log("Creating blob with MIME type:", mimeType);
+                console.info("Creating blob with MIME type:", mimeType);
                 const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-                console.log("Blob created, size:", audioBlob.size);
+                console.info("Blob created, size:", audioBlob.size);
 
                 const url = URL.createObjectURL(audioBlob);
                 setAudioUrl(url);
@@ -242,7 +339,6 @@ const AudioRecorder = observer(() => {
                 // Clean up stream tracks
                 if (streamRef.current) {
                     streamRef.current.getTracks().forEach(track => {
-                        console.log("Stopping track:", track.label);
                         track.stop();
                     });
                 }
@@ -251,16 +347,24 @@ const AudioRecorder = observer(() => {
             audioChunksRef.current = [];
 
             // Request data at regular intervals for more reliable recording
-            console.log("Starting MediaRecorder");
+            console.info("Starting MediaRecorder");
             mediaRecorder.start(100);
-            setIsRecording(true);
-            startTimeRef.current = Date.now();
-
-            // Start the visualizer
-            requestAnimationRef.current = requestAnimationFrame(updateVisualizer);
 
         } catch (error) {
             console.error("Error accessing microphone:", error);
+
+            // Stop WaveSurfer recording if there was an error
+            if (recordPluginRef.current && visualizerInitializedRef.current) {
+                try {
+                    if (recordPluginRef.current.isRecording && recordPluginRef.current.isRecording()) {
+                        recordPluginRef.current.stopRecording();
+                    }
+                } catch (e) {
+                    console.warn("Error stopping WaveSurfer recording:", e);
+                }
+            }
+
+            setIsRecording(false);
 
             // Provide specific error messages based on the error
             if (error instanceof DOMException) {
@@ -288,10 +392,22 @@ const AudioRecorder = observer(() => {
     const pauseRecording = () => {
         if (mediaRecorderRef.current && isRecording) {
             if (!isPaused) {
+                // Pause WaveSurfer recording
+                if (recordPluginRef.current && visualizerInitializedRef.current) {
+                    try {
+                        if (recordPluginRef.current.isRecording && recordPluginRef.current.isRecording()) {
+                            recordPluginRef.current.pauseRecording();
+                            console.info("WaveSurfer recording paused");
+                        }
+                    } catch (e) {
+                        console.warn("Error pausing WaveSurfer recording:", e);
+                    }
+                }
+
                 // Some versions of MediaRecorder don't support pause
                 try {
                     mediaRecorderRef.current.pause();
-                    console.log("MediaRecorder paused");
+                    console.info("MediaRecorder paused");
                 } catch (e) {
                     console.warn("MediaRecorder pause not supported", e);
                     // If pause is not supported, we'll just stop the recording
@@ -300,26 +416,28 @@ const AudioRecorder = observer(() => {
                 }
 
                 setIsPaused(true);
-
-                // Cancel animation frame
-                if (requestAnimationRef.current) {
-                    cancelAnimationFrame(requestAnimationRef.current);
-                    requestAnimationRef.current = null;
-                }
             } else {
+                // Resume WaveSurfer recording
+                if (recordPluginRef.current && visualizerInitializedRef.current) {
+                    try {
+                        if (recordPluginRef.current.isPaused && recordPluginRef.current.isPaused()) {
+                            recordPluginRef.current.resumeRecording();
+                            console.info("WaveSurfer recording resumed");
+                        }
+                    } catch (e) {
+                        console.warn("Error resuming WaveSurfer recording:", e);
+                    }
+                }
+
                 try {
                     mediaRecorderRef.current.resume();
-                    console.log("MediaRecorder resumed");
+                    console.info("MediaRecorder resumed");
                 } catch (e) {
                     console.warn("MediaRecorder resume not supported", e);
                     // If resume is not supported, we might need to restart recording
-                    // This is a complex case and might require a different approach
                 }
 
                 setIsPaused(false);
-
-                // Restart animation
-                requestAnimationRef.current = requestAnimationFrame(updateVisualizer);
             }
         }
     };
@@ -327,8 +445,23 @@ const AudioRecorder = observer(() => {
     const stopRecording = () => {
         if (mediaRecorderRef.current && isRecording) {
             try {
-                console.log("Stopping MediaRecorder");
+                console.info("Stopping MediaRecorder");
                 mediaRecorderRef.current.stop();
+
+                // Stop WaveSurfer recording
+                if (recordPluginRef.current && visualizerInitializedRef.current) {
+                    try {
+                        if (recordPluginRef.current.isRecording &&
+                            (recordPluginRef.current.isRecording() ||
+                                (recordPluginRef.current.isPaused && recordPluginRef.current.isPaused()))) {
+                            recordPluginRef.current.stopRecording();
+                            console.info("WaveSurfer recording stopped");
+                        }
+                    } catch (e) {
+                        console.warn("Error stopping WaveSurfer recording:", e);
+                    }
+                }
+
             } catch (e) {
                 console.error("Error stopping recorder:", e);
                 // Even if there's an error, we should update the UI
@@ -336,41 +469,38 @@ const AudioRecorder = observer(() => {
 
             setIsRecording(false);
             setIsPaused(false);
-
-            // Cancel animation frame
-            if (requestAnimationRef.current) {
-                cancelAnimationFrame(requestAnimationRef.current);
-                requestAnimationRef.current = null;
-            }
         }
     };
 
     const discardRecording = () => {
         if (audioUrl) {
-            console.log("Discarding recording");
+            console.info("Discarding recording");
             URL.revokeObjectURL(audioUrl);
             setAudioUrl(null);
         }
 
         setRecordingTime(0);
         audioChunksRef.current = [];
+
+        // Cleanup WaveSurfer
+        cleanupWaveSurfer();
     };
 
     const saveRecording = () => {
         if (audioUrl) {
-            console.log("Saving recording");
+            console.info("Saving recording");
 
             // Add to the audio resources
             state.addAudioResource(audioUrl);
 
             // Find the index of the newly added audio
             const index = state.audios.length - 1;
-            console.log("Audio added at index:", index);
+            console.info("Audio added at index:", index);
 
             // Create a new audio element to preload the audio
             const preloadAudio = new Audio(audioUrl);
             preloadAudio.addEventListener('loadedmetadata', () => {
-                console.log("Audio metadata loaded, duration:", preloadAudio.duration);
+                console.info("Audio metadata loaded, duration:", preloadAudio.duration);
 
                 // Now we know the audio is loaded, add it to the timeline
                 state.addAudio(index);
@@ -378,6 +508,9 @@ const AudioRecorder = observer(() => {
                 // Reset after saving
                 setAudioUrl(null);
                 setRecordingTime(0);
+
+                // Cleanup WaveSurfer
+                cleanupWaveSurfer();
             });
 
             // Start loading the audio
@@ -420,14 +553,14 @@ const AudioRecorder = observer(() => {
     };
 
     return (
-        <div className="p-4 bg-gray-800 rounded-lg mb-4">
+        <div className="p-4 bg-white dark:bg-gray-800 rounded-lg mb-4">
             <div className="flex justify-between items-center mb-2">
                 <h3 className="text-sm font-semibold">Voice Narration</h3>
 
                 {!isRecording && !audioUrl && audioDevices.length > 0 && (
                     <button
                         onClick={toggleDeviceSelector}
-                        className="text-gray-400 hover:text-white transition-colors"
+                        className="text-gray-600 hover:text-black dark:text-gray-400 dark:hover:text-white transition-colors"
                         title="Select microphone"
                     >
                         <AdjustmentsHorizontalIcon className="w-5 h-5" />
@@ -436,12 +569,13 @@ const AudioRecorder = observer(() => {
             </div>
 
             {showDeviceSelector && !isRecording && !audioUrl && (
-                <div className="mb-3 p-2 bg-gray-700 rounded-lg">
-                    <label className="block text-xs text-gray-400 mb-1">Select Microphone</label>
+                <div className="mb-3 p-2 bg-slate-200 dark:bg-gray-700 rounded-lg">
+                    <label className="block text-xs text-black dark:text-gray-400 mb-1">Select Microphone</label>
                     <select
+                        aria-label="Select microphone"
                         value={selectedDeviceId}
                         onChange={(e) => setSelectedDeviceId(e.target.value)}
-                        className="w-full bg-gray-900 text-white rounded py-1.5 px-2 text-sm"
+                        className="w-full text-black bg-white dark:bg-gray-900 dark:text-white rounded py-1.5 px-2 text-sm"
                     >
                         {audioDevices.map((device) => (
                             <option key={device.deviceId} value={device.deviceId}>
@@ -451,7 +585,7 @@ const AudioRecorder = observer(() => {
                     </select>
                     <button
                         onClick={getAudioDevices}
-                        className="mt-2 text-xs text-blue-400 hover:text-blue-300"
+                        className="mt-2 text-xs text-blue-700 hover:text-blue-900 hover:font-medium darK:text-blue-400 dark:hover:text-blue-300"
                     >
                         Refresh device list
                     </button>
@@ -481,30 +615,16 @@ const AudioRecorder = observer(() => {
                         <span className={`rounded-full w-3 h-3 ${isPaused ? 'bg-yellow-500' : 'bg-red-500 animate-pulse'}`}></span>
                     </div>
 
-                    <div className="h-16 bg-gray-900 rounded-lg overflow-hidden flex items-end p-1">
-                        {visualizerData.length > 0 ? (
-                            visualizerData.map((value, index) => (
-                                <div
-                                    key={index}
-                                    className="w-1 mx-0.5 bg-gradient-to-t from-red-600 to-red-400"
-                                    style={{
-                                        height: `${Math.min(100, value / 2)}%`,
-                                        transition: 'height 0.1s ease'
-                                    }}
-                                ></div>
-                            ))
-                        ) : (
-                            <div className="w-full text-center text-gray-500 text-xs">
-                                {isPaused ? "Recording paused" : "Speak now..."}
-                            </div>
-                        )}
-                    </div>
+                    {/* Using fixed ID for the visualizer container */}
+                    <div
+                        id={visualizerContainerId}
+                        className="w-full h-20 dark:bg-gray-700 border-[1px] dark:border-0 border-gray-300 rounded-md overflow-hidden"
+                    ></div>
 
                     <div className="flex justify-between space-x-2">
                         <button
                             onClick={pauseRecording}
-                            className={`flex-1 py-1.5 px-3 flex items-center justify-center ${isPaused ? 'bg-green-600 hover:bg-green-700' : 'bg-yellow-600 hover:bg-yellow-700'
-                                } text-white rounded-lg transition-colors`}
+                            className={`flex-1 py-1.5 px-3 flex items-center justify-center ${isPaused ? 'bg-green-600 hover:bg-green-700' : 'bg-yellow-600 hover:bg-yellow-700'} text-white rounded-lg transition-colors`}
                         >
                             {isPaused ? 'Resume' : 'Pause'}
                         </button>
@@ -552,4 +672,5 @@ const AudioRecorder = observer(() => {
         </div>
     );
 });
+
 export default AudioRecorder;
