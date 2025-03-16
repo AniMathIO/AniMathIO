@@ -5,6 +5,7 @@ import { observer } from "mobx-react";
 import { MicrophoneIcon, StopIcon, TrashIcon, CheckIcon, AdjustmentsHorizontalIcon } from "@heroicons/react/24/solid";
 import WaveSurfer from "wavesurfer.js";
 import RecordPlugin from 'wavesurfer.js/dist/plugins/record';
+import { getUid } from "@/utils";
 
 const AudioRecorder = observer(() => {
     const state = React.useContext(StateContext);
@@ -28,6 +29,7 @@ const AudioRecorder = observer(() => {
     const wavesurferRef = useRef<WaveSurfer | null>(null);
     const recordPluginRef = useRef<any | null>(null);
     const timeInterval = useRef<NodeJS.Timeout | null>(null);
+    const recordingStartTimeRef = useRef<number | null>(null);
     const visualizerInitializedRef = useRef<boolean>(false);
 
     // Fetch available audio input devices
@@ -113,7 +115,7 @@ const AudioRecorder = observer(() => {
             // Create WaveSurfer instance
             const wavesurfer = WaveSurfer.create({
                 container: `#${visualizerContainerId}`,
-                waveColor: '#00a0f5', 
+                waveColor: '#00a0f5',
                 progressColor: '#027bbca9',
                 height: 80,
                 cursorWidth: 0,
@@ -220,6 +222,73 @@ const AudioRecorder = observer(() => {
             console.error("Error requesting Electron permission:", error);
             return false;
         }
+    };
+
+    // Timer functions
+    const startTimer = () => {
+        // Clear any existing interval
+        if (timeInterval.current) {
+            clearInterval(timeInterval.current);
+            timeInterval.current = null;
+        }
+
+        // Reset time to 0
+        setRecordingTime(0);
+
+        // Store the exact start time for accurate calculation
+        recordingStartTimeRef.current = Date.now();
+
+        // Set an interval that updates exactly once per second
+        timeInterval.current = setInterval(() => {
+            if (recordingStartTimeRef.current) {
+                // Calculate elapsed seconds based on real clock time
+                const elapsedSeconds = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+                setRecordingTime(elapsedSeconds);
+            }
+        }, 1000); // Update exactly once per second
+    };
+
+    const pauseTimer = () => {
+        // Stop the interval but keep the current time value
+        if (timeInterval.current) {
+            clearInterval(timeInterval.current);
+            timeInterval.current = null;
+        }
+
+        // Save the current elapsed seconds for resuming later
+        if (recordingStartTimeRef.current) {
+            const elapsedSeconds = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+            setRecordingTime(elapsedSeconds);
+        }
+    };
+
+    const resumeTimer = () => {
+        // Calculate a new start time based on the elapsed seconds so far
+        recordingStartTimeRef.current = Date.now() - (recordingTime * 1000);
+
+        // Restart the interval
+        timeInterval.current = setInterval(() => {
+            if (recordingStartTimeRef.current) {
+                const elapsedSeconds = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+                setRecordingTime(elapsedSeconds);
+            }
+        }, 1000);
+    };
+
+    const stopTimer = () => {
+        // Clear the interval
+        if (timeInterval.current) {
+            clearInterval(timeInterval.current);
+            timeInterval.current = null;
+        }
+
+        // Calculate final elapsed seconds if we were recording
+        if (recordingStartTimeRef.current && isRecording) {
+            const finalSeconds = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+            setRecordingTime(finalSeconds);
+        }
+
+        recordingStartTimeRef.current = null;
     };
 
     const startRecording = async () => {
@@ -350,6 +419,8 @@ const AudioRecorder = observer(() => {
             console.info("Starting MediaRecorder");
             mediaRecorder.start(100);
 
+            startTimer();
+
         } catch (error) {
             console.error("Error accessing microphone:", error);
 
@@ -365,6 +436,7 @@ const AudioRecorder = observer(() => {
             }
 
             setIsRecording(false);
+            stopTimer();
 
             // Provide specific error messages based on the error
             if (error instanceof DOMException) {
@@ -415,6 +487,7 @@ const AudioRecorder = observer(() => {
                     return;
                 }
 
+                pauseTimer();
                 setIsPaused(true);
             } else {
                 // Resume WaveSurfer recording
@@ -437,6 +510,7 @@ const AudioRecorder = observer(() => {
                     // If resume is not supported, we might need to restart recording
                 }
 
+                resumeTimer();
                 setIsPaused(false);
             }
         }
@@ -462,6 +536,8 @@ const AudioRecorder = observer(() => {
                     }
                 }
 
+                stopTimer();
+
             } catch (e) {
                 console.error("Error stopping recorder:", e);
                 // Even if there's an error, we should update the UI
@@ -471,6 +547,7 @@ const AudioRecorder = observer(() => {
             setIsPaused(false);
         }
     };
+
 
     const discardRecording = () => {
         if (audioUrl) {
@@ -482,39 +559,115 @@ const AudioRecorder = observer(() => {
         setRecordingTime(0);
         audioChunksRef.current = [];
 
+        stopTimer();
         // Cleanup WaveSurfer
         cleanupWaveSurfer();
     };
 
     const saveRecording = () => {
         if (audioUrl) {
-            console.info("Saving recording");
+            console.log("Saving recording with duration:", recordingTime);
 
             // Add to the audio resources
             state.addAudioResource(audioUrl);
 
             // Find the index of the newly added audio
             const index = state.audios.length - 1;
-            console.info("Audio added at index:", index);
 
-            // Create a new audio element to preload the audio
-            const preloadAudio = new Audio(audioUrl);
-            preloadAudio.addEventListener('loadedmetadata', () => {
-                console.info("Audio metadata loaded, duration:", preloadAudio.duration);
+            // Calculate a valid duration (ensure it's positive)
+            const safeDuration = recordingTime > 0 ? recordingTime : 1;
 
-                // Now we know the audio is loaded, add it to the timeline
+            // Create or get the audio element with the expected ID
+            const audioId = `audio-${index}`;
+            let audioElement = document.getElementById(audioId) as HTMLAudioElement;
+
+            if (!audioElement) {
+                // Create a new audio element with the expected ID
+                audioElement = document.createElement('audio');
+                audioElement.id = audioId;
+                audioElement.src = audioUrl;
+
+                // Add a data attribute for the real duration
+                audioElement.setAttribute('data-real-duration', String(safeDuration));
+
+                // Hide it
+                audioElement.style.display = 'none';
+
+                // Add to the document
+                document.body.appendChild(audioElement);
+            } else {
+                // Update existing element
+                audioElement.src = audioUrl;
+                audioElement.setAttribute('data-real-duration', String(safeDuration));
+            }
+
+            // Temporarily override the duration getter on this specific element
+            // This is a bit of a hack but can work for this specific scenario
+            try {
+                const originalDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'duration');
+
+                // Define a custom duration getter just for this element
+                Object.defineProperty(audioElement, 'duration', {
+                    get: function () {
+                        // Try to get the data attribute first
+                        const dataDuration = this.getAttribute('data-real-duration');
+                        if (dataDuration && !isNaN(parseFloat(dataDuration))) {
+                            return parseFloat(dataDuration);
+                        }
+                        // Fall back to the original getter
+                        return originalDescriptor?.get?.call(this) || safeDuration;
+                    },
+                    configurable: true
+                });
+
+                // Now call addAudio which will use our custom duration getter
+                console.log(`Adding audio with index ${index} and override duration ${safeDuration}s`);
                 state.addAudio(index);
 
-                // Reset after saving
-                setAudioUrl(null);
-                setRecordingTime(0);
+                // Restore original behavior
+                Object.defineProperty(audioElement, 'duration', originalDescriptor!);
 
-                // Cleanup WaveSurfer
-                cleanupWaveSurfer();
-            });
+            } catch (error) {
+                console.error("Error overriding duration:", error);
 
-            // Start loading the audio
-            preloadAudio.load();
+                // Fall back to a direct approach - if we can access state.addEditorElement
+                try {
+                    // Try to call addEditorElement directly if available
+                    const id = Math.random().toString(36).substring(2, 11); // Simple UID fallback
+
+                    // @ts-ignore - Assuming addEditorElement is accessible
+                    state.addEditorElement({
+                        id,
+                        name: `Media(audio) ${index + 1}`,
+                        type: "audio",
+                        placement: {
+                            x: 0, y: 0, width: 100, height: 100,
+                            rotation: 0, scaleX: 1, scaleY: 1
+                        },
+                        timeFrame: {
+                            start: 0,
+                            end: safeDuration * 1000, // Convert to ms
+                        },
+                        properties: {
+                            elementId: `audio-${id}`,
+                            src: audioUrl,
+                            volume: 1,
+                            muted: false,
+                        }
+                    });
+                } catch (innerError) {
+                    console.error("Direct element addition failed:", innerError);
+
+                    // Last resort - normal call with known limitation
+                    console.warn("Falling back to standard addAudio call - duration may be incorrect");
+                    state.addAudio(index);
+                }
+            }
+
+            // Clean up
+            setAudioUrl(null);
+            setRecordingTime(0);
+            cleanupWaveSurfer();
         }
     };
 
@@ -585,7 +738,7 @@ const AudioRecorder = observer(() => {
                     </select>
                     <button
                         onClick={getAudioDevices}
-                        className="mt-2 text-xs text-blue-700 hover:text-blue-900 hover:font-medium darK:text-blue-400 dark:hover:text-blue-300"
+                        className="mt-2 text-xs dark:text-blue-500 text-blue-700 hover:text-blue-900 hover:font-medium darK:text-blue-400 dark:hover:text-blue-300"
                     >
                         Refresh device list
                     </button>

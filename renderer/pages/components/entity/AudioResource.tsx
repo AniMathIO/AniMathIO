@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useEffect } from "react";
 import { StateContext } from "@/states";
 import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
@@ -9,9 +9,10 @@ import WavesurferPlayer from "@wavesurfer/react";
 export type AudioResourceProps = {
   audio: string;
   index: number;
+  knownDuration?: number;
 };
 const AudioResource = observer(
-  ({ audio, index }: AudioResourceProps) => {
+  ({ audio, index, knownDuration }: AudioResourceProps) => {
     const state = React.useContext(StateContext);
     const ref = React.useRef<HTMLAudioElement>(null);
     const [formatedAudioLength, setFormatedAudioLength] =
@@ -20,9 +21,24 @@ const AudioResource = observer(
     const [wavesurfer, setWavesurfer] = React.useState<any>(null)
     const [isPlaying, setIsPlaying] = React.useState(false)
 
+    // Initialize with knownDuration if provided
+    useEffect(() => {
+      if (knownDuration !== undefined && knownDuration > 0) {
+        setFormatedAudioLength(formatTimeToMinSec(knownDuration));
+      }
+    }, [knownDuration]);
+
     const onReady = (ws: any) => {
       setWavesurfer(ws)
       setIsPlaying(false)
+
+      // Get duration from WaveSurfer when it's ready
+      if (ws && ws.getDuration) {
+        const wavesurferDuration = ws.getDuration();
+        if (isFinite(wavesurferDuration) && wavesurferDuration > 0) {
+          setFormatedAudioLength(formatTimeToMinSec(wavesurferDuration));
+        }
+      }
     }
 
     const onPlayPause = () => {
