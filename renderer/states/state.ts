@@ -1660,60 +1660,6 @@ export class State {
       canvas.renderAll();
     };
 
-    const loadMafsImage = (element: any) => {
-      return new Promise<void>((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          try {
-            const imageObject = new fabric.CoverImage(img, {
-              name: element.id,
-              left: element.placement.x,
-              top: element.placement.y,
-              angle: element.placement.rotation,
-              objectCaching: false,
-              selectable: true,
-              lockUniScaling: true,
-              customFilter: element.properties.effect?.type as any,
-            } as any);
-
-            const image = {
-              w: img.naturalWidth,
-              h: img.naturalHeight,
-            };
-
-            imageObject.width = image.w;
-            imageObject.height = image.h;
-
-            img.width = image.w;
-            img.height = image.h;
-
-            imageObject.scaleToHeight(image.h);
-            imageObject.scaleToWidth(image.w);
-
-            const toScale = {
-              x: element.placement.width / image.w,
-              y: element.placement.height / image.h,
-            };
-
-            imageObject.scaleX = toScale.x * element.placement.scaleX;
-            imageObject.scaleY = toScale.y * element.placement.scaleY;
-
-            element.fabricObject = imageObject;
-            element.properties.imageObject = imageObject;
-
-            addElementToCanvas(element, imageObject, false);
-            resolve();
-          } catch (error) {
-            console.error("Error loading Mafs image:", error);
-            reject(error);
-          }
-        };
-        img.onerror = reject;
-        img.src = element.properties.src;
-      });
-    };
-
     const elementPromises = state.editorElements.map(async (element: any) => {
       switch (element.type) {
         case "video": {
@@ -1742,10 +1688,7 @@ export class State {
           addElementToCanvas(element, videoObject, false);
           break;
         }
-        case "mafs": {
-          await loadMafsImage(element);
-          break;
-        }
+        case "mafs":
         case "image": {
           const imageElement = document.getElementById(
             element.properties.elementId
