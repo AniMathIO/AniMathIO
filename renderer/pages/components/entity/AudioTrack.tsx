@@ -4,6 +4,7 @@ import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { AudioEditorElement } from "@/types";
 import { SpeakerWaveIcon, SpeakerXMarkIcon } from "@heroicons/react/24/solid";
+import dynamic from "next/dynamic";
 
 
 interface AudioTrackProps {
@@ -15,7 +16,7 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
     const state = React.useContext(StateContext);
     const [volume, setVolume] = useState(100);
     const [muted, setMuted] = useState(false);
-    const audioElement = document.getElementById(element.properties.elementId) as HTMLAudioElement;
+    const audioElement = document?.getElementById(element.properties.elementId) as HTMLAudioElement;
 
     useEffect(() => {
         if (audioElement) {
@@ -92,4 +93,4 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
     );
 });
 
-export default AudioTrack;
+export default dynamic(() => Promise.resolve(AudioTrack), { ssr: false });
