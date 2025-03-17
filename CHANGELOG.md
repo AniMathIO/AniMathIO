@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.5.0](https://github.com/AniMathIO/AniMathIO/compare/v1.4.1...v1.5.0) (2025-03-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* fixed rendering state bug in mathematical elements
+* added backwards compatible audio settings state for project saving and loading
+* added missing dependencies to ci test runner
+* updated packages and locked version to resolve install and build errors
+
+### Features
+
+* added space hotkey ([5630b68](https://github.com/AniMathIO/AniMathIO/commit/5630b688dde26d25db476e1f7345673abf7e6269))
+* added vitest ui package for better testing experience ([ebdc423](https://github.com/AniMathIO/AniMathIO/commit/ebdc423de73145634185dd73adac2a41caeea872))
+* improve test coverage ([605d1e4](https://github.com/AniMathIO/AniMathIO/commit/605d1e47b825d5e20705c57aa3e3fba0c440fc07))
+* installed end configured vitest ([7776d5e](https://github.com/AniMathIO/AniMathIO/commit/7776d5e840f722a6e488d315e851117d15e485ca))
+* updated help submenu links ([fee61f8](https://github.com/AniMathIO/AniMathIO/commit/fee61f808eca71f40aa60d09244743340b942807))
+* WIP audio mixer panel ([60e27cf](https://github.com/AniMathIO/AniMathIO/commit/60e27cf045d5dd57a126beac6ca281f1b8cb8638))
+* WIP working on audio recorder component ([2b522a5](https://github.com/AniMathIO/AniMathIO/commit/2b522a54692def0c9d26811e044fd42097895bc6))
+* WIP working on audio recorder component, fixed light mode audio styling ([596ea0e](https://github.com/AniMathIO/AniMathIO/commit/596ea0e24b4c59638e330c923c3604b241ab218d))
+* working on automated tests ([ada56ea](https://github.com/AniMathIO/AniMathIO/commit/ada56ea2779f07cc58b6917f703920d43877a2d2))
+* working on state related unit tests ([d6face3](https://github.com/AniMathIO/AniMathIO/commit/d6face390f21f031bdc0cc604ad94c83cdd4a89f))
+
+
+### Bug Fixes
+
+* added backwards compatible audio settings state for project saving and loading ([368d7b8](https://github.com/AniMathIO/AniMathIO/commit/368d7b8102721c7d64ee7076269ba78bdee1f6ed))
+* added missing dependencies to ci test runner ([5f9721a](https://github.com/AniMathIO/AniMathIO/commit/5f9721a67380f1d176b276df2446d2db25d2fdc8))
+* adding missing dependencies to ci runner ([a126d5e](https://github.com/AniMathIO/AniMathIO/commit/a126d5e961e19270de45e3137194ccd9d036c2fb))
+* correcting node version for automated tests ([ed6f252](https://github.com/AniMathIO/AniMathIO/commit/ed6f25246086a13d1155575643e7583b5953727a))
+* correcting node version for automated tests ([7bd3bc1](https://github.com/AniMathIO/AniMathIO/commit/7bd3bc1d35e1df71e537b85081aef77a423bf277))
+* correcting node version for automated tests ([4bc0f34](https://github.com/AniMathIO/AniMathIO/commit/4bc0f34920e9c4cdcc8934444d73ab187ce521eb))
+* correcting node version for automated tests ([93598aa](https://github.com/AniMathIO/AniMathIO/commit/93598aa24d6c56b52b836ab31f4d8121fbcfadd0))
+* fixed  CJS Node API deprecated error ([39ae1c7](https://github.com/AniMathIO/AniMathIO/commit/39ae1c74fcbace7ee7e0e7c1b82cb821143553c3))
+* fixed build error ([994b3ab](https://github.com/AniMathIO/AniMathIO/commit/994b3abc9901bbd8f1a313c92e764b8024b0ed76))
+* fixed rendering state bug in mathematical elements ([9f4be2f](https://github.com/AniMathIO/AniMathIO/commit/9f4be2f598f85424db4f2f8801d1921773bc604f))
+* improve test runner ci with dynamic node version loading ([c367e34](https://github.com/AniMathIO/AniMathIO/commit/c367e34c3afbccccb3042cf7650b05948dee2fa8))
+* infinite and nan time in audio resource panel for recorded audio ([7b62958](https://github.com/AniMathIO/AniMathIO/commit/7b62958fcc4df47e1b7c0289479f84eadf35cd79))
+* node-gyp build for automated tests ([2a7cb19](https://github.com/AniMathIO/AniMathIO/commit/2a7cb19680fe174225ba505c49590e0567940af5))
+* refactored and fixed weird test cases ([a24458b](https://github.com/AniMathIO/AniMathIO/commit/a24458bbe832af134e85876978f04c5f79e56b45))
+* test runs ([185d22b](https://github.com/AniMathIO/AniMathIO/commit/185d22b5f40f7aeae680deee8d37b9a50e478fc0))
+* updated packages and locked version to resolve install and build errors ([d418e28](https://github.com/AniMathIO/AniMathIO/commit/d418e28ac1767eec494dce5eb47836ec6ba958ed))
+* WIP fixed rerendering bug when audio volume changed ([318f828](https://github.com/AniMathIO/AniMathIO/commit/318f828ca93afaf0a12b3c00ea7537e56e8c8cdf))
+* working on automated test fix ([7258205](https://github.com/AniMathIO/AniMathIO/commit/725820592e71e9e4eb3e1610913754977d9ce099))
+* working on automated tests ([0a6d893](https://github.com/AniMathIO/AniMathIO/commit/0a6d893c6247fd4baa8ffc3888286afe3d41b73f))
+* working on dependency errors in tests ci runner ([af885c7](https://github.com/AniMathIO/AniMathIO/commit/af885c7f9feec845065ad715c40cbe03530d18ff))
+* working on fixing automated tests ([309b47d](https://github.com/AniMathIO/AniMathIO/commit/309b47d405277a03409739899a06c7d0daa88de2))
+* working on test fixes ([b142daf](https://github.com/AniMathIO/AniMathIO/commit/b142daf25c0cd1ba206e974c3ef9610199faf73b))
+
+
+### Miscellaneous Chores
+
+* release 1.5.0 ([3573bad](https://github.com/AniMathIO/AniMathIO/commit/3573badeebb26bf4798a3f09c16772c12f8d1d86))
+
 ## [1.4.1](https://github.com/AniMathIO/AniMathIO/compare/v1.4.0...v1.4.1) (2025-03-09)
 
 
