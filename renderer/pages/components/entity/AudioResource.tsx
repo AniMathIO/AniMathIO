@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useEffect } from "react";
 import { StateContext } from "@/states";
 import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
@@ -9,9 +9,10 @@ import WavesurferPlayer from "@wavesurfer/react";
 export type AudioResourceProps = {
   audio: string;
   index: number;
+  knownDuration?: number;
 };
 const AudioResource = observer(
-  ({ audio, index }: AudioResourceProps) => {
+  ({ audio, index, knownDuration }: AudioResourceProps) => {
     const state = React.useContext(StateContext);
     const ref = React.useRef<HTMLAudioElement>(null);
     const [formatedAudioLength, setFormatedAudioLength] =
@@ -20,9 +21,24 @@ const AudioResource = observer(
     const [wavesurfer, setWavesurfer] = React.useState<any>(null)
     const [isPlaying, setIsPlaying] = React.useState(false)
 
+    // Initialize with knownDuration if provided
+    useEffect(() => {
+      if (knownDuration !== undefined && knownDuration > 0) {
+        setFormatedAudioLength(formatTimeToMinSec(knownDuration));
+      }
+    }, [knownDuration]);
+
     const onReady = (ws: any) => {
       setWavesurfer(ws)
       setIsPlaying(false)
+
+      // Get duration from WaveSurfer when it's ready
+      if (ws && ws.getDuration) {
+        const wavesurferDuration = ws.getDuration();
+        if (isFinite(wavesurferDuration) && wavesurferDuration > 0) {
+          setFormatedAudioLength(formatTimeToMinSec(wavesurferDuration));
+        }
+      }
     }
 
     const onPlayPause = () => {
@@ -30,7 +46,7 @@ const AudioResource = observer(
     }
 
     return (
-      <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative min-h-[130px]">
+      <div className="rounded-lg overflow-hidden items-center bg-white border-[1px] dark:border-0 border-slate-300 dark:bg-slate-800 m-[15px] flex flex-col relative min-h-[130px]">
         {/* align vertically center */}
         <div className="w-full flex justify-start px-1">
           <WavesurferPlayer
@@ -47,16 +63,16 @@ const AudioResource = observer(
             onPause={() => setIsPlaying(false)}
           />
         </div>
-        <div className=" text-white py-1 absolute text-base top-2 right-2">
+        <div className=" darK:text-white py-1 absolute text-base top-2 right-2">
           {formatedAudioLength}
         </div>
-        <button onClick={onPlayPause} className="hover:bg-[#00a0f5] rounded z-10 text-white font-bold py-1 absolute text-lg top-10 right-2">
+        <button onClick={onPlayPause} className="hover:bg-[#00a0f5] rounded z-10 dark:text-white font-bold py-1 absolute text-lg top-10 right-2">
           {isPlaying ? <PauseIcon className="h-8 w-8" /> : <PlayIcon className="h-8 w-8" />}
         </button>
 
         <button
           aria-label="Add audio"
-          className="hover:bg-[#00a0f5] rounded z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
+          className="hover:bg-[#00a0f5] rounded z-10 dark:text-white font-bold py-1 absolute text-lg bottom-2 right-2"
           onClick={() => state.addAudio(index)}
         >
           <PlusCircleIcon className="h-8 w-8" />

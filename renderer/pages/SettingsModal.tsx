@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
-import { FaArrowLeft, FaArrowRight, FaArrowUp, FaArrowDown, FaTrashAlt, FaCopy, FaPaste, FaEyeSlash, FaEye } from 'react-icons/fa';
+import { FaArrowLeft, FaArrowRight, FaArrowUp, FaArrowDown, FaTrashAlt, FaCopy, FaPaste, FaEyeSlash, FaEye, FaPlay } from 'react-icons/fa';
 declare global {
     interface Window {
         electron: {
@@ -229,6 +229,15 @@ const SettingsModal: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody>
+                        <tr className="hover:bg-gray-50 dark:hover:bg-gray-600">
+                                <td className="px-4 py-2 text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                    <span className="font-bold">Space</span>
+                                    <FaPlay className="text-gray-500 dark:text-gray-400" />
+                                </td>
+                                <td className="px-4 py-2 text-gray-600 dark:text-gray-400">
+                                    Starts or pauses the playback
+                                </td>
+                            </tr>
                             <tr className="hover:bg-gray-50 dark:hover:bg-gray-600">
                                 <td className="px-4 py-2 text-gray-700 dark:text-gray-300 flex items-center gap-2">
                                     <span className="font-bold">Arrows (Left or Right)</span>

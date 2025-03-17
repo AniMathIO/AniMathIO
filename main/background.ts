@@ -1,6 +1,6 @@
 import path from "path";
 import { exec } from "child_process";
-import { IpcMainEvent, app, ipcMain } from "electron";
+import { IpcMainEvent, app, ipcMain, systemPreferences } from "electron";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
 import Store from "electron-store";
@@ -90,11 +90,37 @@ ipcMain.on("set-theme-mode", (event, themeMode) => {
   store.set("themeMode", themeMode);
 });
 
-ipcMain.handle('get-gemini-api-token', () => {
-  return store.get('geminiApiToken', '');
+ipcMain.handle("get-gemini-api-token", () => {
+  return store.get("geminiApiToken", "");
 });
 
-ipcMain.handle('set-gemini-api-token', (_, apiToken) => {
-  store.set('geminiApiToken', apiToken);
+ipcMain.handle("set-gemini-api-token", (_, apiToken) => {
+  store.set("geminiApiToken", apiToken);
   return true;
+});
+
+// Request microphone permissions (macOS)
+function requestMicrophonePermission() {
+  if (process.platform === "darwin") {
+    const status = systemPreferences.getMediaAccessStatus("microphone");
+    if (status !== "granted") {
+      systemPreferences.askForMediaAccess("microphone");
+    }
+  }
+}
+
+// Set up ipcMain handler for permission requests from the renderer
+ipcMain.handle("request-microphone-permission", async () => {
+  if (process.platform === "darwin") {
+    // On macOS, we can request permission programmatically
+    await systemPreferences.askForMediaAccess("microphone");
+    return systemPreferences.getMediaAccessStatus("microphone");
+  } else if (process.platform === "win32") {
+    // Windows doesn't provide a programmatic way to request permission
+    // Permissions are typically managed through Windows settings
+    return "granted"; // We'll assume granted and let the API handle denial
+  } else {
+    // Linux and other platforms typically don't have permissions
+    return "granted";
+  }
 });

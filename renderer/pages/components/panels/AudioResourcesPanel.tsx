@@ -4,6 +4,7 @@ import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import AudioResource from "../entity/AudioResource";
 import UploadButton from "../partials/shared/UploadButton";
+import AudioRecorder from "../entity/AudioRecorder";
 
 const AudioResourcesPanel = observer(() => {
   const state = React.useContext(StateContext);
@@ -17,6 +18,12 @@ const AudioResourcesPanel = observer(() => {
       <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
         Audio Resources
       </div>
+
+      {/* Audio Recorder Component */}
+      <div className="mx-4 mb-4">
+        <AudioRecorder />
+      </div>
+
       {state.audios.map((audio, index) => {
         return <AudioResource key={audio} audio={audio} index={index} />;
       })}
