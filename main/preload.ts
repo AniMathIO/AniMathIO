@@ -9,4 +9,7 @@ contextBridge.exposeInMainWorld("electron", {
       ipcRenderer.removeListener(channel, func),
     invoke: (channel: string, data: any) => ipcRenderer.invoke(channel, data),
   },
+  // Add the microphone permission request function
+  requestMicrophonePermission: () => 
+    ipcRenderer.invoke('request-microphone-permission'),
 });
