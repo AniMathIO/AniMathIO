@@ -56,7 +56,7 @@ const ImageResource = observer(
         </div>
         <button
           title="Add Image"
-          className="hover:bg-[#00a0f5] rounded z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
+          className="hover:bg-[#00a0f5] rounded-sm z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
           onClick={() => state.addImage(index)}
         >
           <PlusCircleIcon className="w-8 h-8 drop-shadow-lg" />

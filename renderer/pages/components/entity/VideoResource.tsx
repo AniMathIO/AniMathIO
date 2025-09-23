@@ -23,7 +23,7 @@ const VideoResource = observer(
         </div>
         <button
           aria-label="Add video"
-          className="hover:bg-[#00a0f5] rounded z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
+          className="hover:bg-[#00a0f5] rounded-sm z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
           onClick={() => state.addVideo(index)}
         >
           <PlusCircleIcon className="h-8 w-8 drop-shadow-lg"></PlusCircleIcon>

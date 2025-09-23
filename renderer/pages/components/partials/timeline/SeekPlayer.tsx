@@ -86,7 +86,7 @@ const SeekPlayer = observer((_props: SeekPlayerProps) => {
                 {/* Time display */}
                 <div className="flex flex-row items-center border border-black dark:border-white py-1 px-2 rounded-2xl">
                     <span className="font-mono">{formattedTime}</span>
-                    <div className="w-[1px] h-[24px] bg-slate-300 mx-[10px]"></div>
+                    <div className="w-px h-[24px] bg-slate-300 mx-[10px]"></div>
                     <span className="font-mono">{formattedMaxTime}</span>
                 </div>
             </div>

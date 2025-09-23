@@ -38,7 +38,7 @@ const AnimationResource = observer((props: AnimationResourceProps) => {
         </div>
         <button
           aria-label="Delete"
-          className="hover:bg-[#00a0f5] bg-[rgba(0,0,0,.25)] rounded z-10 text-white font-bold py-1 text-lg"
+          className="hover:bg-[#00a0f5] bg-[rgba(0,0,0,.25)] rounded-sm z-10 text-white font-bold py-1 text-lg"
           onClick={() => state.removeAnimation(props.animation.id)}
         >
           <TrashIcon className="w-6 h-6" />

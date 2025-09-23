@@ -83,19 +83,19 @@ ipcMain.on("message", async (event, arg) => {
 });
 
 ipcMain.handle("get-theme-mode", () => {
-  return store.get("themeMode", "light");
+  return (store as any).get("themeMode", "light");
 });
 
 ipcMain.on("set-theme-mode", (event, themeMode) => {
-  store.set("themeMode", themeMode);
+  (store as any).set("themeMode", themeMode);
 });
 
 ipcMain.handle("get-gemini-api-token", () => {
-  return store.get("geminiApiToken", "");
+  return (store as any).get("geminiApiToken", "");
 });
 
 ipcMain.handle("set-gemini-api-token", (_, apiToken) => {
-  store.set("geminiApiToken", apiToken);
+  (store as any).set("geminiApiToken", apiToken);
   return true;
 });
 

@@ -59,7 +59,7 @@ const TEXT_RESOURCES = [
 const TextResourcesPanel = observer(() => {
   return (
     <div className="bg-slate-200 dark:bg-gray-700 text-black dark:text-white h-full">
-      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold text-black">
+      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold text-black dark:text-white">
         Text Resources
       </div>
       <ul>

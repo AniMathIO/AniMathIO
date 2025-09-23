@@ -105,7 +105,7 @@ const Element = observer((props: ElementProps) => {
       </div>
       <button
         aria-label="Remove element"
-        className="bg-red-500 hover:bg-red-700 text-white mr-2 text-sm py-1 px-1 rounded"
+        className="bg-red-500 hover:bg-red-700 text-white mr-2 text-sm py-1 px-1 rounded-sm"
         onClick={(e) => {
           state.removeEditorElement(element.id);
           state.refreshElements();

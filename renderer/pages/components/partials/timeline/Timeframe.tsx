@@ -58,7 +58,7 @@ const TimeFrame = observer((props: { element: EditorElement }) => {
             case "text":
                 return (
                     <div className={`${commonClasses} flex flex-col justify-end h-[64px]`}>
-                        <p className="text-4xl">{element.properties.text}</p>
+                        <p className="text-4xl text-black dark:text-white">{element.properties.text}</p>
                     </div>
                 );
             case "mafs":
