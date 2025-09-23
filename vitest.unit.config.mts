@@ -6,33 +6,16 @@ export default defineConfig({
     environment: "happy-dom",
     globals: true,
     setupFiles: ["./tests/setup.ts"],
-    include: ["tests/**/*.test.{ts,tsx}"],
-    browser: {
-      enabled: true,
-      name: "chromium",
-      provider: "playwright",
-      headless: true,
-      instances: [
-        {
-          browser: "chromium",
-          launch: {
-            args: ["--no-sandbox", "--disable-setuid-sandbox"]
-          },
-          context: {
-            viewport: { width: 1280, height: 720 }
-          }
-        }
-      ]
-    },
+    include: ["tests/renderer/**/*.test.{ts,tsx}", "tests/main/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html", "lcov"],
       reportsDirectory: "./coverage",
-        include: [
-          "renderer/states/**/*.ts",
-          "renderer/utils/**/*.ts",
-          "main/**/*.ts"
-        ],
+      include: [
+        "renderer/states/**/*.ts",
+        "renderer/utils/**/*.ts",
+        "main/**/*.ts"
+      ],
       exclude: [
         // Next.js build artifacts and chunks
         "**/app/**",
