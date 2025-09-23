@@ -3,6 +3,7 @@
   "compilerOptions": {
     "strict": true,
     "downlevelIteration": true,
+    "types": [],
     "baseUrl": "",
     "paths": {
       "@/types": [

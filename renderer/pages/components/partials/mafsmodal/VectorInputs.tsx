@@ -9,13 +9,13 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
     return (
         <>
             <div className="mb-4">
-                <label htmlFor="vectorTailX" className="block font-medium mb-1">
+                <label htmlFor="vectorTailX" className="block font-medium mb-1 text-black dark:text-white">
                     Tail X
                 </label>
                 <input
                     type="number"
                     id="vectorTailX"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={vectorProps ? vectorProps.tail![0] : 0}
                     onChange={(e) =>
                         setVectorProps({
@@ -26,13 +26,13 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="vectorTailY" className="block font-medium mb-1">
+                <label htmlFor="vectorTailY" className="block font-medium mb-1 text-black dark:text-white">
                     Tail Y
                 </label>
                 <input
                     type="number"
                     id="vectorTailY"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={vectorProps ? vectorProps.tail![1] : 0}
                     onChange={(e) =>
                         setVectorProps({
@@ -43,13 +43,13 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="vectorTipX" className="block font-medium mb-1">
+                <label htmlFor="vectorTipX" className="block font-medium mb-1 text-black dark:text-white">
                     Tip X
                 </label>
                 <input
                     type="number"
                     id="vectorTipX"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={vectorProps.tip[0]}
                     onChange={(e) =>
                         setVectorProps({
@@ -60,13 +60,13 @@ const VectorInputs = ({ vectorProps, setVectorProps }: VectorInputsProps) => {
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="vectorTipY" className="block font-medium mb-1">
+                <label htmlFor="vectorTipY" className="block font-medium mb-1 text-black dark:text-white">
                     Tip Y
                 </label>
                 <input
                     type="number"
                     id="vectorTipY"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={vectorProps.tip[1]}
                     onChange={(e) =>
                         setVectorProps({

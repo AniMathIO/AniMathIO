@@ -27,13 +27,13 @@ const LatexInputs = ({
                 handleLatexSubmit={handleLatexSubmit}
             />
             <div className="mb-4">
-                <label htmlFor="latexAtX" className="block font-medium mb-1">
+                <label htmlFor="latexAtX" className="block font-medium mb-1 text-black dark:text-white">
                     At X
                 </label>
                 <input
                     type="number"
                     id="latexAtX"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={latexProps.at[0]}
                     onChange={(e) =>
                         setLatexProps({
@@ -44,13 +44,13 @@ const LatexInputs = ({
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="latexAtY" className="block font-medium mb-1">
+                <label htmlFor="latexAtY" className="block font-medium mb-1 text-black dark:text-white">
                     At Y
                 </label>
                 <input
                     type="number"
                     id="latexAtY"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={latexProps.at[1]}
                     onChange={(e) =>
                         setLatexProps({
@@ -61,18 +61,18 @@ const LatexInputs = ({
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="latexTex" className="block font-medium mb-1">
+                <label htmlFor="latexTex" className="block font-medium mb-1 text-black dark:text-white">
                     LaTeX
                 </label>
                 <textarea
                     id="latexTex"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={latexInput}
                     onChange={(e) => setLatexInput(e.target.value)}
                 />
             </div>
             <button
-                className="bg-blue-500 mb-2 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                className="bg-blue-500 mb-2 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-sm"
                 onClick={handleLatexSubmit}
             >
                 Submit LaTeX

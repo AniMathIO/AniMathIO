@@ -26,7 +26,7 @@ const TextResource = observer(
         </div>
         <button
           aria-label="Add Text"
-          className="h-[32px] w-[32px] hover:bg-black bg-[rgba(0,0,0,.25)] rounded z-10 text-white font-bold py-1 flex items-center justify-center"
+          className="h-[32px] w-[32px] hover:bg-black bg-[rgba(0,0,0,.25)] rounded-sm z-10 text-white font-bold py-1 flex items-center justify-center"
           onClick={() =>
             state.addText({
               text: sampleText,

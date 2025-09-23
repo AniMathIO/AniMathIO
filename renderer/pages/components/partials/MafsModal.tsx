@@ -196,10 +196,10 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
     };
 
     return (
-        <div className="fixed inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-start justify-center pt-16">
+        <div className="fixed inset-0 z-50 overflow-auto bg-black/50 flex items-start justify-center pt-16">
             <div className={`${className} rounded-lg shadow-lg p-6 w-full max-w-4xl max-h-[calc(100vh-8rem)] overflow-auto`}>
                 <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-2xl font-bold">{mafsElement.name}</h2>
+                    <h2 className="text-2xl font-bold text-black dark:text-white">{mafsElement.name}</h2>
                     <button
                         className="text-gray-500 hover:text-gray-700 dark:hover:text-white"
                         onClick={onClose}
@@ -223,7 +223,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                     </button>
                 </div>
                 <div className="mb-4">
-                    <label htmlFor="width" className="block font-medium mb-1">
+                    <label htmlFor="width" className="block font-medium mb-1 text-black dark:text-white">
                         Width
                     </label>
                     <input
@@ -231,7 +231,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                         id="width"
                         max={835}
                         maxLength={3}
-                        className="w-full border border-gray-300 text-black rounded px-3 py-2"
+                        className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                         value={mafsConfig.width}
                         onChange={(e) =>
                             handleMafsConfigChange("width", parseInt(e.target.value))
@@ -239,7 +239,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                     />
                 </div>
                 <div className="mb-4">
-                    <label htmlFor="height" className="block font-medium mb-1">
+                    <label htmlFor="height" className="block font-medium mb-1 text-black dark:text-white">
                         Height
                     </label>
                     <input
@@ -247,7 +247,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                         id="height"
                         max={235}
                         maxLength={3}
-                        className="w-full border border-gray-300 text-black rounded px-3 py-2"
+                        className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                         value={mafsConfig.height}
                         onChange={(e) =>
                             handleMafsConfigChange("height", parseInt(e.target.value))
@@ -262,7 +262,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                             onChange={(e) => handleMafsConfigChange("pan", e.target.checked)}
                             className="form-checkbox"
                         />
-                        <span className="ml-2">Pan</span>
+                        <span className="ml-2 text-black dark:text-white">Pan</span>
                     </label>
                 </div>
                 <div className="mb-4">
@@ -273,16 +273,16 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                             onChange={(e) => handleMafsConfigChange("zoom", e.target.checked)}
                             className="form-checkbox"
                         />
-                        <span className="ml-2">Zoom</span>
+                        <span className="ml-2 text-black dark:text-white">Zoom</span>
                     </label>
                 </div>
                 <div className="mb-4">
-                    <label htmlFor="coordinateType" className="block font-medium mb-1">
+                    <label htmlFor="coordinateType" className="block font-medium mb-1 text-black dark:text-white">
                         Coordinate Type
                     </label>
                     <select
                         id="coordinateType"
-                        className="w-full border border-gray-300 text-black rounded px-3 py-2"
+                        className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                         value={mafsConfig.coordinateType}
                         onChange={(e) =>
                             handleMafsConfigChange("coordinateType", e.target.value)
@@ -303,7 +303,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                 {mafsElement.name === "Ellipse" && <EllipseInputs ellipseProps={ellipseProps} setEllipseProps={setEllipseProps} />}
                 {mafsElement.name === "Plot" && <PlotInputs plotProps={plotProps} setPlotProps={setPlotProps} plotInput={plotInput} setPlotInput={setPlotInput} handlePlotSubmit={handlePlotSubmit} />}
                 {mafsElement.name === "Vector" && <VectorInputs vectorProps={vectorProps} setVectorProps={setVectorProps} />}
-                <div className="border border-gray-300 rounded p-4 flex justify-center">
+                <div className="border border-gray-300 rounded-sm p-4 flex justify-center">
                     <div ref={mafsRef}>
                         <Mafs
                             width={mafsConfig.width}
@@ -318,7 +318,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                     </div>
                 </div>
                 <div className="mt-4 flex justify-end">
-                    <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mr-2" onClick={handleAddResource} >
+                    <button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-sm mr-2" onClick={handleAddResource} >
                         Add Element
                     </button>
                 </div>
@@ -326,19 +326,19 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
                     isOpen={isErrorModalOpen}
                     onRequestClose={() => setIsErrorModalOpen(false)}
                     contentLabel="Error Modal"
-                    className="fixed inset-0 flex items-center justify-center z-[9999] bg-black bg-opacity-50"
-                    overlayClassName="fixed inset-0 z-[9999] bg-black bg-opacity-50"
+                    className="fixed inset-0 flex items-center justify-center z-9999 bg-black/50"
+                    overlayClassName="fixed inset-0 z-9999 bg-black/50"
                     shouldCloseOnOverlayClick={true}
                 >
-                    <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-sm shadow-lg max-w-md mx-auto">
                         <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-2xl font-bold text-red-800">Error</h2>
+                            <h2 className="text-2xl font-bold text-red-800 dark:text-red-400">Error</h2>
                         </div>
-                        <p className="text-gray-700 mb-4">{errorMessage}</p>
+                        <p className="text-gray-700 dark:text-gray-300 mb-4">{errorMessage}</p>
                         <div className="flex justify-end">
                             <button
                                 onClick={() => setIsErrorModalOpen(false)}
-                                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                             >
                                 Close
                             </button>

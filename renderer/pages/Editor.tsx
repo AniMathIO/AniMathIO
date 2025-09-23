@@ -85,7 +85,7 @@ const Editor = observer(() => {
         <link rel="icon" href={AniMathIO.src} />
       </Head>
 
-      <div className="bg-slate-200 dark:bg-gray-800 grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[100svh]">
+      <div className="bg-slate-200 dark:bg-gray-800 grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-svh">
         <div className="tile row-span-2 flex flex-col">
           <Menu />
         </div>

@@ -179,18 +179,18 @@ const ExportVideoPanel = observer(() => {
 
   return (
     <>
-      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
+      <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold text-black dark:text-white">
         Export
       </div>
       {/* Set max time from number input */}
       <div className="px-[16px]">
         <div className="flex flex-row items-center my-2">
-          <div className="text-base font-semibold mr-2">Video Length:</div>
+          <div className="text-base font-semibold mr-2 text-black dark:text-white">Video Length:</div>
           <label htmlFor="video-length" className="sr-only">Video Length</label>
           <input
             id="video-length"
             type="number"
-            className="rounded text-center text-black border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500 max-w-[50px] mr-2"
+            className="rounded text-center text-black dark:text-white bg-white dark:bg-gray-800 border-slate-200 dark:border-gray-600 placeholder-slate-400 dark:placeholder-gray-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500 max-w-[50px] mr-2"
             value={state.maxTime / 1000}
             onChange={(e) => {
               const value = e.target.value;
@@ -198,17 +198,17 @@ const ExportVideoPanel = observer(() => {
             }}
             placeholder="Length in seconds"
           />
-          <div>secs</div>
+          <div className="text-black dark:text-white">secs</div>
         </div>
         <div className="flex flex-row items-center my-2">
-          <div className="text-base font-semibold mr-2">Canvas Resolution:</div>
+          <div className="text-base font-semibold mr-2 text-black dark:text-white">Canvas Resolution:</div>
           <label htmlFor="canvas-resolution" className="sr-only">Canvas Resolution</label>
           <select
             id="canvas-resolution"
             name="canvas-resolution"
             value={`${state.canvas_width}x${state.canvas_height}`}
             onChange={handleResolutionChange}
-            className="rounded-md text-base text-black w-24 border-slate-200 placeholder-slate-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500"
+            className="rounded-md text-base text-black dark:text-white bg-white dark:bg-gray-800 w-24 border-slate-200 dark:border-gray-600 placeholder-slate-400 dark:placeholder-gray-400 contrast-more:border-slate-400 contrast-more:placeholder-slate-500"
           >
             {resolutionOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -220,7 +220,7 @@ const ExportVideoPanel = observer(() => {
       </div >
       {/*  Format selection with radio button */}
       <div className="px-[16px]" >
-        <div className="text-base font-semibold mr-2">Video Format:</div>
+        <div className="text-base font-semibold mr-2 text-black dark:text-white">Video Format:</div>
         <div className="flex flex-row items-center my-2">
           <label htmlFor="video-format" className="sr-only">Video Format</label>
           <input
@@ -235,7 +235,7 @@ const ExportVideoPanel = observer(() => {
             }}
             placeholder="Video Format"
           />
-          <div className="text-md mr-2">MP4</div>
+          <div className="text-md mr-2 text-black dark:text-white">MP4</div>
           <label htmlFor="video-format" ></label>
           <input
             id="video-format"
@@ -249,7 +249,7 @@ const ExportVideoPanel = observer(() => {
             }}
             placeholder="Video Format"
           />
-          <div className="text-md mr-2">webm</div>
+          <div className="text-md mr-2 text-black dark:text-white">webm</div>
         </div>
       </div>
 
@@ -272,7 +272,7 @@ const ExportVideoPanel = observer(() => {
         Export Video ({state.maxTime / 1000} seconds)
       </button >
 
-      <div className="text-base font-semibold m-4 mb-0">Save / Load Project:</div>
+      <div className="text-base font-semibold m-4 mb-0 text-black dark:text-white">Save / Load Project:</div>
       {/* Button to save project as ArrayBuffer with .animathio extension using state.serialize */}
       <button
         className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg ml-4 mr-0 mb-2"
@@ -302,11 +302,11 @@ const ExportVideoPanel = observer(() => {
         isOpen={isRenderingModalOpen}
         onRequestClose={() => setIsRenderingModalOpen(false)}
         contentLabel="Video Rendering Modal"
-        className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50"
-        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-60"
+        className="fixed inset-0 flex items-center justify-center z-50 bg-black/50"
+        overlayClassName="fixed inset-0 z-40 bg-black/60"
         shouldCloseOnOverlayClick={false}
       >
-        <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-sm shadow-lg max-w-md mx-auto">
           <div className="flex items-center mb-4">
             <div className="mr-4">
               <svg
@@ -331,10 +331,10 @@ const ExportVideoPanel = observer(() => {
               </svg>
             </div>
             <div>
-              <h2 className="text-xl font-bold">Video Rendering</h2>
-              <p className="text-gray-700">Please wait while the video is being rendered...</p>
+              <h2 className="text-xl font-bold text-black dark:text-white">Video Rendering</h2>
+              <p className="text-gray-700 dark:text-gray-300">Please wait while the video is being rendered...</p>
               <br />
-              <p className="text-gray-800"><b>Note:</b> rendering in MP4 results in higher quality, but takes longer.</p>
+              <p className="text-gray-800 dark:text-gray-200"><b>Note:</b> rendering in MP4 results in higher quality, but takes longer.</p>
             </div>
           </div>
         </div>
@@ -352,11 +352,11 @@ const ExportVideoPanel = observer(() => {
           }
         }}
         contentLabel="Project Saving Modal"
-        className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50"
-        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-60"
+        className="fixed inset-0 flex items-center justify-center z-50 bg-black/50"
+        overlayClassName="fixed inset-0 z-40 bg-black/60"
         shouldCloseOnOverlayClick={saveModalStatus !== 'saving'}
       >
-        <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-sm shadow-lg max-w-md mx-auto">
           {saveModalStatus === 'saving' && (
             <div className="flex items-center mb-4">
               <div className="mr-4">
@@ -382,10 +382,10 @@ const ExportVideoPanel = observer(() => {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-bold">Saving Project</h2>
-                <p className="text-gray-700">Please wait while your project is being saved...</p>
+                <h2 className="text-xl font-bold text-black dark:text-white">Saving Project</h2>
+                <p className="text-gray-700 dark:text-gray-300">Please wait while your project is being saved...</p>
                 <br />
-                <p className="text-gray-800">This may take a moment if your project contains large media files.</p>
+                <p className="text-gray-800 dark:text-gray-200">This may take a moment if your project contains large media files.</p>
               </div>
             </div>
           )}
@@ -408,10 +408,10 @@ const ExportVideoPanel = observer(() => {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-bold text-green-600">Project Saved Successfully!</h2>
-                <p className="text-gray-700">Your project has been saved.</p>
+                <h2 className="text-xl font-bold text-green-600 dark:text-green-400">Project Saved Successfully!</h2>
+                <p className="text-gray-700 dark:text-gray-300">Your project has been saved.</p>
                 <button
-                  className="mt-4 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+                  className="mt-4 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-sm"
                   onClick={() => {
                     setIsSavingModalOpen(false);
                     setSaveModalStatus('saving');
@@ -442,11 +442,11 @@ const ExportVideoPanel = observer(() => {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-bold text-red-600">Error Saving Project</h2>
-                <p className="text-gray-700">An error occurred while saving your project:</p>
-                <p className="text-red-600 font-medium mt-2 p-2 bg-red-100 rounded">{saveErrorMessage || 'Unknown error occurred'}</p>
+                <h2 className="text-xl font-bold text-red-600 dark:text-red-400">Error Saving Project</h2>
+                <p className="text-gray-700 dark:text-gray-300">An error occurred while saving your project:</p>
+                <p className="text-red-600 dark:text-red-400 font-medium mt-2 p-2 bg-red-100 dark:bg-red-900 rounded-sm">{saveErrorMessage || 'Unknown error occurred'}</p>
                 <button
-                  className="mt-4 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                  className="mt-4 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-sm"
                   onClick={() => {
                     setIsSavingModalOpen(false);
                     setSaveModalStatus('saving');
@@ -471,11 +471,11 @@ const ExportVideoPanel = observer(() => {
           }
         }}
         contentLabel="Project Loading Modal"
-        className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50"
-        overlayClassName="fixed inset-0 z-40 bg-black bg-opacity-60"
+        className="fixed inset-0 flex items-center justify-center z-50 bg-black/50"
+        overlayClassName="fixed inset-0 z-40 bg-black/60"
         shouldCloseOnOverlayClick={loadModalStatus !== 'loading'}
       >
-        <div className="bg-white p-6 rounded shadow-lg max-w-md mx-auto">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-sm shadow-lg max-w-md mx-auto">
           {loadModalStatus === 'loading' && (
             <div className="flex items-center mb-4">
               <div className="mr-4">
@@ -501,8 +501,8 @@ const ExportVideoPanel = observer(() => {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-bold">Loading Project</h2>
-                <p className="text-gray-700">Please wait while your project is being loaded...</p>
+                <h2 className="text-xl font-bold text-black dark:text-white">Loading Project</h2>
+                <p className="text-gray-700 dark:text-gray-300">Please wait while your project is being loaded...</p>
 
                 {/* Progress bar */}
                 {loadingProgress > 0 && (
@@ -513,7 +513,7 @@ const ExportVideoPanel = observer(() => {
                         style={{ width: `${loadingProgress}%` }}
                       ></div>
                     </div>
-                    <p className="text-xs text-gray-500 text-right mt-1">{loadingProgress}%</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-right mt-1">{loadingProgress}%</p>
                   </div>
                 )}
               </div>
@@ -538,10 +538,10 @@ const ExportVideoPanel = observer(() => {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-bold text-purple-600">Project Loaded Successfully!</h2>
-                <p className="text-gray-700">Your project is now ready to use.</p>
+                <h2 className="text-xl font-bold text-purple-600 dark:text-purple-400">Project Loaded Successfully!</h2>
+                <p className="text-gray-700 dark:text-gray-300">Your project is now ready to use.</p>
                 <button
-                  className="mt-4 bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
+                  className="mt-4 bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-sm"
                   onClick={() => {
                     setIsLoadingModalOpen(false);
                     setLoadModalStatus('loading');
@@ -572,11 +572,11 @@ const ExportVideoPanel = observer(() => {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-bold text-red-600">Error Loading Project</h2>
-                <p className="text-gray-700">An error occurred while loading your project:</p>
-                <p className="text-red-600 font-medium mt-2 p-2 bg-red-100 rounded">{loadErrorMessage}</p>
+                <h2 className="text-xl font-bold text-red-600 dark:text-red-400">Error Loading Project</h2>
+                <p className="text-gray-700 dark:text-gray-300">An error occurred while loading your project:</p>
+                <p className="text-red-600 dark:text-red-400 font-medium mt-2 p-2 bg-red-100 dark:bg-red-900 rounded-sm">{loadErrorMessage}</p>
                 <button
-                  className="mt-4 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                  className="mt-4 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-sm"
                   onClick={() => {
                     setIsLoadingModalOpen(false);
                     setLoadModalStatus('loading');

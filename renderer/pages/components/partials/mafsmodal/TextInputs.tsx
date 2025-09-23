@@ -9,13 +9,13 @@ const TextInputs = ({ textProps, setTextProps }: TextInputsProps) => {
     return (
         <>
             <div className="mb-4">
-                <label htmlFor="textX" className="block font-medium mb-1">
+                <label htmlFor="textX" className="block font-medium mb-1 text-black dark:text-white">
                     X
                 </label>
                 <input
                     type="number"
                     id="textX"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={textProps.x}
                     onChange={(e) =>
                         setTextProps({
@@ -26,13 +26,13 @@ const TextInputs = ({ textProps, setTextProps }: TextInputsProps) => {
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="textY" className="block font-medium mb-1">
+                <label htmlFor="textY" className="block font-medium mb-1 text-black dark:text-white">
                     Y
                 </label>
                 <input
                     type="number"
                     id="textY"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={textProps.y}
                     onChange={(e) =>
                         setTextProps({
@@ -43,13 +43,13 @@ const TextInputs = ({ textProps, setTextProps }: TextInputsProps) => {
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="textContent" className="block font-medium mb-1">
+                <label htmlFor="textContent" className="block font-medium mb-1 text-black dark:text-white">
                     Content
                 </label>
                 <input
                     type="text"
                     id="textContent"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={textProps?.children?.toString() || ""}
                     onChange={(e) =>
                         setTextProps({

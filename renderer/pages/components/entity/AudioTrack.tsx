@@ -64,7 +64,7 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
                 <span className="text-black dark:text-white text-sm font-bold mr-1">{index + 1}</span>
                 <span className="border-l border-gray-600 h-12"></span>
             </div>
-            <div className="flex-grow">
+            <div className="grow">
                 <div className="truncate text-sm">{element.name}</div>
                 <div className="flex items-center mt-1">
                     <button
@@ -84,7 +84,7 @@ const AudioTrack = observer(({ element, index }: AudioTrackProps) => {
                         max="100"
                         value={volume}
                         onChange={handleVolumeChange}
-                        className="flex-grow h-2 rounded-lg appearance-none bg-gray-600 cursor-pointer"
+                        className="grow h-2 rounded-lg appearance-none bg-gray-600 cursor-pointer"
                     />
                     <span className="ml-2 text-xs w-8 text-right">{volume}%</span>
                 </div>

@@ -9,13 +9,13 @@ const PointInputs = ({ pointProps, setPointProps }: PointInputsProps) => {
     return (
         <>
             <div className="mb-4">
-                <label htmlFor="pointX" className="block font-medium mb-1">
+                <label htmlFor="pointX" className="block font-medium mb-1 text-black dark:text-white">
                     X
                 </label>
                 <input
                     type="number"
                     id="pointX"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={pointProps.x}
                     onChange={(e) =>
                         setPointProps({
@@ -26,13 +26,13 @@ const PointInputs = ({ pointProps, setPointProps }: PointInputsProps) => {
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="pointY" className="block font-medium mb-1">
+                <label htmlFor="pointY" className="block font-medium mb-1 text-black dark:text-white">
                     Y
                 </label>
                 <input
                     type="number"
                     id="pointY"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                     value={pointProps.y}
                     onChange={(e) =>
                         setPointProps({

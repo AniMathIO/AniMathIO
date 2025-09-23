@@ -9,7 +9,7 @@ const MafsResource = observer(({ name, children, onAddResource }: { name: string
       </div>
       <button
         title="Add Mafs Element"
-        className="hover:bg-[#00a0f5] rounded z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
+        className="hover:bg-[#00a0f5] rounded-sm z-10 text-white font-bold py-1 absolute text-lg bottom-2 right-2"
         onClick={onAddResource}
       >
         <PlusCircleIcon className="w-8 h-8 drop-shadow-lg" />
