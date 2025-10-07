@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { isValidComponent } from './test-utils.ts'
 
 describe('Panel Components', () => {
   it('should render AnimationsPanel component', async () => {
