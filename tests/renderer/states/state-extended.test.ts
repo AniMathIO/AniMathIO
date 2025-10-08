@@ -344,7 +344,7 @@ describe("State Extended Tests", () => {
     it("should handle playback control", () => {
       state.setPlaying(true);
       expect(state.playing).toBe(true);
-      
+
       state.setPlaying(false);
       expect(state.playing).toBe(false);
     });
@@ -367,14 +367,29 @@ describe("State Extended Tests", () => {
         id: "test-id",
         name: "Test Element",
         type: "text",
-        placement: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        placement: {
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 100,
+          rotation: 0,
+          scaleX: 1,
+          scaleY: 1,
+        },
         timeFrame: { start: 0, end: 1000 },
-        properties: { text: "Test", fontSize: 16, fontWeight: 400, splittedTexts: [] },
+        properties: {
+          text: "Test",
+          fontSize: 16,
+          fontWeight: 400,
+          splittedTexts: [],
+        },
       };
 
       await state.addEditorElement(element as any);
       state.removeEditorElement("test-id");
-      expect(state.editorElements.some((el) => el.id === "test-id")).toBeFalsy();
+      expect(
+        state.editorElements.some((el) => el.id === "test-id")
+      ).toBeFalsy();
     });
   });
 
@@ -396,11 +411,13 @@ describe("State Extended Tests", () => {
 
     it("should handle resource replacement", () => {
       state.images = ["old-image.jpg"];
-      state.editorElements = [{
-        id: "test-id",
-        type: "image",
-        properties: { src: "old-image.jpg" },
-      } as any];
+      state.editorElements = [
+        {
+          id: "test-id",
+          type: "image",
+          properties: { src: "old-image.jpg" },
+        } as any,
+      ];
 
       state.replaceImageResource(0, "new-image.jpg");
       expect(state.images[0]).toBe("new-image.jpg");
@@ -424,8 +441,20 @@ describe("State Extended Tests", () => {
     });
 
     it("should handle animation updates", () => {
-      const animation1 = { id: "anim-1", type: "fadeIn", targetId: "element-1", duration: 1000, properties: {} };
-      const animation2 = { id: "anim-1", type: "fadeOut", targetId: "element-1", duration: 2000, properties: {} };
+      const animation1 = {
+        id: "anim-1",
+        type: "fadeIn",
+        targetId: "element-1",
+        duration: 1000,
+        properties: {},
+      };
+      const animation2 = {
+        id: "anim-1",
+        type: "fadeOut",
+        targetId: "element-1",
+        duration: 2000,
+        properties: {},
+      };
 
       state.animations = [animation1];
       state.updateAnimation("anim-1", animation2);
@@ -433,7 +462,13 @@ describe("State Extended Tests", () => {
     });
 
     it("should handle animation removal", () => {
-      const animation = { id: "anim-1", type: "fadeIn", targetId: "element-1", duration: 1000, properties: {} };
+      const animation = {
+        id: "anim-1",
+        type: "fadeIn",
+        targetId: "element-1",
+        duration: 1000,
+        properties: {},
+      };
       state.animations = [animation];
       state.removeAnimation("anim-1");
       expect(state.animations).toHaveLength(0);

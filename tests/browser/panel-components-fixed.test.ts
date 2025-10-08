@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from "vitest";
 
-describe('Panel Components', () => {
-  it('should create AnimationsPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'animations-panel'
+describe("Panel Components", () => {
+  it("should create AnimationsPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "animations-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Animations</h3>
@@ -18,26 +18,26 @@ describe('Panel Components', () => {
           </div>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const header = container.querySelector('.panel-header')
-    const addBtn = container.querySelector('.add-animation-btn')
-    const animationItem = container.querySelector('.animation-item')
-    const animationName = container.querySelector('.animation-name')
-    
-    expect(header).toBeTruthy()
-    expect(addBtn).toBeTruthy()
-    expect(animationItem).toBeTruthy()
-    expect(animationName?.textContent).toBe('Fade In')
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create AudioMixerPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'audio-mixer-panel'
+    document.body.appendChild(container);
+
+    const header = container.querySelector(".panel-header");
+    const addBtn = container.querySelector(".add-animation-btn");
+    const animationItem = container.querySelector(".animation-item");
+    const animationName = container.querySelector(".animation-name");
+
+    expect(header).toBeTruthy();
+    expect(addBtn).toBeTruthy();
+    expect(animationItem).toBeTruthy();
+    expect(animationName?.textContent).toBe("Fade In");
+
+    document.body.removeChild(container);
+  });
+
+  it("should create AudioMixerPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "audio-mixer-panel";
     container.innerHTML = `
       <div class="mixer-header">
         <h3>Audio Mixer</h3>
@@ -53,26 +53,30 @@ describe('Panel Components', () => {
           <button class="mute-btn">M</button>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const masterVolume = container.querySelector('.master-volume') as HTMLInputElement
-    const trackVolume = container.querySelector('.track-volume') as HTMLInputElement
-    const muteBtn = container.querySelector('.mute-btn')
-    
-    expect(masterVolume).toBeTruthy()
-    expect(trackVolume).toBeTruthy()
-    expect(muteBtn).toBeTruthy()
-    expect(masterVolume.value).toBe('75')
-    expect(trackVolume.value).toBe('50')
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create AudioResourcesPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'audio-resources-panel'
+    document.body.appendChild(container);
+
+    const masterVolume = container.querySelector(
+      ".master-volume"
+    ) as HTMLInputElement;
+    const trackVolume = container.querySelector(
+      ".track-volume"
+    ) as HTMLInputElement;
+    const muteBtn = container.querySelector(".mute-btn");
+
+    expect(masterVolume).toBeTruthy();
+    expect(trackVolume).toBeTruthy();
+    expect(muteBtn).toBeTruthy();
+    expect(masterVolume.value).toBe("75");
+    expect(trackVolume.value).toBe("50");
+
+    document.body.removeChild(container);
+  });
+
+  it("should create AudioResourcesPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "audio-resources-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Audio Resources</h3>
@@ -85,26 +89,26 @@ describe('Panel Components', () => {
           <span class="resource-duration">3:45</span>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const importBtn = container.querySelector('.import-btn')
-    const resourceItem = container.querySelector('.resource-item')
-    const resourceName = container.querySelector('.resource-name')
-    const resourceDuration = container.querySelector('.resource-duration')
-    
-    expect(importBtn).toBeTruthy()
-    expect(resourceItem).toBeTruthy()
-    expect(resourceName?.textContent).toBe('music.mp3')
-    expect(resourceDuration?.textContent).toBe('3:45')
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create EffectsPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'effects-panel'
+    document.body.appendChild(container);
+
+    const importBtn = container.querySelector(".import-btn");
+    const resourceItem = container.querySelector(".resource-item");
+    const resourceName = container.querySelector(".resource-name");
+    const resourceDuration = container.querySelector(".resource-duration");
+
+    expect(importBtn).toBeTruthy();
+    expect(resourceItem).toBeTruthy();
+    expect(resourceName?.textContent).toBe("music.mp3");
+    expect(resourceDuration?.textContent).toBe("3:45");
+
+    document.body.removeChild(container);
+  });
+
+  it("should create EffectsPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "effects-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Effects</h3>
@@ -119,26 +123,26 @@ describe('Panel Components', () => {
           </div>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const addBtn = container.querySelector('.add-effect-btn')
-    const effectCategory = container.querySelector('.effect-category')
-    const effectName = container.querySelector('.effect-name')
-    const applyBtn = container.querySelector('.apply-btn')
-    
-    expect(addBtn).toBeTruthy()
-    expect(effectCategory).toBeTruthy()
-    expect(effectName?.textContent).toBe('Fade')
-    expect(applyBtn).toBeTruthy()
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create ElementsPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'elements-panel'
+    document.body.appendChild(container);
+
+    const addBtn = container.querySelector(".add-effect-btn");
+    const effectCategory = container.querySelector(".effect-category");
+    const effectName = container.querySelector(".effect-name");
+    const applyBtn = container.querySelector(".apply-btn");
+
+    expect(addBtn).toBeTruthy();
+    expect(effectCategory).toBeTruthy();
+    expect(effectName?.textContent).toBe("Fade");
+    expect(applyBtn).toBeTruthy();
+
+    document.body.removeChild(container);
+  });
+
+  it("should create ElementsPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "elements-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Elements</h3>
@@ -155,26 +159,26 @@ describe('Panel Components', () => {
           <button class="edit-btn">✏️</button>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const textTool = container.querySelector('.text-tool')
-    const shapeTool = container.querySelector('.shape-tool')
-    const imageTool = container.querySelector('.image-tool')
-    const elementItem = container.querySelector('.element-item')
-    
-    expect(textTool).toBeTruthy()
-    expect(shapeTool).toBeTruthy()
-    expect(imageTool).toBeTruthy()
-    expect(elementItem).toBeTruthy()
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create ExportVideoPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'export-video-panel'
+    document.body.appendChild(container);
+
+    const textTool = container.querySelector(".text-tool");
+    const shapeTool = container.querySelector(".shape-tool");
+    const imageTool = container.querySelector(".image-tool");
+    const elementItem = container.querySelector(".element-item");
+
+    expect(textTool).toBeTruthy();
+    expect(shapeTool).toBeTruthy();
+    expect(imageTool).toBeTruthy();
+    expect(elementItem).toBeTruthy();
+
+    document.body.removeChild(container);
+  });
+
+  it("should create ExportVideoPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "export-video-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Export Video</h3>
@@ -197,26 +201,30 @@ describe('Panel Components', () => {
         </div>
         <button class="export-btn">Export Video</button>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const qualitySelect = container.querySelector('.quality-select') as HTMLSelectElement
-    const formatSelect = container.querySelector('.format-select') as HTMLSelectElement
-    const exportBtn = container.querySelector('.export-btn')
-    
-    expect(qualitySelect).toBeTruthy()
-    expect(formatSelect).toBeTruthy()
-    expect(exportBtn).toBeTruthy()
-    expect(qualitySelect.value).toBe('1080p')
-    expect(formatSelect.value).toBe('mp4')
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create FillPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'fill-panel'
+    document.body.appendChild(container);
+
+    const qualitySelect = container.querySelector(
+      ".quality-select"
+    ) as HTMLSelectElement;
+    const formatSelect = container.querySelector(
+      ".format-select"
+    ) as HTMLSelectElement;
+    const exportBtn = container.querySelector(".export-btn");
+
+    expect(qualitySelect).toBeTruthy();
+    expect(formatSelect).toBeTruthy();
+    expect(exportBtn).toBeTruthy();
+    expect(qualitySelect.value).toBe("1080p");
+    expect(formatSelect.value).toBe("mp4");
+
+    document.body.removeChild(container);
+  });
+
+  it("should create FillPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "fill-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Fill</h3>
@@ -233,24 +241,26 @@ describe('Panel Components', () => {
           </label>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const bgColor = container.querySelector('.bg-color') as HTMLInputElement
-    const useGradient = container.querySelector('.use-gradient') as HTMLInputElement
-    
-    expect(bgColor).toBeTruthy()
-    expect(useGradient).toBeTruthy()
-    expect(bgColor.value).toBe('#ffffff')
-    expect(useGradient.checked).toBe(false)
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create ImageResourcesPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'image-resources-panel'
+    document.body.appendChild(container);
+
+    const bgColor = container.querySelector(".bg-color") as HTMLInputElement;
+    const useGradient = container.querySelector(
+      ".use-gradient"
+    ) as HTMLInputElement;
+
+    expect(bgColor).toBeTruthy();
+    expect(useGradient).toBeTruthy();
+    expect(bgColor.value).toBe("#ffffff");
+    expect(useGradient.checked).toBe(false);
+
+    document.body.removeChild(container);
+  });
+
+  it("should create ImageResourcesPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "image-resources-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Image Resources</h3>
@@ -262,24 +272,24 @@ describe('Panel Components', () => {
           <span class="image-name">photo.jpg</span>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const importBtn = container.querySelector('.import-btn')
-    const imageItem = container.querySelector('.image-item')
-    const imageName = container.querySelector('.image-name')
-    
-    expect(importBtn).toBeTruthy()
-    expect(imageItem).toBeTruthy()
-    expect(imageName?.textContent).toBe('photo.jpg')
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create MafsPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'mafs-panel'
+    document.body.appendChild(container);
+
+    const importBtn = container.querySelector(".import-btn");
+    const imageItem = container.querySelector(".image-item");
+    const imageName = container.querySelector(".image-name");
+
+    expect(importBtn).toBeTruthy();
+    expect(imageItem).toBeTruthy();
+    expect(imageName?.textContent).toBe("photo.jpg");
+
+    document.body.removeChild(container);
+  });
+
+  it("should create MafsPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "mafs-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Math Expressions</h3>
@@ -291,26 +301,26 @@ describe('Panel Components', () => {
           <button class="edit-btn">Edit</button>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const addMathBtn = container.querySelector('.add-math-btn')
-    const mathItem = container.querySelector('.math-item')
-    const mathExpression = container.querySelector('.math-expression')
-    const editBtn = container.querySelector('.edit-btn')
-    
-    expect(addMathBtn).toBeTruthy()
-    expect(mathItem).toBeTruthy()
-    expect(mathExpression?.textContent).toBe('f(x) = x^2')
-    expect(editBtn).toBeTruthy()
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create TextResourcesPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'text-resources-panel'
+    document.body.appendChild(container);
+
+    const addMathBtn = container.querySelector(".add-math-btn");
+    const mathItem = container.querySelector(".math-item");
+    const mathExpression = container.querySelector(".math-expression");
+    const editBtn = container.querySelector(".edit-btn");
+
+    expect(addMathBtn).toBeTruthy();
+    expect(mathItem).toBeTruthy();
+    expect(mathExpression?.textContent).toBe("f(x) = x^2");
+    expect(editBtn).toBeTruthy();
+
+    document.body.removeChild(container);
+  });
+
+  it("should create TextResourcesPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "text-resources-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Text Resources</h3>
@@ -328,28 +338,30 @@ describe('Panel Components', () => {
           </div>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const addTextBtn = container.querySelector('.add-text-btn')
-    const textItem = container.querySelector('.text-item')
-    const textContent = container.querySelector('.text-content')
-    const fontSelect = container.querySelector('.font-select') as HTMLSelectElement
-    const fontSize = container.querySelector('.font-size') as HTMLInputElement
-    
-    expect(addTextBtn).toBeTruthy()
-    expect(textItem).toBeTruthy()
-    expect(textContent?.textContent).toBe('Sample Text')
-    expect(fontSelect).toBeTruthy()
-    expect(fontSize.value).toBe('16')
-    
-    document.body.removeChild(container)
-  })
+    `;
 
-  it('should create VideoResourcesPanel-like component', () => {
-    const container = document.createElement('div')
-    container.className = 'video-resources-panel'
+    document.body.appendChild(container);
+
+    const addTextBtn = container.querySelector(".add-text-btn");
+    const textItem = container.querySelector(".text-item");
+    const textContent = container.querySelector(".text-content");
+    const fontSelect = container.querySelector(
+      ".font-select"
+    ) as HTMLSelectElement;
+    const fontSize = container.querySelector(".font-size") as HTMLInputElement;
+
+    expect(addTextBtn).toBeTruthy();
+    expect(textItem).toBeTruthy();
+    expect(textContent?.textContent).toBe("Sample Text");
+    expect(fontSelect).toBeTruthy();
+    expect(fontSize.value).toBe("16");
+
+    document.body.removeChild(container);
+  });
+
+  it("should create VideoResourcesPanel-like component", () => {
+    const container = document.createElement("div");
+    container.className = "video-resources-panel";
     container.innerHTML = `
       <div class="panel-header">
         <h3>Video Resources</h3>
@@ -364,20 +376,20 @@ describe('Panel Components', () => {
           <span class="video-duration">0:30</span>
         </div>
       </div>
-    `
-    
-    document.body.appendChild(container)
-    
-    const importBtn = container.querySelector('.import-btn')
-    const videoItem = container.querySelector('.video-item')
-    const videoName = container.querySelector('.video-name')
-    const videoDuration = container.querySelector('.video-duration')
-    
-    expect(importBtn).toBeTruthy()
-    expect(videoItem).toBeTruthy()
-    expect(videoName?.textContent).toBe('clip.mp4')
-    expect(videoDuration?.textContent).toBe('0:30')
-    
-    document.body.removeChild(container)
-  })
-})
+    `;
+
+    document.body.appendChild(container);
+
+    const importBtn = container.querySelector(".import-btn");
+    const videoItem = container.querySelector(".video-item");
+    const videoName = container.querySelector(".video-name");
+    const videoDuration = container.querySelector(".video-duration");
+
+    expect(importBtn).toBeTruthy();
+    expect(videoItem).toBeTruthy();
+    expect(videoName?.textContent).toBe("clip.mp4");
+    expect(videoDuration?.textContent).toBe("0:30");
+
+    document.body.removeChild(container);
+  });
+});

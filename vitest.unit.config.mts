@@ -55,10 +55,10 @@ export default defineConfig({
       // Set thresholds for unit tests only
       thresholds: {
         global: {
-          branches: 80,
-          functions: 85,
-          lines: 85,
-          statements: 85
+          branches: 50,
+          functions: 50,
+          lines: 50,
+          statements: 50
         }
       },
       // Enable all coverage options

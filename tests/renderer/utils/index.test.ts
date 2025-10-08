@@ -13,7 +13,7 @@ describe("Utils", () => {
     it("should generate a unique ID", () => {
       const id1 = getUid();
       const id2 = getUid();
-      
+
       expect(id1).toBeDefined();
       expect(id2).toBeDefined();
       expect(id1).not.toBe(id2);
@@ -32,7 +32,7 @@ describe("Utils", () => {
       const imageElement = { tagName: "IMG" } as HTMLImageElement;
       const audioElement = { tagName: "AUDIO" } as HTMLAudioElement;
       const divElement = { tagName: "DIV" } as HTMLElement;
-      
+
       expect(isHtmlVideoElement(imageElement)).toBe(false);
       expect(isHtmlVideoElement(audioElement)).toBe(false);
       expect(isHtmlVideoElement(divElement)).toBe(false);
@@ -53,7 +53,7 @@ describe("Utils", () => {
       const videoElement = { tagName: "VIDEO" } as HTMLVideoElement;
       const audioElement = { tagName: "AUDIO" } as HTMLAudioElement;
       const divElement = { tagName: "DIV" } as HTMLElement;
-      
+
       expect(isHtmlImageElement(videoElement)).toBe(false);
       expect(isHtmlImageElement(audioElement)).toBe(false);
       expect(isHtmlImageElement(divElement)).toBe(false);
@@ -74,7 +74,7 @@ describe("Utils", () => {
       const videoElement = { tagName: "VIDEO" } as HTMLVideoElement;
       const imageElement = { tagName: "IMG" } as HTMLImageElement;
       const divElement = { tagName: "DIV" } as HTMLElement;
-      
+
       expect(isHtmlAudioElement(videoElement)).toBe(false);
       expect(isHtmlAudioElement(imageElement)).toBe(false);
       expect(isHtmlAudioElement(divElement)).toBe(false);
