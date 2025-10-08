@@ -11,9 +11,9 @@ jobs:
         node-version-file: [".nvmrc"]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version-file }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -24,7 +24,7 @@ jobs:
       - name: Run unit tests with coverage
         run: npm run test:coverage
       - name: Upload unit test coverage
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: unit-coverage
           path: coverage/
@@ -37,9 +37,9 @@ jobs:
         node-version-file: [".nvmrc"]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version-file }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -52,12 +52,12 @@ jobs:
       - name: Run browser tests with coverage
         run: npm run test:browser:coverage
       - name: Upload browser test coverage
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: browser-coverage
           path: coverage-browser/
       - name: Upload test screenshots (if any)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: test-screenshots
