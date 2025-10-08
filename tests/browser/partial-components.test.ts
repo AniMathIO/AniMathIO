@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isValidComponent } from './test-utils.ts'
+import { isValidComponent } from './test-utils'
 
 describe('Partial Components', () => {
   it('should render MafsModal component', async () => {
@@ -29,7 +29,7 @@ describe('Partial Components', () => {
   it('should render SeekPlayer component', async () => {
     const { default: SeekPlayer } = await import('../../renderer/pages/components/partials/timeline/SeekPlayer')
     expect(SeekPlayer).toBeDefined()
-    expect(isValidComponent(SeekPlayer)).toBe(true))
+    expect(isValidComponent(SeekPlayer)).toBe(true)
   })
 
   it('should render Timeframe component', async () => {
