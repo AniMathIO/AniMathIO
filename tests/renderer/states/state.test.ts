@@ -1004,4 +1004,88 @@ describe("State", () => {
       expect(secondResult).toHaveProperty("sourceNode");
     });
   });
+
+  describe("Additional State Methods", () => {
+    it("should set background color", () => {
+      const newColor = "#ff0000";
+      state.setBackgroundColor(newColor);
+
+      expect(state.backgroundColor).toBe(newColor);
+    });
+
+    it("should set max time", () => {
+      const newMaxTime = 60000;
+      state.setMaxTime(newMaxTime);
+
+      expect(state.maxTime).toBe(newMaxTime);
+    });
+
+    it("should set selected menu option", () => {
+      state.setSelectedMenuOption("Images");
+
+      expect(state.selectedMenuOption).toBe("Images");
+    });
+
+    it("should add animation", () => {
+      const animation = {
+        id: "anim-1",
+        targetId: "video-1",
+        duration: 1000,
+        type: "fadeIn" as const,
+        properties: {},
+      };
+
+      state.addAnimation(animation);
+
+      expect(state.animations.length).toBeGreaterThan(0);
+      expect(state.animations.some((a) => a.id === "anim-1")).toBe(true);
+    });
+
+    it("should remove animation", () => {
+      const animation = {
+        id: "anim-1",
+        targetId: "video-1",
+        duration: 1000,
+        type: "fadeIn" as const,
+        properties: {},
+      };
+
+      state.addAnimation(animation);
+      state.removeAnimation("anim-1");
+
+      expect(state.animations.some((a) => a.id === "anim-1")).toBe(false);
+    });
+
+    it("should update animation", () => {
+      const animation = {
+        id: "anim-1",
+        targetId: "video-1",
+        duration: 1000,
+        type: "fadeIn" as const,
+        properties: {},
+      };
+
+      state.addAnimation(animation);
+
+      const updatedAnimation = {
+        ...animation,
+        duration: 2000,
+      };
+
+      state.updateAnimation("anim-1", updatedAnimation);
+
+      const foundAnimation = state.animations.find((a) => a.id === "anim-1");
+      expect(foundAnimation).toBeDefined();
+      expect(foundAnimation?.id).toBe("anim-1");
+    });
+
+    it("should handle seek to specific time", () => {
+      const seekTime = 5000;
+      vi.spyOn(state, "setCurrentTimeInMs").mockImplementation(() => {});
+
+      state.handleSeek(seekTime);
+
+      expect(state.setCurrentTimeInMs).toHaveBeenCalledWith(seekTime);
+    });
+  });
 });
