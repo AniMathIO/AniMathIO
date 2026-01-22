@@ -1,25 +1,15 @@
 "use client";
 
 import { fabric } from "fabric";
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import Resources from "./components/Resources";
 import ElementsPanel from "./components/panels/ElementsPanel";
 import Menu from "./Menu";
 import Timeline from "./components/Timeline";
-import { State } from '../states/state';
 import Head from "next/head";
 import AniMathIO from "../public/images/AniMathIO.png";
-
-export const EditorWithStore = () => {
-  const [state] = useState(new State());
-  return (
-    <StateContext.Provider value={state}>
-      <Editor></Editor>
-    </StateContext.Provider>
-  );
-}
 
 const Editor = observer(() => {
   const state = React.useContext(StateContext);
@@ -37,6 +27,10 @@ const Editor = observer(() => {
   };
 
   useEffect(() => {
+    // Only initialize canvas if editor is active
+    if (!state.isEditorActive) {
+      return;
+    }
     const canvas = new fabric.Canvas("canvas", {
       height: state.canvas_height,
       width: state.canvas_width,
@@ -63,13 +57,22 @@ const Editor = observer(() => {
     // Set the default scale factor based on the initial canvas dimensions
     const defaultScaleFactor = canvasScaleMap[`${state.canvas_width}x${state.canvas_height}`]?.default || 37;
     setScaleFactor(defaultScaleFactor);
-  }, []);
+  }, [state.isEditorActive]);
 
   useEffect(() => {
+    // Only update scale factor if editor is active
+    if (!state.isEditorActive) {
+      return;
+    }
     // Update the scale factor when the canvas dimensions change
     const defaultScaleFactor = canvasScaleMap[`${state.canvas_width}x${state.canvas_height}`]?.default || 37;
     setScaleFactor(defaultScaleFactor);
-  }, [state.canvas_width, state.canvas_height]);
+  }, [state.canvas_width, state.canvas_height, state.isEditorActive]);
+
+  // Only show editor if it's active
+  if (!state.isEditorActive) {
+    return null;
+  }
 
   const handleScaleChange = (event: any) => {
     const newScaleFactor = parseInt(event.target.value);

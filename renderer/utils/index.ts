@@ -51,3 +51,6 @@ export function formatTimeToMinSecMili(time: number) {
 function appendZero(value: number, minDigits: number = 2) {
   return value.toString().padStart(minDigits, "0");
 }
+
+// Export project history utilities
+export * from "./projectHistory";

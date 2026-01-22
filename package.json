@@ -3,7 +3,10 @@
   "name": "animathio",
   "description": "AniMathIO is a video editor application for editing Manim-like video projects",
   "version": "1.5.0",
-  "author": "Kovács Bálint-Hunor",
+  "author": {
+    "name": "Kovács Bálint-Hunor",
+    "email": "kovacsbalinthunor53@gmail.com"
+  },
   "main": "app/background.js",
   "scripts": {
     "dev": "nextron -- --turbopack",
@@ -23,6 +26,7 @@
     "build:mac:universal": "nextron build --mac --universal",
     "build:win": "nextron build --win --ia32",
     "build:linux": "nextron build --linux",
+    "build:linux:debug:flatpak": "DEBUG=@malept/flatpak-bundler nextron build --linux flatpak",
     "build:nomac": "nextron build --win --linux",
     "build-native": "next build renderer && electron-builder",
     "postinstall": "electron-builder install-app-deps && npm rebuild canvas --update-binary"
