@@ -43,6 +43,12 @@ linux:
     - AppImage
     - deb
     - flatpak
+  # Desktop file configuration
+  desktop:
+    entry:
+      Name: AniMathIO
+      Comment: Video editor for creating Manim-like mathematical videos
+      Categories: AudioVideo;Video;Graphics;
 # Flatpak configuration (must be at root level, not under linux)
 flatpak:
   # Base app configuration
@@ -51,6 +57,10 @@ flatpak:
   runtime: org.freedesktop.Platform
   runtimeVersion: "24.08"
   sdk: org.freedesktop.Sdk
+  # Version branch (defaults to "master" if not set)
+  branch: "1.5.0"
+  # License file path
+  license: LICENSE
   # Application metadata
   synopsis: "AniMathIO revolutionizes the creation of mathematical videos, tailored for educators, students, and professionals seeking to bring complex concepts to life"
   description: "AniMathIO revolutionizes the creation of mathematical videos, tailored for educators, students, and professionals seeking to bring complex concepts to life"
