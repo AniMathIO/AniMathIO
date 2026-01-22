@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
 import { FaArrowLeft, FaArrowRight, FaArrowUp, FaArrowDown, FaTrashAlt, FaCopy, FaPaste, FaEyeSlash, FaEye, FaPlay } from 'react-icons/fa';
-import { version } from '../../package.json';
+import packageJson from '../../package.json';
 declare global {
     interface Window {
         electron: {
@@ -422,7 +422,7 @@ const SettingsModal: React.FC = () => {
 
                 <div className="flex justify-between items-center mt-6">
                     <div className="text-sm text-gray-500 dark:text-gray-400">
-                        Version {version}
+                        Version {packageJson.version}
                     </div>
                     <button
                         className="w-fit bg-red-600 hover:bg-red-800 text-white px-4 py-2 rounded-xl"

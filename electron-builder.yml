@@ -9,14 +9,18 @@ files:
     filter:
       - package.json
       - app
-      - "!**/node_modules/@tailwindcss/oxide-android-*"
-      - "!**/node_modules/@tailwindcss/oxide-darwin-*"
-      - "!**/node_modules/@tailwindcss/oxide-linux-*"
-      - "!**/node_modules/@tailwindcss/oxide-win32-*"
+      - "!**/node_modules/**"
+      - "!node_modules/**"
+      - "!**/@tailwindcss/oxide-*"
+      - "!**/@tailwindcss/oxide-android-*"
+      - "!**/@tailwindcss/oxide-darwin-*"
+      - "!**/@tailwindcss/oxide-linux-*"
+      - "!**/@tailwindcss/oxide-win32-*"
 extraFiles:
   - scripts
 publish: null
 npmRebuild: false
+asar: true
 # File associations for "Open with" functionality
 fileAssociations:
   - ext: animathio
