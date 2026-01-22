@@ -186,6 +186,15 @@ ipcMain.handle("set-gemini-api-token", (_, apiToken) => {
   return true;
 });
 
+ipcMain.handle("get-gemini-model", () => {
+  return (store as any).get("geminiModel", "gemini-2.0-flash");
+});
+
+ipcMain.handle("set-gemini-model", (_, model) => {
+  (store as any).set("geminiModel", model);
+  return true;
+});
+
 // Request microphone permissions (macOS)
 function requestMicrophonePermission() {
   if (process.platform === "darwin") {

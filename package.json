@@ -34,6 +34,7 @@
   "dependencies": {
     "@ffmpeg/ffmpeg": "0.12.15",
     "@ffmpeg/util": "0.12.2",
+    "@google/genai": "^1.38.0",
     "@hello-pangea/color-picker": "3.2.2",
     "@heroicons/react": "2.2.0",
     "@imgly/background-removal": "1.7.0",
