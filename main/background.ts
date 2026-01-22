@@ -1,6 +1,6 @@
 import path from "path";
 import { exec } from "child_process";
-import { IpcMainEvent, app, ipcMain, systemPreferences, dialog, BrowserWindow } from "electron";
+import { IpcMainEvent, app, ipcMain, systemPreferences, dialog, BrowserWindow, shell } from "electron";
 import { readFile } from "fs/promises";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
@@ -296,5 +296,15 @@ ipcMain.handle("write-project-file", async (event, filePath: string, fileData: n
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || "Failed to write file" };
+  }
+});
+
+// Handler to open external URLs
+ipcMain.handle("open-external-url", async (event, url: string) => {
+  try {
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to open URL" };
   }
 });

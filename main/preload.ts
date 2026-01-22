@@ -40,4 +40,7 @@ contextBridge.exposeInMainWorld("electron", {
       ipcRenderer.removeListener('open-file-from-system', wrapper);
     };
   },
+  // Open external URL
+  openExternalUrl: (url: string) => 
+    ipcRenderer.invoke('open-external-url', url),
 });

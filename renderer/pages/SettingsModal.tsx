@@ -43,6 +43,10 @@ declare global {
                 filePath?: string;
                 error?: string;
             }) => void) => () => void;
+            openExternalUrl: (url: string) => Promise<{
+                success: boolean;
+                error?: string;
+            }>;
         };
     }
 }

@@ -13,6 +13,9 @@ import { PiUploadSimpleBold } from "react-icons/pi";
 import { IoTrashOutline } from "react-icons/io5";
 import { FiSearch } from "react-icons/fi";
 import { IoAddCircleOutline } from "react-icons/io5";
+import { HiOutlineGlobe } from "react-icons/hi";
+import { HiOutlineBookOpen } from "react-icons/hi";
+import { FaDiscord } from "react-icons/fa";
 
 // Type declaration is in SettingsModal.tsx
 
@@ -498,23 +501,66 @@ const DashboardPanel = observer(() => {
       <div className="max-w-5xl mx-auto h-full px-6 pt-4 flex flex-col gap-4">
         {/* Header */}
         <div className="flex flex-col gap-3 border border-slate-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-900 shadow-sm p-5">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-black/30 flex items-center justify-center">
-              <Image
-                src="/images/AniMathIO.png"
-                alt="AniMathIO logo"
-                width={28}
-                height={28}
-                className="object-contain"
-              />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-black/30 flex items-center justify-center">
+                <Image
+                  src="/images/AniMathIO.png"
+                  alt="AniMathIO logo"
+                  width={28}
+                  height={28}
+                  className="object-contain"
+                />
+              </div>
+              <div className="leading-tight">
+                <p className="text-[0.95rem] font-semibold text-slate-600 dark:text-gray-200">
+                  AniMathIO
+                </p>
+                <h1 className="text-3xl font-semibold text-slate-900 dark:text-white mt-1">
+                  Dashboard
+                </h1>
+              </div>
             </div>
-            <div className="leading-tight">
-              <p className="text-[0.95rem] font-semibold text-slate-600 dark:text-gray-200">
-                AniMathIO
-              </p>
-              <h1 className="text-3xl font-semibold text-slate-900 dark:text-white mt-1">
-                Dashboard
-              </h1>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  if (window.electron && window.electron.openExternalUrl) {
+                    window.electron.openExternalUrl("https://animathio.com");
+                  } else {
+                    window.open("https://animathio.com", "_blank");
+                  }
+                }}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors"
+                title="Website"
+              >
+                <HiOutlineGlobe className="h-5 w-5 text-slate-600 dark:text-gray-300" />
+              </button>
+              <button
+                onClick={() => {
+                  if (window.electron && window.electron.openExternalUrl) {
+                    window.electron.openExternalUrl("https://docs.animathio.com/");
+                  } else {
+                    window.open("https://docs.animathio.com/", "_blank");
+                  }
+                }}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors"
+                title="Documentation"
+              >
+                <HiOutlineBookOpen className="h-5 w-5 text-slate-600 dark:text-gray-300" />
+              </button>
+              <button
+                onClick={() => {
+                  if (window.electron && window.electron.openExternalUrl) {
+                    window.electron.openExternalUrl("https://discord.com/invite/cZMTYSAHRX");
+                  } else {
+                    window.open("https://discord.com/invite/cZMTYSAHRX", "_blank");
+                  }
+                }}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-800 transition-colors"
+                title="Discord"
+              >
+                <FaDiscord className="h-5 w-5 text-slate-600 dark:text-gray-300" />
+              </button>
             </div>
           </div>
         </div>
