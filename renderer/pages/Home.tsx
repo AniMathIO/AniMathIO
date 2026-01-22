@@ -1,8 +1,20 @@
-import React from 'react';
+"use client";
+
+import React, { useState } from 'react';
 import Editor from './Editor';
+import Dashboard from './Dashboard';
+import { StateContext } from '@/states';
+import { State } from '../states/state';
+
 const HomePage = () => {
+  // Create a single shared state instance
+  const [state] = useState(() => new State());
+  
   return (
-    <Editor />
+    <StateContext.Provider value={state}>
+      <Dashboard />
+      <Editor />
+    </StateContext.Provider>
   );
 }
 

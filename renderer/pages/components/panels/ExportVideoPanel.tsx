@@ -5,6 +5,7 @@ import { observer } from "mobx-react";
 import Modal from "react-modal";
 import { IoIosSave } from "react-icons/io";
 import { PiUploadSimpleBold } from "react-icons/pi";
+import { addProjectToHistory } from "@/utils";
 
 
 const ExportVideoPanel = observer(() => {
@@ -35,91 +36,205 @@ const ExportVideoPanel = observer(() => {
     state.setCanvasSize(width, height);
   };
 
-  const handleSaveProject = async () => {
+  // Save to current file (if exists)
+  const handleSave = async () => {
+    if (!state.currentProjectFilePath) {
+      // No current file, use Save As instead
+      handleSaveAs();
+      return;
+    }
+
     try {
       // Show saving modal while serializing
       setSaveModalStatus('saving');
       setIsSavingModalOpen(true);
 
-      // Serialize the project (this could take time)
+      // Serialize the project
       const buffer = await state.serialize();
+      const fileData = Array.from(new Uint8Array(buffer));
+
+      // Use Electron IPC to save to the current file path
+      if (window.electron && window.electron.writeProjectFile && state.currentProjectFilePath) {
+        try {
+          // Save directly to the current file path (no dialog)
+          const result = await window.electron.writeProjectFile(state.currentProjectFilePath, fileData);
+          
+          if (!result.success) {
+            throw new Error(result.error || "Failed to write file");
+          }
+
+          // Update project history
+          if (state.currentProjectFilePath && state.currentProjectFileName) {
+            await addProjectToHistory(state.currentProjectFilePath, state.currentProjectFileName);
+          }
+
+          setSaveModalStatus('success');
+          setIsSavingModalOpen(true);
+          return;
+        } catch (error) {
+          console.error("Error saving to file path:", error);
+          // If file doesn't exist or path is invalid, fall through to Save As
+        }
+      }
+
+      // If we have a file handle (from File System Access API), use it
+      if (state.currentProjectFileHandle && 'showSaveFilePicker' in window) {
+        try {
+          const blob = new Blob([buffer], { type: "application/octet-stream" });
+          // @ts-ignore
+          const writable = await state.currentProjectFileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+
+          // Update project history
+          if (state.currentProjectFilePath && state.currentProjectFileName) {
+            await addProjectToHistory(state.currentProjectFilePath, state.currentProjectFileName);
+          }
+
+          setSaveModalStatus('success');
+          setIsSavingModalOpen(true);
+          return;
+        } catch (error) {
+          console.error("Error saving to file handle:", error);
+          // Fall through to Save As
+        }
+      }
+
+      // Fallback: use Save As
+      handleSaveAs();
+    } catch (error) {
+      console.error("Error saving project:", error);
+      setSaveModalStatus('error');
+      setSaveErrorMessage(error instanceof Error ? error.message : 'Unknown error');
+      setIsSavingModalOpen(true);
+    }
+  };
+
+  // Save As - opens file picker
+  const handleSaveAs = async () => {
+    try {
+      // Show saving modal while serializing
+      setSaveModalStatus('saving');
+      setIsSavingModalOpen(true);
+
+      // Serialize the project
+      const buffer = await state.serialize();
+      const fileData = Array.from(new Uint8Array(buffer));
+      const currentDate = new Date();
+      const suggestedName = state.currentProjectFileName || `project-${currentDate.toISOString()}.animathio`;
 
       // Hide the saving modal before showing the native save dialog
       setIsSavingModalOpen(false);
 
-      // Create the blob for download
-      const blob = new Blob([buffer], { type: "application/octet-stream" });
-      const currentDate = new Date();
+      // Use Electron IPC to save file (gets full path)
+      if (window.electron && window.electron.saveProjectFile) {
+        try {
+          const result = await window.electron.saveProjectFile(fileData, suggestedName);
+          
+          if (!result.success) {
+            if (result.error === "File save cancelled") {
+              setIsSavingModalOpen(false);
+              return;
+            }
+            throw new Error(result.error || "Failed to save file");
+          }
 
-      // Try to use the File System Access API if available (modern browsers)
+          // Store file information with full path
+          if (result.fileName) {
+            state.setCurrentProjectFileName(result.fileName);
+          }
+          if (result.filePath) {
+            state.setCurrentProjectFilePath(result.filePath);
+          }
+          state.setCurrentProjectFileHandle(null); // Can't store file handle through IPC
+
+          // Add to project history with full path
+          if (result.filePath && result.fileName) {
+            await addProjectToHistory(result.filePath, result.fileName);
+          }
+
+          // Show success modal
+          setSaveModalStatus('success');
+          setIsSavingModalOpen(true);
+          return;
+        } catch (error) {
+          console.error("Error saving project via IPC:", error);
+          setSaveModalStatus('error');
+          setSaveErrorMessage(error instanceof Error ? error.message : 'Unknown error');
+          setIsSavingModalOpen(true);
+          return;
+        }
+      }
+
+      // Fallback: Try File System Access API if available
       if ('showSaveFilePicker' in window) {
         try {
-          // @ts-ignore - TypeScript might not recognize this API yet
+          // @ts-ignore
           const fileHandle = await window.showSaveFilePicker({
-            suggestedName: `project-${currentDate.toISOString()}.animathio`,
+            suggestedName: suggestedName,
             types: [{
               description: 'Animathio Project File',
               accept: { 'application/octet-stream': ['.animathio'] }
             }]
           });
 
-          // Get a writable stream
+          const blob = new Blob([buffer], { type: "application/octet-stream" });
           // @ts-ignore
           const writable = await fileHandle.createWritable();
-
-          // Write the blob to the file
           await writable.write(blob);
-
-          // Close the file
           await writable.close();
 
-          // Show success modal after save is complete
+          // Store file handle (but we can't get full path from FileSystemFileHandle)
+          state.setCurrentProjectFileHandle(fileHandle);
+          state.setCurrentProjectFileName(fileHandle.name);
+          // Note: We can't get full path from FileSystemFileHandle, so we store the name
+          // This is a limitation of the File System Access API
+          state.setCurrentProjectFilePath(fileHandle.name);
+
+          // Add to project history (with filename only, as we can't get full path)
+          await addProjectToHistory(fileHandle.name, fileHandle.name);
+
+          // Show success modal
           setSaveModalStatus('success');
           setIsSavingModalOpen(true);
-
-          return; // Exit early since we successfully saved
-        } catch (fsError) {
-          // User might have canceled or browser doesn't fully support the API
-          // Fall back to the traditional method
+          return;
+        } catch (fsError: any) {
+          // User might have canceled
+          if (fsError.name === 'AbortError') {
+            setIsSavingModalOpen(false);
+            return;
+          }
           console.log("File System Access API failed, falling back:", fsError);
         }
       }
-      else {
 
-        // Fallback to traditional download method
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "project-${currentDate.toISOString()}.animathio";
+      // Fallback to traditional download method
+      const blob = new Blob([buffer], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = suggestedName;
+      link.click();
 
-        // Click the link to start the download
-        link.click();
-
-        // Clean up the URL object
-        setTimeout(() => {
-          URL.revokeObjectURL(url);
-
-          // Show success modal after a short delay
-          setSaveModalStatus('success');
-          setIsSavingModalOpen(true);
-        }, 1000);
-      }
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        setSaveModalStatus('success');
+        setIsSavingModalOpen(true);
+      }, 1000);
 
     } catch (error) {
       console.error("Error saving project:", error);
-
-      // Set error state and show modal
       setSaveModalStatus('error');
       setSaveErrorMessage(error instanceof Error ? error.message : 'Unknown error');
       setIsSavingModalOpen(true);
     }
   };
-  const handleLoadProject = () => {
+  const handleLoadProject = async () => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".animathio";
 
-    input.onchange = (e) => {
+    input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
         // Reset and show loading modal
@@ -143,6 +258,14 @@ const ExportVideoPanel = observer(() => {
 
             // Deserialize the project
             await state.deserialize(buffer.buffer);
+
+            // Store file information
+            state.setCurrentProjectFileName(file.name);
+            state.setCurrentProjectFilePath(file.name);
+            state.setCurrentProjectFileHandle(null); // Can't store file handle from file input
+
+            // Add to project history
+            await addProjectToHistory(file.name, file.name);
 
             // Calculate how long the operation took
             const operationTime = Date.now() - startTime;
@@ -273,10 +396,11 @@ const ExportVideoPanel = observer(() => {
       </button >
 
       <div className="text-base font-semibold m-4 mb-0 text-black dark:text-white">Save / Load Project:</div>
-      {/* Button to save project as ArrayBuffer with .animathio extension using state.serialize */}
+      {/* Save button - saves to current file */}
       <button
-        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg ml-4 mr-0 mb-2"
-        onClick={handleSaveProject}
+        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg ml-4 mr-2 mb-2"
+        onClick={handleSave}
+        title={state.currentProjectFilePath ? `Save to ${state.currentProjectFileName}` : "Save (will use Save As)"}
       >
         <div className="flex justify-center align-middle gap-1">
           <IoIosSave className="h-6 w-6" />
@@ -284,15 +408,14 @@ const ExportVideoPanel = observer(() => {
         </div>
       </button>
 
-      {/* Load the saved .animathio project with state.deserialize */}
+      {/* Save As button - opens file picker */}
       <button
-        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg ml-2 mr-4 mt-2"
-        onClick={handleLoadProject}
+        className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg mr-4 mb-2"
+        onClick={handleSaveAs}
       >
-
         <div className="flex justify-center align-middle gap-1">
-          <PiUploadSimpleBold className="h-6 w-6"/> 
-          Load
+          <IoIosSave className="h-6 w-6" />
+          Save As
         </div>
       </button>
 

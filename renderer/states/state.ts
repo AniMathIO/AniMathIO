@@ -57,6 +57,10 @@ export class State {
   >();
   canvas_width: number;
   canvas_height: number;
+  currentProjectFilePath: string | null = null; // Track the currently opened project file path
+  currentProjectFileName: string | null = null; // Track the currently opened project file name
+  currentProjectFileHandle: FileSystemFileHandle | null = null; // Store file handle for Save functionality
+  isEditorActive: boolean = false; // Track if editor is active (false = dashboard, true = editor)
 
   constructor() {
     this.canvas = null;
@@ -578,6 +582,22 @@ export class State {
 
   setSelectedMenuOption(selectedMenuOption: MenuOption) {
     this.selectedMenuOption = selectedMenuOption;
+  }
+
+  setEditorActive(active: boolean) {
+    this.isEditorActive = active;
+  }
+
+  setCurrentProjectFilePath(filePath: string | null) {
+    this.currentProjectFilePath = filePath;
+  }
+
+  setCurrentProjectFileName(fileName: string | null) {
+    this.currentProjectFileName = fileName;
+  }
+
+  setCurrentProjectFileHandle(fileHandle: FileSystemFileHandle | null) {
+    this.currentProjectFileHandle = fileHandle;
   }
 
   setCanvas(canvas: fabric.Canvas | null, width: number, height: number) {

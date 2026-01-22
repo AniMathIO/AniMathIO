@@ -1,6 +1,7 @@
 import path from "path";
 import { exec } from "child_process";
-import { IpcMainEvent, app, ipcMain, systemPreferences } from "electron";
+import { IpcMainEvent, app, ipcMain, systemPreferences, dialog } from "electron";
+import { readFile } from "fs/promises";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
 import Store from "electron-store";
@@ -122,5 +123,92 @@ ipcMain.handle("request-microphone-permission", async () => {
   } else {
     // Linux and other platforms typically don't have permissions
     return "granted";
+  }
+});
+
+// Handler to read project file by path (no dialog, direct read)
+ipcMain.handle("read-project-file", async (event, filePath: string) => {
+  try {
+    // Try to read the file directly
+    const fileBuffer = await readFile(filePath);
+    return {
+      success: true,
+      data: Array.from(new Uint8Array(fileBuffer)),
+      fileName: path.basename(filePath),
+      filePath: filePath,
+    };
+  } catch (error: any) {
+    // Return error without showing dialog
+    return { success: false, error: error.message || "Failed to read file" };
+  }
+});
+
+// Handler to open project file with dialog (for files not in history)
+ipcMain.handle("open-project-file", async (event) => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: "Open Project File",
+      filters: [
+        { name: "Animathio Project", extensions: ["animathio"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+      properties: ["openFile"],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: "File selection cancelled" };
+    }
+
+    const selectedPath = result.filePaths[0];
+    const fileBuffer = await readFile(selectedPath);
+    return {
+      success: true,
+      data: Array.from(new Uint8Array(fileBuffer)),
+      fileName: path.basename(selectedPath),
+      filePath: selectedPath,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to open file" };
+  }
+});
+
+// Handler to save project file with dialog (returns full path)
+ipcMain.handle("save-project-file", async (event, fileData: number[], suggestedName?: string) => {
+  try {
+    const result = await dialog.showSaveDialog({
+      title: "Save Project File",
+      defaultPath: suggestedName || "project.animathio",
+      filters: [
+        { name: "Animathio Project", extensions: ["animathio"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: "File save cancelled" };
+    }
+
+    const filePath = result.filePath;
+    const fileBuffer = Buffer.from(fileData);
+    await require("fs/promises").writeFile(filePath, fileBuffer);
+
+    return {
+      success: true,
+      fileName: path.basename(filePath),
+      filePath: filePath,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to save file" };
+  }
+});
+
+// Handler to save project file directly to path (no dialog)
+ipcMain.handle("write-project-file", async (event, filePath: string, fileData: number[]) => {
+  try {
+    const fileBuffer = Buffer.from(fileData);
+    await require("fs/promises").writeFile(filePath, fileBuffer);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to write file" };
   }
 });

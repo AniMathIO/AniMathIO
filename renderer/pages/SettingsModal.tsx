@@ -11,6 +11,31 @@ declare global {
                 removeListener(channel: string, func: (...args: any[]) => void): void;
                 invoke(channel: string, data?: any): Promise<any>;
             };
+            requestMicrophonePermission: () => Promise<string>;
+            readProjectFile: (filePath: string) => Promise<{
+                success: boolean;
+                data?: number[];
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }>;
+            openProjectFile: () => Promise<{
+                success: boolean;
+                data?: number[];
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }>;
+            saveProjectFile: (fileData: number[], suggestedName?: string) => Promise<{
+                success: boolean;
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }>;
+            writeProjectFile: (filePath: string, fileData: number[]) => Promise<{
+                success: boolean;
+                error?: string;
+            }>;
         };
     }
 }
