@@ -36,6 +36,13 @@ declare global {
                 success: boolean;
                 error?: string;
             }>;
+            onOpenFileFromSystem: (callback: (data: {
+                success: boolean;
+                data?: number[];
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }) => void) => () => void;
         };
     }
 }

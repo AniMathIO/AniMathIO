@@ -31,4 +31,13 @@ contextBridge.exposeInMainWorld("electron", {
   // Write project file directly to path (no dialog)
   writeProjectFile: (filePath: string, fileData: number[]) => 
     ipcRenderer.invoke('write-project-file', filePath, fileData),
+  // Listen for file opened from system (Open with)
+  onOpenFileFromSystem: (callback: (data: any) => void) => {
+    const wrapper = (event: any, data: any) => callback(data);
+    ipcRenderer.on('open-file-from-system', wrapper);
+    // Return cleanup function
+    return () => {
+      ipcRenderer.removeListener('open-file-from-system', wrapper);
+    };
+  },
 });

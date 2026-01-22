@@ -1,6 +1,6 @@
 import path from "path";
 import { exec } from "child_process";
-import { IpcMainEvent, app, ipcMain, systemPreferences, dialog } from "electron";
+import { IpcMainEvent, app, ipcMain, systemPreferences, dialog, BrowserWindow } from "electron";
 import { readFile } from "fs/promises";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
@@ -8,6 +8,10 @@ import Store from "electron-store";
 
 const store = new Store();
 const isProd = process.env.NODE_ENV === "production";
+
+// Store file path to open when app is ready
+let fileToOpen: string | null = null;
+let mainWindow: BrowserWindow | null = null;
 
 if (isProd) {
   serve({ directory: "app" });
@@ -47,10 +51,78 @@ async function startProcess(event: IpcMainEvent, value: string) {
   }
 }
 
+// Handle file open requests (called after app is ready)
+async function handleOpenFile(filePath: string) {
+  if (!mainWindow) {
+    // Store for later if window isn't ready
+    fileToOpen = filePath;
+    return;
+  }
+
+  try {
+    // Read the file
+    const fileBuffer = await readFile(filePath);
+    const fileName = path.basename(filePath);
+
+    // Send to renderer process
+    mainWindow.webContents.send("open-file-from-system", {
+      success: true,
+      data: Array.from(new Uint8Array(fileBuffer)),
+      fileName: fileName,
+      filePath: filePath,
+    });
+  } catch (error: any) {
+    console.error("Error opening file:", error);
+    if (mainWindow) {
+      mainWindow.webContents.send("open-file-from-system", {
+        success: false,
+        error: error.message || "Failed to open file",
+      });
+    }
+  }
+}
+
 (async () => {
+  // Handle macOS open-file event (fires before ready)
+  app.on("open-file", (event, filePath) => {
+    event.preventDefault();
+    fileToOpen = filePath;
+    
+    // If app is already ready, open it immediately
+    if (app.isReady() && mainWindow) {
+      handleOpenFile(filePath);
+    }
+  });
+
+  // Handle Windows/Linux: prevent multiple instances and handle file opens
+  const gotTheLock = app.requestSingleInstanceLock();
+
+  if (!gotTheLock) {
+    // Another instance is already running, quit this one
+    app.quit();
+  } else {
+    // Handle second instance (when user tries to open file with already running app)
+    app.on("second-instance", (event, commandLine, workingDirectory) => {
+      // Focus existing window
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+
+      // On Windows/Linux, file path is in commandLine
+      // Format: ["path/to/electron.exe", "path/to/file.animathio"]
+      if (process.platform === "win32" || process.platform === "linux") {
+        const filePath = commandLine.find((arg) => arg.endsWith(".animathio"));
+        if (filePath) {
+          handleOpenFile(filePath);
+        }
+      }
+    });
+  }
+
   await app.whenReady();
 
-  const mainWindow = createWindow("main", {
+  mainWindow = createWindow("main", {
     width: 1600,
     height: 900,
     minWidth: 1600,
@@ -66,6 +138,20 @@ async function startProcess(event: IpcMainEvent, value: string) {
     const port = process.argv[2];
     await mainWindow.loadURL(`http://localhost:${port}/Home`);
     // mainWindow.webContents.openDevTools();
+  }
+
+  // Handle file that was queued before app was ready
+  if (fileToOpen) {
+    handleOpenFile(fileToOpen);
+    fileToOpen = null;
+  }
+
+  // On Windows/Linux, check process.argv for file path (when app is launched with file)
+  if (process.platform === "win32" || process.platform === "linux") {
+    const filePath = process.argv.find((arg) => arg.endsWith(".animathio"));
+    if (filePath) {
+      handleOpenFile(filePath);
+    }
   }
 })();
 

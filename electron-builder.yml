@@ -9,12 +9,31 @@ files:
     filter:
       - package.json
       - app
+      - "!**/node_modules/@tailwindcss/oxide-android-*"
+      - "!**/node_modules/@tailwindcss/oxide-darwin-*"
+      - "!**/node_modules/@tailwindcss/oxide-linux-*"
+      - "!**/node_modules/@tailwindcss/oxide-win32-*"
 extraFiles:
   - scripts
 publish: null
 npmRebuild: false
+# File associations for "Open with" functionality
+fileAssociations:
+  - ext: animathio
+    name: AniMathIO Project
+    description: AniMathIO Video Editor Project File
+    role: Editor
+    mimeType: application/octet-stream
 mac:
   icon: resources/icons/icon.icns
+  # Additional macOS file association settings
+  extendInfo:
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: AniMathIO Project
+        CFBundleTypeRole: Editor
+        LSItemContentTypes:
+          - com.kovacsbalinthunor.animathio.project
+        LSHandlerRank: Owner
 win:
   icon: resources/icons/icon.ico
 linux:
