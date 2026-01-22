@@ -222,6 +222,10 @@ export class State {
     // Parse the JSON
     const stateObject = JSON.parse(stateJSON);
 
+    // Clear selected element since fabric objects don't exist yet
+    // They will be recreated in refreshElements()
+    this.selectedElement = null;
+
     // First load basic state properties
     this.backgroundColor = stateObject.backgroundColor;
     this.selectedMenuOption = stateObject.selectedMenuOption;
@@ -984,9 +988,27 @@ export class State {
   setSelectedElement(selectedElement: EditorElement | null) {
     this.selectedElement = selectedElement;
     if (this.canvas) {
-      if (selectedElement?.fabricObject)
-        this.canvas.setActiveObject(selectedElement.fabricObject);
-      else this.canvas.discardActiveObject();
+      if (selectedElement?.fabricObject) {
+        // Verify that the fabric object is valid and actually on the canvas
+        const objects = this.canvas.getObjects();
+        const isValidObject = objects.includes(selectedElement.fabricObject);
+        
+        if (isValidObject) {
+          try {
+            this.canvas.setActiveObject(selectedElement.fabricObject);
+            this.canvas.requestRenderAll();
+          } catch (error) {
+            console.warn("Failed to set active object:", error);
+            // If setting active object fails, just discard it
+            this.canvas.discardActiveObject();
+          }
+        } else {
+          // Fabric object is not on canvas, discard selection
+          this.canvas.discardActiveObject();
+        }
+      } else {
+        this.canvas.discardActiveObject();
+      }
     }
   }
   updateSelectedElement() {
