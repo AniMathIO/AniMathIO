@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
 import { FaArrowLeft, FaArrowRight, FaArrowUp, FaArrowDown, FaTrashAlt, FaCopy, FaPaste, FaEyeSlash, FaEye, FaPlay } from 'react-icons/fa';
+import { version } from '../../package.json';
 declare global {
     interface Window {
         electron: {
@@ -155,20 +156,20 @@ const SettingsModal: React.FC = () => {
                             Gemini 2.0 Flash API Token:
                         </label>
                         <div className="relative flex gap-2">
-                            <div className="flex-grow relative">
+                            <div className="grow relative">
                                 <input
                                     type={showFullToken ? "text" : "password"}
                                     id="geminiApiToken"
                                     value={isLoading ? "Loading..." : geminiApiToken}
                                     onChange={(e) => setGeminiApiToken(e.target.value)}
-                                    className="w-full border text-black border-gray-300 rounded px-3 py-2 pr-10"
+                                    className="w-full border text-black dark:text-white border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-sm px-3 py-2 pr-10"
                                     placeholder="Enter your Gemini API token"
                                     disabled={isLoading}
                                 />
                                 {geminiApiToken && (
                                     <button
                                         type="button"
-                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                                         onClick={() => setShowFullToken(!showFullToken)}
                                         title={showFullToken ? "Hide token" : "Show token"}
                                     >
@@ -229,7 +230,7 @@ const SettingsModal: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody>
-                        <tr className="hover:bg-gray-50 dark:hover:bg-gray-600">
+                            <tr className="hover:bg-gray-50 dark:hover:bg-gray-600">
                                 <td className="px-4 py-2 text-gray-700 dark:text-gray-300 flex items-center gap-2">
                                     <span className="font-bold">Space</span>
                                     <FaPlay className="text-gray-500 dark:text-gray-400" />
@@ -291,12 +292,17 @@ const SettingsModal: React.FC = () => {
                     </table>
                 </div>
 
-                <button
-                    className="w-fit self-end bg-red-600 hover:bg-red-800 text-white px-4 py-2 rounded-xl mt-6"
-                    onClick={handleCloseModal}
-                >
-                    Close
-                </button>
+                <div className="flex justify-between items-center mt-6">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                        Version {version}
+                    </div>
+                    <button
+                        className="w-fit bg-red-600 hover:bg-red-800 text-white px-4 py-2 rounded-xl"
+                        onClick={handleCloseModal}
+                    >
+                        Close
+                    </button>
+                </div>
             </div>
         </div>
     );

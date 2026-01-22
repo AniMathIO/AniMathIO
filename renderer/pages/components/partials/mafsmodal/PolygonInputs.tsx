@@ -10,13 +10,13 @@ const PolygonInputs = ({ polygonPoints, setPolygonPoints }: PolygonInputsProps) 
         <>
             {polygonPoints.map((point, index) => (
                 <div key={index} className="mb-4">
-                    <label htmlFor={`polygonX${index}`} className="block font-medium mb-1">
+                    <label htmlFor={`polygonX${index}`} className="block font-medium mb-1 text-black dark:text-white">
                         X{index + 1}
                     </label>
                     <input
                         type="number"
                         id={`polygonX${index}`}
-                        className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                        className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                         value={point[0]}
                         onChange={(e) => {
                             const newPoints = [...polygonPoints];
@@ -24,13 +24,13 @@ const PolygonInputs = ({ polygonPoints, setPolygonPoints }: PolygonInputsProps) 
                             setPolygonPoints(newPoints);
                         }}
                     />
-                    <label htmlFor={`polygonY${index}`} className="block font-medium mb-1">
+                    <label htmlFor={`polygonY${index}`} className="block font-medium mb-1 text-black dark:text-white">
                         Y{index + 1}
                     </label>
                     <input
                         type="number"
                         id={`polygonY${index}`}
-                        className="w-full border text-black border-gray-300 rounded px-3 py-2"
+                        className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
                         value={point[1]}
                         onChange={(e) => {
                             const newPoints = [...polygonPoints];
@@ -41,7 +41,7 @@ const PolygonInputs = ({ polygonPoints, setPolygonPoints }: PolygonInputsProps) 
                 </div>
             ))}
             <button
-                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-2"
+                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-sm mb-2"
                 onClick={() =>
                     setPolygonPoints([...polygonPoints, [0, 0]])
                 }

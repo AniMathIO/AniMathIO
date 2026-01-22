@@ -25,7 +25,7 @@ const ImageResourcesPanel = observer(() => {
       </div>
       <UploadButton
         accept="image/*"
-        className="ml-[15px] bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold text-center mx-5 py-2 px-4 rounded cursor-pointer"
+        className="ml-[15px] bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold text-center mx-5 py-2 px-4 rounded-sm cursor-pointer"
         onChange={handleFileChange}
       />
 

@@ -728,7 +728,7 @@ const AudioRecorder = observer(() => {
                         aria-label="Select microphone"
                         value={selectedDeviceId}
                         onChange={(e) => setSelectedDeviceId(e.target.value)}
-                        className="w-full text-black bg-white dark:bg-gray-900 dark:text-white rounded py-1.5 px-2 text-sm"
+                        className="w-full text-black bg-white dark:bg-gray-900 dark:text-white rounded-sm py-1.5 px-2 text-sm"
                     >
                         {audioDevices.map((device) => (
                             <option key={device.deviceId} value={device.deviceId}>
@@ -746,7 +746,7 @@ const AudioRecorder = observer(() => {
             )}
 
             {permissionError && (
-                <div className="mb-3 p-2 bg-red-800 text-white rounded text-sm">
+                <div className="mb-3 p-2 bg-red-800 text-white rounded-sm text-sm">
                     {permissionError}
                 </div>
             )}
@@ -771,7 +771,7 @@ const AudioRecorder = observer(() => {
                     {/* Using fixed ID for the visualizer container */}
                     <div
                         id={visualizerContainerId}
-                        className="w-full h-20 dark:bg-gray-700 border-[1px] dark:border-0 border-gray-300 rounded-md overflow-hidden"
+                        className="w-full h-20 dark:bg-gray-700 border dark:border-0 border-gray-300 rounded-md overflow-hidden"
                     ></div>
 
                     <div className="flex justify-between space-x-2">

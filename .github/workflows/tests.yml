@@ -3,20 +3,83 @@ name: Run Tests
 on: [push, pull_request]
 
 jobs:
-  test:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version-file: ['.nvmrc']
+        node-version-file: [".nvmrc"]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version-file }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ matrix.node-version-file }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
           npm ci
-      - name: Run tests
-        run: npm test
+      - name: Run unit tests
+        run: npm run test:unit
+      - name: Run unit tests with coverage
+        run: npm run test:unit:coverage
+      - name: Upload unit test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: coverage/
+
+  browser-tests:
+    name: Browser/UI Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version-file: [".nvmrc"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version-file }}
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ matrix.node-version-file }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+          npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run browser tests
+        run: npm run test:browser
+      - name: Run browser tests with coverage
+        run: npm run test:browser:coverage
+      - name: Upload browser test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-coverage
+          path: coverage-browser/
+      - name: Upload test screenshots (if any)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-screenshots
+          path: tests/browser/__screenshots__/
+
+  all-tests:
+    name: All Tests
+    runs-on: ubuntu-latest
+    needs: [unit-tests, browser-tests]
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          echo "Unit tests: ${{ needs.unit-tests.result }}"
+          echo "Browser tests: ${{ needs.browser-tests.result }}"
+          if [[ "${{ needs.unit-tests.result }}" == "failure" || "${{ needs.browser-tests.result }}" == "failure" ]]; then
+            echo "Some tests failed"
+            exit 1
+          fi
+          echo "All tests passed!"

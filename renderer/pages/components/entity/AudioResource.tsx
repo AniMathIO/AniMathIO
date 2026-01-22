@@ -46,7 +46,7 @@ const AudioResource = observer(
     }
 
     return (
-      <div className="rounded-lg overflow-hidden items-center bg-white border-[1px] dark:border-0 border-slate-300 dark:bg-slate-800 m-[15px] flex flex-col relative min-h-[130px]">
+      <div className="rounded-lg overflow-hidden items-center bg-white border dark:border-0 border-slate-300 dark:bg-slate-800 m-[15px] flex flex-col relative min-h-[130px]">
         {/* align vertically center */}
         <div className="w-full flex justify-start px-1">
           <WavesurferPlayer
@@ -66,13 +66,13 @@ const AudioResource = observer(
         <div className=" darK:text-white py-1 absolute text-base top-2 right-2">
           {formatedAudioLength}
         </div>
-        <button onClick={onPlayPause} className="hover:bg-[#00a0f5] rounded z-10 dark:text-white font-bold py-1 absolute text-lg top-10 right-2">
+        <button onClick={onPlayPause} className="hover:bg-[#00a0f5] rounded-sm z-10 dark:text-white font-bold py-1 absolute text-lg top-10 right-2">
           {isPlaying ? <PauseIcon className="h-8 w-8" /> : <PlayIcon className="h-8 w-8" />}
         </button>
 
         <button
           aria-label="Add audio"
-          className="hover:bg-[#00a0f5] rounded z-10 dark:text-white font-bold py-1 absolute text-lg bottom-2 right-2"
+          className="hover:bg-[#00a0f5] rounded-sm z-10 dark:text-white font-bold py-1 absolute text-lg bottom-2 right-2"
           onClick={() => state.addAudio(index)}
         >
           <PlusCircleIcon className="h-8 w-8" />

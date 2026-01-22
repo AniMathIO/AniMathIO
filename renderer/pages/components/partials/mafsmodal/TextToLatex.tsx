@@ -129,7 +129,7 @@ const TextToLatex: React.FC<TextToLatexProps> = ({
                 </label>
                 <textarea
                     id="textInput"
-                    className="w-full border text-black border-gray-300 rounded px-3 py-2 min-h-[100px]"
+                    className="w-full border border-gray-300 dark:border-gray-600 text-black dark:text-white bg-white dark:bg-gray-800 rounded-sm px-3 py-2 min-h-[100px]"
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     placeholder="Example: The quadratic formula is x = (-b ± √(b² - 4ac)) / 2a"
@@ -154,7 +154,7 @@ const TextToLatex: React.FC<TextToLatexProps> = ({
             </div>
 
 
-            <p className=''>The LaTeX code will be displayed below in the LaTeX input field</p>
+            <p className='text-black dark:text-white'>The LaTeX code will be displayed below in the LaTeX input field</p>
         </div>
     );
 };

@@ -749,14 +749,14 @@ export class State {
               direction === "left"
                 ? -editorElement.placement.width
                 : direction === "right"
-                ? this.canvas?.width
-                : editorElement.placement.x,
+                  ? this.canvas?.width
+                  : editorElement.placement.x,
             top:
               direction === "top"
                 ? -editorElement.placement.height
                 : direction === "bottom"
-                ? this.canvas?.height
-                : editorElement.placement.y,
+                  ? this.canvas?.height
+                  : editorElement.placement.y,
           };
           if (animation.properties.useClipPath) {
             const clipRectangle = FabricUtils.getClipMaskRect(
@@ -774,9 +774,9 @@ export class State {
             editorElement.properties.splittedTexts =
               editorElement.fabricObject instanceof fabric.Text
                 ? getTextObjectsPartitionedByCharacters(
-                    editorElement.fabricObject as fabric.Text,
-                    editorElement
-                  )
+                  editorElement.fabricObject as fabric.Text,
+                  editorElement
+                )
                 : editorElement.properties.splittedTexts;
 
             editorElement.properties.splittedTexts.forEach((textObject) => {
@@ -873,14 +873,14 @@ export class State {
               direction === "left"
                 ? -editorElement.placement.width
                 : direction === "right"
-                ? this.canvas?.width
-                : editorElement.placement.x,
+                  ? this.canvas?.width
+                  : editorElement.placement.x,
             top:
               direction === "top"
                 ? -100 - editorElement.placement.height
                 : direction === "bottom"
-                ? this.canvas?.height
-                : editorElement.placement.y,
+                  ? this.canvas?.height
+                  : editorElement.placement.y,
           };
           if (animation.properties.useClipPath) {
             const clipRectangle = FabricUtils.getClipMaskRect(
@@ -1566,7 +1566,7 @@ export class State {
           // await ffmpeg.exec(["-y", "-i", "video.webm", "-c:v", "libx264", "video.mp4"]);
 
           const output = await ffmpeg.readFile("video.mp4");
-          const outputBlob = new Blob([output], { type: "video/mp4" });
+          const outputBlob = new Blob([typeof output === 'string' ? new TextEncoder().encode(output) : new Uint8Array(output)], { type: "video/mp4" });
           const outputUrl = URL.createObjectURL(outputBlob);
           const a = document.createElement("a");
           a.download = "video.mp4";

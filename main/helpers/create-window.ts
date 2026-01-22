@@ -16,7 +16,7 @@ export const createWindow = (
 ): BrowserWindow => {
   const key = "window-state";
   const name = `window-state-${windowName}`;
-  const store = new Store<Rectangle>({ name });
+  const store = new Store({ name });
   const defaultSize = {
     width: options.width || 1600,
     height: options.height || 900,
@@ -25,7 +25,7 @@ export const createWindow = (
   };
   let state = {};
 
-  const restore = () => store.get(key, defaultSize);
+  const restore = () => (store as any).get(key, defaultSize);
 
   const getCurrentPosition = () => {
     const position = win.getPosition();
@@ -71,7 +71,7 @@ export const createWindow = (
     if (!win.isMinimized() && !win.isMaximized()) {
       Object.assign(state, getCurrentPosition());
     }
-    store.set(key, state);
+    (store as any).set(key, state);
   };
 
   state = ensureVisibleOnSomeDisplay(restore());
@@ -134,14 +134,14 @@ export const createWindow = (
         },
       ],
     },
-    // {
-    //   label: "View",
-    //   submenu: [
-    //     {
-    //       role: "toggleDevTools",
-    //     },
-    //   ],
-    // },
+    ...(process.env.NODE_ENV !== "production" ? [{
+      label: "View",
+      submenu: [
+        {
+          role: "toggleDevTools" as const,
+        },
+      ],
+    }] : []),
   ];
 
   const menu = Menu.buildFromTemplate(menuTemplate);

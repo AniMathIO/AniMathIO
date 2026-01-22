@@ -72,7 +72,7 @@ const AudioMixerPanel = observer(() => {
                                 max="100"
                                 value={masterVolume}
                                 onChange={handleMasterVolumeChange}
-                                className="flex-grow h-2 rounded-lg appearance-none bg-gray-600 cursor-pointer"
+                                className="grow h-2 rounded-lg appearance-none bg-gray-600 cursor-pointer"
                             />
                             <span className="ml-2 text-xs w-8 text-right">{masterVolume}%</span>
                         </div>

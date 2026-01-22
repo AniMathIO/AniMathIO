@@ -135,3 +135,7 @@ node_modules
 .next
 app
 dist
+/playwright-report
+/test-results
+**/__screenshots__
+/coverage-browser
