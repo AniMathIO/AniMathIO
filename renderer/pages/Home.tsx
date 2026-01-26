@@ -6,6 +6,7 @@ import Dashboard from './Dashboard';
 import { StateContext } from '@/states';
 import { State } from '../states/state';
 import { addProjectToHistory } from '@/utils';
+import { ProjectLoadingModal } from './components/partials/ProjectLoadingModal';
 
 const HomePage = () => {
   // Create a single shared state instance
@@ -17,11 +18,15 @@ const HomePage = () => {
       const unsubscribe = window.electron.onOpenFileFromSystem(async (fileData) => {
         if (!fileData.success) {
           console.error('Failed to open file from system:', fileData.error);
-          alert(`Failed to open project: ${fileData.error || 'Unknown error'}`);
+          state.setProjectLoadingStatus('error', fileData.error || 'Unknown error');
           return;
         }
 
         try {
+          // Set loading state
+          state.setProjectLoadingStatus('loading', 'Loading project...');
+          state.setProjectLoadingProgress(0);
+
           // Convert array back to ArrayBuffer
           const buffer = new Uint8Array(fileData.data || []).buffer;
 
@@ -45,12 +50,21 @@ const HomePage = () => {
           // Activate editor
           state.setEditorActive(true);
           state.setSelectedMenuOption("Videos");
+
+          // Set success state
+          state.setProjectLoadingStatus('success', '');
+          
+          // Auto-close success modal after 1.5 seconds
+          setTimeout(() => {
+            if (state.projectLoadingStatus === 'success') {
+              state.setProjectLoadingStatus('idle', '');
+            }
+          }, 1500);
         } catch (error) {
           console.error('Error loading project from system:', error);
-          alert(
-            `Failed to load project: ${
-              error instanceof Error ? error.message : 'Unknown error'
-            }`
+          state.setProjectLoadingStatus(
+            'error',
+            error instanceof Error ? error.message : 'Unknown error'
           );
         }
       });
@@ -66,6 +80,7 @@ const HomePage = () => {
   
   return (
     <StateContext.Provider value={state}>
+      <ProjectLoadingModal />
       <Dashboard />
       <Editor />
     </StateContext.Provider>

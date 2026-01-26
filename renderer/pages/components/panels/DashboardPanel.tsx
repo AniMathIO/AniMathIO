@@ -260,6 +260,10 @@ const DashboardPanel = observer(() => {
             throw new Error(result.error || "Failed to open file");
           }
 
+          // Set loading state
+          state.setProjectLoadingStatus('loading', 'Opening project...');
+          state.setProjectLoadingProgress(0);
+
           // Convert array back to ArrayBuffer
           const buffer = new Uint8Array(result.data || []).buffer;
 
@@ -286,13 +290,23 @@ const DashboardPanel = observer(() => {
 
           // Reload projects list
           await loadProjects();
+          
+          // Set success state
+          state.setProjectLoadingStatus('success', '');
+          
+          // Auto-close success modal after 1.5 seconds
+          setTimeout(() => {
+            if (state.projectLoadingStatus === 'success') {
+              state.setProjectLoadingStatus('idle', '');
+            }
+          }, 1500);
+          
           return;
         } catch (error) {
           console.error("Error opening project via IPC:", error);
-          alert(
-            `Failed to open project: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`
+          state.setProjectLoadingStatus(
+            'error',
+            error instanceof Error ? error.message : 'Unknown error'
           );
           return;
         }
@@ -309,8 +323,18 @@ const DashboardPanel = observer(() => {
         if (file) {
           const reader = new FileReader();
 
+          reader.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const progress = Math.round((event.loaded / event.total) * 100);
+              state.setProjectLoadingProgress(progress);
+            }
+          };
+
           reader.onload = async (event) => {
             try {
+              // Set loading state
+              state.setProjectLoadingStatus('loading', 'Opening project...');
+
               const arrayBuffer = event.target?.result as ArrayBuffer;
 
               // Deserialize the project
@@ -330,17 +354,28 @@ const DashboardPanel = observer(() => {
 
               // Reload projects list
               await loadProjects();
+              
+              // Set success state
+              state.setProjectLoadingStatus('success', '');
+              
+              // Auto-close success modal after 1.5 seconds
+              setTimeout(() => {
+                if (state.projectLoadingStatus === 'success') {
+                  state.setProjectLoadingStatus('idle', '');
+                }
+              }, 1500);
             } catch (error) {
               console.error("Error loading project:", error);
-              alert(
-                "Failed to load project. The file might be corrupted or incompatible."
+              state.setProjectLoadingStatus(
+                'error',
+                'Failed to load project. The file might be corrupted or incompatible.'
               );
             }
           };
 
           reader.onerror = () => {
             console.error("File reading error");
-            alert("Failed to read the file. Please try again.");
+            state.setProjectLoadingStatus('error', 'Failed to read the file. Please try again.');
           };
 
           reader.readAsArrayBuffer(file);
@@ -361,15 +396,17 @@ const DashboardPanel = observer(() => {
       // Use Electron IPC to read the file directly by path (no dialog)
       if (window.electron && window.electron.readProjectFile) {
         try {
+          // Set loading state
+          state.setProjectLoadingStatus('loading', 'Loading project...');
+          state.setProjectLoadingProgress(0);
+
           const result = await window.electron.readProjectFile(
             project.filePath
           );
 
           if (!result.success) {
             // File not found - show error
-            alert(
-              `Failed to open project: ${result.error || "File not found"}`
-            );
+            state.setProjectLoadingStatus('error', result.error || 'File not found');
             return;
           }
 
@@ -399,13 +436,23 @@ const DashboardPanel = observer(() => {
 
           // Reload projects list
           await loadProjects();
+          
+          // Set success state
+          state.setProjectLoadingStatus('success', '');
+          
+          // Auto-close success modal after 1.5 seconds
+          setTimeout(() => {
+            if (state.projectLoadingStatus === 'success') {
+              state.setProjectLoadingStatus('idle', '');
+            }
+          }, 1500);
+          
           return;
         } catch (error) {
           console.error("Error loading project via IPC:", error);
-          alert(
-            `Failed to load project: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`
+          state.setProjectLoadingStatus(
+            'error',
+            error instanceof Error ? error.message : 'Unknown error'
           );
           return;
         }
@@ -422,8 +469,18 @@ const DashboardPanel = observer(() => {
         if (file) {
           const reader = new FileReader();
 
+          reader.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const progress = Math.round((event.loaded / event.total) * 100);
+              state.setProjectLoadingProgress(progress);
+            }
+          };
+
           reader.onload = async (event) => {
             try {
+              // Set loading state
+              state.setProjectLoadingStatus('loading', 'Loading project...');
+
               const arrayBuffer = event.target?.result as ArrayBuffer;
               const buffer = new Uint8Array(arrayBuffer);
 
@@ -444,17 +501,28 @@ const DashboardPanel = observer(() => {
 
               // Reload projects list
               await loadProjects();
+              
+              // Set success state
+              state.setProjectLoadingStatus('success', '');
+              
+              // Auto-close success modal after 1.5 seconds
+              setTimeout(() => {
+                if (state.projectLoadingStatus === 'success') {
+                  state.setProjectLoadingStatus('idle', '');
+                }
+              }, 1500);
             } catch (error) {
               console.error("Error loading project:", error);
-              alert(
-                "Failed to load project. The file might be corrupted or incompatible."
+              state.setProjectLoadingStatus(
+                'error',
+                'Failed to load project. The file might be corrupted or incompatible.'
               );
             }
           };
 
           reader.onerror = () => {
             console.error("File reading error");
-            alert("Failed to read the file. Please try again.");
+            state.setProjectLoadingStatus('error', 'Failed to read the file. Please try again.');
           };
 
           reader.readAsArrayBuffer(file);

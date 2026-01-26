@@ -61,6 +61,11 @@ export class State {
   currentProjectFileName: string | null = null; // Track the currently opened project file name
   currentProjectFileHandle: FileSystemFileHandle | null = null; // Store file handle for Save functionality
   isEditorActive: boolean = false; // Track if editor is active (false = dashboard, true = editor)
+  
+  // Project loading state
+  projectLoadingStatus: 'idle' | 'loading' | 'success' | 'error' = 'idle';
+  projectLoadingMessage: string = '';
+  projectLoadingProgress: number = 0;
 
   constructor() {
     this.canvas = null;
@@ -602,6 +607,17 @@ export class State {
 
   setCurrentProjectFileHandle(fileHandle: FileSystemFileHandle | null) {
     this.currentProjectFileHandle = fileHandle;
+  }
+
+  setProjectLoadingStatus(status: 'idle' | 'loading' | 'success' | 'error', message?: string) {
+    this.projectLoadingStatus = status;
+    if (message !== undefined) {
+      this.projectLoadingMessage = message;
+    }
+  }
+
+  setProjectLoadingProgress(progress: number) {
+    this.projectLoadingProgress = progress;
   }
 
   setCanvas(canvas: fabric.Canvas | null, width: number, height: number) {
