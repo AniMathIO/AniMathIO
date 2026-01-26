@@ -66,13 +66,10 @@ const SettingsModal: React.FC = () => {
 
 
     useEffect(() => {
-        // Load the saved theme mode when the component mounts
-        const loadThemeMode = async () => {
-            const savedThemeMode = await window.electron.ipcRenderer.invoke('get-theme-mode');
-            setIsDarkMode(savedThemeMode === 'dark');
-            document.documentElement.classList.toggle('dark', savedThemeMode === 'dark');
-        };
-        loadThemeMode();
+        // Sync isDarkMode state with the theme already applied by _app.tsx
+        // The theme is already loaded and applied in _app.tsx, so we just need to sync the toggle state
+        const isDark = document.documentElement.classList.contains('dark');
+        setIsDarkMode(isDark);
     }, []);
 
     useEffect(() => {
