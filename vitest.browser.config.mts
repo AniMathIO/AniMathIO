@@ -15,9 +15,10 @@ export default defineConfig({
       instances: [
         {
           browser: "chromium",
+          // @ts-expect-error - launch option is supported at runtime but not in types
           launch: {
             args: [
-              "--no-sandbox", 
+              "--no-sandbox",
               "--disable-setuid-sandbox",
               "--disable-dev-shm-usage",
               "--disable-gpu",
