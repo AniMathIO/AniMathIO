@@ -5,18 +5,77 @@ directories:
   output: dist
   buildResources: resources
 files:
-  - from: .
-    filter:
-      - package.json
-      - app
-extraFiles:
+  - package.json
+  - app
   - scripts
+  # Exclude platform-specific Tailwind CSS dependencies that aren't needed at runtime
+  - "!node_modules/@tailwindcss/oxide-*"
+  - "!node_modules/@tailwindcss/oxide-android-*"
+  - "!node_modules/@tailwindcss/oxide-darwin-*"
+  - "!node_modules/@tailwindcss/oxide-linux-*"
+  - "!node_modules/@tailwindcss/oxide-win32-*"
 publish: null
 npmRebuild: false
+asar: true
+# File associations for "Open with" functionality
+fileAssociations:
+  - ext: animathio
+    name: AniMathIO Project
+    description: AniMathIO Video Editor Project File
+    role: Editor
+    mimeType: application/octet-stream
 mac:
   icon: resources/icons/icon.icns
+  # Additional macOS file association settings
+  extendInfo:
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: AniMathIO Project
+        CFBundleTypeRole: Editor
+        LSItemContentTypes:
+          - com.kovacsbalinthunor.animathio.project
+        LSHandlerRank: Owner
 win:
   icon: resources/icons/icon.ico
 linux:
   icon: resources/icons/icon.png
-  category: Sound & Video
+  category: AudioVideo
+  target:
+    - AppImage
+    - deb
+    - flatpak
+  # Desktop file configuration
+  desktop:
+    entry:
+      Name: AniMathIO
+      Comment: Video editor for creating Manim-like mathematical videos
+      Categories: AudioVideo;Video;Graphics;
+# Flatpak configuration (must be at root level, not under linux)
+flatpak:
+  # Base app configuration
+  base: org.electronjs.Electron2.BaseApp
+  baseVersion: "24.08"
+  runtime: org.freedesktop.Platform
+  runtimeVersion: "24.08"
+  sdk: org.freedesktop.Sdk
+  # Version branch (defaults to "master" if not set)
+  branch: "1.5.0"
+  # License file path
+  license: LICENSE
+  # Application metadata
+  synopsis: "AniMathIO revolutionizes the creation of mathematical videos, tailored for educators, students, and professionals seeking to bring complex concepts to life"
+  description: "AniMathIO revolutionizes the creation of mathematical videos, tailored for educators, students, and professionals seeking to bring complex concepts to life"
+  # Sandbox permissions
+  finishArgs:
+    - --share=ipc
+    - --device=dri
+    - --socket=x11
+    - --socket=wayland
+    - --socket=pulseaudio
+    - --share=network
+    - --filesystem=home
+    - --env=ELECTRON_TRASH=gio
+    # Enable notifications
+    - --talk-name=org.freedesktop.Notifications
+  # File associations (MIME types) - removed duplicate, already in fileAssociations
+  # Enable Wayland support (experimental, but available)
+  useWaylandFlags: false

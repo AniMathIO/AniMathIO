@@ -1,18 +1,25 @@
 # Security Policy
+## Project Status
+
+**Important Notice**: AniMathIO is transitioning into a maintenance phase with yearly or bi-yearly updates. Due to limited time and resources, active development has slowed down, and updates will primarily focus on critical security patches and bug fixes.
+
+We encourage community contributions and will continue to review and merge pull requests that improve the security and stability of the project.
+
+Only the latest version receives security updates and support.
 
 ## Supported Versions
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.0   | :x:                |
-| 1.1.0   | :x:                |
-| 1.2.0   | :x:                |
-| 1.3.0   | :x:                |
-| 1.3.1   | :x:                |
+| 1.6.0   | :white_check_mark: |
+| 1.5.0   | :x:                |
+| 1.4.1   | :x:                |
 | 1.4.0   | :x:                |
-| 1.4.1   | :white_check_mark: |
-| 1.5.0   | :white_check_mark: |
-| 1.6.0   | coming soon        |
+| 1.3.1   | :x:                |
+| 1.3.0   | :x:                |
+| 1.2.0   | :x:                |
+| 1.1.0   | :x:                |
+| 1.0.0   | :x:                |
 
 ## Reporting a Vulnerability
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LatexProps } from "@/types";
 import dynamic from 'next/dynamic';
+import { GoogleGenAI } from '@google/genai';
 
 type TextToLatexProps = {
     latexProps: LatexProps;
@@ -56,33 +57,25 @@ const TextToLatex: React.FC<TextToLatexProps> = ({
                 return;
             }
 
+            // Get the model (default to gemini-2.0-flash if not set)
+            const model = await window.electron.ipcRenderer.invoke('get-gemini-model') || 'gemini-2.0-flash';
+
+            // Initialize Google GenAI client
+            const ai = new GoogleGenAI({ apiKey: apiToken });
+
             // Call Gemini API to convert text to LaTeX
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiToken}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [{
-                            text: `Convert the following mathematical text to LaTeX. Return only the LaTeX code without any explanations or markdown formatting, DO NOT add '$' symbols around it:\n\n${textInput}`
-                        }]
-                    }],
-                    generationConfig: {
-                        temperature: 0.2,
-                        topK: 32,
-                        topP: 1,
-                        maxOutputTokens: 1024,
-                    }
-                })
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: `Convert the following mathematical text to LaTeX. Return only the LaTeX code without any explanations or markdown formatting, DO NOT add '$' symbols around it:\n\n${textInput}`,
+                config: {
+                    temperature: 0.2,
+                    topK: 32,
+                    topP: 1,
+                    maxOutputTokens: 1024,
+                }
             });
 
-            if (!response.ok) {
-                throw new Error(`API request failed: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            const latexResult = data.candidates[0].content.parts[0].text;
+            const latexResult = response.text || '';
 
             // Clean the latex result (remove any potential markdown formatting)
             let cleanLatex = latexResult.trim();

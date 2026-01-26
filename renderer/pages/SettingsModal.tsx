@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
 import { FaArrowLeft, FaArrowRight, FaArrowUp, FaArrowDown, FaTrashAlt, FaCopy, FaPaste, FaEyeSlash, FaEye, FaPlay } from 'react-icons/fa';
-import { version } from '../../package.json';
+import packageJson from '../../package.json';
 declare global {
     interface Window {
         electron: {
@@ -11,6 +11,42 @@ declare global {
                 removeListener(channel: string, func: (...args: any[]) => void): void;
                 invoke(channel: string, data?: any): Promise<any>;
             };
+            requestMicrophonePermission: () => Promise<string>;
+            readProjectFile: (filePath: string) => Promise<{
+                success: boolean;
+                data?: number[];
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }>;
+            openProjectFile: () => Promise<{
+                success: boolean;
+                data?: number[];
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }>;
+            saveProjectFile: (fileData: number[], suggestedName?: string) => Promise<{
+                success: boolean;
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }>;
+            writeProjectFile: (filePath: string, fileData: number[]) => Promise<{
+                success: boolean;
+                error?: string;
+            }>;
+            onOpenFileFromSystem: (callback: (data: {
+                success: boolean;
+                data?: number[];
+                fileName?: string;
+                filePath?: string;
+                error?: string;
+            }) => void) => () => void;
+            openExternalUrl: (url: string) => Promise<{
+                success: boolean;
+                error?: string;
+            }>;
         };
     }
 }
@@ -19,6 +55,9 @@ const SettingsModal: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isDarkMode, setIsDarkMode] = useState(false);
     const [geminiApiToken, setGeminiApiToken] = useState("");
+    const [selectedModel, setSelectedModel] = useState("gemini-2.0-flash");
+    const [availableModels, setAvailableModels] = useState<string[]>([]);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isClearing, setIsClearing] = useState(false);
     const [saveMessage, setSaveMessage] = useState({ text: "", type: "" });
@@ -27,13 +66,10 @@ const SettingsModal: React.FC = () => {
 
 
     useEffect(() => {
-        // Load the saved theme mode when the component mounts
-        const loadThemeMode = async () => {
-            const savedThemeMode = await window.electron.ipcRenderer.invoke('get-theme-mode');
-            setIsDarkMode(savedThemeMode === 'dark');
-            document.documentElement.classList.toggle('dark', savedThemeMode === 'dark');
-        };
-        loadThemeMode();
+        // Sync isDarkMode state with the theme already applied by _app.tsx
+        // The theme is already loaded and applied in _app.tsx, so we just need to sync the toggle state
+        const isDark = document.documentElement.classList.contains('dark');
+        setIsDarkMode(isDark);
     }, []);
 
     useEffect(() => {
@@ -48,6 +84,14 @@ const SettingsModal: React.FC = () => {
                     } else {
                         setGeminiApiToken('');
                     }
+
+                    // Load selected model
+                    const savedModel = await window.electron.ipcRenderer.invoke('get-gemini-model');
+                    if (savedModel) {
+                        setSelectedModel(savedModel);
+                    } else {
+                        setSelectedModel('gemini-2.0-flash');
+                    }
                 } catch (error) {
                     console.error("Failed to load settings:", error);
                 } finally {
@@ -58,6 +102,47 @@ const SettingsModal: React.FC = () => {
 
         loadSettings();
     }, [isOpen]); // Re-run when isOpen changes
+
+    // Fetch available models when API token is available
+    useEffect(() => {
+        const fetchModels = async () => {
+            if (!geminiApiToken || !isOpen) {
+                setAvailableModels([]);
+                return;
+            }
+
+            setIsLoadingModels(true);
+            try {
+                // Dynamically import GoogleGenAI to avoid SSR issues
+                const { GoogleGenAI } = await import('@google/genai');
+                const ai = new GoogleGenAI({ apiKey: geminiApiToken });
+                const modelsPager = await ai.models.list();
+                
+                const modelNames: string[] = [];
+                for await (const model of modelsPager) {
+                    // Extract model name (format: "models/gemini-2.0-flash" -> "gemini-2.0-flash")
+                    if (model.name && model.name.startsWith('models/')) {
+                        const modelName = model.name.replace('models/', '');
+                        // Filter to only include Gemini models
+                        if (modelName.startsWith('gemini-')) {
+                            modelNames.push(modelName);
+                        }
+                    }
+                }
+                
+                // Sort models alphabetically
+                modelNames.sort();
+                setAvailableModels(modelNames);
+            } catch (error) {
+                console.error("Failed to fetch models:", error);
+                setAvailableModels([]);
+            } finally {
+                setIsLoadingModels(false);
+            }
+        };
+
+        fetchModels();
+    }, [geminiApiToken, isOpen]);
 
     useEffect(() => {
         const handleOpenModal = () => {
@@ -98,8 +183,11 @@ const SettingsModal: React.FC = () => {
 
             // Save the API token
             await window.electron.ipcRenderer.invoke('set-gemini-api-token', geminiApiToken);
+            
+            // Save the selected model
+            await window.electron.ipcRenderer.invoke('set-gemini-model', selectedModel);
 
-            setSaveMessage({ text: "API token saved successfully!", type: "success" });
+            setSaveMessage({ text: "API token and model saved successfully!", type: "success" });
         } catch (error) {
             console.error("Failed to save API token:", error);
             setSaveMessage({ text: "Failed to save API token", type: "error" });
@@ -123,6 +211,16 @@ const SettingsModal: React.FC = () => {
             setSaveMessage({ text: "Failed to clear API token", type: "error" });
         } finally {
             setIsClearing(false);
+        }
+    };
+
+    const handleModelChange = async (model: string) => {
+        setSelectedModel(model);
+        try {
+            // Save the model immediately when changed
+            await window.electron.ipcRenderer.invoke('set-gemini-model', model);
+        } catch (error) {
+            console.error("Failed to save model:", error);
         }
     };
 
@@ -153,7 +251,7 @@ const SettingsModal: React.FC = () => {
                     <h3 className="text-xl font-semibold mb-3 dark:text-white">AI Integration ✨</h3>
                     <div className="mb-4">
                         <label htmlFor="geminiApiToken" className="block mb-2 dark:text-white">
-                            Gemini 2.0 Flash API Token:
+                            Gemini API Token:
                         </label>
                         <div className="relative flex gap-2">
                             <div className="grow relative">
@@ -212,6 +310,33 @@ const SettingsModal: React.FC = () => {
                             Your API token is stored locally and is used to access the Gemini AI for text-to-LaTeX conversion.
                             <br />
                             You can get a Gemini API token from the <a href="https://ai.google.dev/gemini-api/docs/api-key" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Google AI Studio</a>.
+                        </p>
+                    </div>
+                    <div className="mb-4">
+                        <label htmlFor="geminiModel" className="block mb-2 dark:text-white">
+                            Gemini Model:
+                        </label>
+                        <select
+                            id="geminiModel"
+                            value={selectedModel}
+                            onChange={(e) => handleModelChange(e.target.value)}
+                            disabled={isLoading || isLoadingModels || !geminiApiToken}
+                            className="w-full border text-black dark:text-white border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-sm px-3 py-2"
+                        >
+                            {isLoadingModels ? (
+                                <option>Loading models...</option>
+                            ) : availableModels.length > 0 ? (
+                                availableModels.map((model) => (
+                                    <option key={model} value={model}>
+                                        {model}
+                                    </option>
+                                ))
+                            ) : (
+                                <option value={selectedModel}>{selectedModel || "No models available"}</option>
+                            )}
+                        </select>
+                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                            Select the Gemini model to use for text-to-LaTeX conversion. Available models are fetched automatically when an API token is provided.
                         </p>
                     </div>
                 </div>
@@ -294,7 +419,7 @@ const SettingsModal: React.FC = () => {
 
                 <div className="flex justify-between items-center mt-6">
                     <div className="text-sm text-gray-500 dark:text-gray-400">
-                        Version {version}
+                        Version {packageJson.version}
                     </div>
                     <button
                         className="w-fit bg-red-600 hover:bg-red-800 text-white px-4 py-2 rounded-xl"

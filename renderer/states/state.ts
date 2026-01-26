@@ -57,6 +57,15 @@ export class State {
   >();
   canvas_width: number;
   canvas_height: number;
+  currentProjectFilePath: string | null = null; // Track the currently opened project file path
+  currentProjectFileName: string | null = null; // Track the currently opened project file name
+  currentProjectFileHandle: FileSystemFileHandle | null = null; // Store file handle for Save functionality
+  isEditorActive: boolean = false; // Track if editor is active (false = dashboard, true = editor)
+  
+  // Project loading state
+  projectLoadingStatus: 'idle' | 'loading' | 'success' | 'error' = 'idle';
+  projectLoadingMessage: string = '';
+  projectLoadingProgress: number = 0;
 
   constructor() {
     this.canvas = null;
@@ -217,6 +226,10 @@ export class State {
 
     // Parse the JSON
     const stateObject = JSON.parse(stateJSON);
+
+    // Clear selected element since fabric objects don't exist yet
+    // They will be recreated in refreshElements()
+    this.selectedElement = null;
 
     // First load basic state properties
     this.backgroundColor = stateObject.backgroundColor;
@@ -578,6 +591,33 @@ export class State {
 
   setSelectedMenuOption(selectedMenuOption: MenuOption) {
     this.selectedMenuOption = selectedMenuOption;
+  }
+
+  setEditorActive(active: boolean) {
+    this.isEditorActive = active;
+  }
+
+  setCurrentProjectFilePath(filePath: string | null) {
+    this.currentProjectFilePath = filePath;
+  }
+
+  setCurrentProjectFileName(fileName: string | null) {
+    this.currentProjectFileName = fileName;
+  }
+
+  setCurrentProjectFileHandle(fileHandle: FileSystemFileHandle | null) {
+    this.currentProjectFileHandle = fileHandle;
+  }
+
+  setProjectLoadingStatus(status: 'idle' | 'loading' | 'success' | 'error', message?: string) {
+    this.projectLoadingStatus = status;
+    if (message !== undefined) {
+      this.projectLoadingMessage = message;
+    }
+  }
+
+  setProjectLoadingProgress(progress: number) {
+    this.projectLoadingProgress = progress;
   }
 
   setCanvas(canvas: fabric.Canvas | null, width: number, height: number) {
@@ -964,9 +1004,27 @@ export class State {
   setSelectedElement(selectedElement: EditorElement | null) {
     this.selectedElement = selectedElement;
     if (this.canvas) {
-      if (selectedElement?.fabricObject)
-        this.canvas.setActiveObject(selectedElement.fabricObject);
-      else this.canvas.discardActiveObject();
+      if (selectedElement?.fabricObject) {
+        // Verify that the fabric object is valid and actually on the canvas
+        const objects = this.canvas.getObjects();
+        const isValidObject = objects.includes(selectedElement.fabricObject);
+        
+        if (isValidObject) {
+          try {
+            this.canvas.setActiveObject(selectedElement.fabricObject);
+            this.canvas.requestRenderAll();
+          } catch (error) {
+            console.warn("Failed to set active object:", error);
+            // If setting active object fails, just discard it
+            this.canvas.discardActiveObject();
+          }
+        } else {
+          // Fabric object is not on canvas, discard selection
+          this.canvas.discardActiveObject();
+        }
+      } else {
+        this.canvas.discardActiveObject();
+      }
     }
   }
   updateSelectedElement() {

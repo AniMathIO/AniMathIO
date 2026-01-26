@@ -1,12 +1,17 @@
 import path from "path";
 import { exec } from "child_process";
-import { IpcMainEvent, app, ipcMain, systemPreferences } from "electron";
+import { IpcMainEvent, app, ipcMain, systemPreferences, dialog, BrowserWindow, shell } from "electron";
+import { readFile } from "fs/promises";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
 import Store from "electron-store";
 
 const store = new Store();
 const isProd = process.env.NODE_ENV === "production";
+
+// Store file path to open when app is ready
+let fileToOpen: string | null = null;
+let mainWindow: BrowserWindow | null = null;
 
 if (isProd) {
   serve({ directory: "app" });
@@ -46,10 +51,78 @@ async function startProcess(event: IpcMainEvent, value: string) {
   }
 }
 
+// Handle file open requests (called after app is ready)
+async function handleOpenFile(filePath: string) {
+  if (!mainWindow) {
+    // Store for later if window isn't ready
+    fileToOpen = filePath;
+    return;
+  }
+
+  try {
+    // Read the file
+    const fileBuffer = await readFile(filePath);
+    const fileName = path.basename(filePath);
+
+    // Send to renderer process
+    mainWindow.webContents.send("open-file-from-system", {
+      success: true,
+      data: Array.from(new Uint8Array(fileBuffer)),
+      fileName: fileName,
+      filePath: filePath,
+    });
+  } catch (error: any) {
+    console.error("Error opening file:", error);
+    if (mainWindow) {
+      mainWindow.webContents.send("open-file-from-system", {
+        success: false,
+        error: error.message || "Failed to open file",
+      });
+    }
+  }
+}
+
 (async () => {
+  // Handle macOS open-file event (fires before ready)
+  app.on("open-file", (event, filePath) => {
+    event.preventDefault();
+    fileToOpen = filePath;
+    
+    // If app is already ready, open it immediately
+    if (app.isReady() && mainWindow) {
+      handleOpenFile(filePath);
+    }
+  });
+
+  // Handle Windows/Linux: prevent multiple instances and handle file opens
+  const gotTheLock = app.requestSingleInstanceLock();
+
+  if (!gotTheLock) {
+    // Another instance is already running, quit this one
+    app.quit();
+  } else {
+    // Handle second instance (when user tries to open file with already running app)
+    app.on("second-instance", (event, commandLine, workingDirectory) => {
+      // Focus existing window
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+
+      // On Windows/Linux, file path is in commandLine
+      // Format: ["path/to/electron.exe", "path/to/file.animathio"]
+      if (process.platform === "win32" || process.platform === "linux") {
+        const filePath = commandLine.find((arg) => arg.endsWith(".animathio"));
+        if (filePath) {
+          handleOpenFile(filePath);
+        }
+      }
+    });
+  }
+
   await app.whenReady();
 
-  const mainWindow = createWindow("main", {
+  mainWindow = createWindow("main", {
     width: 1600,
     height: 900,
     minWidth: 1600,
@@ -65,6 +138,20 @@ async function startProcess(event: IpcMainEvent, value: string) {
     const port = process.argv[2];
     await mainWindow.loadURL(`http://localhost:${port}/Home`);
     // mainWindow.webContents.openDevTools();
+  }
+
+  // Handle file that was queued before app was ready
+  if (fileToOpen) {
+    handleOpenFile(fileToOpen);
+    fileToOpen = null;
+  }
+
+  // On Windows/Linux, check process.argv for file path (when app is launched with file)
+  if (process.platform === "win32" || process.platform === "linux") {
+    const filePath = process.argv.find((arg) => arg.endsWith(".animathio"));
+    if (filePath) {
+      handleOpenFile(filePath);
+    }
   }
 })();
 
@@ -99,6 +186,15 @@ ipcMain.handle("set-gemini-api-token", (_, apiToken) => {
   return true;
 });
 
+ipcMain.handle("get-gemini-model", () => {
+  return (store as any).get("geminiModel", "gemini-2.0-flash");
+});
+
+ipcMain.handle("set-gemini-model", (_, model) => {
+  (store as any).set("geminiModel", model);
+  return true;
+});
+
 // Request microphone permissions (macOS)
 function requestMicrophonePermission() {
   if (process.platform === "darwin") {
@@ -122,5 +218,102 @@ ipcMain.handle("request-microphone-permission", async () => {
   } else {
     // Linux and other platforms typically don't have permissions
     return "granted";
+  }
+});
+
+// Handler to read project file by path (no dialog, direct read)
+ipcMain.handle("read-project-file", async (event, filePath: string) => {
+  try {
+    // Try to read the file directly
+    const fileBuffer = await readFile(filePath);
+    return {
+      success: true,
+      data: Array.from(new Uint8Array(fileBuffer)),
+      fileName: path.basename(filePath),
+      filePath: filePath,
+    };
+  } catch (error: any) {
+    // Return error without showing dialog
+    return { success: false, error: error.message || "Failed to read file" };
+  }
+});
+
+// Handler to open project file with dialog (for files not in history)
+ipcMain.handle("open-project-file", async (event) => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: "Open Project File",
+      filters: [
+        { name: "Animathio Project", extensions: ["animathio"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+      properties: ["openFile"],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, error: "File selection cancelled" };
+    }
+
+    const selectedPath = result.filePaths[0];
+    const fileBuffer = await readFile(selectedPath);
+    return {
+      success: true,
+      data: Array.from(new Uint8Array(fileBuffer)),
+      fileName: path.basename(selectedPath),
+      filePath: selectedPath,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to open file" };
+  }
+});
+
+// Handler to save project file with dialog (returns full path)
+ipcMain.handle("save-project-file", async (event, fileData: number[], suggestedName?: string) => {
+  try {
+    const result = await dialog.showSaveDialog({
+      title: "Save Project File",
+      defaultPath: suggestedName || "project.animathio",
+      filters: [
+        { name: "Animathio Project", extensions: ["animathio"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: "File save cancelled" };
+    }
+
+    const filePath = result.filePath;
+    const fileBuffer = Buffer.from(fileData);
+    await require("fs/promises").writeFile(filePath, fileBuffer);
+
+    return {
+      success: true,
+      fileName: path.basename(filePath),
+      filePath: filePath,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to save file" };
+  }
+});
+
+// Handler to save project file directly to path (no dialog)
+ipcMain.handle("write-project-file", async (event, filePath: string, fileData: number[]) => {
+  try {
+    const fileBuffer = Buffer.from(fileData);
+    await require("fs/promises").writeFile(filePath, fileBuffer);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to write file" };
+  }
+});
+
+// Handler to open external URLs
+ipcMain.handle("open-external-url", async (event, url: string) => {
+  try {
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to open URL" };
   }
 });

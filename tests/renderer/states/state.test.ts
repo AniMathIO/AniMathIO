@@ -254,6 +254,7 @@ describe("State", () => {
       getActiveObjects: vi.fn(() => []),
       setActiveObject: vi.fn(),
       renderAll: vi.fn(),
+      requestRenderAll: vi.fn(),
       backgroundColor: "#111111",
       on: vi.fn(),
     };
@@ -414,6 +415,9 @@ describe("State", () => {
         fabricObject: { id: "fabric-obj" },
         type: "text",
       };
+
+      // Mock getObjects to return the fabric object so it passes validation
+      mockCanvas.getObjects.mockReturnValue([element.fabricObject]);
 
       state.setSelectedElement(element as any);
       expect(state.selectedElement).toEqual(element);
