@@ -5,19 +5,15 @@ directories:
   output: dist
   buildResources: resources
 files:
-  - from: .
-    filter:
-      - package.json
-      - app
-      - "!**/node_modules/**"
-      - "!node_modules/**"
-      - "!**/@tailwindcss/oxide-*"
-      - "!**/@tailwindcss/oxide-android-*"
-      - "!**/@tailwindcss/oxide-darwin-*"
-      - "!**/@tailwindcss/oxide-linux-*"
-      - "!**/@tailwindcss/oxide-win32-*"
-extraFiles:
+  - package.json
+  - app
   - scripts
+  # Exclude platform-specific Tailwind CSS dependencies that aren't needed at runtime
+  - "!node_modules/@tailwindcss/oxide-*"
+  - "!node_modules/@tailwindcss/oxide-android-*"
+  - "!node_modules/@tailwindcss/oxide-darwin-*"
+  - "!node_modules/@tailwindcss/oxide-linux-*"
+  - "!node_modules/@tailwindcss/oxide-win32-*"
 publish: null
 npmRebuild: false
 asar: true

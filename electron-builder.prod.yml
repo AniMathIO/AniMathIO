@@ -5,18 +5,17 @@ directories:
   output: dist
   buildResources: resources
 files:
-  - from: .
-    filter:
-      - package.json
-      - app
-      # Exclude platform-specific Tailwind CSS dependencies that aren't needed at runtime
-      - "!node_modules/@tailwindcss/oxide-*"
-      - "!node_modules/@tailwindcss/oxide-android-*"
-      - "!node_modules/@tailwindcss/oxide-darwin-*"
-      - "!node_modules/@tailwindcss/oxide-linux-*"
+  - package.json
+  - app
   - scripts
+  # Exclude platform-specific Tailwind CSS dependencies that aren't needed at runtime
+  - "!node_modules/@tailwindcss/oxide-*"
+  - "!node_modules/@tailwindcss/oxide-android-*"
+  - "!node_modules/@tailwindcss/oxide-darwin-*"
+  - "!node_modules/@tailwindcss/oxide-linux-*"
 publish: null
 npmRebuild: false
+asar: true
 # File associations for "Open with" functionality
 fileAssociations:
   - ext: animathio
