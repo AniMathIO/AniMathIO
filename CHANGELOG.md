@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.6.1...animathio-v1.6.2) (2026-01-27)
+
+
+### Bug Fixes
+
+* improve release workflow for artifact uploads ([b044c01](https://github.com/AniMathIO/AniMathIO/commit/b044c018b81671580badb7d94998dcb0e2d0d1ed))
+
 ## [1.6.1](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.5.0...animathio-v1.6.1) (2026-01-27)
 
 
