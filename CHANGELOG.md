@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.6.1](https://github.com/AniMathIO/AniMathIO/compare/v1.6.0...v1.6.1) (2026-01-27)
+
+
+### Features
+
+* add manual trigger to release workflow ([0562625](https://github.com/AniMathIO/AniMathIO/commit/05626251f8b8973f9e031d8d02f05c78a752773e))
+
+
+### Bug Fixes
+
+* fixed ci build ([0bf52c9](https://github.com/AniMathIO/AniMathIO/commit/0bf52c99c26188132d6984cd0ae833a2b2a857c3))
+
+
+### Miscellaneous Chores
+
+* release 1.6.1 ([0a86ef5](https://github.com/AniMathIO/AniMathIO/commit/0a86ef5e9674b7fb0388481f10d34b03ff24a09f))
+
 ## [1.6.0](https://github.com/AniMathIO/AniMathIO/compare/v1.5.0...v1.6.0) (2026-01-27)
 
 
