@@ -36,13 +36,17 @@ mac:
         LSHandlerRank: Owner
 win:
   icon: resources/icons/icon.ico
+nsis:
+  artifactName: "AniMathIO.Setup.${version}.${ext}"
 linux:
   icon: resources/icons/icon.png
   category: AudioVideo
   target:
     - AppImage
     - deb
+    - snap
     - flatpak
+
   # Desktop file configuration
   desktop:
     entry:
@@ -78,4 +82,4 @@ flatpak:
     - --talk-name=org.freedesktop.Notifications
   # File associations (MIME types) - removed duplicate, already in fileAssociations
   # Enable Wayland support (experimental, but available)
-  useWaylandFlags: false
+  useWaylandFlags: true

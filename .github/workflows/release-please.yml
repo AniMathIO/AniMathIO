@@ -12,13 +12,92 @@ name: release-please
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
-          # this assumes that you have created a personal access token
-          # (PAT) and configured it as a GitHub action secret named
-          # `MY_RELEASE_PLEASE_TOKEN` (this secret name is not important).
           token: ${{ secrets.GITHUB_TOKEN }}
-          # this is a built-in strategy in release-please, see "Action Inputs"
-          # for more options
-          release-type: simple
+          release-type: node
+
+  build-linux:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+      
+      - name: Install snapcraft
+        run: |
+          sudo snap install snapcraft --classic
+      
+      - name: Install Node dependencies
+        run: npm ci
+      
+      - name: Build Linux binaries
+        run: npm run build:linux
+      
+      - name: Create linux-unpacked tarball
+        run: |
+          cd dist
+          tar -czf linux-unpacked.tar.gz linux-unpacked/
+          cd ..
+      
+      - name: Upload artifacts
+        run: |
+          gh release upload ${{ needs.release-please.outputs.tag_name }} \
+            dist/AniMathIO-${{ needs.release-please.outputs.version }}.AppImage \
+            dist/animathio_${{ needs.release-please.outputs.version }}_amd64.snap \
+            dist/animathio_${{ needs.release-please.outputs.version }}_amd64.deb \
+            dist/AniMathIO-${{ needs.release-please.outputs.version }}-x86_64.flatpak \
+            dist/linux-unpacked.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      
+      - name: Install Node dependencies
+        run: npm ci
+      
+      - name: Build Windows binaries
+        run: npm run build:win
+      
+      - name: Create win-unpacked zip
+        run: |
+          cd dist
+          Compress-Archive -Path win-unpacked -DestinationPath win-unpacked.zip
+          cd ..
+        shell: pwsh
+      
+      - name: Upload artifacts
+        run: |
+          gh release upload ${{ needs.release-please.outputs.tag_name }} `
+            dist/AniMathIO.Setup.${{ needs.release-please.outputs.version }}.exe `
+            dist/AniMathIO.Setup.${{ needs.release-please.outputs.version }}.exe.blockmap `
+            dist/win-unpacked.zip
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

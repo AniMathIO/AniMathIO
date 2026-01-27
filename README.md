@@ -29,16 +29,97 @@ They are core part of the AniMathIO software! Check them out!
 
 ## OS Support
 
-We are supporting the following operating systems: macOS, Windows, Linux (via universal dmg, exe, AppImage, Snap and unpacked).
+We are supporting the following operating systems: Windows, Linux (via AppImage, Snap, Flatpak, DEB packages, and AUR).
 
-**NOTE**: Help is needed for MacOS support.
-Due to the lack of available resources, the latest version of AniMathIO that supports MacOS is the legacy 1.3.0 version.
+**NOTE**: macOS is currently **unsupported**. Due to the lack of available resources, the latest version of AniMathIO that supports macOS is the legacy 1.3.0 version.
 
 ## Installation
 
-Please download the latest version of the project binaries from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
+### Windows
 
-Or from our website: [https://animathio.com/](https://animathio.com)
+1. Download the latest `AniMathIO.Setup.X.X.X.exe` installer from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
+2. Run the installer and follow the installation wizard
+3. Launch AniMathIO from the Start Menu or desktop shortcut
+
+Alternatively, you can download `win-unpacked.zip` for a portable version (no installation required).
+
+### Linux
+
+AniMathIO is available in multiple formats for Linux distributions:
+
+#### AppImage (Universal Linux)
+
+1. Download `AniMathIO-X.X.X.AppImage` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
+2. Make it executable:
+   ```bash
+   chmod +x AniMathIO-X.X.X.AppImage
+   ```
+3. Run it:
+   ```bash
+   ./AniMathIO-X.X.X.AppImage
+   ```
+
+#### Snap Package (Universal Linux)
+
+Install via snap:
+```bash
+sudo snap install animathio
+```
+
+Or download the `.snap` file from the [release page](https://github.com/AniMathIO/AniMathIO/releases) and install it:
+```bash
+sudo snap install --dangerous animathio_X.X.X_amd64.snap
+```
+
+#### Flatpak (Experimental)
+
+**Note**: Flatpak support is experimental and may have limitations.
+
+1. Download `AniMathIO-X.X.X-x86_64.flatpak` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
+2. Install it:
+   ```bash
+   flatpak install AniMathIO-X.X.X-x86_64.flatpak
+   ```
+
+#### DEB Package (Debian/Ubuntu-based)
+
+1. Download `animathio_X.X.X_amd64.deb` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
+2. Install it:
+   ```bash
+   sudo dpkg -i animathio_X.X.X_amd64.deb
+   sudo apt-get install -f  # Install any missing dependencies
+   ```
+
+#### Arch Linux (AUR)
+
+AniMathIO is available in the AUR as `animathio-bin`:
+
+```bash
+# Using yay (recommended)
+yay -S animathio-bin
+
+# Or using paru
+paru -S animathio-bin
+
+# Or manually with makepkg
+git clone https://aur.archlinux.org/animathio-bin.git
+cd animathio-bin
+makepkg -si
+```
+
+**AUR Package**: [animathio-bin](https://aur.archlinux.org/packages/animathio-bin)
+
+#### Portable Linux
+
+Download `linux-unpacked.tar.gz` from the [release page](https://github.com/AniMathIO/AniMathIO/releases), extract it, and run the executable directly.
+
+### macOS
+
+⚠️ **macOS is currently unsupported**. The latest version of AniMathIO that supports macOS is the legacy 1.3.0 version, available on the [release page](https://github.com/AniMathIO/AniMathIO/releases).
+
+---
+
+**Alternative Download**: You can also download binaries from our website: [https://animathio.com/](https://animathio.com)
 
 ## Development build
 
