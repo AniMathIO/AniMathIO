@@ -103,7 +103,7 @@
     "electron-builder": "26.0.20",
     "happy-dom": "20.3.9",
     "jsdom": "27.0.0",
-    "next": "15.5.7",
+    "next": "15.5.9",
     "nextron": "9.5.0",
     "playwright": "1.55.1",
     "postcss": "8.5.6",
