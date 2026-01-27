@@ -11,7 +11,7 @@ Only the latest version receives security updates and support.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.6.0   | :white_check_mark: |
+| 1.6.x   | :white_check_mark: |
 | 1.5.0   | :x:                |
 | 1.4.1   | :x:                |
 | 1.4.0   | :x:                |
