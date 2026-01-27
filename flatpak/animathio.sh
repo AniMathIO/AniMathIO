@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /app/animathio/linux-unpacked/animathio "$@"
+exec /app/animathio/AniMathIO --no-sandbox "$@"
