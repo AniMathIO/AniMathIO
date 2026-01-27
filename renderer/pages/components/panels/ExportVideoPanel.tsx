@@ -395,7 +395,7 @@ const ExportVideoPanel = observer(() => {
         Export Video ({state.maxTime / 1000} seconds)
       </button >
 
-      <div className="text-base font-semibold m-4 mb-0 text-black dark:text-white">Save / Load Project:</div>
+      <div className="text-base font-semibold m-4 mb-0 text-black dark:text-white">Save / Save As Project:</div>
       {/* Save button - saves to current file */}
       <button
         className="bg-gray-500 hover:bg-gray-900 text-white font-bold py-2 px-2 rounded-lg ml-4 mr-2 mb-2"
