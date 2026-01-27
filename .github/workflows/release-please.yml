@@ -30,6 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Mark repo as safe for git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$(pwd)"
+
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -63,13 +68,13 @@ jobs:
           path: dist/linux-unpacked.tar.gz
           retention-days: 1
 
-      - name: Upload artifacts to release
+      - name: Upload Linux artifacts to release
         run: |
-          gh release upload ${{ needs.release-please.outputs.tag_name }} \
-            dist/AniMathIO-${{ needs.release-please.outputs.version }}.AppImage \
-            dist/animathio_${{ needs.release-please.outputs.version }}_amd64.snap \
-            dist/animathio_${{ needs.release-please.outputs.version }}_amd64.deb \
-            dist/linux-unpacked.tar.gz
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
+            "dist/AniMathIO-${{ needs.release-please.outputs.version }}.AppImage" \
+            "dist/animathio_${{ needs.release-please.outputs.version }}_amd64.snap" \
+            "dist/animathio_${{ needs.release-please.outputs.version }}_amd64.deb" \
+            "dist/linux-unpacked.tar.gz"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -96,10 +101,35 @@ jobs:
           manifest-path: flatpak/com.animathio.AniMathIO.yml
           cache-key: flatpak-builder-${{ github.sha }}
 
+      - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: AniMathIO-${{ needs.release-please.outputs.version }}.flatpak
+          retention-days: 1
+
+  upload-flatpak:
+    needs: [release-please, build-flatpak]
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mark repo as safe for git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$(pwd)"
+
+      - name: Download Flatpak artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: .
+
       - name: Upload Flatpak to release
         run: |
-          gh release upload ${{ needs.release-please.outputs.tag_name }} \
-            AniMathIO-${{ needs.release-please.outputs.version }}.flatpak
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
+            "AniMathIO-${{ needs.release-please.outputs.version }}.flatpak"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -109,6 +139,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Windows normally doesn't hit the "dubious ownership" problem,
+      # but this is harmless if you ever need it:
+      # - name: Mark repo as safe for git
+      #   run: git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+      #   shell: pwsh
 
       - name: Use Node.js
         uses: actions/setup-node@v4
@@ -128,12 +164,12 @@ jobs:
           cd ..
         shell: pwsh
 
-      - name: Upload artifacts to release
+      - name: Upload Windows artifacts to release
         run: |
-          gh release upload ${{ needs.release-please.outputs.tag_name }} `
-            dist/AniMathIO.Setup.${{ needs.release-please.outputs.version }}.exe `
-            dist/AniMathIO.Setup.${{ needs.release-please.outputs.version }}.exe.blockmap `
-            dist/win-unpacked.zip
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" `
+            "dist/AniMathIO.Setup.${{ needs.release-please.outputs.version }}.exe" `
+            "dist/AniMathIO.Setup.${{ needs.release-please.outputs.version }}.exe.blockmap" `
+            "dist/win-unpacked.zip"
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
