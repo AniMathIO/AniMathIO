@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.3](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.6.2...animathio-v1.6.3) (2026-01-27)
+
+
+### Bug Fixes
+
+* update label to 'Save / Save As Project' ([8ae3ea4](https://github.com/AniMathIO/AniMathIO/commit/8ae3ea48bd44bd1f1a363e98dc8441c58f088441))
+
 ## [1.6.2](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.6.1...animathio-v1.6.2) (2026-01-27)
 
 
