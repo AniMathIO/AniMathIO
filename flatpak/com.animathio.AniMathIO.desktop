@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=AniMathIO
+Comment=Video editor for creating Manim-like mathematical videos
+Exec=animathio %U
+Icon=com.animathio.AniMathIO
+Type=Application
+Categories=AudioVideo;Video;Graphics;
+MimeType=application/octet-stream;

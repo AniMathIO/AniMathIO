@@ -2,7 +2,7 @@
   "private": true,
   "name": "animathio",
   "description": "AniMathIO is a video editor application for editing Manim-like video projects",
-  "version": "1.6.1",
+  "version": "1.6.0",
   "author": {
     "name": "Kovács Bálint-Hunor",
     "email": "kovacsbalinthunor53@gmail.com"
@@ -32,8 +32,8 @@
     "build:win": "nextron build --win --x64",
     "prebuild:linux": "node scripts/fix-tailwind-oxide-dirs.js",
     "build:linux": "nextron build --linux",
-    "prebuild:linux:debug:flatpak": "node scripts/fix-tailwind-oxide-dirs.js",
-    "build:linux:debug:flatpak": "DEBUG=@malept/flatpak-bundler nextron build --linux flatpak",
+    "prebuild:flatpak": "node scripts/fix-tailwind-oxide-dirs.js",
+    "build:flatpak": "npm run build:linux && flatpak-builder --force-clean --repo=repo build-dir flatpak/com.animathio.AniMathIO.yml && flatpak build-bundle repo AniMathIO.flatpak com.animathio.AniMathIO",
     "prebuild:nomac": "node scripts/fix-tailwind-oxide-dirs.js",
     "build:nomac": "nextron build --win --linux",
     "prebuild-native": "node scripts/fix-tailwind-oxide-dirs.js",

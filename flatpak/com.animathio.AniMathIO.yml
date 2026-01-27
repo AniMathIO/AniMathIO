@@ -1,0 +1,40 @@
+id: com.animathio.AniMathIO
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+base: org.electronjs.Electron2.BaseApp
+base-version: '24.08'
+command: animathio
+separate-locales: false
+
+finish-args:
+  - --share=ipc
+  - --device=dri
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --share=network
+  - --filesystem=home
+  - --env=ELECTRON_TRASH=gio
+  - --talk-name=org.freedesktop.Notifications
+
+modules:
+  - name: animathio
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 animathio.sh /app/bin/animathio
+      - install -Dm644 com.animathio.AniMathIO.desktop /app/share/applications/com.animathio.AniMathIO.desktop
+      - install -Dm644 com.animathio.AniMathIO.metainfo.xml /app/share/metainfo/com.animathio.AniMathIO.metainfo.xml
+      - install -Dm644 icon.png /app/share/icons/hicolor/512x512/apps/com.animathio.AniMathIO.png
+      - cp -r linux-unpacked /app/animathio
+    sources:
+      - type: archive
+        path: ../../dist/linux-unpacked.tar.gz
+      - type: file
+        path: animathio.sh
+      - type: file
+        path: com.animathio.AniMathIO.desktop
+      - type: file
+        path: com.animathio.AniMathIO.metainfo.xml
+      - type: file
+        path: ../resources/icon.png
