@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { parseManimScene } from "../../../renderer/utils/manim/parser";
 import { translateManimScene } from "../../../renderer/utils/manim/translator";
 
@@ -8,6 +8,16 @@ vi.mock("@/utils", () => ({
   isHtmlVideoElement: (el: unknown) => el instanceof HTMLVideoElement,
   isHtmlAudioElement: (el: unknown) => el instanceof HTMLAudioElement,
   isHtmlImageElement: (el: unknown) => el instanceof HTMLImageElement,
+}));
+
+const MOCK_KATEX_DATA_URL = "data:image/png;base64,mockKatexOutput";
+
+vi.mock("@/utils/katex-render", () => ({
+  renderLatexToImage: vi.fn(async () => ({
+    dataUrl: MOCK_KATEX_DATA_URL,
+    width: 200,
+    height: 80,
+  })),
 }));
 
 const SIMPLE_SCENE = `
@@ -57,11 +67,33 @@ describe("parseManimScene", () => {
     }
   });
 
+  it("strips the Python raw-string prefix from Text/MathTex/Tex string literals", () => {
+    const scene = parseManimScene(`
+from manim import *
+
+class RawStringScene(Scene):
+    def construct(self):
+        greeting = Text(r"Raw text")
+        formula = MathTex(r"\\frac{a}{b}")
+        proof = Tex(r"Q.E.D.")
+`);
+    const greeting = scene.mobjects["greeting"];
+    const formula = scene.mobjects["formula"];
+    const proof = scene.mobjects["proof"];
+
+    expect(greeting.kind === "Text" && greeting.text).toBe("Raw text");
+    expect(formula.kind === "MathTex" && formula.tex).toBe("\\frac{a}{b}");
+    expect(proof.kind === "Tex" && proof.tex).toBe("Q.E.D.");
+  });
+
   it("parses MathTex mobjects", () => {
     const scene = parseManimScene(SIMPLE_SCENE);
     const formula = scene.mobjects["formula"];
     expect(formula).toBeDefined();
     expect(formula.kind).toBe("MathTex");
+    if (formula.kind === "MathTex") {
+      expect(formula.tex).toBe("E = mc^2");
+    }
   });
 
   it("parses self.play() statements", () => {
@@ -129,49 +161,49 @@ describe("parseManimScene", () => {
 describe("translateManimScene", () => {
   const canvas = { width: 1920, height: 1080 };
 
-  it("produces elements and animations from a simple scene", () => {
+  it("produces elements and animations from a simple scene", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
 
     expect(result.elements.length).toBeGreaterThan(0);
     expect(result.animations.length).toBeGreaterThan(0);
     expect(result.durationMs).toBeGreaterThan(0);
   });
 
-  it("creates TextEditorElements for Text/MathTex", () => {
+  it("creates a TextEditorElement for Text and a MafsEditorElement (KaTeX raster) for MathTex", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
 
-    const textEls = result.elements.filter((e) => e.type === "text");
-    expect(textEls.length).toBe(2);
-
-    const titleEl = textEls.find((e) => e.name === "title");
-    expect(titleEl).toBeDefined();
+    const titleEl = result.elements.find((e) => e.name === "title");
+    expect(titleEl?.type).toBe("text");
     expect(titleEl?.properties).toMatchObject({ text: "Hello World" });
 
-    const formulaEl = textEls.find((e) => e.name === "formula");
-    expect(formulaEl).toBeDefined();
+    const formulaEl = result.elements.find((e) => e.name === "formula");
+    expect(formulaEl?.type).toBe("mafs");
+    if (formulaEl?.type === "mafs") {
+      expect(formulaEl.properties.src).toBe(MOCK_KATEX_DATA_URL);
+    }
   });
 
-  it("maps Write/Create to fadeIn animations", () => {
+  it("maps Write/Create to fadeIn animations", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
 
     const fadeIns = result.animations.filter((a) => a.type === "fadeIn");
     expect(fadeIns.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("maps FadeOut to fadeOut animations", () => {
+  it("maps FadeOut to fadeOut animations", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
 
     const fadeOuts = result.animations.filter((a) => a.type === "fadeOut");
     expect(fadeOuts.length).toBe(1);
   });
 
-  it("creates ImageEditorElement for ImageMobject", () => {
+  it("creates ImageEditorElement for ImageMobject", async () => {
     const scene = parseManimScene(SHAPES_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
 
     const imgEl = result.elements.find((e) => e.type === "image");
     expect(imgEl).toBeDefined();
@@ -180,23 +212,23 @@ describe("translateManimScene", () => {
     }
   });
 
-  it("accounts for self.wait() in total duration", () => {
+  it("accounts for self.wait() in total duration", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
     // 1s wait + 2s wait + 3 plays × 1s default = 6s minimum
     expect(result.durationMs).toBeGreaterThanOrEqual(6000);
   });
 
-  it("returns no errors for valid scene", () => {
+  it("returns no errors for valid scene", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
     // Warnings may exist but should be informational, not critical
     expect(result.elements.length).toBeGreaterThan(0);
   });
 
-  it("assigns valid placement to each element", () => {
+  it("assigns valid placement to each element", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
 
     for (const el of result.elements) {
       expect(el.placement.width).toBeGreaterThan(0);
@@ -204,9 +236,9 @@ describe("translateManimScene", () => {
     }
   });
 
-  it("each animation targets a valid element id", () => {
+  it("each animation targets a valid element id", async () => {
     const scene = parseManimScene(SIMPLE_SCENE);
-    const result = translateManimScene(scene, canvas);
+    const result = await translateManimScene(scene, canvas);
     const elementIds = new Set(result.elements.map((e) => e.id));
 
     for (const anim of result.animations) {

@@ -2,7 +2,9 @@
  * Translates a parsed ManimScene into AniMathIO EditorElements and Animations.
  *
  * Mapping strategy:
- *  - Text / Tex / MathTex  →  TextEditorElement
+ *  - Text  →  TextEditorElement (editable Konva text)
+ *  - Tex / MathTex  →  MafsEditorElement (KaTeX-rendered raster image; Konva's
+ *    canvas Text node can't typeset math directly)
  *  - Circle / Rectangle / Arrow  →  TextEditorElement (SVG-like placeholder with label)
  *  - ImageMobject  →  ImageEditorElement (src must be resolved externally)
  *  - Create / Write / GrowFromCenter  →  FadeIn animation
@@ -16,10 +18,12 @@
  */
 
 import { getUid } from "@/utils";
+import { renderLatexToImage } from "@/utils/katex-render";
 import type {
   EditorElement,
   TextEditorElement,
   ImageEditorElement,
+  MafsEditorElement,
   Animation,
   Placement,
   TimeFrame,
@@ -27,6 +31,7 @@ import type {
 import type {
   ManimScene,
   ManimMobject,
+  ManimTex,
   ManimPlayAnimation,
   ManimTranslationResult,
   ManimTranslationWarning,
@@ -109,13 +114,10 @@ function resolveColor(color: string | undefined): string {
 // ---------- element builders ----------
 
 function buildTextElement(
-  mob: Extract<ManimMobject, { kind: "Text" | "Tex" | "MathTex" }>,
+  mob: Extract<ManimMobject, { kind: "Text" }>,
   placement: Placement,
   timeFrame: TimeFrame
 ): TextEditorElement {
-  const label =
-    mob.kind === "Text" ? mob.text : `$${(mob as Extract<ManimMobject, { kind: "Tex" | "MathTex" }>).tex}$`;
-
   return {
     id: getUid(),
     name: mob.id,
@@ -123,9 +125,68 @@ function buildTextElement(
     placement,
     timeFrame,
     properties: {
-      text: label,
-      fontSize: (mob.kind === "Text" && mob.fontSize) ? mob.fontSize : 36,
-      fontWeight: (mob.kind === "Text" && mob.fontWeight) ? mob.fontWeight : 400,
+      text: mob.text,
+      fontSize: mob.fontSize ?? 36,
+      fontWeight: mob.fontWeight ?? 400,
+      splittedTexts: [],
+    },
+  };
+}
+
+/** Scales natural image dimensions to fit within a cell, preserving aspect ratio. */
+function fitWithinCell(
+  naturalWidth: number,
+  naturalHeight: number,
+  cell: { width: number; height: number }
+): { width: number; height: number } {
+  if (naturalWidth <= 0 || naturalHeight <= 0) {
+    return { width: cell.width, height: cell.height };
+  }
+  const scale = Math.min(cell.width / naturalWidth, cell.height / naturalHeight, 1);
+  return { width: naturalWidth * scale, height: naturalHeight * scale };
+}
+
+async function buildMathTexElement(
+  mob: ManimTex,
+  placement: Placement,
+  timeFrame: TimeFrame
+): Promise<MafsEditorElement> {
+  const { dataUrl, width, height } = await renderLatexToImage(mob.tex, {
+    color: resolveColor(mob.color),
+  });
+  const fitted = fitWithinCell(width, height, placement);
+  const id = getUid();
+
+  return {
+    id,
+    name: mob.id,
+    type: "mafs",
+    placement: { ...placement, width: fitted.width, height: fitted.height },
+    timeFrame,
+    properties: {
+      elementId: `manim-tex-${mob.id}`,
+      src: dataUrl,
+      effect: { type: "none" },
+    },
+  };
+}
+
+/** Fallback when KaTeX rendering fails: plain text showing the raw LaTeX source. */
+function buildMathTexFallbackElement(
+  mob: ManimTex,
+  placement: Placement,
+  timeFrame: TimeFrame
+): TextEditorElement {
+  return {
+    id: getUid(),
+    name: mob.id,
+    type: "text",
+    placement,
+    timeFrame,
+    properties: {
+      text: `$${mob.tex}$`,
+      fontSize: 36,
+      fontWeight: 400,
       splittedTexts: [],
     },
   };
@@ -211,10 +272,10 @@ function buildBreatheAnimation(targetId: string, durationMs: number): Animation 
 
 // ---------- main translator ----------
 
-export function translateManimScene(
+export async function translateManimScene(
   scene: ManimScene,
   canvas: CanvasSize = { width: 1920, height: 1080 }
-): ManimTranslationResult {
+): Promise<ManimTranslationResult> {
   const warnings: ManimTranslationWarning[] = [];
   const elements: EditorElement[] = [];
   const animations: Animation[] = [];
@@ -245,8 +306,17 @@ export function translateManimScene(
     const timeFrame: TimeFrame = { start: 0, end: totalDurationMs };
 
     let el: EditorElement | null = null;
-    if (mob.kind === "Text" || mob.kind === "Tex" || mob.kind === "MathTex") {
-      el = buildTextElement(mob as Extract<ManimMobject, { kind: "Text" | "Tex" | "MathTex" }>, placement, timeFrame);
+    if (mob.kind === "Text") {
+      el = buildTextElement(mob, placement, timeFrame);
+    } else if (mob.kind === "Tex" || mob.kind === "MathTex") {
+      try {
+        el = await buildMathTexElement(mob, placement, timeFrame);
+      } catch (error) {
+        warnings.push({
+          message: `Failed to render KaTeX for "${varName}" ("${mob.tex}"): ${error instanceof Error ? error.message : String(error)}. Falling back to plain text.`,
+        });
+        el = buildMathTexFallbackElement(mob, placement, timeFrame);
+      }
     } else if (mob.kind === "Circle" || mob.kind === "Rectangle" || mob.kind === "Arrow") {
       el = buildShapeElement(mob as Extract<ManimMobject, { kind: "Circle" | "Rectangle" | "Arrow" }>, placement, timeFrame);
     } else if (mob.kind === "ImageMobject") {

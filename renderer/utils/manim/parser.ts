@@ -30,7 +30,8 @@ function stripComments(line: string): string {
 }
 
 function trimQuotes(s: string): string {
-  return s.replace(/^['"]|['"]$/g, "");
+  // Strip an optional Python raw-string prefix (r"..."/R'...') before the quote.
+  return s.replace(/^[rR]?['"]/, "").replace(/['"]$/, "");
 }
 
 function parseColor(raw: string): ManimColor | undefined {
@@ -88,8 +89,8 @@ function parseMobjectCall(varName: string, rhs: string): ManimMobject | null {
     [
       "Text",
       (args) => {
-        // Text("Hello", color=WHITE, font_size=48)
-        const textMatch = args.match(/^['"](.+?)['"]/);
+        // Text("Hello", color=WHITE, font_size=48) — also allow a raw-string prefix: Text(r"Hello")
+        const textMatch = args.match(/^[rR]?['"](.+?)['"]/);
         return {
           kind: "Text",
           id: varName,

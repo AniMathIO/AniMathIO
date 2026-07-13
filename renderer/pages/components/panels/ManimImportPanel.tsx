@@ -29,6 +29,7 @@ const ManimImportPanel = observer(() => {
   const [warnings, setWarnings] = useState<ManimTranslationWarning[]>([]);
   const [importedCount, setImportedCount] = useState<{ elements: number; animations: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileLoad = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -44,14 +45,15 @@ const ManimImportPanel = observer(() => {
     reader.readAsText(file);
   }, []);
 
-  const handleImport = useCallback(() => {
+  const handleImport = useCallback(async () => {
     setError(null);
     setWarnings([]);
     setImportedCount(null);
+    setIsImporting(true);
 
     try {
       const parsed = parseManimScene(script);
-      const result = translateManimScene(parsed, {
+      const result = await translateManimScene(parsed, {
         width: state.canvas_width,
         height: state.canvas_height,
       });
@@ -77,6 +79,8 @@ const ManimImportPanel = observer(() => {
       setImportedCount({ elements: result.elements.length, animations: result.animations.length });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsImporting(false);
     }
   }, [script, state]);
 
@@ -131,10 +135,10 @@ const ManimImportPanel = observer(() => {
       {/* Import button */}
       <button
         onClick={handleImport}
-        disabled={!script.trim()}
+        disabled={!script.trim() || isImporting}
         className="w-full py-2 rounded font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        Import into Timeline
+        {isImporting ? "Importing…" : "Import into Timeline"}
       </button>
 
       {/* Success */}
