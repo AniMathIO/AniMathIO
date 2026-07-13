@@ -125,7 +125,7 @@ export class ElementStore {
 
   // ---------- Add element helpers ----------
 
-  addVideo(index: number) {
+  addVideo(index: number, dropPosition?: { x: number; y: number }) {
     const videoElement = document.getElementById(`video-${index}`);
     if (!isHtmlVideoElement(videoElement)) return;
 
@@ -133,16 +133,20 @@ export class ElementStore {
     const aspectRatio = videoElement.videoWidth / videoElement.videoHeight;
     const videoId = getUid();
     const audioId = getUid();
+    const width = 100 * aspectRatio;
+    const height = 100;
+    const x = dropPosition ? dropPosition.x - width / 2 : 0;
+    const y = dropPosition ? dropPosition.y - height / 2 : 0;
 
     this.addEditorElement({
       id: videoId,
       name: `Media(video) ${index + 1}`,
       type: "video",
       placement: {
-        x: 0,
-        y: 0,
-        width: 100 * aspectRatio,
-        height: 100,
+        x,
+        y,
+        width,
+        height,
         rotation: 0,
         scaleX: 1,
         scaleY: 1,
@@ -179,22 +183,26 @@ export class ElementStore {
     });
   }
 
-  addImage(index: number) {
+  addImage(index: number, dropPosition?: { x: number; y: number }) {
     const imageElement = document.getElementById(`image-${index}`);
     if (!isHtmlImageElement(imageElement)) return;
 
     const aspectRatio = imageElement.naturalWidth / imageElement.naturalHeight;
     const id = getUid();
+    const width = 100 * aspectRatio;
+    const height = 100;
+    const x = dropPosition ? dropPosition.x - width / 2 : 0;
+    const y = dropPosition ? dropPosition.y - height / 2 : 0;
 
     this.addEditorElement({
       id,
       name: `Media(image) ${index + 1}`,
       type: "image",
       placement: {
-        x: 0,
-        y: 0,
-        width: 100 * aspectRatio,
-        height: 100,
+        x,
+        y,
+        width,
+        height,
         rotation: 0,
         scaleX: 1,
         scaleY: 1,
@@ -271,18 +279,22 @@ export class ElementStore {
     });
   }
 
-  addText(options: { text: string; fontSize: number; fontWeight: number }) {
+  addText(options: { text: string; fontSize: number; fontWeight: number }, dropPosition?: { x: number; y: number }) {
     const id = getUid();
     const index = this.editorElements.length;
+    const width = 100;
+    const height = 100;
+    const x = dropPosition ? dropPosition.x - width / 2 : 0;
+    const y = dropPosition ? dropPosition.y - height / 2 : 0;
     this.addEditorElement({
       id,
       name: `Text ${index + 1}`,
       type: "text",
       placement: {
-        x: 0,
-        y: 0,
-        width: 100,
-        height: 100,
+        x,
+        y,
+        width,
+        height,
         rotation: 0,
         scaleX: 1,
         scaleY: 1,

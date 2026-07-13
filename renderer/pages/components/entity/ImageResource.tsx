@@ -50,7 +50,16 @@ const ImageResource = observer(
     };
 
     return (
-      <div className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative">
+      <div
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(
+            "application/x-animathio-resource",
+            JSON.stringify({ kind: "image", index })
+          );
+        }}
+        className="rounded-lg overflow-hidden items-center bg-slate-800 m-[15px] flex flex-col relative"
+      >
         <div className="bg-[rgba(0,0,0,.50)] rounded-xl text-white py-1 px-1 absolute text-base top-1.3 right-2">
           {resolution.w}x{resolution.h}
         </div>

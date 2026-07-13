@@ -252,6 +252,38 @@ export function snapNodeToGuides(node: Konva.Node, stage: Konva.Stage): SnapGuid
 }
 
 /**
+ * dragBoundFunc helper: clamps a node's proposed drag position so its
+ * (axis-aligned) bounding box stays within [0, stageWidth] x [0, stageHeight].
+ * getClientRect() is used instead of raw width/height so rotated nodes are
+ * clamped by their actual on-screen footprint, not their unrotated box.
+ * If the node itself is larger than the stage on an axis, that axis is left
+ * unclamped rather than locking the node into a degenerate (min > max) range.
+ */
+export function clampNodeToStage(
+  node: Konva.Node,
+  pos: { x: number; y: number },
+  stageWidth: number,
+  stageHeight: number
+): { x: number; y: number } {
+  const rect = node.getClientRect();
+  const currentPos = node.position();
+  const offsetX = rect.x - currentPos.x;
+  const offsetY = rect.y - currentPos.y;
+
+  let x = pos.x;
+  let y = pos.y;
+
+  if (rect.width <= stageWidth) {
+    x = Math.min(Math.max(pos.x, -offsetX), stageWidth - rect.width - offsetX);
+  }
+  if (rect.height <= stageHeight) {
+    y = Math.min(Math.max(pos.y, -offsetY), stageHeight - rect.height - offsetY);
+  }
+
+  return { x, y };
+}
+
+/**
  * Returns a clip region object for use in slideIn/slideOut animations.
  * In Konva, clip is defined as { x, y, width, height } on a Group or Node.
  */

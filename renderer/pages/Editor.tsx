@@ -17,6 +17,7 @@ import {
   makeImageSceneFunc,
   getFilterFromEffectType,
   snapNodeToGuides,
+  clampNodeToStage,
   NO_GUIDES,
   type SnapGuides,
 } from "@/utils/konva-utils";
@@ -96,6 +97,7 @@ const VideoElementNode = observer(({ element, stateCtx, onGuidesChange }: { elem
       scaleY={scaleY}
       rotation={rotation}
       draggable
+      dragBoundFunc={(pos) => clampNodeToStage(nodeRef.current!, pos, stateCtx.canvas_width, stateCtx.canvas_height)}
       sceneFunc={makeImageSceneFunc(() => videoElement, effect as any)}
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
@@ -159,6 +161,7 @@ const ImageElementNode = observer(({ element, stateCtx, onGuidesChange }: { elem
       scaleY={scaleY}
       rotation={rotation}
       draggable
+      dragBoundFunc={(pos) => clampNodeToStage(nodeRef.current!, pos, stateCtx.canvas_width, stateCtx.canvas_height)}
       sceneFunc={makeImageSceneFunc(() => imgElement, effect as any)}
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
@@ -218,6 +221,7 @@ const TextElementNode = observer(({ element, stateCtx, onGuidesChange }: { eleme
       fontStyle={String(element.properties.fontWeight)}
       fill={element.properties.color ?? getContrastColor(stateCtx.backgroundColor)}
       draggable
+      dragBoundFunc={(pos) => clampNodeToStage(nodeRef.current!, pos, stateCtx.canvas_width, stateCtx.canvas_height)}
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
       onDragMove={(e) => {
@@ -380,6 +384,49 @@ const EditorInner = observer(() => {
     setScaleFactor(Math.min(newScaleFactor, maxScaleFactor));
   };
 
+  const handleCanvasDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer.types.includes("application/x-animathio-resource")) {
+      e.preventDefault();
+    }
+  };
+
+  const handleCanvasDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const payload = e.dataTransfer.getData("application/x-animathio-resource");
+    if (!payload) return;
+    e.preventDefault();
+
+    let resource: { kind: string; index?: number; text?: string; fontSize?: number; fontWeight?: number };
+    try {
+      resource = JSON.parse(payload);
+    } catch {
+      return;
+    }
+
+    // The Canvas Scale slider is a pure CSS transform (see the wrapper div's
+    // style below), so this element's own bounding rect already reflects the
+    // scaled visual size — dividing it out here converts the drop point back
+    // into unscaled Konva stage coordinates without needing scaleFactor math.
+    const rect = e.currentTarget.getBoundingClientRect();
+    const dropPosition = {
+      x: ((e.clientX - rect.left) / rect.width) * state.canvas_width,
+      y: ((e.clientY - rect.top) / rect.height) * state.canvas_height,
+    };
+
+    switch (resource.kind) {
+      case "video":
+        if (resource.index !== undefined) state.addVideo(resource.index, dropPosition);
+        break;
+      case "image":
+        if (resource.index !== undefined) state.addImage(resource.index, dropPosition);
+        break;
+      case "text":
+        if (resource.text !== undefined && resource.fontSize !== undefined && resource.fontWeight !== undefined) {
+          state.addText({ text: resource.text, fontSize: resource.fontSize, fontWeight: resource.fontWeight }, dropPosition);
+        }
+        break;
+    }
+  };
+
   return (
     <React.Fragment>
       <Head>
@@ -408,6 +455,8 @@ const EditorInner = observer(() => {
               transform: `scale(${scaleFactor / 100})`,
             }}
             className="flex w-fit h-fit"
+            onDragOver={handleCanvasDragOver}
+            onDrop={handleCanvasDrop}
           >
             <EditorCanvas />
           </div>

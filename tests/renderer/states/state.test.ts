@@ -254,6 +254,23 @@ describe("State (RootStore)", () => {
         })
       );
     });
+
+    it("without a dropPosition, places the element at (0, 0) (unchanged click-to-add behavior)", () => {
+      const spy = vi.spyOn(state.elementStore, "addEditorElement");
+      state.addText({ text: "Hello world", fontSize: 20, fontWeight: 400 });
+      const placement = spy.mock.calls[0][0].placement;
+      expect(placement.x).toBe(0);
+      expect(placement.y).toBe(0);
+    });
+
+    it("with a dropPosition, centers the element on the drop point", () => {
+      const spy = vi.spyOn(state.elementStore, "addEditorElement");
+      state.addText({ text: "Hello world", fontSize: 20, fontWeight: 400 }, { x: 500, y: 300 });
+      const placement = spy.mock.calls[0][0].placement;
+      // default text placement is 100x100, so centering subtracts half that
+      expect(placement.x).toBe(450);
+      expect(placement.y).toBe(250);
+    });
   });
 
   // ---- addVideo ----
@@ -265,6 +282,24 @@ describe("State (RootStore)", () => {
       expect(spy).toHaveBeenNthCalledWith(1, expect.objectContaining({ type: "video" }));
       expect(spy).toHaveBeenNthCalledWith(2, expect.objectContaining({ type: "audio" }));
     });
+
+    it("without a dropPosition, places the video element at (0, 0)", () => {
+      const spy = vi.spyOn(state.elementStore, "addEditorElement");
+      state.addVideo(0);
+      const placement = spy.mock.calls[0][0].placement;
+      expect(placement.x).toBe(0);
+      expect(placement.y).toBe(0);
+    });
+
+    it("with a dropPosition, centers the video element on the drop point", () => {
+      const spy = vi.spyOn(state.elementStore, "addEditorElement");
+      state.addVideo(0, { x: 500, y: 300 });
+      const placement = spy.mock.calls[0][0].placement;
+      // video-0 mock is 1280x720 -> width = 100 * (1280/720)
+      const expectedWidth = 100 * (1280 / 720);
+      expect(placement.x).toBeCloseTo(500 - expectedWidth / 2);
+      expect(placement.y).toBeCloseTo(300 - 50);
+    });
   });
 
   // ---- addImage ----
@@ -273,6 +308,24 @@ describe("State (RootStore)", () => {
       const spy = vi.spyOn(state.elementStore, "addEditorElement");
       state.addImage(0);
       expect(spy).toHaveBeenCalledWith(expect.objectContaining({ type: "image" }));
+    });
+
+    it("without a dropPosition, places the image element at (0, 0)", () => {
+      const spy = vi.spyOn(state.elementStore, "addEditorElement");
+      state.addImage(0);
+      const placement = spy.mock.calls[0][0].placement;
+      expect(placement.x).toBe(0);
+      expect(placement.y).toBe(0);
+    });
+
+    it("with a dropPosition, centers the image element on the drop point", () => {
+      const spy = vi.spyOn(state.elementStore, "addEditorElement");
+      state.addImage(0, { x: 500, y: 300 });
+      const placement = spy.mock.calls[0][0].placement;
+      // image-0 mock is 800x600 -> width = 100 * (800/600)
+      const expectedWidth = 100 * (800 / 600);
+      expect(placement.x).toBeCloseTo(500 - expectedWidth / 2);
+      expect(placement.y).toBeCloseTo(300 - 50);
     });
   });
 

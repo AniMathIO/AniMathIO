@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
+  clampNodeToStage,
   getCoverCrop,
   getFilterFromEffectType,
   getLineGuideStops,
@@ -294,5 +295,46 @@ describe("snapNodeToGuides", () => {
     expect(guides.vertical).toEqual([]);
     expect(guides.horizontal).toEqual([]);
     expect(dragged.absolutePosition()).toEqual({ x: 500, y: 500 });
+  });
+});
+
+// Mock for clampNodeToStage: getClientRect() at the node's current position()
+// plus a fixed size, so proposing a new `pos` simulates the client rect
+// moving by the same delta (mirrors how a real Konva node behaves mid-drag).
+function makeClampNode(currentPos: { x: number; y: number }, size: { width: number; height: number }) {
+  return {
+    position: () => currentPos,
+    getClientRect: () => ({ x: currentPos.x, y: currentPos.y, width: size.width, height: size.height }),
+  } as any;
+}
+
+describe("clampNodeToStage", () => {
+  it("leaves an in-bounds position untouched", () => {
+    const node = makeClampNode({ x: 100, y: 100 }, { width: 50, height: 50 });
+    const result = clampNodeToStage(node, { x: 120, y: 130 }, 800, 600);
+    expect(result).toEqual({ x: 120, y: 130 });
+  });
+
+  it("clamps a position dragged past the left/top edge to 0", () => {
+    const node = makeClampNode({ x: 100, y: 100 }, { width: 50, height: 50 });
+    const result = clampNodeToStage(node, { x: -40, y: -30 }, 800, 600);
+    // Konva treats -0 the same as 0; toBe(-0) would also pass but toBeCloseTo
+    // makes the equivalence explicit instead of relying on a signed-zero quirk.
+    expect(result.x).toBeCloseTo(0);
+    expect(result.y).toBeCloseTo(0);
+  });
+
+  it("clamps a position dragged past the right/bottom edge to the max in-bounds position", () => {
+    const node = makeClampNode({ x: 100, y: 100 }, { width: 50, height: 50 });
+    const result = clampNodeToStage(node, { x: 900, y: 700 }, 800, 600);
+    // max x/y so the 50x50 box's right/bottom edge lands exactly on the stage edge
+    expect(result).toEqual({ x: 750, y: 550 });
+  });
+
+  it("does not force-clamp an axis where the node itself is bigger than the stage", () => {
+    const node = makeClampNode({ x: 0, y: 0 }, { width: 1000, height: 50 });
+    const result = clampNodeToStage(node, { x: 300, y: 700 }, 800, 600);
+    expect(result.x).toBe(300); // width (1000) > stageWidth (800): x left unclamped
+    expect(result.y).toBe(550); // height (50) <= stageHeight (600): y still clamped
   });
 });

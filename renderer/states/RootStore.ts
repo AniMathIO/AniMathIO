@@ -170,14 +170,14 @@ export class RootStore {
   updateSelectedElement() { this.elementStore.updateSelectedElement(); }
   refreshElements() { this.elementStore.refreshElements(); }
   updateEffect(id: string, effect: Effect) { this.elementStore.updateEffect(id, effect as any); }
-  addVideo(index: number) { this.elementStore.addVideo(index); }
-  addImage(index: number) { this.elementStore.addImage(index); }
+  addVideo(index: number, dropPosition?: { x: number; y: number }) { this.elementStore.addVideo(index, dropPosition); }
+  addImage(index: number, dropPosition?: { x: number; y: number }) { this.elementStore.addImage(index, dropPosition); }
   addMafsResource(index: number, pngSrc: string, name: string) {
     return this.elementStore.addMafsResource(index, pngSrc, name);
   }
   addAudio(index: number) { this.elementStore.addAudio(index); }
-  addText(options: { text: string; fontSize: number; fontWeight: number }) {
-    this.elementStore.addText(options);
+  addText(options: { text: string; fontSize: number; fontWeight: number }, dropPosition?: { x: number; y: number }) {
+    this.elementStore.addText(options, dropPosition);
   }
   updateAudioSettings(
     id: string,
