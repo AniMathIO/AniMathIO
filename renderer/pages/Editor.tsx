@@ -22,6 +22,8 @@ import {
   type SnapGuides,
 } from "@/utils/konva-utils";
 import { getContrastColor } from "@/utils/color";
+import { classifyDroppedFile, computeDropCanvasPosition } from "@/utils/dragDropFiles";
+import { waitForElementById, waitForMediaReady } from "@/utils/domLoad";
 
 // ============================================================
 // Individual element renderers
@@ -367,6 +369,7 @@ const canvasScaleMap: Record<string, { max: number; default: number }> = {
 const EditorInner = observer(() => {
   const state = React.useContext(StateContext);
   const [scaleFactor, setScaleFactor] = React.useState(25);
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!state.isEditorActive) return;
@@ -427,6 +430,72 @@ const EditorInner = observer(() => {
     }
   };
 
+  // OS-level file drag-in (Finder/Explorer/another app) is independent of the
+  // app's own application/x-animathio-resource drags handled above — a native
+  // file drag never sets that MIME type, so the two coexist without conflict.
+  // "Files" is the standard dataTransfer.types signal available during
+  // dragover, before the actual file list is populated at drop time.
+  const handleAppDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer.types.includes("Files")) {
+      e.preventDefault();
+    }
+  };
+
+  const handleAppDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+
+    // Capture synthetic-event-derived values now, before any await.
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    const canvasRect = canvasWrapperRef.current?.getBoundingClientRect() ?? null;
+    const dropPosition = computeDropCanvasPosition(clientX, clientY, canvasRect, state.canvas_width, state.canvas_height);
+
+    const addDroppedFiles = async () => {
+      for (const file of files) {
+        const kind = classifyDroppedFile(file);
+        if (!kind) {
+          console.warn(`Dropped file "${file.name}" has an unsupported type (${file.type || "unknown"}); skipping.`);
+          continue;
+        }
+
+        const url = URL.createObjectURL(file);
+
+        if (kind === "video") {
+          const index = state.videos.length;
+          state.addVideoResource(url);
+          state.setSelectedMenuOption("Videos");
+          const el = await waitForElementById(`video-${index}`);
+          if (el) {
+            await waitForMediaReady(el as HTMLVideoElement);
+            state.addVideo(index, dropPosition);
+          }
+        } else if (kind === "image") {
+          const index = state.images.length;
+          state.addImageResource(url);
+          state.setSelectedMenuOption("Images");
+          const el = await waitForElementById(`image-${index}`);
+          if (el) {
+            await waitForMediaReady(el as HTMLImageElement);
+            state.addImage(index, dropPosition);
+          }
+        } else {
+          const index = state.audios.length;
+          state.addAudioResource(url);
+          state.setSelectedMenuOption("Audios");
+          const el = await waitForElementById(`audio-${index}`);
+          if (el) {
+            await waitForMediaReady(el as HTMLAudioElement);
+            state.addAudio(index);
+          }
+        }
+      }
+    };
+
+    addDroppedFiles();
+  };
+
   return (
     <React.Fragment>
       <Head>
@@ -434,7 +503,11 @@ const EditorInner = observer(() => {
         <link rel="icon" href={AniMathIO.src} />
       </Head>
 
-      <div className="bg-slate-200 dark:bg-gray-800 grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[calc(100svh-32px)]">
+      <div
+        className="bg-slate-200 dark:bg-gray-800 grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[calc(100svh-32px)]"
+        onDragOver={handleAppDragOver}
+        onDrop={handleAppDrop}
+      >
         <div className="tile row-span-2 flex flex-col">
           <Menu />
         </div>
@@ -450,6 +523,7 @@ const EditorInner = observer(() => {
           className="col-start-4 bg-gray-200 dark:bg-gray-700 dark:text-white grid w-[900px] h-[500px] place-self-center place-content-center"
         >
           <div
+            ref={canvasWrapperRef}
             style={{
               transformOrigin: "center",
               transform: `scale(${scaleFactor / 100})`,
