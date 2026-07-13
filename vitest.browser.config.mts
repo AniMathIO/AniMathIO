@@ -1,7 +1,17 @@
 import { defineConfig } from "vitest/config";
+import { playwright } from "@vitest/browser-playwright";
 import path from "path";
 
 export default defineConfig({
+  // tsconfig.json sets jsx: "preserve" for Next.js's own SWC-based JSX transform.
+  // Vite's dev server needs to transform JSX itself to serve these files to the
+  // browser instance; without this override it fails to parse every .tsx file
+  // (Vite logs a cosmetic "oxc options will be used, esbuild options ignored"
+  // warning, but removing this option reproduces the parse failures, so the
+  // warning doesn't reflect what's actually happening).
+  esbuild: {
+    jsx: "automatic",
+  },
   test: {
     environment: "happy-dom",
     globals: true,
@@ -10,7 +20,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       name: "chromium",
-      provider: "playwright",
+      provider: playwright(),
       headless: true,
       instances: [
         {
