@@ -12,12 +12,14 @@ vi.mock("@/utils", () => ({
 
 const MOCK_KATEX_DATA_URL = "data:image/png;base64,mockKatexOutput";
 
+const renderLatexToImageMock = vi.fn(async () => ({
+  dataUrl: MOCK_KATEX_DATA_URL,
+  width: 200,
+  height: 80,
+}));
+
 vi.mock("@/utils/katex-render", () => ({
-  renderLatexToImage: vi.fn(async () => ({
-    dataUrl: MOCK_KATEX_DATA_URL,
-    width: 200,
-    height: 80,
-  })),
+  renderLatexToImage: (...args: unknown[]) => renderLatexToImageMock(...(args as [string, unknown])),
 }));
 
 const SIMPLE_SCENE = `
@@ -183,6 +185,45 @@ describe("translateManimScene", () => {
     if (formulaEl?.type === "mafs") {
       expect(formulaEl.properties.src).toBe(MOCK_KATEX_DATA_URL);
     }
+  });
+
+  it("applies Text(color=...) to the element, and leaves color unset when unspecified", async () => {
+    const scene = parseManimScene(`
+from manim import *
+
+class ColorScene(Scene):
+    def construct(self):
+        tinted = Text("Tinted", color=YELLOW)
+        plain = Text("Plain")
+`);
+    const result = await translateManimScene(scene, canvas);
+
+    const tintedEl = result.elements.find((e) => e.name === "tinted");
+    expect(tintedEl?.type === "text" && tintedEl.properties.color).toBe("#FFFF00");
+
+    const plainEl = result.elements.find((e) => e.name === "plain");
+    expect(plainEl?.type === "text" && plainEl.properties.color).toBeUndefined();
+  });
+
+  it("passes the canvas background's contrast color to KaTeX rendering when MathTex has no color=", async () => {
+    const scene = parseManimScene(`
+from manim import *
+
+class NoColorFormula(Scene):
+    def construct(self):
+        formula = MathTex(r"x^2")
+`);
+    renderLatexToImageMock.mockClear();
+    await translateManimScene(scene, canvas, "#FFFFFF");
+
+    expect(renderLatexToImageMock).toHaveBeenCalledWith("x^2", { color: "#000000" });
+  });
+
+  it("warns that ImageMobject file paths need manual resolution", async () => {
+    const scene = parseManimScene(SHAPES_SCENE);
+    const result = await translateManimScene(scene, canvas);
+
+    expect(result.warnings.some((w) => w.message.includes("photo.png") && w.message.includes("manually"))).toBe(true);
   });
 
   it("maps Write/Create to fadeIn animations", async () => {

@@ -86,6 +86,33 @@ export function getFilterFromEffectType(effectType: EffectType): string {
 }
 
 /**
+ * Whether an <img>/<video> element has actually finished loading real pixel
+ * data and is safe to pass to ctx.drawImage(). A failed/unresolvable src
+ * still leaves the element in the DOM with `complete: true` but no decoded
+ * bitmap ("broken" state) — drawImage() throws InvalidStateError for that,
+ * so this must be checked instead of just truthiness of width/height (which
+ * can come from HTML width/height attributes set for unrelated layout
+ * reasons, not actual image data).
+ */
+function isElementDrawable(element: HTMLImageElement | HTMLVideoElement): boolean {
+  if ("naturalWidth" in element) {
+    return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
+  }
+  // HTMLVideoElement: HAVE_CURRENT_DATA (2) or above means a frame is decoded.
+  return element.readyState >= 2 && element.videoWidth > 0 && element.videoHeight > 0;
+}
+
+/** Draws a dashed placeholder rect for a missing/broken image or video. */
+function drawBrokenPlaceholder(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, Math.max(0, width - 2), Math.max(0, height - 2));
+  ctx.restore();
+}
+
+/**
  * Creates a custom Konva scene function that draws an image/video element
  * with cover-crop cropping and optional CSS-filter effects.
  */
@@ -95,22 +122,22 @@ export function makeImageSceneFunc(
 ) {
   return (context: Konva.Context, shape: Konva.Shape) => {
     const element = getElement();
-    if (!element) return;
-
-    const ctx = (context as any)._context as CanvasRenderingContext2D;
     const width = shape.width();
     const height = shape.height();
+    const ctx = (context as any)._context as CanvasRenderingContext2D;
 
-    const naturalW =
-      "naturalWidth" in element
-        ? element.naturalWidth || (element as HTMLImageElement).width
-        : (element as HTMLVideoElement).videoWidth || element.width;
-    const naturalH =
-      "naturalHeight" in element
-        ? element.naturalHeight || (element as HTMLImageElement).height
-        : (element as HTMLVideoElement).videoHeight || element.height;
+    if (!width || !height) return;
 
-    if (!naturalW || !naturalH || !width || !height) return;
+    if (!element || !isElementDrawable(element)) {
+      drawBrokenPlaceholder(ctx, width, height);
+      context.beginPath();
+      context.rect(0, 0, width, height);
+      context.closePath();
+      return;
+    }
+
+    const naturalW = "naturalWidth" in element ? element.naturalWidth : element.videoWidth;
+    const naturalH = "naturalHeight" in element ? element.naturalHeight : element.videoHeight;
 
     const { cropX, cropY, cropWidth, cropHeight } = getCoverCrop(
       naturalW,
@@ -119,14 +146,22 @@ export function makeImageSceneFunc(
       height
     );
 
-    ctx.save();
-    const filter = getFilterFromEffectType(effectType);
-    if (filter !== "none") {
-      ctx.filter = filter;
+    try {
+      ctx.save();
+      const filter = getFilterFromEffectType(effectType);
+      if (filter !== "none") {
+        ctx.filter = filter;
+      }
+      ctx.drawImage(element, cropX, cropY, cropWidth, cropHeight, 0, 0, width, height);
+      ctx.filter = "none";
+      ctx.restore();
+    } catch (error) {
+      // Defense-in-depth: a single broken element must never abort Konva's
+      // synchronous layer draw pass, which would hide every element drawn
+      // after it in the same layer.
+      console.warn("Failed to draw image/video element:", error);
+      drawBrokenPlaceholder(ctx, width, height);
     }
-    ctx.drawImage(element, cropX, cropY, cropWidth, cropHeight, 0, 0, width, height);
-    ctx.filter = "none";
-    ctx.restore();
 
     // Draw the hit region so Konva can detect clicks/drags
     context.beginPath();

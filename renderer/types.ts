@@ -55,6 +55,8 @@ export type TextEditorElement = EditorElementBase<
     fontSize: number;
     fontWeight: number;
     splittedTexts: Konva.Text[];
+    /** Explicit fill color; when unset, falls back to contrasting against the canvas background. */
+    color?: string;
   }
 >;
 

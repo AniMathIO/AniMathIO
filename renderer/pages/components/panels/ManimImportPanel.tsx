@@ -53,10 +53,11 @@ const ManimImportPanel = observer(() => {
 
     try {
       const parsed = parseManimScene(script);
-      const result = await translateManimScene(parsed, {
-        width: state.canvas_width,
-        height: state.canvas_height,
-      });
+      const result = await translateManimScene(
+        parsed,
+        { width: state.canvas_width, height: state.canvas_height },
+        state.backgroundColor
+      );
 
       runInAction(() => {
         // Extend maxTime if the scene is longer

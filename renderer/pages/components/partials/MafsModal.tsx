@@ -10,6 +10,7 @@ import {
 import { StateContext } from "@/states";
 import * as htmlToImage from 'html-to-image';
 import { MafsModalProps, LatexProps } from "@/types";
+import { getContrastColor } from "@/utils/color";
 import katex from "katex";
 import Modal from 'react-modal';
 import dynamic from "next/dynamic";
@@ -154,7 +155,41 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
 
     const extractPNG = async (): Promise<string> => {
         try {
-            const dataUrl = await htmlToImage.toPng(mafsRef.current as HTMLElement, {
+            const container = mafsRef.current as HTMLElement;
+            // Mafs's axis/grid colors are CSS custom properties declared only in
+            // the `.MafsView { ... }` stylesheet rule (core.css + our globals.css
+            // override). html-to-image clones the DOM verbatim for SVG content —
+            // it never embeds that rule into its isolated capture document (it
+            // lives inside a Tailwind v4 `@layer` block html-to-image's stylesheet
+            // walker doesn't recurse into), so every `var(--mafs-*)` reference in
+            // the cloned SVG's `stroke`/`fill` attributes stays unresolved and
+            // renders invisible — axis lines, grid, and tick numbers vanish even
+            // though they're present and visible in the live DOM. Custom
+            // properties set as an inline `style` attribute, by contrast, *do*
+            // survive cloneNode verbatim, so we set every property the axis/grid/
+            // label rendering depends on directly here (mirroring core.css's
+            // defaults) instead of relying on the stylesheet cascade at capture
+            // time. --mafs-fg (and --mafs-origin-color, derived from it) also
+            // gets the live canvas-background contrast color, since the app UI's
+            // own dark/light mode is unrelated to the canvas's independently
+            // configurable background.
+            const mafsView = container.querySelector<HTMLElement>(".MafsView");
+            const fg = getContrastColor(state.backgroundColor);
+            mafsView?.style.setProperty("--mafs-fg", fg);
+            mafsView?.style.setProperty("--mafs-bg", "rgba(0, 0, 0, 0)");
+            mafsView?.style.setProperty("--mafs-origin-color", fg);
+            mafsView?.style.setProperty("--mafs-line-color", "#555");
+            mafsView?.style.setProperty("--mafs-line-stroke-dash-style", "4, 3");
+            mafsView?.style.setProperty("--mafs-axis-stroke-width", "1px");
+            mafsView?.style.setProperty("--grid-line-subdivision-color", "#222");
+
+            // Mafs renders its axis numbers in a custom web font (CMU Serif);
+            // without waiting for it to finish loading, html-to-image can
+            // rasterize before the glyphs are painted, leaving them blank.
+            await document.fonts?.ready;
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+            const dataUrl = await htmlToImage.toPng(container, {
                 filter: (node) => node.tagName !== 'I'
             });
             return dataUrl;

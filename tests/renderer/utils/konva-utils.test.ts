@@ -23,6 +23,31 @@ function makeLayer() {
   return { batchDraw: vi.fn() };
 }
 
+// Minimal Konva.Context/Shape mocks for makeImageSceneFunc
+function makeSceneFuncArgs(width: number, height: number) {
+  const ctx2d = {
+    save: vi.fn(),
+    restore: vi.fn(),
+    drawImage: vi.fn(),
+    strokeRect: vi.fn(),
+    setLineDash: vi.fn(),
+    filter: "none",
+    strokeStyle: "",
+    lineWidth: 0,
+  };
+  const context = {
+    _context: ctx2d,
+    beginPath: vi.fn(),
+    rect: vi.fn(),
+    closePath: vi.fn(),
+  };
+  const shape = {
+    width: () => width,
+    height: () => height,
+  };
+  return { ctx2d, context, shape };
+}
+
 describe("getCoverCrop", () => {
   it("fills width when target is wider than image", () => {
     // image 100x100, target 200x100 → needs to scale x
@@ -99,6 +124,78 @@ describe("KonvaAnimProxy", () => {
     expect(proxy.left).toBe(10);
     expect(proxy.top).toBe(20);
     expect(proxy.opacity).toBe(0.8);
+  });
+});
+
+describe("makeImageSceneFunc", () => {
+  it("draws a healthy, fully-loaded image", () => {
+    const { ctx2d, context, shape } = makeSceneFuncArgs(100, 50);
+    const img = { complete: true, naturalWidth: 200, naturalHeight: 100 } as unknown as HTMLImageElement;
+
+    const sceneFunc = makeImageSceneFunc(() => img, "none");
+    sceneFunc(context as any, shape as any);
+
+    expect(ctx2d.drawImage).toHaveBeenCalledTimes(1);
+    expect(ctx2d.strokeRect).not.toHaveBeenCalled();
+  });
+
+  it("draws a placeholder instead of crashing for a broken image (naturalWidth 0)", () => {
+    const { ctx2d, context, shape } = makeSceneFuncArgs(100, 50);
+    // complete:true + naturalWidth:0 is exactly the "broken" state a failed <img> load leaves behind.
+    const img = { complete: true, naturalWidth: 0, naturalHeight: 0, width: 20, height: 20 } as unknown as HTMLImageElement;
+
+    const sceneFunc = makeImageSceneFunc(() => img, "none");
+    sceneFunc(context as any, shape as any);
+
+    expect(ctx2d.drawImage).not.toHaveBeenCalled();
+    expect(ctx2d.strokeRect).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws a placeholder when no element is available", () => {
+    const { ctx2d, context, shape } = makeSceneFuncArgs(100, 50);
+
+    const sceneFunc = makeImageSceneFunc(() => null, "none");
+    sceneFunc(context as any, shape as any);
+
+    expect(ctx2d.drawImage).not.toHaveBeenCalled();
+    expect(ctx2d.strokeRect).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the placeholder if drawImage throws (InvalidStateError-style failure)", () => {
+    const { ctx2d, context, shape } = makeSceneFuncArgs(100, 50);
+    const img = { complete: true, naturalWidth: 200, naturalHeight: 100 } as unknown as HTMLImageElement;
+    ctx2d.drawImage.mockImplementation(() => {
+      throw new DOMException("broken state", "InvalidStateError");
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const sceneFunc = makeImageSceneFunc(() => img, "none");
+    expect(() => sceneFunc(context as any, shape as any)).not.toThrow();
+
+    expect(ctx2d.strokeRect).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it("treats a video below HAVE_CURRENT_DATA readyState as not drawable", () => {
+    const { ctx2d, context, shape } = makeSceneFuncArgs(100, 50);
+    const video = { readyState: 1, videoWidth: 640, videoHeight: 480 } as unknown as HTMLVideoElement;
+
+    const sceneFunc = makeImageSceneFunc(() => video, "none");
+    sceneFunc(context as any, shape as any);
+
+    expect(ctx2d.drawImage).not.toHaveBeenCalled();
+    expect(ctx2d.strokeRect).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws a video once it has decoded a frame (readyState >= HAVE_CURRENT_DATA)", () => {
+    const { ctx2d, context, shape } = makeSceneFuncArgs(100, 50);
+    const video = { readyState: 2, videoWidth: 640, videoHeight: 480 } as unknown as HTMLVideoElement;
+
+    const sceneFunc = makeImageSceneFunc(() => video, "none");
+    sceneFunc(context as any, shape as any);
+
+    expect(ctx2d.drawImage).toHaveBeenCalledTimes(1);
+    expect(ctx2d.strokeRect).not.toHaveBeenCalled();
   });
 });
 

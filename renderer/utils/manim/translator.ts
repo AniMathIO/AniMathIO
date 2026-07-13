@@ -19,6 +19,7 @@
 
 import { getUid } from "@/utils";
 import { renderLatexToImage } from "@/utils/katex-render";
+import { getContrastColor } from "@/utils/color";
 import type {
   EditorElement,
   TextEditorElement,
@@ -105,8 +106,9 @@ const MANIM_NAMED_COLORS: Record<string, string> = {
   MAROON: "#800000",
 };
 
-function resolveColor(color: string | undefined): string {
-  if (!color) return "#FFFFFF";
+/** Resolves a Manim color name/hex to a hex string, or undefined if none was given. */
+function resolveColor(color: string | undefined): string | undefined {
+  if (!color) return undefined;
   if (color.startsWith("#")) return color;
   return MANIM_NAMED_COLORS[color.toUpperCase()] ?? "#FFFFFF";
 }
@@ -129,6 +131,9 @@ function buildTextElement(
       fontSize: mob.fontSize ?? 36,
       fontWeight: mob.fontWeight ?? 400,
       splittedTexts: [],
+      // Only set when the script specifies color=; otherwise left undefined so
+      // TextElementNode falls back to contrasting against the canvas background.
+      color: resolveColor(mob.color),
     },
   };
 }
@@ -149,10 +154,11 @@ function fitWithinCell(
 async function buildMathTexElement(
   mob: ManimTex,
   placement: Placement,
-  timeFrame: TimeFrame
+  timeFrame: TimeFrame,
+  backgroundColor: string
 ): Promise<MafsEditorElement> {
   const { dataUrl, width, height } = await renderLatexToImage(mob.tex, {
-    color: resolveColor(mob.color),
+    color: resolveColor(mob.color) ?? getContrastColor(backgroundColor),
   });
   const fitted = fitWithinCell(width, height, placement);
   const id = getUid();
@@ -274,7 +280,8 @@ function buildBreatheAnimation(targetId: string, durationMs: number): Animation 
 
 export async function translateManimScene(
   scene: ManimScene,
-  canvas: CanvasSize = { width: 1920, height: 1080 }
+  canvas: CanvasSize = { width: 1920, height: 1080 },
+  backgroundColor: string = "#111111"
 ): Promise<ManimTranslationResult> {
   const warnings: ManimTranslationWarning[] = [];
   const elements: EditorElement[] = [];
@@ -310,7 +317,7 @@ export async function translateManimScene(
       el = buildTextElement(mob, placement, timeFrame);
     } else if (mob.kind === "Tex" || mob.kind === "MathTex") {
       try {
-        el = await buildMathTexElement(mob, placement, timeFrame);
+        el = await buildMathTexElement(mob, placement, timeFrame, backgroundColor);
       } catch (error) {
         warnings.push({
           message: `Failed to render KaTeX for "${varName}" ("${mob.tex}"): ${error instanceof Error ? error.message : String(error)}. Falling back to plain text.`,
@@ -321,6 +328,9 @@ export async function translateManimScene(
       el = buildShapeElement(mob as Extract<ManimMobject, { kind: "Circle" | "Rectangle" | "Arrow" }>, placement, timeFrame);
     } else if (mob.kind === "ImageMobject") {
       el = buildImageElement(mob as Extract<ManimMobject, { kind: "ImageMobject" }>, placement, timeFrame);
+      warnings.push({
+        message: `ImageMobject "${varName}" references "${(mob as Extract<ManimMobject, { kind: "ImageMobject" }>).filename}", which AniMathIO can't resolve automatically — replace its source manually in the editor.`,
+      });
     } else if (mob.kind === "VGroup" || mob.kind === "Group") {
       // Groups are skipped; animations on them target children instead
       warnings.push({ message: `VGroup/Group "${varName}" is not directly rendered; animate its children.` });

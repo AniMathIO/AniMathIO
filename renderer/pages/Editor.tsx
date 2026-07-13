@@ -14,6 +14,7 @@ import Konva from "konva";
 import { Stage, Layer, Image, Text, Transformer } from "react-konva";
 import type { EditorElement, VideoEditorElement, ImageEditorElement, TextEditorElement, MafsEditorElement } from "@/types";
 import { makeImageSceneFunc, getFilterFromEffectType } from "@/utils/konva-utils";
+import { getContrastColor } from "@/utils/color";
 
 // ============================================================
 // Individual element renderers
@@ -196,7 +197,7 @@ const TextElementNode = observer(({ element, stateCtx }: { element: TextEditorEl
       rotation={rotation}
       fontSize={element.properties.fontSize}
       fontStyle={String(element.properties.fontWeight)}
-      fill="#ffffff"
+      fill={element.properties.color ?? getContrastColor(stateCtx.backgroundColor)}
       draggable
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
