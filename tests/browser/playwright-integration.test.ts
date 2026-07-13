@@ -208,7 +208,7 @@ describe("Playwright Integration Tests", () => {
     const canvas = document.createElement("canvas");
     canvas.width = 800;
     canvas.height = 600;
-    canvas.id = "fabric-canvas";
+    canvas.id = "konva-canvas";
 
     const ctx = canvas.getContext("2d");
     if (ctx) {
@@ -223,7 +223,7 @@ describe("Playwright Integration Tests", () => {
     expect(canvas.width).toBe(800);
     expect(canvas.height).toBe(600);
     expect(!!ctx).toBe(true);
-    expect(canvas.id).toBe("fabric-canvas");
+    expect(canvas.id).toBe("konva-canvas");
 
     document.body.removeChild(canvas);
   });

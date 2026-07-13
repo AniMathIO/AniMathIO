@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Editor from './Editor';
 import Dashboard from './Dashboard';
 import { StateContext } from '@/states';
-import { State } from '../states/state';
+import { RootStore as State } from '../states/RootStore';
 import { addProjectToHistory } from '@/utils';
 import { ProjectLoadingModal } from './components/partials/ProjectLoadingModal';
 

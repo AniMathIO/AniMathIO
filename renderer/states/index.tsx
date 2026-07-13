@@ -1,11 +1,11 @@
 "use client";
 import React, { createContext } from "react";
-import { State } from "./state";
+import { RootStore } from "./RootStore";
 
-export const StateContext = createContext(new State());
+export const StateContext = createContext(new RootStore());
 
 export function StateProvider(props: { children: React.ReactNode }) {
-  const [state] = React.useState(new State());
+  const [state] = React.useState(() => new RootStore());
   return (
     <StateContext.Provider value={state}>
       {props.children}

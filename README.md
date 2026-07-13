@@ -51,10 +51,13 @@ AniMathIO is available in multiple formats for Linux distributions:
 
 1. Download `AniMathIO-X.X.X.AppImage` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
 2. Make it executable:
+
    ```bash
    chmod +x AniMathIO-X.X.X.AppImage
    ```
+
 3. Run it:
+
    ```bash
    ./AniMathIO-X.X.X.AppImage
    ```
@@ -62,11 +65,13 @@ AniMathIO is available in multiple formats for Linux distributions:
 #### Snap Package (Universal Linux)
 
 Install via snap:
+
 ```bash
 sudo snap install animathio
 ```
 
 Or download the `.snap` file from the [release page](https://github.com/AniMathIO/AniMathIO/releases) and install it:
+
 ```bash
 sudo snap install --dangerous animathio_X.X.X_amd64.snap
 ```
@@ -77,6 +82,7 @@ sudo snap install --dangerous animathio_X.X.X_amd64.snap
 
 1. Download `AniMathIO-X.X.X-x86_64.flatpak` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
 2. Install it:
+
    ```bash
    flatpak install AniMathIO-X.X.X-x86_64.flatpak
    ```
@@ -85,6 +91,7 @@ sudo snap install --dangerous animathio_X.X.X_amd64.snap
 
 1. Download `animathio_X.X.X_amd64.deb` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
 2. Install it:
+
    ```bash
    sudo dpkg -i animathio_X.X.X_amd64.deb
    sudo apt-get install -f  # Install any missing dependencies

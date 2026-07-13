@@ -10,7 +10,7 @@ import dynamic from "next/dynamic";
 const TimeFrame = observer((props: { element: EditorElement }) => {
     const state = React.useContext(StateContext);
     const { element } = props;
-    const disabled = element.type === "audio";
+    const disabled = false;
     const isSelected = state.selectedElement?.id === element.id;
     const bgColorOnSelected = isSelected ? "bg-slate-800" : "bg-slate-600";
     const disabledCursor = disabled ? "cursor-no-drop" : "cursor-ew-resize";

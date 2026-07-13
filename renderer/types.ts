@@ -1,10 +1,10 @@
-import { fabric } from "fabric";
+import Konva from "konva";
 import { KatexOptions } from "katex";
 import { vec } from "mafs";
 
 export type EditorElementBase<T extends string, P> = {
   readonly id: string;
-  fabricObject?: fabric.Object;
+  konvaNode?: Konva.Node;
   name: string;
   readonly type: T;
   placement: Placement;
@@ -16,7 +16,6 @@ export type VideoEditorElement = EditorElementBase<
   {
     src: string;
     elementId: string;
-    imageObject?: fabric.Image;
     effect: Effect;
     muted: boolean;
   }
@@ -26,7 +25,6 @@ export type ImageEditorElement = EditorElementBase<
   {
     src: string;
     elementId: string;
-    imageObject?: fabric.Object;
     effect: Effect;
   }
 >;
@@ -36,7 +34,6 @@ export type MafsEditorElement = EditorElementBase<
   {
     src: string;
     elementId: string;
-    imageObject?: fabric.Object;
     effect: Effect;
   }
 >;
@@ -57,7 +54,7 @@ export type TextEditorElement = EditorElementBase<
     text: string;
     fontSize: number;
     fontWeight: number;
-    splittedTexts: fabric.Text[];
+    splittedTexts: Konva.Text[];
   }
 >;
 
@@ -109,6 +106,15 @@ export type FadeOutAnimation = AnimationBase<"fadeOut">;
 
 export type BreatheAnimation = AnimationBase<"breathe">;
 
+/**
+ * Mathematical object reveal: scales the element from 0 → 1 from its centre,
+ * mimicking Manim's GrowFromCenter / Write effect.
+ */
+export type MafsRevealAnimation = AnimationBase<
+  "mafsReveal",
+  { direction: "in" | "out" }
+>;
+
 export type SlideDirection = "left" | "right" | "top" | "bottom";
 export type SlideTextType = "none" | "character";
 export type SlideInAnimation = AnimationBase<
@@ -134,7 +140,8 @@ export type Animation =
   | FadeOutAnimation
   | SlideInAnimation
   | SlideOutAnimation
-  | BreatheAnimation;
+  | BreatheAnimation
+  | MafsRevealAnimation;
 
 export type MenuOption =
   | "Videos"
@@ -146,7 +153,8 @@ export type MenuOption =
   | "Animations"
   | "Effects"
   | "Background Fill"
-  | "Mathematical Objects";
+  | "Mathematical Objects"
+  | "Manim Import";
 
 export type MafsResourceType = {
   index: number;

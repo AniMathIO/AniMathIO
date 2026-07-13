@@ -14,6 +14,7 @@ import {
   SlideInAnimation,
   SlideOutAnimation,
   SlideTextType,
+  MafsRevealAnimation,
 } from "@/types";
 
 import dynamic from "next/dynamic";
@@ -23,7 +24,8 @@ const ANIMATION_TYPE_TO_LABEL: Record<string, string> = {
   fadeOut: "Fade Out",
   slideIn: "Slide In",
   slideOut: "Slide Out",
-  breath: "Breath",
+  breathe: "Breathe",
+  mafsReveal: "Math Reveal",
 };
 export type AnimationResourceProps = {
   animation: Animation;
@@ -55,6 +57,9 @@ const AnimationResource = observer((props: AnimationResourceProps) => {
         <SlideAnimation
           animation={props.animation as SlideInAnimation | SlideOutAnimation}
         />
+      ) : null}
+      {props.animation.type === "mafsReveal" ? (
+        <MafsRevealAnimationControl animation={props.animation as MafsRevealAnimation} />
       ) : null}
     </div>
   );
@@ -184,6 +189,50 @@ export const SlideAnimation = observer(
           >
             <option value="none">None</option>
             <option value="character">Character</option>
+          </select>
+        </div>
+      </div>
+    );
+  }
+);
+
+export const MafsRevealAnimationControl = observer(
+  (props: { animation: MafsRevealAnimation }) => {
+    const state = React.useContext(StateContext);
+    return (
+      <div className="flex flex-col w-full items-start">
+        <div className="flex flex-row items-center justify-between my-1">
+          <label className="text-white text-xs" htmlFor="mafs-duration">
+            Duration (s):
+          </label>
+          <input
+            id="mafs-duration"
+            className="bg-slate-100 text-black rounded-lg px-2 py-1 ml-2 w-16 text-xs"
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={props.animation.duration / 1000}
+            onChange={(e) => {
+              const ms = Math.max(100, Number(e.target.value) * 1000);
+              state.updateAnimation(props.animation.id, { ...props.animation, duration: ms });
+            }}
+          />
+        </div>
+        <div className="flex flex-row items-center justify-between my-1">
+          <div className="text-white text-xs">Direction</div>
+          <select
+            aria-label="Reveal direction"
+            className="bg-slate-100 text-black rounded-lg px-2 py-1 ml-2 w-16 text-xs"
+            value={props.animation.properties.direction}
+            onChange={(e) => {
+              state.updateAnimation(props.animation.id, {
+                ...props.animation,
+                properties: { direction: e.target.value as "in" | "out" },
+              });
+            }}
+          >
+            <option value="in">In</option>
+            <option value="out">Out</option>
           </select>
         </div>
       </div>

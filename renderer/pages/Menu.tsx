@@ -11,10 +11,11 @@ import {
   MusicalNoteIcon,
   EyeDropperIcon,
   SparklesIcon,
-  VariableIcon
+  VariableIcon,
+  ArrowDownOnSquareIcon,
 } from "@heroicons/react/24/solid";
 import { RiSoundModuleFill } from "react-icons/ri";
-import { State } from "../states/state";
+import { RootStore as State } from "../states/RootStore";
 
 const Menu = observer(() => {
   const state = React.useContext(StateContext);
@@ -117,6 +118,13 @@ const MENU_OPTIONS = [
     icon: ArrowDownTrayIcon,
     action: (state: State) => {
       state.setSelectedMenuOption("Export");
+    },
+  },
+  {
+    name: "Manim Import",
+    icon: ArrowDownOnSquareIcon,
+    action: (state: State) => {
+      state.setSelectedMenuOption("Manim Import");
     },
   },
 ];
