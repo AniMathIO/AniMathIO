@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   getCoverCrop,
   getFilterFromEffectType,
+  getLineGuideStops,
   KonvaAnimProxy,
   KonvaUtils,
   makeImageSceneFunc,
+  snapNodeToGuides,
 } from "../../../renderer/utils/konva-utils";
 
 // Minimal Konva.Node mock
@@ -230,5 +232,67 @@ describe("KonvaUtils.getClipRegion", () => {
     // extraOffsetX = 10 / 2 = 5
     expect(region.x).toBe(-5);
     expect(region.width).toBe(110);
+  });
+});
+
+// Minimal Konva.Stage/Node mocks for the snapping-guide helpers
+function makeStage(width: number, height: number, otherNodes: any[] = []) {
+  return {
+    width: () => width,
+    height: () => height,
+    find: (_selector: string) => otherNodes,
+  } as any;
+}
+
+function makeDraggableNode(rect: { x: number; y: number; width: number; height: number }) {
+  let pos = { x: rect.x, y: rect.y };
+  const node = {
+    getClientRect: () => rect,
+    absolutePosition: (newPos?: { x: number; y: number }) => {
+      if (newPos) {
+        pos = newPos;
+        return;
+      }
+      return pos;
+    },
+  };
+  return node as any;
+}
+
+describe("getLineGuideStops", () => {
+  it("includes canvas edges/center plus other elements' edges/center, excluding the dragged shape", () => {
+    const dragged = makeDraggableNode({ x: 0, y: 0, width: 10, height: 10 });
+    const other = makeDraggableNode({ x: 100, y: 50, width: 20, height: 40 });
+    const stage = makeStage(800, 600, [dragged, other]);
+
+    const stops = getLineGuideStops(dragged, stage);
+
+    expect(stops.vertical).toEqual([0, 400, 800, 100, 110, 120]);
+    expect(stops.horizontal).toEqual([0, 300, 600, 50, 70, 90]);
+  });
+});
+
+describe("snapNodeToGuides", () => {
+  it("snaps the node's left edge to a nearby element's left edge and reports a vertical guide", () => {
+    const other = makeDraggableNode({ x: 200, y: 0, width: 50, height: 50 });
+    const dragged = makeDraggableNode({ x: 203, y: 300, width: 30, height: 30 });
+    const stage = makeStage(800, 600, [dragged, other]);
+
+    const guides = snapNodeToGuides(dragged, stage);
+
+    expect(guides.vertical).toEqual([200]);
+    expect(dragged.absolutePosition().x).toBe(200);
+  });
+
+  it("returns no guides and leaves position untouched when nothing is within the snap threshold", () => {
+    const other = makeDraggableNode({ x: 200, y: 0, width: 50, height: 50 });
+    const dragged = makeDraggableNode({ x: 500, y: 500, width: 30, height: 30 });
+    const stage = makeStage(800, 600, [dragged, other]);
+
+    const guides = snapNodeToGuides(dragged, stage);
+
+    expect(guides.vertical).toEqual([]);
+    expect(guides.horizontal).toEqual([]);
+    expect(dragged.absolutePosition()).toEqual({ x: 500, y: 500 });
   });
 });

@@ -11,9 +11,15 @@ import Head from "next/head";
 import AniMathIO from "../public/images/AniMathIO.png";
 import dynamic from "next/dynamic";
 import Konva from "konva";
-import { Stage, Layer, Image, Text, Transformer } from "react-konva";
+import { Stage, Layer, Image, Text, Line, Transformer } from "react-konva";
 import type { EditorElement, VideoEditorElement, ImageEditorElement, TextEditorElement, MafsEditorElement } from "@/types";
-import { makeImageSceneFunc, getFilterFromEffectType } from "@/utils/konva-utils";
+import {
+  makeImageSceneFunc,
+  getFilterFromEffectType,
+  snapNodeToGuides,
+  NO_GUIDES,
+  type SnapGuides,
+} from "@/utils/konva-utils";
 import { getContrastColor } from "@/utils/color";
 
 // ============================================================
@@ -50,7 +56,7 @@ function useDomElementById<T extends HTMLElement>(id: string): T | null {
   return el;
 }
 
-const VideoElementNode = observer(({ element, stateCtx }: { element: VideoEditorElement; stateCtx: any }) => {
+const VideoElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: VideoEditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
   const nodeRef = useRef<Konva.Image>(null);
   const animRef = useRef<Konva.Animation | null>(null);
   const videoElement = useDomElementById<HTMLVideoElement>(element.properties.elementId);
@@ -80,6 +86,7 @@ const VideoElementNode = observer(({ element, stateCtx }: { element: VideoEditor
   return (
     <Image
       ref={nodeRef}
+      name="editorElement"
       image={videoElement}
       x={x}
       y={y}
@@ -92,7 +99,12 @@ const VideoElementNode = observer(({ element, stateCtx }: { element: VideoEditor
       sceneFunc={makeImageSceneFunc(() => videoElement, effect as any)}
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
+      onDragMove={(e) => {
+        const stage = e.target.getStage();
+        if (stage) onGuidesChange(snapNodeToGuides(e.target, stage));
+      }}
       onDragEnd={(e) => {
+        onGuidesChange(NO_GUIDES);
         stateCtx.updateEditorElement({
           ...element,
           placement: { ...element.placement, x: e.target.x(), y: e.target.y() },
@@ -115,7 +127,7 @@ const VideoElementNode = observer(({ element, stateCtx }: { element: VideoEditor
   );
 });
 
-const ImageElementNode = observer(({ element, stateCtx }: { element: ImageEditorElement | MafsEditorElement; stateCtx: any }) => {
+const ImageElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: ImageEditorElement | MafsEditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
   const nodeRef = useRef<Konva.Image>(null);
   const imgElement = useDomElementById<HTMLImageElement>(element.properties.elementId);
 
@@ -137,6 +149,7 @@ const ImageElementNode = observer(({ element, stateCtx }: { element: ImageEditor
   return (
     <Image
       ref={nodeRef}
+      name="editorElement"
       image={imgElement}
       x={x}
       y={y}
@@ -149,7 +162,12 @@ const ImageElementNode = observer(({ element, stateCtx }: { element: ImageEditor
       sceneFunc={makeImageSceneFunc(() => imgElement, effect as any)}
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
+      onDragMove={(e) => {
+        const stage = e.target.getStage();
+        if (stage) onGuidesChange(snapNodeToGuides(e.target, stage));
+      }}
       onDragEnd={(e) => {
+        onGuidesChange(NO_GUIDES);
         stateCtx.updateEditorElement({
           ...element,
           placement: { ...element.placement, x: e.target.x(), y: e.target.y() },
@@ -172,7 +190,7 @@ const ImageElementNode = observer(({ element, stateCtx }: { element: ImageEditor
   );
 });
 
-const TextElementNode = observer(({ element, stateCtx }: { element: TextEditorElement; stateCtx: any }) => {
+const TextElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: TextEditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
   const nodeRef = useRef<Konva.Text>(null);
 
   useEffect(() => {
@@ -187,6 +205,7 @@ const TextElementNode = observer(({ element, stateCtx }: { element: TextEditorEl
   return (
     <Text
       ref={nodeRef}
+      name="editorElement"
       text={element.properties.text}
       x={x}
       y={y}
@@ -201,7 +220,12 @@ const TextElementNode = observer(({ element, stateCtx }: { element: TextEditorEl
       draggable
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
+      onDragMove={(e) => {
+        const stage = e.target.getStage();
+        if (stage) onGuidesChange(snapNodeToGuides(e.target, stage));
+      }}
       onDragEnd={(e) => {
+        onGuidesChange(NO_GUIDES);
         stateCtx.updateEditorElement({
           ...element,
           placement: { ...element.placement, x: e.target.x(), y: e.target.y() },
@@ -224,39 +248,21 @@ const TextElementNode = observer(({ element, stateCtx }: { element: TextEditorEl
   );
 });
 
-const EditorElementNode = observer(({ element, stateCtx }: { element: EditorElement; stateCtx: any }) => {
+const EditorElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: EditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
   switch (element.type) {
     case "video":
-      return <VideoElementNode element={element} stateCtx={stateCtx} />;
+      return <VideoElementNode element={element} stateCtx={stateCtx} onGuidesChange={onGuidesChange} />;
     case "image":
     case "mafs":
-      return <ImageElementNode element={element} stateCtx={stateCtx} />;
+      return <ImageElementNode element={element} stateCtx={stateCtx} onGuidesChange={onGuidesChange} />;
     case "text":
-      return <TextElementNode element={element} stateCtx={stateCtx} />;
+      return <TextElementNode element={element} stateCtx={stateCtx} onGuidesChange={onGuidesChange} />;
     case "audio":
       return null; // Audio has no visual representation on the canvas
     default:
       return null;
   }
 });
-
-// ============================================================
-// Snapping guidelines helper
-// ============================================================
-
-function getLineGuideStops(skipShape: Konva.Node, stage: Konva.Stage) {
-  const vertical: number[] = [0, stage.width() / 2, stage.width()];
-  const horizontal: number[] = [0, stage.height() / 2, stage.height()];
-
-  stage.find(".editorElement").forEach((guideItem) => {
-    if (guideItem === skipShape) return;
-    const box = guideItem.getClientRect();
-    vertical.push(box.x, box.x + box.width / 2, box.x + box.width);
-    horizontal.push(box.y, box.y + box.height / 2, box.y + box.height);
-  });
-
-  return { vertical, horizontal };
-}
 
 // ============================================================
 // Main EditorCanvas component
@@ -267,6 +273,7 @@ const EditorCanvas = observer(() => {
   const stageRef = useRef<Konva.Stage>(null);
   const layerRef = useRef<Konva.Layer>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
+  const [guides, setGuides] = React.useState<SnapGuides>(NO_GUIDES);
 
   // Register stage with state
   useEffect(() => {
@@ -313,7 +320,7 @@ const EditorCanvas = observer(() => {
     >
       <Layer ref={layerRef}>
         {state.editorElements.map((element) => (
-          <EditorElementNode key={element.id} element={element} stateCtx={state} />
+          <EditorElementNode key={element.id} element={element} stateCtx={state} onGuidesChange={setGuides} />
         ))}
         <Transformer
           ref={transformerRef}
@@ -325,6 +332,14 @@ const EditorCanvas = observer(() => {
           anchorCornerRadius={5}
           keepRatio={false}
         />
+      </Layer>
+      <Layer listening={false}>
+        {guides.vertical.map((x, i) => (
+          <Line key={`v-${i}`} points={[x, 0, x, state.canvas_height]} stroke="#ff0000" strokeWidth={1} dash={[4, 4]} />
+        ))}
+        {guides.horizontal.map((y, i) => (
+          <Line key={`h-${i}`} points={[0, y, state.canvas_width, y]} stroke="#ff0000" strokeWidth={1} dash={[4, 4]} />
+        ))}
       </Layer>
     </Stage>
   );
@@ -372,7 +387,7 @@ const EditorInner = observer(() => {
         <link rel="icon" href={AniMathIO.src} />
       </Head>
 
-      <div className="bg-slate-200 dark:bg-gray-800 grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-svh">
+      <div className="bg-slate-200 dark:bg-gray-800 grid grid-rows-[500px_1fr_20px] grid-cols-[90px_300px_250px_1fr] h-[calc(100svh-32px)]">
         <div className="tile row-span-2 flex flex-col">
           <Menu />
         </div>

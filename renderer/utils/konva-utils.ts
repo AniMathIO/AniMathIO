@@ -170,6 +170,87 @@ export function makeImageSceneFunc(
   };
 }
 
+// ============================================================
+// Snapping guidelines
+// ============================================================
+
+export type SnapGuides = { vertical: number[]; horizontal: number[] };
+export const NO_GUIDES: SnapGuides = { vertical: [], horizontal: [] };
+const SNAP_THRESHOLD = 6;
+
+/**
+ * Candidate stop coordinates a dragged node can snap to: the canvas edges
+ * and center, plus every other element's edges and center (elements must be
+ * named "editorElement" in the Konva tree for stage.find to pick them up).
+ */
+export function getLineGuideStops(skipShape: Konva.Node, stage: Konva.Stage) {
+  const vertical: number[] = [0, stage.width() / 2, stage.width()];
+  const horizontal: number[] = [0, stage.height() / 2, stage.height()];
+
+  stage.find(".editorElement").forEach((guideItem) => {
+    if (guideItem === skipShape) return;
+    const box = guideItem.getClientRect();
+    vertical.push(box.x, box.x + box.width / 2, box.x + box.width);
+    horizontal.push(box.y, box.y + box.height / 2, box.y + box.height);
+  });
+
+  return { vertical, horizontal };
+}
+
+/** The dragged node's own edge/center coordinates, paired with the offset
+ * needed to reposition the node so that edge/center lands on a given stop. */
+export function getObjectSnappingEdges(node: Konva.Node) {
+  const box = node.getClientRect();
+  return {
+    vertical: [
+      { guide: box.x, offset: 0 },
+      { guide: box.x + box.width / 2, offset: box.width / 2 },
+      { guide: box.x + box.width, offset: box.width },
+    ],
+    horizontal: [
+      { guide: box.y, offset: 0 },
+      { guide: box.y + box.height / 2, offset: box.height / 2 },
+      { guide: box.y + box.height, offset: box.height },
+    ],
+  };
+}
+
+/**
+ * Snaps a dragged node's absolute position to the nearest canvas/element edge
+ * or center within SNAP_THRESHOLD px, and returns the guide-line positions to
+ * render (empty when nothing is close enough to snap to).
+ */
+export function snapNodeToGuides(node: Konva.Node, stage: Konva.Stage): SnapGuides {
+  const lineGuideStops = getLineGuideStops(node, stage);
+  const itemBounds = getObjectSnappingEdges(node);
+
+  const closestVertical = itemBounds.vertical
+    .flatMap((item) =>
+      lineGuideStops.vertical.map((guide) => ({ guide, offset: item.offset, diff: Math.abs(guide - item.guide) }))
+    )
+    .filter((candidate) => candidate.diff < SNAP_THRESHOLD)
+    .sort((a, b) => a.diff - b.diff)[0];
+
+  const closestHorizontal = itemBounds.horizontal
+    .flatMap((item) =>
+      lineGuideStops.horizontal.map((guide) => ({ guide, offset: item.offset, diff: Math.abs(guide - item.guide) }))
+    )
+    .filter((candidate) => candidate.diff < SNAP_THRESHOLD)
+    .sort((a, b) => a.diff - b.diff)[0];
+
+  if (!closestVertical && !closestHorizontal) return NO_GUIDES;
+
+  const absPos = node.absolutePosition();
+  if (closestVertical) absPos.x = closestVertical.guide - closestVertical.offset;
+  if (closestHorizontal) absPos.y = closestHorizontal.guide - closestHorizontal.offset;
+  node.absolutePosition(absPos);
+
+  return {
+    vertical: closestVertical ? [closestVertical.guide] : [],
+    horizontal: closestHorizontal ? [closestHorizontal.guide] : [],
+  };
+}
+
 /**
  * Returns a clip region object for use in slideIn/slideOut animations.
  * In Konva, clip is defined as { x, y, width, height } on a Group or Node.
