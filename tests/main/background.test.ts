@@ -276,7 +276,7 @@ describe("Background Process", () => {
 
   it("should handle app path configuration", () => {
     // Test app path configuration
-    mockApp.getPath.mockReturnValue("/mock/userData");
+    mockApp.getPath.mockReturnValueOnce("/mock/userData");
     const userDataPath = mockApp.getPath();
     const newPath = `${userDataPath} (development)`;
 

@@ -2,19 +2,9 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "strict": true,
-    "downlevelIteration": true,
     "types": [],
-    "baseUrl": "",
     "paths": {
-      "@/types": [
-        "./types"
-      ],
-      "@/states": [
-        "./states"
-      ],
-      "@/utils": [
-        "./utils"
-      ]
+      "@/*": ["./*"]
     }
   },
   "include": [
