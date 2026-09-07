@@ -56,19 +56,33 @@ export class AudioContextStore {
   }
 
   /**
-   * Close and clear every cached AudioContext. Called on project switch
-   * (resetForNewProject / deserialize) so contexts bound to the previous
-   * project's (now-detached) audio elements don't linger for the rest of
-   * the session and eat into Chromium's hard per-document AudioContext cap.
+   * Release cached AudioContexts whose <audio> element is no longer in the
+   * document. Called on project switch (resetForNewProject / deserialize).
+   *
+   * Deliberately does NOT close contexts for elements that are still mounted.
+   * A MediaElementAudioSourceNode binding is permanent for the lifetime of its
+   * element: once bound, that element can never be attached to another context,
+   * even after the original is closed. React reconciles the <audio> nodes by
+   * element id, so re-opening a project reuses the very same DOM nodes - closing
+   * their contexts here would make the next export throw InvalidStateError out
+   * of createMediaElementSource, killing the export before it starts.
+   *
+   * Contexts for elements that survive a switch are therefore kept (they are
+   * still the correct context for that element). Ones whose element has since
+   * unmounted are closed, so successive switches converge instead of
+   * accumulating against Chromium's per-document AudioContext cap.
    */
-  releaseAll() {
-    this.audioContexts.forEach((entry) => {
+  releaseDetached() {
+    this.audioContexts.forEach((entry, elementId) => {
+      if (typeof document !== "undefined" && document.getElementById(elementId)) {
+        return;
+      }
+      this.audioContexts.delete(elementId);
       try {
         entry.context.close();
       } catch {
         // AudioContext may already be closed; ignore.
       }
     });
-    this.audioContexts.clear();
   }
 }

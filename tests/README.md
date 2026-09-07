@@ -59,18 +59,19 @@ npm run test:browser:ui
 ### Combined Test Suite
 
 ```bash
-# Run all tests with comprehensive reporting
-npm run test:all
+# Unit tests and browser tests together (what CI runs)
+npm test
 
-# Simple combined run
-npm run test:all:simple
+# Either suite on its own
+npm run test:unit
+npm run test:browser
 ```
 
 ## Test Configuration
 
 ### Vitest Configuration
-- **File**: `vitest.config.mts`
-- **Environment**: `happy-dom`
+- **Files**: `vitest.unit.config.mts` (unit) and `vitest.browser.config.mts` (browser)
+- **Environment**: `happy-dom` for unit tests; real Chromium for browser tests
 - **Coverage**: V8 provider with multiple reporters
 - **Thresholds**: Different for UI vs non-UI components
 

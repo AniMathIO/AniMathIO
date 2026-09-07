@@ -64,9 +64,14 @@ Object.defineProperty(global, "window", {
   writable: true,
 });
 
+// Element ids that should look present in the DOM. A real <audio> node
+// survives a project re-open (React reconciles it by id), which is exactly the
+// case where its cached AudioContext must NOT be closed.
+const mountedElementIds = new Set<string>();
+
 Object.defineProperty(global, "document", {
   value: {
-    getElementById: vi.fn(() => null),
+    getElementById: vi.fn((id: string) => (mountedElementIds.has(id) ? { id, tagName: "AUDIO" } : null)),
     createElement: vi.fn((type: string) => {
       if (type === "a") return { click: vi.fn(), download: "", href: "" };
       if (type === "video") return { srcObject: null, height: 0, width: 0, play: vi.fn(() => Promise.resolve()), remove: vi.fn() };
@@ -109,6 +114,55 @@ function makeAudioElement(id: string, elementId: string) {
     properties: { elementId, src: "test.mp3", volume: 1, muted: false },
   };
 }
+
+describe("AudioContext retention for elements that survive a project switch", () => {
+  let state: State;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    lastCreatedContexts = [];
+    mountedElementIds.clear();
+    state = new State();
+  });
+
+  afterEach(() => {
+    mountedElementIds.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the context of an element whose <audio> node is still mounted", () => {
+    mountedElementIds.add("audio-el-keep");
+    const el = { id: "audio-el-keep" } as HTMLAudioElement;
+
+    const entry = state.getAudioContext(el);
+    expect(lastCreatedContexts).toHaveLength(1);
+
+    state.releaseDetachedAudioContexts();
+
+    // A MediaElementAudioSourceNode binding is permanent for the element's
+    // lifetime: closing this context would leave the element permanently
+    // unusable, and the next createMediaElementSource would throw
+    // InvalidStateError, killing the next export before it starts.
+    expect(entry.context.state).not.toBe("closed");
+    expect(state.audioContexts.has("audio-el-keep")).toBe(true);
+
+    // Re-requesting must hand back the same context, never build a second one.
+    expect(state.getAudioContext(el)).toBe(entry);
+    expect(lastCreatedContexts).toHaveLength(1);
+  });
+
+  it("still closes contexts whose element has left the document", () => {
+    mountedElementIds.add("audio-el-gone");
+    const el = { id: "audio-el-gone" } as HTMLAudioElement;
+    const entry = state.getAudioContext(el);
+
+    mountedElementIds.delete("audio-el-gone");
+    state.releaseDetachedAudioContexts();
+
+    expect(entry.context.state).toBe("closed");
+    expect(state.audioContexts.has("audio-el-gone")).toBe(false);
+  });
+});
 
 describe("AudioContext lifecycle across project switch (Defect 1)", () => {
   let state: State;

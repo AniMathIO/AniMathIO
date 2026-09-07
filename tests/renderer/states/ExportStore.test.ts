@@ -218,7 +218,7 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
       expect(consoleErrorSpy).toHaveBeenCalledWith("Video export failed:", postProcessingError);
     });
     expect(state.playing).toBe(false);
-    expect(downloadAnchors.every((a) => !a.click.mock.calls.length)).toBe(true);
+    expect(downloadAnchors).toHaveLength(0);
   });
 
   it("tears down once and downloads nothing when the MediaRecorder errors mid-export", async () => {
@@ -245,6 +245,6 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
     // Teardown happened exactly once despite both handlers running...
     expect(mixer.close).toHaveBeenCalledTimes(1);
     // ...and no partial file was handed to the user as a successful export.
-    expect(downloadAnchors.every((a) => !a.click.mock.calls.length)).toBe(true);
+    expect(downloadAnchors).toHaveLength(0);
   });
 });
