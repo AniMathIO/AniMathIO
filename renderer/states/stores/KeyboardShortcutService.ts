@@ -6,8 +6,31 @@ import type { RootStore } from "../RootStore";
  * window keydown listener and dispatch logic that used to live on RootStore.
  */
 export class KeyboardShortcutService {
+  private attached = false;
+
   constructor(private root: RootStore) {
     this.handleKeyboardShortcut = this.handleKeyboardShortcut.bind(this);
+  }
+
+  /**
+   * Registers the global keydown listener. Scoped to be called by whichever
+   * component owns the "editor is active" lifecycle (Editor.tsx), not
+   * RootStore's constructor - the store is shared by the Dashboard, which has
+   * no canvas and shouldn't respond to these shortcuts. Idempotent: calling
+   * this while already attached is a no-op, so remounts/StrictMode don't
+   * register duplicate listeners.
+   */
+  attach() {
+    if (this.attached || typeof window === "undefined") return;
+    window.addEventListener("keydown", this.handleKeyboardShortcut);
+    this.attached = true;
+  }
+
+  /** Removes the global keydown listener. Safe to call when not attached. */
+  detach() {
+    if (!this.attached || typeof window === "undefined") return;
+    window.removeEventListener("keydown", this.handleKeyboardShortcut);
+    this.attached = false;
   }
 
   handleKeyboardShortcut(event: KeyboardEvent) {

@@ -378,6 +378,16 @@ const EditorInner = observer(() => {
     setScaleFactor(defaultScaleFactor);
   }, [state.canvas_width, state.canvas_height, state.isEditorActive]);
 
+  // Global keyboard shortcuts (arrow-key seek/nudge, delete, copy/paste,
+  // space to play/pause) are only meaningful while the editor is mounted -
+  // the Dashboard shares this same store and must not react to them.
+  useEffect(() => {
+    state.attachKeyboardShortcuts();
+    return () => {
+      state.detachKeyboardShortcuts();
+    };
+  }, [state]);
+
   if (!state.isEditorActive) return null;
 
   const handleScaleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
