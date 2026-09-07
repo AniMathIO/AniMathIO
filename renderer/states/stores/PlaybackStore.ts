@@ -10,7 +10,17 @@ export class PlaybackStore {
   maxTime: number = 30 * 1000;
   startedTime: number = 0;
   startedTimePlay: number = 0;
-  private lastAudioSyncTimeMs: number = 0;
+  /** Playhead position at which media elements were last synced (drift correction). */
+  private lastMediaSyncTimeMs: number = 0;
+  /** Playhead position at the previous playback tick, used for boundary detection. */
+  private lastTickTimeMs: number = 0;
+
+  /**
+   * How often media elements are re-synced while playing when no clip boundary
+   * is crossed. Reassigning `currentTime` every frame causes audible stutter,
+   * so plain drift correction is deliberately coarse.
+   */
+  private static readonly DRIFT_SYNC_INTERVAL_MS = 250;
 
   constructor(private root: RootStore) {
     makeAutoObservable(this);
@@ -34,8 +44,9 @@ export class PlaybackStore {
 
   setPlaying(playing: boolean) {
     this.playing = playing;
-    this.updateVideoElements();
-    this.updateAudioElements();
+    this.lastTickTimeMs = this.currentTimeInMs;
+    this.lastMediaSyncTimeMs = this.currentTimeInMs;
+    this.syncMediaElements();
     if (playing) {
       this.startedTime = Date.now();
       this.startedTimePlay = this.currentTimeInMs;
@@ -57,7 +68,11 @@ export class PlaybackStore {
   }
 
   updateTimeTo(newTime: number) {
+    const previousTime = this.lastTickTimeMs;
     this.setCurrentTimeInMs(newTime);
+    // The playhead is quantised to whole frames, and that quantised value is
+    // what the media sync methods read — so boundary detection must use it too.
+    const tickTime = this.currentTimeInMs;
     this.root.animationStore.animationTimeLine?.seek(newTime);
 
     // Update Konva node visibility based on timeframe
@@ -71,17 +86,51 @@ export class PlaybackStore {
 
     this.root.canvasStore.layer?.batchDraw();
 
-    // Keep audio elements in sync with the frame clock during ongoing
-    // playback. Throttled (rather than on every frame) to avoid stutter
-    // from constantly reassigning audio.currentTime.
+    // Keep audio *and* video elements in sync with the frame clock during
+    // ongoing playback. Two different cadences:
+    //   - a clip boundary crossed on this tick must be honoured immediately,
+    //     otherwise clips start/stop up to a throttle window late;
+    //   - otherwise sync only every DRIFT_SYNC_INTERVAL_MS, because
+    //     reassigning currentTime every frame causes playback stutter.
     if (this.playing) {
-      if (Math.abs(newTime - this.lastAudioSyncTimeMs) >= 250) {
-        this.lastAudioSyncTimeMs = newTime;
-        this.updateAudioElements();
+      const crossedBoundary = this.crossesMediaBoundary(previousTime, tickTime);
+      const driftDue =
+        Math.abs(tickTime - this.lastMediaSyncTimeMs) >= PlaybackStore.DRIFT_SYNC_INTERVAL_MS;
+      if (crossedBoundary || driftDue) {
+        this.lastMediaSyncTimeMs = tickTime;
+        this.syncMediaElements();
       }
     } else {
-      this.lastAudioSyncTimeMs = newTime;
+      this.lastMediaSyncTimeMs = tickTime;
     }
+
+    this.lastTickTimeMs = tickTime;
+  }
+
+  /** Re-evaluate every media element against the current playhead position. */
+  private syncMediaElements() {
+    this.updateVideoElements();
+    this.updateAudioElements();
+  }
+
+  /**
+   * Whether any audio/video clip starts or ends inside the time interval the
+   * playhead just traversed. The interval is treated as half-open, `(lo, hi]`,
+   * so a boundary landing exactly on the previous tick (already handled then)
+   * doesn't re-trigger. Direction-agnostic, so jumping backwards works too.
+   */
+  private crossesMediaBoundary(fromTime: number, toTime: number): boolean {
+    const lo = Math.min(fromTime, toTime);
+    const hi = Math.max(fromTime, toTime);
+    if (lo === hi) return false;
+
+    const isCrossed = (boundary: number) => boundary > lo && boundary <= hi;
+
+    return this.root.elementStore.editorElements.some((element) => {
+      if (element.type !== "video" && element.type !== "audio") return false;
+      const { start, end } = element.timeFrame;
+      return isCrossed(start) || isCrossed(end);
+    });
   }
 
   handleSeek(seek: number) {

@@ -81,9 +81,12 @@ export class ElementStore {
       timeFrame: { ...editorElement.timeFrame, ...timeFrame },
     };
 
+    await this.updateEditorElement(newEditorElement);
+    // Sync *after* the new timeframe is committed to editorElements — syncing
+    // first would evaluate the media elements against the old timeframe, making
+    // the call a no-op for the very change that triggered it.
     this.root.playbackStore.updateVideoElements();
     this.root.playbackStore.updateAudioElements();
-    await this.updateEditorElement(newEditorElement);
     this.root.animationStore.refreshAnimations();
   }
 
