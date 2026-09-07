@@ -499,6 +499,46 @@ describe("State (RootStore)", () => {
       expect((updated as any).properties.volume).toBe(0.5);
       expect((updated as any).properties.muted).toBe(true);
     });
+
+    it("should update masterVolume for an audio element (Audio Mixer panel control)", async () => {
+      const element = {
+        id: "audio-elem-2", name: "Audio", type: "audio",
+        placement: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        timeFrame: { start: 0, end: 5000 },
+        properties: { elementId: "audio-audio-elem-2", src: "test.mp3", volume: 1, muted: false },
+      };
+      await state.addEditorElement(element as any);
+      state.updateAudioSettings("audio-elem-2", { masterVolume: 0.3 });
+      const updated = state.editorElements.find((e) => e.id === "audio-elem-2");
+      expect((updated as any).properties.masterVolume).toBe(0.3);
+    });
+
+    it("should not throw when given an id that does not match any element", () => {
+      expect(() =>
+        state.updateAudioSettings("does-not-exist", { volume: 0.2 })
+      ).not.toThrow();
+    });
+  });
+
+  // ---- updateEditorElementTimeFrame for audio elements (draggable/movable on the timeline) ----
+  describe("updateEditorElementTimeFrame for audio elements", () => {
+    it("should allow moving an audio element's start/end time on the timeline, same as other element types", async () => {
+      const element = {
+        id: "audio-drag-1", name: "Audio", type: "audio",
+        placement: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        timeFrame: { start: 0, end: 5000 },
+        properties: { elementId: "audio-audio-drag-1", src: "test.mp3", volume: 1, muted: false },
+      };
+      await state.addEditorElement(element as any);
+
+      await state.updateEditorElementTimeFrame(element as any, {
+        start: 1000,
+        end: 4000,
+      });
+
+      const updated = state.editorElements.find((e) => e.id === "audio-drag-1");
+      expect(updated?.timeFrame).toEqual({ start: 1000, end: 4000 });
+    });
   });
 
   // ---- copyObject / pasteObject ----
