@@ -393,6 +393,74 @@ describe("PlaybackStore boundary-aware sync throttle (Defect 2)", () => {
   });
 });
 
+describe("PlaybackStore boundary detection under realistic frame stepping", () => {
+  let state: State;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    audioElementsById.clear();
+    videoElementsById.clear();
+    state = makeTestState();
+    audioElementsById.set("audio-el-A", makeFakeAudioElement("audio-el-A"));
+    await state.addEditorElement(makeAudioElement("A", 5000, 9000) as any);
+  });
+
+  afterEach(() => {
+    state.setPlaying(false);
+    vi.restoreAllMocks();
+  });
+
+  // The playhead only ever takes whole-frame values (currentKeyFrame * 1000/fps),
+  // so a clip end on a 50ms multiple lands exactly on a frame - and at that frame
+  // the clip is still active, because isInside is closed at both ends. Stepping in
+  // real frame increments is the only shape that exposes an end-boundary test that
+  // looks at boundary values instead of active-state changes; hand-picked
+  // millisecond pairs can step straight over the exact-boundary frame and pass.
+  function sweepFrames(fromMs: number, toMs: number) {
+    const first = Math.floor((fromMs / 1000) * state.fps);
+    const last = Math.ceil((toMs / 1000) * state.fps);
+    for (let frame = first; frame <= last; frame++) {
+      state.updateTimeTo((frame * 1000) / state.fps);
+    }
+  }
+
+  it("stops a clip within one frame of its end, not one throttle window later", () => {
+    const audio = audioElementsById.get("audio-el-A");
+
+    state.setCurrentKeyFrame(Math.floor((8800 / 1000) * state.fps));
+    state.setPlaying(true);
+    expect(audio.paused).toBe(false);
+
+    // 9000 lands exactly on frame 540 at 60fps.
+    sweepFrames(8800, 9100);
+
+    expect(audio.paused).toBe(true);
+  });
+
+  it("starts a clip within one frame of its start", () => {
+    const audio = audioElementsById.get("audio-el-A");
+
+    state.setCurrentKeyFrame(Math.floor((4800 / 1000) * state.fps));
+    state.setPlaying(true);
+    expect(audio.paused).toBe(true);
+
+    sweepFrames(4800, 5100);
+
+    expect(audio.paused).toBe(false);
+  });
+
+  it("keeps a clip playing across its interior without waiting on the throttle", () => {
+    const audio = audioElementsById.get("audio-el-A");
+
+    state.setCurrentKeyFrame(Math.floor((6000 / 1000) * state.fps));
+    state.setPlaying(true);
+
+    sweepFrames(6000, 6300);
+
+    expect(audio.paused).toBe(false);
+  });
+});
+
 describe("updateEditorElementTimeFrame media sync (Defect 3)", () => {
   let state: State;
 

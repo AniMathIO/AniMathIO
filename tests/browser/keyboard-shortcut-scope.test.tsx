@@ -57,6 +57,35 @@ describe("global keyboard shortcuts are scoped to an open editor", () => {
     expect(state.currentTimeInMs).toBe(10000);
   });
 
+  it("stops acting on shortcuts when the editor closes while still mounted", async () => {
+    const { default: Editor } = await import("../../renderer/pages/Editor");
+
+    const state = new State();
+    state.setEditorActive(true);
+    state.setCanvasSize(800, 600);
+
+    render(
+      <StateContext.Provider value={state}>
+        <Editor />
+      </StateContext.Provider>
+    );
+
+    await waitFor(() => expect(state.isEditorActive).toBe(true));
+    await dispatchKey("ArrowRight");
+    expect(state.currentTimeInMs).toBe(10000);
+
+    // Returning to the Dashboard does not unmount EditorInner - it only flips
+    // this flag and renders null - so this is the transition the effect's
+    // dependency array exists for, distinct from the unmount case below.
+    await act(async () => {
+      state.setEditorActive(false);
+    });
+
+    const timeBefore = state.currentTimeInMs;
+    await dispatchKey("ArrowRight");
+    expect(state.currentTimeInMs).toBe(timeBefore);
+  });
+
   it("stops acting on shortcuts after the editor unmounts", async () => {
     const { default: Editor } = await import("../../renderer/pages/Editor");
 

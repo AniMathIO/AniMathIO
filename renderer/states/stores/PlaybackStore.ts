@@ -80,7 +80,7 @@ export class PlaybackStore {
     editorElements.forEach((e) => {
       const node = konvaNodes.get(e.id);
       if (!node) return;
-      const isInside = e.timeFrame.start <= newTime && newTime <= e.timeFrame.end;
+      const isInside = e.timeFrame.start <= tickTime && tickTime <= e.timeFrame.end;
       node.visible(isInside);
     });
 
@@ -114,22 +114,37 @@ export class PlaybackStore {
   }
 
   /**
-   * Whether any audio/video clip starts or ends inside the time interval the
-   * playhead just traversed. The interval is treated as half-open, `(lo, hi]`,
-   * so a boundary landing exactly on the previous tick (already handled then)
-   * doesn't re-trigger. Direction-agnostic, so jumping backwards works too.
+   * Whether any audio/video clip's active state differs between the two ends of
+   * the interval the playhead just traversed - i.e. whether this tick needs to
+   * start or stop something.
+   *
+   * This asks the same question `updateVideoElements`/`updateAudioElements` ask
+   * (`start <= t && t <= end`) rather than testing whether a boundary *value*
+   * falls in the interval. Those two are not equivalent: because the playhead is
+   * quantised to whole frames, a clip end that is a multiple of 50ms lands
+   * exactly on a frame, and at that frame the clip is still active (`t === end`
+   * is inside). The stop is only due on the *next* frame - which a boundary-value
+   * test misses, leaving the clip running until the next drift tick.
+   *
+   * Direction-agnostic, so seeking backwards works too.
    */
   private crossesMediaBoundary(fromTime: number, toTime: number): boolean {
     const lo = Math.min(fromTime, toTime);
     const hi = Math.max(fromTime, toTime);
     if (lo === hi) return false;
 
-    const isCrossed = (boundary: number) => boundary > lo && boundary <= hi;
-
     return this.root.elementStore.editorElements.some((element) => {
       if (element.type !== "video" && element.type !== "audio") return false;
       const { start, end } = element.timeFrame;
-      return isCrossed(start) || isCrossed(end);
+
+      const activeAtLo = start <= lo && lo <= end;
+      const activeAtHi = start <= hi && hi <= end;
+      if (activeAtLo !== activeAtHi) return true;
+
+      // A clip shorter than the gap between samples is inactive at both ends
+      // yet still needs handling; only reachable for degenerate clips or an
+      // unusually long tick.
+      return start > lo && end <= hi;
     });
   }
 

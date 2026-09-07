@@ -88,12 +88,24 @@ export class ExportStore {
       }
     };
 
+    // A MediaRecorder error fires `stop` after `error`, so onstop must know the
+    // export already failed - otherwise it produces a file out of whatever
+    // partial chunks exist and downloads it as if the export had succeeded.
+    let exportFailed = false;
+    let stopTimer: ReturnType<typeof setTimeout> | null = null;
+
     // Shared failure handler: video.play() rejecting and the MediaRecorder
     // erroring out are both paths that previously skipped teardown entirely,
     // leaking mixerContext/exportConnections and leaving playbackStore stuck
     // in the "playing" state with nothing shown to the user.
     const handleExportFailure = (error: unknown) => {
+      if (exportFailed) return;
+      exportFailed = true;
       console.error("Video export failed:", error);
+      if (stopTimer !== null) {
+        clearTimeout(stopTimer);
+        stopTimer = null;
+      }
       cleanupExportAudioGraph();
       this.root.playbackStore.setPlaying(false);
     };
@@ -121,6 +133,11 @@ export class ExportStore {
 
       mediaRecorder.onstop = async function () {
         cleanupExportAudioGraph();
+
+        // An errored recorder still fires `stop`; emitting a file from the
+        // partial chunks would hand the user a corrupt download and no
+        // indication anything went wrong.
+        if (exportFailed) return;
 
         const blob = await fixWebmDuration(
           new Blob([...chunks], { type: "video/webm" })
@@ -178,8 +195,11 @@ export class ExportStore {
       };
 
       mediaRecorder.start();
-      setTimeout(() => {
-        mediaRecorder.stop();
+      stopTimer = setTimeout(() => {
+        stopTimer = null;
+        // An errored recorder is already "inactive"; stopping it again throws
+        // InvalidStateError out of a timer callback, where nothing catches it.
+        if (mediaRecorder.state !== "inactive") mediaRecorder.stop();
         this.root.playbackStore.setPlaying(false);
       }, this.root.playbackStore.maxTime);
 

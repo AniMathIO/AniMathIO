@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fixWebmDuration from "webm-duration-fix";
 import { State } from "../../../renderer/states/state";
 
 vi.mock("konva", () => ({
@@ -30,12 +31,17 @@ Object.defineProperty(global, "window", {
 
 let videoPlayImpl: () => Promise<void> = () => Promise.resolve();
 let lastCreatedVideoEl: any = null;
+const audioElementsById = new Map<string, any>();
 
 Object.defineProperty(global, "document", {
   value: {
-    getElementById: vi.fn(() => null),
+    getElementById: vi.fn((id: string) => audioElementsById.get(id) ?? null),
     createElement: vi.fn((type: string) => {
-      if (type === "a") return { click: vi.fn(), download: "", href: "" };
+      if (type === "a") {
+        const anchor = { click: vi.fn(), download: "", href: "" };
+        downloadAnchors.push(anchor);
+        return anchor;
+      }
       if (type === "video") {
         const el: any = {
           srcObject: null,
@@ -54,14 +60,51 @@ Object.defineProperty(global, "document", {
 });
 
 class MockAudioContext {
+  static instances: MockAudioContext[] = [];
   state = "running";
   destination = { id: "mock-destination" };
   createMediaElementSource = vi.fn(() => ({ connect: vi.fn() }));
   createMediaStreamDestination = vi.fn(() => ({ stream: { getAudioTracks: vi.fn(() => [{ id: "test-audio-track" }]) } }));
+  createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }));
   close = vi.fn();
   resume = vi.fn(() => Promise.resolve());
+  constructor() {
+    MockAudioContext.instances.push(this);
+  }
 }
 global.AudioContext = MockAudioContext as any;
+
+// A MediaRecorder that lets tests drive the error/stop sequence the spec
+// mandates: an error transitions the recorder to "inactive" and fires
+// `error` followed by `stop`.
+class MockMediaRecorder {
+  static instances: MockMediaRecorder[] = [];
+  state = "inactive";
+  ondataavailable: ((e: any) => void) | null = null;
+  onstop: (() => void) | null = null;
+  onerror: ((e: any) => void) | null = null;
+  start = vi.fn(() => {
+    this.state = "recording";
+  });
+  stop = vi.fn(() => {
+    this.state = "inactive";
+    this.onstop?.();
+  });
+  constructor(public stream: any) {
+    MockMediaRecorder.instances.push(this);
+  }
+  /** Drive the spec's error sequence: error event, then stop. */
+  emitError(error: Error) {
+    this.state = "inactive";
+    this.onerror?.({ error });
+    this.onstop?.();
+  }
+}
+global.MediaRecorder = MockMediaRecorder as any;
+global.URL = { createObjectURL: vi.fn(() => "blob:test"), revokeObjectURL: vi.fn() } as any;
+global.Blob = class { constructor(public parts: any[], public opts: any) {} } as any;
+
+const downloadAnchors: any[] = [];
 
 function makeFakeCanvas() {
   const stream = {
@@ -74,6 +117,17 @@ function makeFakeCanvas() {
   };
 }
 
+function makeAudioEditorElement() {
+  return {
+    id: "a1",
+    name: "Audio a1",
+    type: "audio" as const,
+    placement: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+    timeFrame: { start: 0, end: 5000 },
+    properties: { elementId: "audio-el-1", src: "test.mp3", volume: 1, muted: false },
+  } as any;
+}
+
 describe("ExportStore teardown on failure paths (Defect 2)", () => {
   let state: State;
 
@@ -81,6 +135,18 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
     vi.clearAllMocks();
     videoPlayImpl = () => Promise.resolve();
     lastCreatedVideoEl = null;
+    MockAudioContext.instances.length = 0;
+    MockMediaRecorder.instances.length = 0;
+    downloadAnchors.length = 0;
+    audioElementsById.clear();
+    audioElementsById.set("audio-el-1", {
+      tagName: "AUDIO",
+      id: "audio-el-1",
+      currentTime: 0,
+      paused: true,
+      play: vi.fn(),
+      pause: vi.fn(),
+    });
 
     const mockLayer: any = {
       batchDraw: vi.fn(),
@@ -117,17 +183,44 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
     );
   });
 
-  it("does not throw and cleanup is safe to invoke a second time if MediaRecorder errors after onstop already ran", async () => {
-    // This exercises that cleanupExportAudioGraph's internal re-entrancy guard
-    // holds even when reached indirectly (via the exported behavior), by
-    // simply confirming a failed export settles cleanly without throwing.
-    videoPlayImpl = () => Promise.reject(new Error("boom"));
+  it("closes the export mixer AudioContext exactly once when video.play() rejects", async () => {
+    await state.addEditorElement(makeAudioEditorElement());
+    videoPlayImpl = () => Promise.reject(new Error("play() rejected"));
     vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(() => state.saveCanvasToVideoWithAudio()).not.toThrow();
+    state.saveCanvasToVideoWithAudio();
+    await vi.waitFor(() => expect(state.playing).toBe(false));
 
-    await vi.waitFor(() => {
-      expect(state.playing).toBe(false);
-    });
+    // The mixer is the last AudioContext constructed (after each element's own).
+    const mixer = MockAudioContext.instances.at(-1)!;
+    expect(mixer.createMediaStreamSource).toHaveBeenCalled();
+    expect(mixer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("tears down once and downloads nothing when the MediaRecorder errors mid-export", async () => {
+    await state.addEditorElement(makeAudioEditorElement());
+    videoPlayImpl = () => Promise.resolve();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Use webm so onstop's download path is reachable without the ffmpeg
+    // branch, and give fixWebmDuration a real return value - otherwise onstop
+    // throws before reaching the download and the assertion below proves
+    // nothing.
+    state.setVideoFormat("webm");
+    vi.mocked(fixWebmDuration).mockResolvedValue({ size: 1 } as any);
+
+    state.saveCanvasToVideoWithAudio();
+    await vi.waitFor(() => expect(MockMediaRecorder.instances.length).toBe(1));
+
+    const recorder = MockMediaRecorder.instances[0];
+    const mixer = MockAudioContext.instances.at(-1)!;
+
+    // Per spec an error fires `error` and then `stop`, so onstop runs too.
+    recorder.emitError(new Error("recorder blew up"));
+    await vi.waitFor(() => expect(state.playing).toBe(false));
+
+    // Teardown happened exactly once despite both handlers running...
+    expect(mixer.close).toHaveBeenCalledTimes(1);
+    // ...and no partial file was handed to the user as a successful export.
+    expect(downloadAnchors.every((a) => !a.click.mock.calls.length)).toBe(true);
   });
 });
