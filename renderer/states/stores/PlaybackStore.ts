@@ -10,6 +10,7 @@ export class PlaybackStore {
   maxTime: number = 30 * 1000;
   startedTime: number = 0;
   startedTimePlay: number = 0;
+  private lastAudioSyncTimeMs: number = 0;
 
   constructor(private root: RootStore) {
     makeAutoObservable(this);
@@ -69,6 +70,18 @@ export class PlaybackStore {
     });
 
     this.root.canvasStore.layer?.batchDraw();
+
+    // Keep audio elements in sync with the frame clock during ongoing
+    // playback. Throttled (rather than on every frame) to avoid stutter
+    // from constantly reassigning audio.currentTime.
+    if (this.playing) {
+      if (Math.abs(newTime - this.lastAudioSyncTimeMs) >= 250) {
+        this.lastAudioSyncTimeMs = newTime;
+        this.updateAudioElements();
+      }
+    } else {
+      this.lastAudioSyncTimeMs = newTime;
+    }
   }
 
   handleSeek(seek: number) {
@@ -102,35 +115,60 @@ export class PlaybackStore {
   }
 
   updateVideoElements() {
+    const t = this.currentTimeInMs;
     this.root.elementStore.editorElements
       .filter((element): element is VideoEditorElement => element.type === "video")
       .forEach((element) => {
         const video = document.getElementById(element.properties.elementId);
-        if (isHtmlVideoElement(video)) {
-          const videoTime = (this.currentTimeInMs - element.timeFrame.start) / 1000;
+        if (!isHtmlVideoElement(video)) return;
+
+        const { start, end } = element.timeFrame;
+        const isInside = start <= t && t <= end;
+        if (!isInside) {
+          video.pause();
+          video.currentTime = 0;
+          return;
+        }
+
+        const videoTime = (t - start) / 1000;
+        if (Math.abs(video.currentTime - videoTime) > 0.15) {
           video.currentTime = videoTime;
-          if (this.playing) {
-            video.play();
-          } else {
-            video.pause();
-          }
+        }
+        if (this.playing) {
+          // Treat an unknown `paused` state (e.g. in tests) as "not playing"
+          // so we don't skip play(); avoid re-invoking play() on an element
+          // that's already actively playing.
+          if (video.paused !== false) video.play();
+        } else {
+          video.pause();
         }
       });
   }
 
   updateAudioElements() {
+    const t = this.currentTimeInMs;
     this.root.elementStore.editorElements
       .filter((element): element is AudioEditorElement => element.type === "audio")
       .forEach((element) => {
         const audio = document.getElementById(element.properties.elementId);
-        if (isHtmlAudioElement(audio)) {
-          const audioTime = (this.currentTimeInMs - element.timeFrame.start) / 1000;
+        if (!isHtmlAudioElement(audio)) return;
+
+        const { start, end } = element.timeFrame;
+        const isInside = start <= t && t <= end;
+        if (!isInside) {
+          audio.pause();
+          audio.currentTime = 0;
+          return;
+        }
+
+        const audioTime = (t - start) / 1000;
+        if (Math.abs(audio.currentTime - audioTime) > 0.15) {
           audio.currentTime = audioTime;
-          if (this.playing) {
-            audio.play();
-          } else {
-            audio.pause();
-          }
+        }
+        if (this.playing) {
+          if (audio.paused !== false) audio.play();
+        } else {
+          audio.pause();
         }
       });
   }
