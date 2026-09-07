@@ -64,7 +64,14 @@ export class ExportStore {
       stream.addTrack(mixerDestination.stream.getAudioTracks()[0]);
     }
 
+    // Guard against running the teardown twice (e.g. once from a failure
+    // path and once from mediaRecorder.onstop, or from two failure paths
+    // racing each other) — every step inside is already individually
+    // try/catch-guarded, but this avoids doing the work (and logging) twice.
+    let cleanedUp = false;
     const cleanupExportAudioGraph = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       exportConnections.forEach(({ sourceNode, dest }) => {
         try {
           sourceNode.disconnect(dest);
@@ -79,6 +86,16 @@ export class ExportStore {
           // Already closed; ignore.
         }
       }
+    };
+
+    // Shared failure handler: video.play() rejecting and the MediaRecorder
+    // erroring out are both paths that previously skipped teardown entirely,
+    // leaking mixerContext/exportConnections and leaving playbackStore stuck
+    // in the "playing" state with nothing shown to the user.
+    const handleExportFailure = (error: unknown) => {
+      console.error("Video export failed:", error);
+      cleanupExportAudioGraph();
+      this.root.playbackStore.setPlaying(false);
     };
 
     const video = document.createElement("video");
@@ -96,6 +113,10 @@ export class ExportStore {
 
       mediaRecorder.ondataavailable = function (e) {
         chunks.push(e.data);
+      };
+
+      mediaRecorder.onerror = (event: Event) => {
+        handleExportFailure((event as any)?.error ?? event);
       };
 
       mediaRecorder.onstop = async function () {
@@ -163,6 +184,6 @@ export class ExportStore {
       }, this.root.playbackStore.maxTime);
 
       video.remove();
-    });
+    }).catch(handleExportFailure);
   }
 }
