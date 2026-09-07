@@ -60,8 +60,14 @@ export class PlaybackStore {
     const newTime = this.startedTimePlay + elapsedTime;
     this.updateTimeTo(newTime);
     if (newTime > this.maxTime) {
-      this.currentKeyFrame = 0;
+      // The tick above ran past maxTime, which hid every element. Stop first,
+      // then rewind *through* updateTimeTo so node visibility is recomputed and
+      // redrawn for t=0 - otherwise the playhead returns to the start but the
+      // canvas stays blank until the user scrubs or plays again.
       this.setPlaying(false);
+      this.setCurrentKeyFrame(0);
+      this.updateTimeTo(0);
+      this.syncMediaElements();
     } else {
       requestAnimationFrame(() => this.playFrames());
     }

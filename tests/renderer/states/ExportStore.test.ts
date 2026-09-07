@@ -197,6 +197,30 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
     expect(mixer.close).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces a failure when post-processing rejects instead of failing silently", async () => {
+    await state.addEditorElement(makeAudioEditorElement());
+    videoPlayImpl = () => Promise.resolve();
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // Stands in for the real silent-failure path: on the default mp4 format
+    // onstop awaits ffmpeg.load(), which fetches its core over the network at
+    // runtime. Nothing awaits the handler, so a rejection here used to vanish
+    // and leave the UI looking like the export had succeeded.
+    const postProcessingError = new Error("ffmpeg core unreachable");
+    vi.mocked(fixWebmDuration).mockRejectedValue(postProcessingError);
+
+    state.saveCanvasToVideoWithAudio();
+    await vi.waitFor(() => expect(MockMediaRecorder.instances.length).toBe(1));
+
+    MockMediaRecorder.instances[0].stop();
+
+    await vi.waitFor(() => {
+      expect(consoleErrorSpy).toHaveBeenCalledWith("Video export failed:", postProcessingError);
+    });
+    expect(state.playing).toBe(false);
+    expect(downloadAnchors.every((a) => !a.click.mock.calls.length)).toBe(true);
+  });
+
   it("tears down once and downloads nothing when the MediaRecorder errors mid-export", async () => {
     await state.addEditorElement(makeAudioEditorElement());
     videoPlayImpl = () => Promise.resolve();

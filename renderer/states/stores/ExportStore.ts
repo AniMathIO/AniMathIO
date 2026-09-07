@@ -94,6 +94,11 @@ export class ExportStore {
     let exportFailed = false;
     let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    video.height = 500;
+    video.width = 800;
+
     // Shared failure handler: video.play() rejecting and the MediaRecorder
     // erroring out are both paths that previously skipped teardown entirely,
     // leaking mixerContext/exportConnections and leaving playbackStore stuck
@@ -107,13 +112,12 @@ export class ExportStore {
         stopTimer = null;
       }
       cleanupExportAudioGraph();
+      // Only the success path reaches video.remove(); without this the element
+      // keeps srcObject pointing at the captured canvas/mixer stream.
+      video.srcObject = null;
+      video.remove();
       this.root.playbackStore.setPlaying(false);
     };
-
-    const video = document.createElement("video");
-    video.srcObject = stream;
-    video.height = 500;
-    video.width = 800;
 
     // Seek to start and start playing for export
     this.root.playbackStore.handleSeek(0);
@@ -131,67 +135,74 @@ export class ExportStore {
         handleExportFailure((event as any)?.error ?? event);
       };
 
-      mediaRecorder.onstop = async function () {
-        cleanupExportAudioGraph();
+      // Wrapped rather than assigned as an `async function` directly: nothing
+      // awaits an event handler, so every await below (notably ffmpeg.load(),
+      // which fetches its core from unpkg at runtime on the default mp4 path)
+      // would otherwise reject into the void, leaving the user with no file and
+      // no error while the UI looks like the export succeeded.
+      mediaRecorder.onstop = () => {
+        void (async () => {
+          cleanupExportAudioGraph();
 
-        // An errored recorder still fires `stop`; emitting a file from the
-        // partial chunks would hand the user a corrupt download and no
-        // indication anything went wrong.
-        if (exportFailed) return;
+          // An errored recorder still fires `stop`; emitting a file from the
+          // partial chunks would hand the user a corrupt download and no
+          // indication anything went wrong.
+          if (exportFailed) return;
 
-        const blob = await fixWebmDuration(
-          new Blob([...chunks], { type: "video/webm" })
-        );
-
-        if (mp4) {
-          const data = new Uint8Array(await blob.arrayBuffer());
-          const ffmpeg = new FFmpeg();
-          const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.2/dist/umd";
-          await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-          });
-          await ffmpeg.writeFile("video.webm", data);
-          await ffmpeg.exec([
-            "-y",
-            "-i",
-            "video.webm",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "superfast",
-            "-crf",
-            "24",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "64k",
-            "-movflags",
-            "+faststart",
-            "video.mp4",
-          ]);
-
-          const output = await ffmpeg.readFile("video.mp4");
-          const outputBlob = new Blob(
-            [
-              typeof output === "string"
-                ? new TextEncoder().encode(output)
-                : new Uint8Array(output),
-            ],
-            { type: "video/mp4" }
+          const blob = await fixWebmDuration(
+            new Blob([...chunks], { type: "video/webm" })
           );
-          const outputUrl = URL.createObjectURL(outputBlob);
-          const a = document.createElement("a");
-          a.download = "video.mp4";
-          a.href = outputUrl;
-          a.click();
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.download = "video.webm";
-          a.href = url;
-          a.click();
-        }
+
+          if (mp4) {
+            const data = new Uint8Array(await blob.arrayBuffer());
+            const ffmpeg = new FFmpeg();
+            const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.2/dist/umd";
+            await ffmpeg.load({
+              coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+              wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+            });
+            await ffmpeg.writeFile("video.webm", data);
+            await ffmpeg.exec([
+              "-y",
+              "-i",
+              "video.webm",
+              "-c:v",
+              "libx264",
+              "-preset",
+              "superfast",
+              "-crf",
+              "24",
+              "-c:a",
+              "aac",
+              "-b:a",
+              "64k",
+              "-movflags",
+              "+faststart",
+              "video.mp4",
+            ]);
+
+            const output = await ffmpeg.readFile("video.mp4");
+            const outputBlob = new Blob(
+              [
+                typeof output === "string"
+                  ? new TextEncoder().encode(output)
+                  : new Uint8Array(output),
+              ],
+              { type: "video/mp4" }
+            );
+            const outputUrl = URL.createObjectURL(outputBlob);
+            const a = document.createElement("a");
+            a.download = "video.mp4";
+            a.href = outputUrl;
+            a.click();
+          } else {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.download = "video.webm";
+            a.href = url;
+            a.click();
+          }
+        })().catch(handleExportFailure);
       };
 
       mediaRecorder.start();

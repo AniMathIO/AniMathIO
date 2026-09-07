@@ -393,6 +393,52 @@ describe("PlaybackStore boundary-aware sync throttle (Defect 2)", () => {
   });
 });
 
+describe("PlaybackStore end-of-playback wraparound", () => {
+  let state: State;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    audioElementsById.clear();
+    videoElementsById.clear();
+    state = makeTestState();
+  });
+
+  afterEach(() => {
+    state.setPlaying(false);
+    vi.restoreAllMocks();
+  });
+
+  it("leaves elements visible for t=0 after playback runs past maxTime", async () => {
+    await state.addEditorElement({
+      id: "t1",
+      name: "Text t1",
+      type: "text",
+      placement: { x: 0, y: 0, width: 10, height: 10, rotation: 0, scaleX: 1, scaleY: 1 },
+      timeFrame: { start: 0, end: 5000 },
+      properties: { text: "hi", fontSize: 12, fontWeight: 400, splittedTexts: [] },
+    } as any);
+
+    let visible = true;
+    state.setKonvaNode("t1", {
+      visible(v?: boolean) {
+        if (v !== undefined) visible = v;
+        return visible;
+      },
+    } as any);
+
+    state.setPlaying(true);
+    // Drive the final tick the way playFrames() does when the clock overruns.
+    state.playback.startedTime = Date.now() - (state.maxTime + 100);
+    state.playback.startedTimePlay = 0;
+    state.playback.playFrames();
+
+    expect(state.currentKeyFrame).toBe(0);
+    // The playhead is back at the start, so an element covering t=0 must be
+    // painted again - not left hidden by the overrun tick.
+    expect(visible).toBe(true);
+  });
+});
+
 describe("PlaybackStore boundary detection under realistic frame stepping", () => {
   let state: State;
 
@@ -410,54 +456,65 @@ describe("PlaybackStore boundary detection under realistic frame stepping", () =
     vi.restoreAllMocks();
   });
 
-  // The playhead only ever takes whole-frame values (currentKeyFrame * 1000/fps),
-  // so a clip end on a 50ms multiple lands exactly on a frame - and at that frame
-  // the clip is still active, because isInside is closed at both ends. Stepping in
-  // real frame increments is the only shape that exposes an end-boundary test that
-  // looks at boundary values instead of active-state changes; hand-picked
-  // millisecond pairs can step straight over the exact-boundary frame and pass.
-  function sweepFrames(fromMs: number, toMs: number) {
-    const first = Math.floor((fromMs / 1000) * state.fps);
-    const last = Math.ceil((toMs / 1000) * state.fps);
-    for (let frame = first; frame <= last; frame++) {
-      state.updateTimeTo((frame * 1000) / state.fps);
+  // These assert *when* a clip starts/stops, not merely that it eventually did.
+  // Asserting the end state over a window longer than DRIFT_SYNC_INTERVAL_MS is
+  // useless: the 250ms drift tick alone satisfies it, so such a test passes even
+  // with boundary detection deleted outright.
+  const frameMs = 1000 / 60;
+
+  /** Sweeps in true frame steps, returning the playhead at which `predicate` first held. */
+  function sweepUntil(fromMs: number, toMs: number, predicate: () => boolean): number | null {
+    const firstFrame = Math.floor((fromMs / 1000) * state.fps);
+    const lastFrame = Math.ceil((toMs / 1000) * state.fps);
+    for (let frame = firstFrame; frame <= lastFrame; frame++) {
+      const t = (frame * 1000) / state.fps;
+      state.updateTimeTo(t);
+      if (predicate()) return t;
     }
+    return null;
   }
 
-  it("stops a clip within one frame of its end, not one throttle window later", () => {
+  it("stops a clip within one frame of its end", () => {
     const audio = audioElementsById.get("audio-el-A");
-
     state.setCurrentKeyFrame(Math.floor((8800 / 1000) * state.fps));
     state.setPlaying(true);
     expect(audio.paused).toBe(false);
 
-    // 9000 lands exactly on frame 540 at 60fps.
-    sweepFrames(8800, 9100);
+    const stoppedAt = sweepUntil(8800, 9100, () => audio.paused === true);
 
-    expect(audio.paused).toBe(true);
+    expect(stoppedAt).not.toBeNull();
+    // 9000 lands exactly on a frame and the clip is still active there, so the
+    // stop is due on the very next frame - not at the 9050 drift tick.
+    expect(stoppedAt!).toBeGreaterThan(9000);
+    expect(stoppedAt!).toBeLessThanOrEqual(9000 + frameMs + 1e-6);
   });
 
   it("starts a clip within one frame of its start", () => {
     const audio = audioElementsById.get("audio-el-A");
-
     state.setCurrentKeyFrame(Math.floor((4800 / 1000) * state.fps));
     state.setPlaying(true);
     expect(audio.paused).toBe(true);
 
-    sweepFrames(4800, 5100);
+    const startedAt = sweepUntil(4800, 5100, () => audio.paused === false);
 
-    expect(audio.paused).toBe(false);
+    expect(startedAt).not.toBeNull();
+    // 5000 is exactly on a frame and is inside the clip, so it must start there
+    // rather than waiting for the 5050 drift tick.
+    expect(startedAt!).toBeGreaterThanOrEqual(5000 - 1e-6);
+    expect(startedAt!).toBeLessThanOrEqual(5000 + frameMs + 1e-6);
   });
 
-  it("keeps a clip playing across its interior without waiting on the throttle", () => {
-    const audio = audioElementsById.get("audio-el-A");
-
+  it("does not re-sync every frame while playing through a clip's interior", () => {
     state.setCurrentKeyFrame(Math.floor((6000 / 1000) * state.fps));
     state.setPlaying(true);
 
-    sweepFrames(6000, 6300);
+    const audioSpy = vi.spyOn(state.playback, "updateAudioElements");
+    sweepUntil(6000, 6300, () => false);
 
-    expect(audio.paused).toBe(false);
+    // ~18 frames in 300ms; with the drift throttle honored that is at most a
+    // couple of syncs. Syncing per frame is what causes audible stutter.
+    expect(audioSpy.mock.calls.length).toBeGreaterThan(0);
+    expect(audioSpy.mock.calls.length).toBeLessThanOrEqual(3);
   });
 });
 
