@@ -379,14 +379,17 @@ const EditorInner = observer(() => {
   }, [state.canvas_width, state.canvas_height, state.isEditorActive]);
 
   // Global keyboard shortcuts (arrow-key seek/nudge, delete, copy/paste,
-  // space to play/pause) are only meaningful while the editor is mounted -
-  // the Dashboard shares this same store and must not react to them.
+  // space to play/pause) must only be live while an editor is actually open.
+  // Gating on isEditorActive rather than on mount is deliberate: Home renders
+  // <Dashboard /> and <Editor /> as siblings, so this component stays mounted
+  // (rendering null) the whole time the user is on the Dashboard.
   useEffect(() => {
+    if (!state.isEditorActive) return;
     state.attachKeyboardShortcuts();
     return () => {
       state.detachKeyboardShortcuts();
     };
-  }, [state]);
+  }, [state, state.isEditorActive]);
 
   if (!state.isEditorActive) return null;
 
