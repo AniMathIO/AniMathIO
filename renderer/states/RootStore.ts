@@ -8,6 +8,9 @@ import { AnimationStore } from "./stores/AnimationStore";
 import { PlaybackStore } from "./stores/PlaybackStore";
 import { ExportStore } from "./stores/ExportStore";
 import { ProjectStore } from "./stores/ProjectStore";
+import { UIStore } from "./stores/UIStore";
+import { AudioContextStore } from "./stores/AudioContextStore";
+import { KeyboardShortcutService } from "./stores/KeyboardShortcutService";
 import {
   EditorElement,
   Animation,
@@ -25,13 +28,9 @@ export class RootStore {
   readonly playbackStore: PlaybackStore;
   readonly exportStore: ExportStore;
   readonly projectStore: ProjectStore;
-
-  // Cross-store state
-  selectedMenuOption: MenuOption = "Videos";
-  audioContexts = new Map<
-    string,
-    { context: AudioContext; sourceNode: MediaElementAudioSourceNode }
-  >();
+  readonly uiStore: UIStore;
+  readonly audioContextStore: AudioContextStore;
+  readonly keyboardShortcutService: KeyboardShortcutService;
 
   constructor() {
     this.canvasStore = new CanvasStore(this);
@@ -41,6 +40,9 @@ export class RootStore {
     this.playbackStore = new PlaybackStore(this);
     this.exportStore = new ExportStore(this);
     this.projectStore = new ProjectStore(this);
+    this.uiStore = new UIStore(this);
+    this.audioContextStore = new AudioContextStore(this);
+    this.keyboardShortcutService = new KeyboardShortcutService(this);
 
     makeAutoObservable(this, {
       canvasStore: false,
@@ -50,78 +52,29 @@ export class RootStore {
       playbackStore: false,
       exportStore: false,
       projectStore: false,
-      audioContexts: false,
+      uiStore: false,
+      audioContextStore: false,
+      keyboardShortcutService: false,
     });
 
     if (typeof window !== "undefined") {
-      window.addEventListener("keydown", this.handleKeyboardShortcut.bind(this));
+      window.addEventListener(
+        "keydown",
+        this.keyboardShortcutService.handleKeyboardShortcut
+      );
     }
   }
 
   // ---------- AudioContext management ----------
 
   getAudioContext(audioElement: HTMLAudioElement) {
-    let entry = this.audioContexts.get(audioElement.id);
-    if (!entry) {
-      const ctx = new AudioContext();
-      const sourceNode = ctx.createMediaElementSource(audioElement);
-      entry = { context: ctx, sourceNode };
-      this.audioContexts.set(audioElement.id, entry);
-    }
-    return entry;
+    return this.audioContextStore.getAudioContext(audioElement);
   }
 
   // ---------- Keyboard shortcuts ----------
 
   handleKeyboardShortcut(event: KeyboardEvent) {
-    const target = event.target as HTMLElement;
-    const isInputElement =
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable ||
-      target.tagName === "SELECT";
-
-    if (isInputElement) return;
-
-    switch (event.key) {
-      case "Delete":
-        if (event.ctrlKey || event.metaKey) {
-          if (this.selectedElement) {
-            this.deleteSelectedObjects([this.selectedElement]);
-          }
-          event.preventDefault();
-        }
-        break;
-      case "ArrowUp":
-      case "ArrowDown":
-      case "ArrowLeft":
-      case "ArrowRight":
-        if (event.ctrlKey || event.metaKey) {
-          this.moveSelectedObject(event.key);
-          event.preventDefault();
-        } else {
-          this.skipInTime(event.key);
-          event.preventDefault();
-        }
-        break;
-      case "c":
-        if ((event.ctrlKey || event.metaKey) && event.altKey) {
-          this.copyObject();
-          event.preventDefault();
-        }
-        break;
-      case "v":
-        if ((event.ctrlKey || event.metaKey) && event.altKey) {
-          this.pasteObject();
-          event.preventDefault();
-        }
-        break;
-      case " ":
-        this.setPlaying(!this.playing);
-        break;
-      default:
-        break;
-    }
+    this.keyboardShortcutService.handleKeyboardShortcut(event);
   }
 
   // ============================================================
@@ -249,8 +202,10 @@ export class RootStore {
   deserialize(data: ArrayBuffer) { this.projectStore.deserialize(data); }
 
   // --- Selected menu ---
+  get selectedMenuOption() { return this.uiStore.selectedMenuOption; }
+  set selectedMenuOption(option: MenuOption) { this.uiStore.selectedMenuOption = option; }
   setSelectedMenuOption(option: MenuOption) {
-    this.selectedMenuOption = option;
+    this.uiStore.setSelectedMenuOption(option);
   }
 
   /**
