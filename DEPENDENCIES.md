@@ -19,6 +19,20 @@ re-validating the specific incompatibility below first.
   workflow. This project is npm-based (`package-lock.json`, npm scripts,
   `postinstall` using `electron-builder install-app-deps`). Migrating package
   managers is out of scope for a routine dependency bump.
+
+  **Dependabot will keep proposing this one, bundled into security-group PRs
+  where it is easy to miss** — it has arrived twice inside PRs whose body
+  listed only the unrelated packages. Always diff `package.json` on a
+  dependabot PR before merging, not just the summary table. Nextron is what
+  builds the release binaries, so a surprise major here breaks packaging.
+
+  Holding it also pins six build-time advisories that `npm audit` reports as
+  fixable only via `nextron@10.3.0`: `serialize-javascript` (high),
+  `@babel/runtime`, `terser-webpack-plugin`, `nextron` itself (moderate),
+  `@babel/core` and `webpack` (low). All six are build-toolchain packages —
+  they are devDependencies and none ship inside the packaged Electron app, so
+  they are not reachable by end users. They stay open until the pnpm migration
+  happens; do not merge a nextron major purely to clear them.
 - **TypeScript 5.x → 7.x** — TypeScript 7 moves to a native (Go-based)
   compiler. Next.js's own dependency verification/tooling has not been
   validated against the native compiler yet, and a mismatch here risks
