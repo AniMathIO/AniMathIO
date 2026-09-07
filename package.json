@@ -130,11 +130,11 @@
   },
   "allowScripts": {
     "canvas@3.2.3": true,
-    "core-js-pure@3.49.0": true,
+    "core-js-pure@3.50.0": true,
     "electron@44.2.0": true,
     "electron-winstaller@5.4.0": true,
     "esbuild@0.27.4": true,
-    "protobufjs@7.5.4": true,
+    "protobufjs@7.6.6": true,
     "sharp@0.34.5": true,
     "@tailwindcss/oxide@4.3.3": true,
     "unrs-resolver@1.12.2": true,
