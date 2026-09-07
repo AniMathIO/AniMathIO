@@ -10,10 +10,8 @@ import dynamic from "next/dynamic";
 const TimeFrame = observer((props: { element: EditorElement }) => {
     const state = React.useContext(StateContext);
     const { element } = props;
-    const disabled = false;
     const isSelected = state.selectedElement?.id === element.id;
     const bgColorOnSelected = isSelected ? "bg-slate-800" : "bg-slate-600";
-    const disabledCursor = disabled ? "cursor-no-drop" : "cursor-ew-resize";
 
     const renderElementContent = (element: EditorElement) => {
         const commonClasses = "w-full mt-[calc(-64px/2)] relative z-1";
@@ -88,7 +86,6 @@ const TimeFrame = observer((props: { element: EditorElement }) => {
                 className="z-10"
                 value={element.timeFrame.start}
                 total={state.maxTime}
-                disabled={disabled}
                 onChange={async (value) => {
                     try {
                         await state.updateEditorElementTimeFrame(element, {
@@ -100,14 +97,13 @@ const TimeFrame = observer((props: { element: EditorElement }) => {
                 }}
             >
                 <div
-                    className={`bg-white border-2 border-blue-400 w-[10px] h-[64px] mt-[calc(64px/2)] translate-y-[-50%] transform translate-x-[-50%] ${disabledCursor}`}
+                    className="bg-white border-2 border-blue-400 w-[10px] h-[64px] mt-[calc(64px/2)] translate-y-[-50%] transform translate-x-[-50%] cursor-ew-resize"
                 ></div>
             </Dragable>
 
             <Dragable
-                className={disabled ? "cursor-no-drop" : "cursor-col-resize"}
+                className="cursor-col-resize"
                 value={element.timeFrame.start}
-                disabled={disabled}
                 style={{
                     width: `${((element.timeFrame.end - element.timeFrame.start) / state.maxTime) * 100}%`,
                 }}
@@ -136,7 +132,6 @@ const TimeFrame = observer((props: { element: EditorElement }) => {
             </Dragable>
             <Dragable
                 className="z-10"
-                disabled={disabled}
                 value={element.timeFrame.end}
                 total={state.maxTime}
                 onChange={async (value) => {
@@ -150,7 +145,7 @@ const TimeFrame = observer((props: { element: EditorElement }) => {
                 }}
             >
                 <div
-                    className={`bg-white border-2 border-blue-400 w-[10px] h-[64px] mt-[calc(64px/2)] translate-y-[-50%] transform translate-x-[-50%] ${disabledCursor}`}
+                    className="bg-white border-2 border-blue-400 w-[10px] h-[64px] mt-[calc(64px/2)] translate-y-[-50%] transform translate-x-[-50%] cursor-ew-resize"
                 ></div>
             </Dragable>
         </div>
