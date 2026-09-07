@@ -383,6 +383,39 @@ describe("State (RootStore)", () => {
       expect(updated?.placement.x).toBeCloseTo(800);
       expect(updated?.placement.y).toBeCloseTo(600);
     });
+
+    it("should not divide by zero or produce NaN/undefined placement when the previous canvas size is zero", () => {
+      const element = {
+        id: "elem-zero", name: "Test", type: "text",
+        placement: { x: 400, y: 300, width: 200, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        timeFrame: { start: 0, end: 1000 },
+        properties: { text: "T", fontSize: 16, fontWeight: 400, splittedTexts: [] },
+      };
+      return state.addEditorElement(element as any).then(() => {
+        state.canvasStore.canvas_width = 0;
+        state.canvasStore.canvas_height = 0;
+        state.setCanvasSize(1024, 768);
+        const updated = state.editorElements.find((e) => e.id === "elem-zero");
+        expect(updated?.placement.x).toBe(400);
+        expect(updated?.placement.y).toBe(300);
+        expect(Number.isNaN(updated?.placement.x)).toBe(false);
+        expect(Number.isNaN(updated?.placement.y)).toBe(false);
+      });
+    });
+
+    it("should not rescale (no-op) when the new size equals the current size", async () => {
+      const element = {
+        id: "elem-same", name: "Test", type: "text",
+        placement: { x: 123, y: 45, width: 200, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        timeFrame: { start: 0, end: 1000 },
+        properties: { text: "T", fontSize: 16, fontWeight: 400, splittedTexts: [] },
+      };
+      await state.addEditorElement(element as any);
+      state.setCanvasSize(800, 600); // same as current
+      const updated = state.editorElements.find((e) => e.id === "elem-same");
+      expect(updated?.placement.x).toBe(123);
+      expect(updated?.placement.y).toBe(45);
+    });
   });
 
   // ---- animations ----
