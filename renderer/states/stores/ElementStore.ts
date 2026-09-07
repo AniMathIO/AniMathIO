@@ -98,6 +98,12 @@ export class ElementStore {
 
   removeEditorElement(id: string) {
     this.konvaNodes.delete(id);
+    const removed = this.editorElements.find((editorElement) => editorElement.id === id);
+    if (removed?.type === "audio") {
+      // Prevent a stale AudioContext/source-node (bound to the now-detached
+      // DOM element) from being reused if a future element reuses this id.
+      this.root.releaseAudioContext(removed.properties.elementId);
+    }
     this.setEditorElements(
       this.editorElements.filter((editorElement) => editorElement.id !== id)
     );

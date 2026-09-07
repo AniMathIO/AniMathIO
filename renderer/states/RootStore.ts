@@ -67,8 +67,19 @@ export class RootStore {
 
   // ---------- AudioContext management ----------
 
+  get audioContexts() { return this.audioContextStore.audioContexts; }
   getAudioContext(audioElement: HTMLAudioElement) {
     return this.audioContextStore.getAudioContext(audioElement);
+  }
+
+  /**
+   * Remove and close the cached AudioContext (if any) bound to the given
+   * element id. Called when an editor element is deleted so a later element
+   * that reuses the same id doesn't inherit a source node bound to a
+   * detached DOM node, and so we don't leak AudioContexts over time.
+   */
+  releaseAudioContext(elementId: string) {
+    this.audioContextStore.releaseAudioContext(elementId);
   }
 
   // ---------- Keyboard shortcuts ----------

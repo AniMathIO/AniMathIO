@@ -36,6 +36,9 @@ export class ExportStore {
 
     const audioElements = this.root.elementStore.editorElements.filter(isEditorAudioElement);
     const audioStreams: MediaStream[] = [];
+    // Track per-export connections so they can be torn down again once this
+    // export finishes, instead of accumulating across repeated exports.
+    const exportConnections: { sourceNode: MediaElementAudioSourceNode; dest: MediaStreamAudioDestinationNode }[] = [];
 
     stream.getAudioTracks().forEach((track) => stream.removeTrack(track));
 
@@ -45,19 +48,38 @@ export class ExportStore {
         const { context, sourceNode } = this.root.getAudioContext(audioElement);
         const dest = context.createMediaStreamDestination();
         sourceNode.connect(dest);
+        exportConnections.push({ sourceNode, dest });
         audioStreams.push(dest.stream);
       }
     });
 
+    let mixerContext: AudioContext | null = null;
     if (audioStreams.length > 0) {
-      const mixerContext = new AudioContext();
+      mixerContext = new AudioContext();
       const mixerDestination = mixerContext.createMediaStreamDestination();
       audioStreams.forEach((audioStream) => {
-        const sourceNode = mixerContext.createMediaStreamSource(audioStream);
+        const sourceNode = mixerContext!.createMediaStreamSource(audioStream);
         sourceNode.connect(mixerDestination);
       });
       stream.addTrack(mixerDestination.stream.getAudioTracks()[0]);
     }
+
+    const cleanupExportAudioGraph = () => {
+      exportConnections.forEach(({ sourceNode, dest }) => {
+        try {
+          sourceNode.disconnect(dest);
+        } catch {
+          // Already disconnected; ignore.
+        }
+      });
+      if (mixerContext) {
+        try {
+          mixerContext.close();
+        } catch {
+          // Already closed; ignore.
+        }
+      }
+    };
 
     const video = document.createElement("video");
     video.srcObject = stream;
@@ -77,6 +99,8 @@ export class ExportStore {
       };
 
       mediaRecorder.onstop = async function () {
+        cleanupExportAudioGraph();
+
         const blob = await fixWebmDuration(
           new Blob([...chunks], { type: "video/webm" })
         );
