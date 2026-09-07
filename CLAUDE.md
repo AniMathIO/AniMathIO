@@ -67,6 +67,17 @@ The canvas was migrated from fabric.js to Konva (`react-konva`) — `renderer/pa
 
 `renderer/pages/components/partials/MafsModal.tsx` lets a user configure a Mafs graph (line/point/circle/polygon/plot/etc.) and rasterizes it to a PNG resource via `html-to-image`. Mafs's axis/grid/label colors are CSS custom properties (`--mafs-*`) declared in a stylesheet rule that `html-to-image`'s DOM clone doesn't carry over (it's nested inside a Tailwind v4 `@layer` block); `renderer/utils/mafs-capture.ts#applyMafsCaptureStyles` sets them as inline styles before capture instead of relying on the cascade. Both Manim text and Mafs graphs auto-contrast against the canvas's own background color via `renderer/utils/color.ts#getContrastColor`, independent of the app UI's own light/dark theme.
 
+## Releasing
+
+`RELEASING.md` is the checklist for cutting a release, and it is worth reading
+before touching anything release-adjacent. The parts that are easy to get wrong
+and have gone wrong before: the `staging` -> `main` PR must be merged with a
+**merge commit, never squashed** (a squash leaves release-please with nothing
+releasable), the release takes **two** merges rather than one, dependabot
+security PRs quietly bundle deferred majors that break packaging, and nothing in
+CI exercises `npm run build` before a tag exists — so packaging breakage only
+surfaces after a release is already published.
+
 ## Dependency policy
 
 See `DEPENDENCIES.md` for the current list of majors that are deliberately deferred (and why) versus what's safe to bump. In short: don't jump Konva/Nextron/TypeScript/mobx/Vitest to their next major without reading that file first — each has a specific, currently-real incompatibility with this stack (Turbopack SSR, the build tool's package-manager assumption, Next's dependency verification, etc.), not just "hasn't been tried yet."
