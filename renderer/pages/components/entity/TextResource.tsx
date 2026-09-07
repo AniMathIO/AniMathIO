@@ -14,7 +14,16 @@ const TextResource = observer(
   ({ fontSize, fontWeight, sampleText }: TextResourceProps) => {
     const state = React.useContext(StateContext);
     return (
-      <div className="items-center m-[15px] flex flex-row">
+      <div
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(
+            "application/x-animathio-resource",
+            JSON.stringify({ kind: "text", text: sampleText, fontSize, fontWeight })
+          );
+        }}
+        className="items-center m-[15px] flex flex-row"
+      >
         <div
           className="flex-1 text-black dark:text-white px-2 py-1"
           style={{

@@ -39,7 +39,7 @@ describe("AniMathIO UI Components", () => {
     canvasArea.id = "canvas-area";
     canvasArea.className = "flex-1 bg-gray-900 relative";
     canvasArea.innerHTML = `
-      <canvas id="fabric-canvas" width="800" height="600" class="border border-gray-600"></canvas>
+      <canvas id="konva-canvas" width="800" height="600" class="border border-gray-600"></canvas>
     `;
 
     // Assemble the interface
@@ -53,7 +53,7 @@ describe("AniMathIO UI Components", () => {
     expect(document.getElementById("timeline-panel")).toBeTruthy();
     expect(document.getElementById("resources-panel")).toBeTruthy();
     expect(document.getElementById("canvas-area")).toBeTruthy();
-    expect(document.getElementById("fabric-canvas")).toBeTruthy();
+    expect(document.getElementById("konva-canvas")).toBeTruthy();
 
     // Test buttons exist
     expect(document.getElementById("play-btn")).toBeTruthy();
@@ -166,14 +166,14 @@ describe("AniMathIO UI Components", () => {
     const canvasContainer = document.createElement("div");
     canvasContainer.className = "canvas-container";
     canvasContainer.innerHTML = `
-      <canvas id="fabric-canvas" width="800" height="600"></canvas>
+      <canvas id="konva-canvas" width="800" height="600"></canvas>
       <div id="canvas-overlay" class="canvas-overlay"></div>
     `;
 
     document.body.appendChild(canvasContainer);
 
     const canvas = document.getElementById(
-      "fabric-canvas"
+      "konva-canvas"
     ) as HTMLCanvasElement;
     const overlay = document.getElementById("canvas-overlay");
 

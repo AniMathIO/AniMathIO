@@ -150,9 +150,14 @@ const SettingsModal: React.FC = () => {
         };
 
         const unsubscribe = window.electron.ipcRenderer.on('open-settings-modal', handleOpenModal);
+        // The native OS menu (which fires the IPC event above) doesn't render
+        // reliably on every platform, so the in-app Titlebar fallback opens
+        // settings via this plain window event instead of a main-process round trip.
+        window.addEventListener('open-settings-modal', handleOpenModal);
 
         return () => {
             unsubscribe();
+            window.removeEventListener('open-settings-modal', handleOpenModal);
         };
     }, []);
 

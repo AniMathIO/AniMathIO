@@ -7,7 +7,7 @@ module.exports = {
   images: {
     unoptimized: true,
   },
-  webpack: (config) => {
-    return config;
-  },
+  // Next 16 defaults to Turbopack in dev; an empty object acknowledges that we are
+  // not migrating the old no-op webpack hook (removed below).
+  turbopack: {},
 };

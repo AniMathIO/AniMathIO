@@ -17,4 +17,20 @@ describe("Main Components", () => {
     expect(Timeline).toBeDefined();
     expect(isValidComponent(Timeline)).toBe(true);
   });
+
+  it("should render Titlebar component (in-app menu-bar fallback)", async () => {
+    const { default: Titlebar } = await import(
+      "../../renderer/pages/components/Titlebar"
+    );
+    expect(Titlebar).toBeDefined();
+    expect(isValidComponent(Titlebar)).toBe(true);
+  });
+
+  it("should render ManimImportPanel component", async () => {
+    const { default: ManimImportPanel } = await import(
+      "../../renderer/pages/components/panels/ManimImportPanel"
+    );
+    expect(ManimImportPanel).toBeDefined();
+    expect(isValidComponent(ManimImportPanel)).toBe(true);
+  });
 });

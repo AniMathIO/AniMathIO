@@ -29,6 +29,15 @@ const AnimationsPanel = observer(() => {
     return animation.type === "breathe";
   });
 
+  const hasMafsRevealInAnimation = selectedElementAnimations.some((animation) => {
+    return animation.type === "mafsReveal" && (animation as any).properties?.direction === "in";
+  });
+  const hasMafsRevealOutAnimation = selectedElementAnimations.some((animation) => {
+    return animation.type === "mafsReveal" && (animation as any).properties?.direction === "out";
+  });
+
+  const isMafsElement = selectedElement?.type === "mafs";
+
   return (
     <>
       <div className="text-lg px-[16px] pt-[16px] pb-[15px] font-semibold">
@@ -120,6 +129,38 @@ const AnimationsPanel = observer(() => {
           }}
         >
           Add Breathing
+        </div>
+      ) : null}
+      {isMafsElement && !hasMafsRevealInAnimation ? (
+        <div
+          className="text-sm px-[16px] py-[8px] font-semibold hover:bg-slate-700 hover:text-white cursor-pointer"
+          onClick={() => {
+            state.addAnimation({
+              id: getUid(),
+              type: "mafsReveal",
+              targetId: selectedElement?.id ?? "",
+              duration: 1200,
+              properties: { direction: "in" },
+            });
+          }}
+        >
+          Add Math Reveal In
+        </div>
+      ) : null}
+      {isMafsElement && !hasMafsRevealOutAnimation ? (
+        <div
+          className="text-sm px-[16px] py-[8px] font-semibold hover:bg-slate-700 hover:text-white cursor-pointer"
+          onClick={() => {
+            state.addAnimation({
+              id: getUid(),
+              type: "mafsReveal",
+              targetId: selectedElement?.id ?? "",
+              duration: 800,
+              properties: { direction: "out" },
+            });
+          }}
+        >
+          Add Math Reveal Out
         </div>
       ) : null}
       {selectedElementAnimations.map((animation) => {

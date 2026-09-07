@@ -52,6 +52,9 @@ const Element = observer((props: ElementProps) => {
             onLoadedData={() => {
               state.refreshElements();
             }}
+            onError={() => {
+              console.warn(`Failed to load video for element "${element.name}":`, element.properties.src);
+            }}
             height={20}
             width={20}
             id={element.properties.elementId}
@@ -68,6 +71,9 @@ const Element = observer((props: ElementProps) => {
             onLoadedData={() => {
               state.refreshElements();
             }}
+            onError={() => {
+              console.warn(`Failed to load image for element "${element.name}":`, element.properties.src);
+            }}
             height={20}
             width={20}
             id={element.properties.elementId}
@@ -83,6 +89,9 @@ const Element = observer((props: ElementProps) => {
             onLoadedData={() => {
               state.refreshElements();
             }}
+            onError={() => {
+              console.warn(`Failed to load audio for element "${element.name}":`, element.properties.src);
+            }}
             id={element.properties.elementId}
           ></audio>
         ) : null}
@@ -96,6 +105,9 @@ const Element = observer((props: ElementProps) => {
             }}
             onLoadedData={() => {
               state.refreshElements();
+            }}
+            onError={() => {
+              console.warn(`Failed to load mafs image for element "${element.name}":`, element.properties.src);
             }}
             height={20}
             width={20}

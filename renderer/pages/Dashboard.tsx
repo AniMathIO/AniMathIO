@@ -22,7 +22,7 @@ const Dashboard = observer(() => {
         <link rel="icon" href={AniMathIO.src} />
       </Head>
 
-      <div className="bg-slate-200 dark:bg-gray-800 h-svh w-full">
+      <div className="bg-slate-200 dark:bg-gray-800 h-[calc(100svh-32px)] w-full">
         <DashboardPanel />
       </div>
     </React.Fragment>

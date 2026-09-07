@@ -82,22 +82,8 @@ const DashboardPanel = observer(() => {
 
   const handleNewProject = async () => {
     try {
-      // Create an empty project (reset state)
-      // Reset the editor to default state
-      state.editorElements = [];
-      state.videos = [];
-      state.images = [];
-      state.audios = [];
-      state.backgroundColor = "#111111";
-      state.maxTime = 30 * 1000;
-      state.canvas_width = 800;
-      state.canvas_height = 600;
-      state.animations = [];
-      state.currentKeyFrame = 0;
-      state.selectedElement = null;
-      if (state.canvas) {
-        state.setCanvasSize(800, 600);
-      }
+      // Create an empty project (reset state) — use RootStore API (getters are read-only)
+      state.resetForNewProject();
 
       // Use Electron IPC to save the empty project and get full path
       if (window.electron && window.electron.saveProjectFile) {
@@ -210,21 +196,7 @@ const DashboardPanel = observer(() => {
         input.onchange = async (e) => {
           const file = (e.target as HTMLInputElement).files?.[0];
           if (file) {
-            // Create empty project
-            state.editorElements = [];
-            state.videos = [];
-            state.images = [];
-            state.audios = [];
-            state.backgroundColor = "#111111";
-            state.maxTime = 30 * 1000;
-            state.canvas_width = 800;
-            state.canvas_height = 600;
-            state.animations = [];
-            state.currentKeyFrame = 0;
-            state.selectedElement = null;
-            if (state.canvas) {
-              state.setCanvasSize(800, 600);
-            }
+            state.resetForNewProject();
 
             // Add to history
             await addProjectToHistory(file.name, file.name);

@@ -12,6 +12,7 @@ import TextResourcesPanel from "./panels/TextResourcesPanel";
 import VideoResourcesPanel from "./panels/VideoResourcesPanel";
 import EffectsPanel from "./panels/EffectsPanel";
 import MafsPanel from "./panels/MafsPanel";
+import ManimImportPanel from "./panels/ManimImportPanel";
 
 const Resources = observer(() => {
     const state = React.useContext(StateContext);
@@ -28,6 +29,7 @@ const Resources = observer(() => {
             {selectedMenuOption === "Export" ? <ExportVideoPanel /> : null}
             {selectedMenuOption === "Background Fill" ? <FillPanel /> : null}
             {selectedMenuOption === "Mathematical Objects" ? <MafsPanel /> : null}
+            {selectedMenuOption === "Manim Import" ? <ManimImportPanel /> : null}
         </div>
     );
 });
