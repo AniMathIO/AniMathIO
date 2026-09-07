@@ -56,13 +56,6 @@ export class RootStore {
       audioContextStore: false,
       keyboardShortcutService: false,
     });
-
-    if (typeof window !== "undefined") {
-      window.addEventListener(
-        "keydown",
-        this.keyboardShortcutService.handleKeyboardShortcut
-      );
-    }
   }
 
   // ---------- AudioContext management ----------
@@ -86,6 +79,19 @@ export class RootStore {
 
   handleKeyboardShortcut(event: KeyboardEvent) {
     this.keyboardShortcutService.handleKeyboardShortcut(event);
+  }
+
+  /**
+   * Registers the global keydown shortcut listener. Must be called by the
+   * Editor (not the Dashboard) so shortcuts like arrow-key seek and Space
+   * play/pause are scoped to when an editor is actually open.
+   */
+  attachKeyboardShortcuts() {
+    this.keyboardShortcutService.attach();
+  }
+
+  detachKeyboardShortcuts() {
+    this.keyboardShortcutService.detach();
   }
 
   // ============================================================
