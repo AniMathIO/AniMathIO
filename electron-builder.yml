@@ -41,6 +41,11 @@ nsis:
 linux:
   icon: resources/icons/icon.png
   category: AudioVideo
+  # Pinned because electron-builder otherwise derives this from the package
+  # name and produces `animathio`, while releases up to 1.6.3 shipped
+  # `AniMathIO`. The flatpak manifest and launcher script reference this path,
+  # and renaming it silently broke the flatpak build in 1.7.0.
+  executableName: AniMathIO
   target:
     - AppImage
     - deb
