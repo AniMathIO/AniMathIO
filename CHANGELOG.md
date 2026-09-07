@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.7.0](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.6.3...animathio-v1.7.0) (2026-09-07)
+
+
+### Features
+
+* clamp drag bounds to canvas and support panel-to-canvas drag-and-drop ([c0ec0cb](https://github.com/AniMathIO/AniMathIO/commit/c0ec0cbad9a111b54f472aa70608802e28076275))
+* drag files in from the OS straight into the right panel and canvas ([da32db2](https://github.com/AniMathIO/AniMathIO/commit/da32db2bcfd542574b0fafed188208d104470225))
+* migrate canvas rendering from fabric.js to konva.js ([84af6c9](https://github.com/AniMathIO/AniMathIO/commit/84af6c9305e46ff9335e4e928c77c58b8649c8f6))
+* restore drag-snapping guides and add in-app titlebar fallback ([879bde4](https://github.com/AniMathIO/AniMathIO/commit/879bde4f06e7a5dc4e216de9c258ee4a5103f275))
+
+
+### Bug Fixes
+
+* add required homepage/repository fields for electron-builder deb packaging ([43f2e86](https://github.com/AniMathIO/AniMathIO/commit/43f2e8659a654696a92f7dd974a1bd920817e402))
+* broken-image crash, Manim/Mafs color contrast, and Mafs axis/grid capture ([2b2b668](https://github.com/AniMathIO/AniMathIO/commit/2b2b668bb48fa92a2c5831b51b941460f7cdceb7))
+* close AudioContexts on project switch and export failure paths ([c880d35](https://github.com/AniMathIO/AniMathIO/commit/c880d3579b083672ad274df0b9e0e5b415d6d63a))
+* gate keyboard-shortcut listener on isEditorActive, not just mount ([3d53621](https://github.com/AniMathIO/AniMathIO/commit/3d536219ab3e7929f3e642ab6555e32cf46fb785))
+* honor clip end boundaries and fail exports cleanly ([e9c2b28](https://github.com/AniMathIO/AniMathIO/commit/e9c2b282e95958ff49e6bf84afebe1b7817f4bb4))
+* keep AudioContexts for elements that survive a project re-open ([e4bff2d](https://github.com/AniMathIO/AniMathIO/commit/e4bff2d713c0dc97c8247dfa79071ad5000261cd))
+* keep video/audio playback in sync with clip timeframes ([56dd1eb](https://github.com/AniMathIO/AniMathIO/commit/56dd1ebc014a86325313514717eb13b616ed5114))
+* render Manim Tex/MathTex as KaTeX-typeset math instead of raw text ([8762a80](https://github.com/AniMathIO/AniMathIO/commit/8762a807ae933bd8b245357f9f234a54cb49237e))
+* replace misleading Manim import screenshot with mid-playback capture ([2653cb9](https://github.com/AniMathIO/AniMathIO/commit/2653cb9106d3126d9ea92584cb2f08ebd4bccef4))
+* restore canvas after playback ends, surface silent export failures ([8816265](https://github.com/AniMathIO/AniMathIO/commit/881626544a3378af6b1b18656742876fd30f3f51))
+* restore preview audio, sync timeline audio/video, and close export audio contexts ([1fbe352](https://github.com/AniMathIO/AniMathIO/commit/1fbe3529c9e0f631abeab20892003caf9151861c))
+* scope global keyboard shortcuts to the Editor, not Dashboard ([41f3279](https://github.com/AniMathIO/AniMathIO/commit/41f3279a654b3bb2fa2c0806e796986fbbd92c2a))
+
+
+### Documentation
+
+* add CLAUDE.md (workstream H) ([2f0e38c](https://github.com/AniMathIO/AniMathIO/commit/2f0e38c890bc9d1e3d8d57eced16b6a321545998))
+
+
+### Code Refactoring
+
+* drop dead disabled-state branches from Timeframe ([55600d9](https://github.com/AniMathIO/AniMathIO/commit/55600d90abab60b02c17f39141734fcab8d76dc4))
+* split UI, audio-context, and keyboard-shortcut state into sub-stores ([9e9030b](https://github.com/AniMathIO/AniMathIO/commit/9e9030bcd9fbead6a46ad4a44b1cafcb3d795ea0))
+
 ## [1.6.3](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.6.2...animathio-v1.6.3) (2026-01-27)
 
 
