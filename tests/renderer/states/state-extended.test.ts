@@ -120,6 +120,41 @@ describe("State Extended Tests", () => {
       expect(state.editorElements[0].placement.x).toBe(50);
     });
 
+    it("should persist a video element's placement update (drag/resize/rotate), same as image/text", async () => {
+      const video = {
+        id: "video-test-id", name: "Media(video) 1", type: "video",
+        placement: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        timeFrame: { start: 0, end: 1000 },
+        properties: { elementId: "video-video-test-id", src: "test-video-src", effect: { type: "none" }, muted: true },
+      };
+
+      await state.addEditorElement(video as any);
+      expect(state.editorElements).toHaveLength(1);
+
+      // Simulate what VideoElementNode's onDragEnd/onTransformEnd handlers do
+      // (Editor.tsx) after a canvas drag or transformer resize/rotate.
+      const dragged = {
+        ...video,
+        placement: { ...video.placement, x: 42, y: 17 },
+      };
+      await state.updateEditorElement(dragged as any);
+      expect(state.editorElements[0].placement.x).toBe(42);
+      expect(state.editorElements[0].placement.y).toBe(17);
+
+      const transformed = {
+        ...state.editorElements[0],
+        placement: { ...state.editorElements[0].placement, scaleX: 1.5, scaleY: 2, rotation: 45 },
+      };
+      await state.updateEditorElement(transformed as any);
+      expect(state.editorElements[0].placement.scaleX).toBe(1.5);
+      expect(state.editorElements[0].placement.scaleY).toBe(2);
+      expect(state.editorElements[0].placement.rotation).toBe(45);
+
+      // Video-specific property (effect) editing, same panel/mechanism as image/mafs.
+      state.updateEffect(video.id, { type: "sepia" } as any);
+      expect((state.editorElements[0] as any).properties.effect.type).toBe("sepia");
+    });
+
     it("should handle multiple elements", async () => {
       for (let i = 0; i < 5; i++) {
         await state.addEditorElement({
