@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.7.0...animathio-v1.7.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* pin Linux executableName so the flatpak build stops breaking ([c3d8eb8](https://github.com/AniMathIO/AniMathIO/commit/c3d8eb8ba9ae7d101e3c7e90f1f7f6c96074658a))
+* pin Linux executableName to restore the flatpak build ([23b405f](https://github.com/AniMathIO/AniMathIO/commit/23b405fb4ba7ac93f8b64d5b95121f215a3d022a))
+
 ## [1.7.0](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.6.3...animathio-v1.7.0) (2026-09-07)
 
 
