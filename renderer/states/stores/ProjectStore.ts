@@ -150,6 +150,11 @@ export class ProjectStore {
     this.root.mediaStore.videos = [];
     this.root.mediaStore.images = [];
 
+    // The elements being replaced here may be bound to cached AudioContexts
+    // (see AudioContextStore); close them before swapping in the new
+    // element list so they don't linger open for the rest of the session.
+    this.root.audioContextStore.releaseAll();
+
     this.root.elementStore.editorElements = stateObject.editorElements.map((element: any) => {
       if (element.type === "audio") {
         return {

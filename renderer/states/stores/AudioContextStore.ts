@@ -25,6 +25,15 @@ export class AudioContextStore {
       entry = { context: ctx, sourceNode };
       this.audioContexts.set(audioElement.id, entry);
     }
+    // A context created outside a user gesture (or resurrected after being
+    // suspended by the browser) starts/returns in "suspended" state, which
+    // silently produces no audio output. Resume it defensively every time
+    // this entry is handed out.
+    if (entry.context.state === "suspended") {
+      entry.context.resume().catch(() => {
+        // Resume can reject if the context was closed concurrently; ignore.
+      });
+    }
     return entry;
   }
 
@@ -44,5 +53,22 @@ export class AudioContextStore {
         // AudioContext may already be closed; ignore.
       }
     }
+  }
+
+  /**
+   * Close and clear every cached AudioContext. Called on project switch
+   * (resetForNewProject / deserialize) so contexts bound to the previous
+   * project's (now-detached) audio elements don't linger for the rest of
+   * the session and eat into Chromium's hard per-document AudioContext cap.
+   */
+  releaseAll() {
+    this.audioContexts.forEach((entry) => {
+      try {
+        entry.context.close();
+      } catch {
+        // AudioContext may already be closed; ignore.
+      }
+    });
+    this.audioContexts.clear();
   }
 }

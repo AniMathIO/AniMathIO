@@ -82,6 +82,15 @@ export class RootStore {
     this.audioContextStore.releaseAudioContext(elementId);
   }
 
+  /**
+   * Close and clear every cached AudioContext. Called on project switch so
+   * contexts from the previous project don't stay open for the rest of the
+   * session (see AudioContextStore.releaseAll for why this matters).
+   */
+  releaseAllAudioContexts() {
+    this.audioContextStore.releaseAll();
+  }
+
   // ---------- Keyboard shortcuts ----------
 
   handleKeyboardShortcut(event: KeyboardEvent) {
@@ -226,6 +235,7 @@ export class RootStore {
     this.playbackStore.setPlaying(false);
     this.elementStore.konvaNodes.clear();
     this.elementStore.clipboard = null;
+    this.releaseAllAudioContexts();
     this.setAnimations([]);
     this.setEditorElements([]);
     this.setVideos([]);
