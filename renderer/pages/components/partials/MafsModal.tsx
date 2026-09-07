@@ -10,7 +10,7 @@ import {
 import { StateContext } from "@/states";
 import * as htmlToImage from 'html-to-image';
 import { MafsModalProps, LatexProps } from "@/types";
-import { getContrastColor } from "@/utils/color";
+import { applyMafsCaptureStyles } from "@/utils/mafs-capture";
 import katex from "katex";
 import Modal from 'react-modal';
 import dynamic from "next/dynamic";
@@ -174,14 +174,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
             // own dark/light mode is unrelated to the canvas's independently
             // configurable background.
             const mafsView = container.querySelector<HTMLElement>(".MafsView");
-            const fg = getContrastColor(state.backgroundColor);
-            mafsView?.style.setProperty("--mafs-fg", fg);
-            mafsView?.style.setProperty("--mafs-bg", "rgba(0, 0, 0, 0)");
-            mafsView?.style.setProperty("--mafs-origin-color", fg);
-            mafsView?.style.setProperty("--mafs-line-color", "#555");
-            mafsView?.style.setProperty("--mafs-line-stroke-dash-style", "4, 3");
-            mafsView?.style.setProperty("--mafs-axis-stroke-width", "1px");
-            mafsView?.style.setProperty("--grid-line-subdivision-color", "#222");
+            applyMafsCaptureStyles(mafsView, state.backgroundColor);
 
             // Mafs renders its axis numbers in a custom web font (CMU Serif);
             // without waiting for it to finish loading, html-to-image can
