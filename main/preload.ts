@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld("electron", {
   writeProjectFile: (filePath: string, fileData: number[]) => 
     ipcRenderer.invoke('write-project-file', filePath, fileData),
   // Listen for file opened from system (Open with)
+  readMediaFile: (filePath: string) => ipcRenderer.invoke('read-media-file', filePath),
+  writeVideoFile: (filePath: string, fileData: number[]) =>
+    ipcRenderer.invoke('write-video-file', filePath, fileData),
+  // Listen for file opened from system (Open with)
   onOpenFileFromSystem: (callback: (data: any) => void) => {
     const wrapper = (event: any, data: any) => callback(data);
     ipcRenderer.on('open-file-from-system', wrapper);

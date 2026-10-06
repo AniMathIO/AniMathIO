@@ -20,6 +20,7 @@ They are core part of the AniMathIO software! Check them out!
 - [Table of Contents](#table-of-contents)
 - [OS Support](#os-support)
 - [Installation](#installation)
+- [AI Agent Integration (MCP)](#ai-agent-integration-mcp)
 - [Development build](#development-build)
   - [Canvas build fix](#canvas-build-fix)
     - [NOTE: If you want proper development you will need to follow the steps regarding the canvas build and install all the necessary dependencies](#note-if-you-want-proper-development-you-will-need-to-follow-the-steps-regarding-the-canvas-build-and-install-all-the-necessary-dependencies)
@@ -127,6 +128,47 @@ Download `linux-unpacked.tar.gz` from the [release page](https://github.com/AniM
 ---
 
 **Alternative Download**: You can also download binaries from our website: [https://animathio.com/](https://animathio.com)
+
+## AI Agent Integration (MCP)
+
+AniMathIO includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server, so AI agents such as Claude can drive the editor while you watch changes appear on the canvas.
+
+The server runs inside the Electron main process, so AniMathIO must be running with a project open. It is **disabled by default** — enable it under **Settings**, which shows the endpoint and an auth token.
+
+- **Endpoint:** `http://127.0.0.1:<port>/mcp` (default port `4517`, loopback only)
+- **Auth:** bearer token, shown in Settings
+- **Transport:** HTTP MCP, not stdio
+
+### Available tools
+
+| Tool | Purpose |
+| --- | --- |
+| `get_project_state` | Read canvas, timeline, elements and animations |
+| `add_text` | Add a text element |
+| `add_math` | Add a LaTeX fragment, typeset via KaTeX |
+| `import_manim_scene` | Convert a whole Manim Community script into timeline elements |
+| `add_animation` | Attach fadeIn/fadeOut/slideIn/slideOut/breathe/mafsReveal |
+| `update_element` / `remove_element` | Change or delete an element |
+| `set_canvas` | Canvas size, background colour, timeline duration |
+| `seek` / `set_playing` | Move the playhead, start/stop playback |
+| `save_project` | Save the open project |
+| `add_media` | Import an image, video, or audio file from an absolute local path into the project |
+| `export_video` | Render the project to an absolute `.mp4` or `.webm` path |
+
+`import_manim_scene` is the highest-leverage one: it builds an entire scene in a single call.
+
+`add_media` takes a required `path` on the machine running AniMathIO and returns the created element IDs; a video creates both video and audio elements. It selects the matching resource panel and waits for the media to decode. Unsupported file types, missing files, and decoding failures report an error.
+
+`export_video` takes a required absolute `path` ending in `.mp4` or `.webm` and an optional `format` that must match the extension (otherwise the extension determines the format). The parent directory must exist; an existing destination is overwritten. Export records in **real time**: a 30-second project takes at least 30 seconds, plus conversion and writing. MP4 conversion fetches the FFmpeg core if needed. Allow a long client timeout, keep the project open, and avoid editing during export. The tool returns after the file is written.
+
+> **Security:** a connected agent can read local media, modify the open project, and write files. Keep the token private, and enable the server only while you are using it.
+
+### Testing the connection
+
+```console
+node scripts/mcp-smoke.mjs --token <token>                  # list tools
+node scripts/mcp-smoke.mjs --token <token> --tool get_project_state
+```
 
 ## Development build
 
