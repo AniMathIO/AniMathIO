@@ -2,14 +2,14 @@
   "private": true,
   "name": "animathio",
   "description": "AniMathIO is a video editor application for editing Manim-like video projects",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "homepage": "https://animathio.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/AniMathIO/AniMathIO.git"
   },
   "author": {
-    "name": "Kov\u00e1cs B\u00e1lint-Hunor",
+    "name": "Kovács Bálint-Hunor",
     "email": "kovacsbalinthunor53@gmail.com"
   },
   "main": "app/background.js",
