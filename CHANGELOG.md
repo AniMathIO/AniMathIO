@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.8.0](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.7.1...animathio-v1.8.0) (2026-10-06)
+
+
+### Features
+
+* add media import and video export over MCP ([04a1855](https://github.com/AniMathIO/AniMathIO/commit/04a1855d8564322fe63c6548e2602ea45dcdca66))
+* expose AniMathIO to AI agents over MCP ([2297118](https://github.com/AniMathIO/AniMathIO/commit/2297118f364893261fe18c84743543f45d628d0a))
+* expose AniMathIO to AI agents over MCP (closes [#129](https://github.com/AniMathIO/AniMathIO/issues/129)) ([c3404dd](https://github.com/AniMathIO/AniMathIO/commit/c3404dd6e5336e9cb798cf484f847295c7b30c25))
+* **mcp:** import media and export video to filesystem paths ([866fc5d](https://github.com/AniMathIO/AniMathIO/commit/866fc5dc7e6f104ee3460a831264635a99e6a82f))
+* release AI agent integration and filesystem media tools ([4b490e2](https://github.com/AniMathIO/AniMathIO/commit/4b490e238ffa0e0ae8be6cb6585b25977d784a31))
+
+
+### Bug Fixes
+
+* build a fresh MCP server and transport per request ([abdd840](https://github.com/AniMathIO/AniMathIO/commit/abdd840db7830e2f807370add47a9ed3ad078ffd))
+* **deps:** apply security pins without upgrading Nextron ([5c5a1b9](https://github.com/AniMathIO/AniMathIO/commit/5c5a1b97425e2b25ee90d31164cb06d3afca7d55))
+* keep the MCP SDK out of the main-process bundle ([780a867](https://github.com/AniMathIO/AniMathIO/commit/780a86742c621bc46c8ad4baec37de356a82b04d))
+* **mcp:** send cloneable project snapshots over IPC ([5f244b5](https://github.com/AniMathIO/AniMathIO/commit/5f244b525f088713b1e8c11f5d2b2b2da534bbc2))
+
+
+### Documentation
+
+* add RELEASING.md capturing the release procedure ([3a3d6bf](https://github.com/AniMathIO/AniMathIO/commit/3a3d6bf1215d8968f5461f04bc63565d697efee2))
+* describe media import and real-time MCP video export ([515ed9d](https://github.com/AniMathIO/AniMathIO/commit/515ed9dee083bb9dc530d457ff0d1379bed33307))
+* document the MCP server in the README ([bde2255](https://github.com/AniMathIO/AniMathIO/commit/bde22552f2334fb59c154f97babbfed9b0afd076))
+* remove transferred MCP guide patch ([14e8e14](https://github.com/AniMathIO/AniMathIO/commit/14e8e14807324b84f590cd68456e0d78750b6357))
+
 ## [1.7.1](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.7.0...animathio-v1.7.1) (2026-09-07)
 
 
