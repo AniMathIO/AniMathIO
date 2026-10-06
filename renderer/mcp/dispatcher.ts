@@ -76,8 +76,9 @@ function describeElement(element: EditorElement) {
     id: element.id,
     name: element.name,
     type: element.type,
-    placement: element.placement,
-    timeFrame: element.timeFrame,
+    // MobX objects are proxies, which Electron's structured clone rejects.
+    placement: { ...element.placement },
+    timeFrame: { ...element.timeFrame },
   };
 }
 

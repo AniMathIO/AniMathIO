@@ -75,6 +75,18 @@ describe("MCP dispatcher", () => {
     });
   });
 
+  it("returns a detached, structured-cloneable snapshot of observable elements", async () => {
+    state.setEditorActive(true);
+    state.addText({ text: "IPC snapshot", fontSize: 24, fontWeight: 400 });
+    const result = await dispatch("get_project_state", {});
+    const cloned = structuredClone(result) as { elements: { placement: { x: number }; timeFrame: { end: number } }[] };
+    expect(cloned).toEqual(result);
+    cloned.elements[0].placement.x = 99;
+    cloned.elements[0].timeFrame.end = 100;
+    expect(state.editorElements[0].placement.x).toBe(0);
+    expect(state.editorElements[0].timeFrame.end).toBe(state.maxTime);
+  });
+
   it.each(["update_element", "remove_element"])("%s identifies an unknown id", async (tool) => {
     state.setEditorActive(true);
     await expect(dispatch(tool, { id: "missing-element-42" })).rejects.toThrow(
