@@ -96,6 +96,9 @@ export class AniMathIOMcpServer {
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
     });
+    mcp.onerror = (error) => console.error("[mcp] server error:", error);
+    this.transport.onerror = (error) => console.error("[mcp] transport error:", error);
+
     await mcp.connect(this.transport);
 
     this.http = createServer((req, res) => {
@@ -145,6 +148,7 @@ export class AniMathIOMcpServer {
       const body = req.method === "POST" ? await readBody(req) : undefined;
       await this.transport!.handleRequest(req, res, body);
     } catch (error) {
+      console.error("[mcp] request failed:", error);
       if (!res.headersSent) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(
