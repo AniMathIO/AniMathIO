@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fixWebmDuration from "webm-duration-fix";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { toBlobURL } from "@ffmpeg/util";
 import { State } from "../../../renderer/states/state";
 
 vi.mock("konva", () => ({
@@ -102,7 +104,12 @@ class MockMediaRecorder {
 }
 global.MediaRecorder = MockMediaRecorder as any;
 global.URL = { createObjectURL: vi.fn(() => "blob:test"), revokeObjectURL: vi.fn() } as any;
-global.Blob = class { constructor(public parts: any[], public opts: any) {} } as any;
+global.Blob = class {
+  constructor(public parts: any[], public opts: any) {}
+  async arrayBuffer() {
+    return new Uint8Array(this.parts.flatMap(part => Array.from(part))).buffer;
+  }
+} as any;
 
 const downloadAnchors: any[] = [];
 
@@ -246,5 +253,176 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
     expect(mixer.close).toHaveBeenCalledTimes(1);
     // ...and no partial file was handed to the user as a successful export.
     expect(downloadAnchors).toHaveLength(0);
+  });
+});
+
+// Drive the real recorder completion and IPC delivery paths. A spy on the
+// export method alone would miss early resolution and partial-file delivery.
+describe("ExportStore destination delivery", () => {
+  let state: State;
+  let writeVideoFile: ReturnType<typeof vi.fn>;
+  const outputBytes = new Uint8Array([0, 127, 128, 255]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    videoPlayImpl = () => Promise.resolve();
+    MockMediaRecorder.instances.length = 0;
+    downloadAnchors.length = 0;
+    audioElementsById.clear();
+    writeVideoFile = vi.fn().mockResolvedValue({ success: true });
+    (window as any).electron = { writeVideoFile };
+    state = new State();
+    state.setStage({ width: vi.fn(), height: vi.fn(), container: vi.fn(() => ({ style: {}, querySelector: vi.fn() })) } as any,
+      { batchDraw: vi.fn(), add: vi.fn(), getCanvas: vi.fn(() => makeFakeCanvas()) } as any, 800, 600);
+    state.setMaxTime(1000);
+    vi.mocked(fixWebmDuration).mockResolvedValue({ arrayBuffer: async () => outputBytes.buffer } as any);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("records for the project duration, delivers exact WebM bytes, and waits for the disk write", async () => {
+    let finishWrite!: (result: { success: boolean }) => void;
+    writeVideoFile.mockImplementation(() => new Promise(resolve => { finishWrite = resolve; }));
+    let settled = false;
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm").then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(MockMediaRecorder.instances[0].start).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(writeVideoFile).not.toHaveBeenCalled();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(MockMediaRecorder.instances[0].stop).toHaveBeenCalledOnce();
+    expect(writeVideoFile).toHaveBeenCalledExactlyOnceWith("/tmp/result.webm", [0, 127, 128, 255]);
+    expect(settled).toBe(false);
+    finishWrite({ success: true });
+    await pending;
+    expect(settled).toBe(true);
+    expect(state.playing).toBe(false);
+    expect(downloadAnchors).toHaveLength(0);
+  });
+
+  it("rejects disk-write failures and allows a subsequent export", async () => {
+    writeVideoFile.mockResolvedValueOnce({ success: false, error: "EACCES destination" });
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm");
+    const failure = expect(pending).rejects.toThrow("EACCES destination");
+    await vi.advanceTimersByTimeAsync(1000);
+    await failure;
+    expect(downloadAnchors).toHaveLength(0);
+    const retry = state.exportStore.saveCanvasToVideoToPath("/tmp/retry.webm", "webm");
+    await vi.advanceTimersByTimeAsync(1000);
+    await retry;
+    expect(writeVideoFile).toHaveBeenLastCalledWith("/tmp/retry.webm", [0, 127, 128, 255]);
+  });
+
+  it("rejects recorder errors, cancels the stop timer, and never writes partial bytes", async () => {
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm");
+    const failure = expect(pending).rejects.toThrow("recorder failed");
+    await vi.advanceTimersByTimeAsync(0);
+    const recorder = MockMediaRecorder.instances[0];
+    recorder.emitError(new Error("recorder failed"));
+    await failure;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(recorder.stop).not.toHaveBeenCalled();
+    expect(fixWebmDuration).not.toHaveBeenCalled();
+    expect(writeVideoFile).not.toHaveBeenCalled();
+    expect(downloadAnchors).toHaveLength(0);
+    expect(state.playing).toBe(false);
+  });
+
+  it("rejects failed playback without writing and blocks overlapping exports", async () => {
+    let failPlay!: (error: Error) => void;
+    videoPlayImpl = () => new Promise((_resolve, reject) => { failPlay = reject; });
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/first.webm", "webm");
+    const failure = expect(pending).rejects.toThrow("play failed");
+    await expect(state.exportStore.saveCanvasToVideoToPath("/tmp/second.webm", "webm")).rejects.toThrow("Another video export");
+    failPlay(new Error("play failed"));
+    await failure;
+    expect(writeVideoFile).not.toHaveBeenCalled();
+    expect(state.playing).toBe(false);
+  });
+
+  it("rejects conversion failures without writing or downloading a partial file", async () => {
+    vi.mocked(fixWebmDuration).mockRejectedValue(new Error("conversion failed"));
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.mp4", "mp4");
+    const failure = expect(pending).rejects.toThrow("conversion failed");
+    await vi.advanceTimersByTimeAsync(1000);
+    await failure;
+    expect(writeVideoFile).not.toHaveBeenCalled();
+    expect(downloadAnchors).toHaveLength(0);
+  });
+
+  it("writes converted MP4 bytes instead of the source WebM and keeps the UI format", async () => {
+    const converted = new Uint8Array([9, 8, 7]);
+    const ffmpeg = { load: vi.fn().mockResolvedValue(undefined), writeFile: vi.fn().mockResolvedValue(undefined),
+      exec: vi.fn().mockResolvedValue(0), readFile: vi.fn().mockResolvedValue(converted) };
+    vi.mocked(FFmpeg).mockImplementation(function () { return ffmpeg as any; });
+    vi.mocked(toBlobURL).mockResolvedValue("blob:ffmpeg-core");
+    state.setVideoFormat("webm");
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.mp4", "mp4");
+    await vi.advanceTimersByTimeAsync(1000);
+    await pending;
+    expect(ffmpeg.load).toHaveBeenCalledOnce();
+    expect(ffmpeg.writeFile).toHaveBeenCalledWith("video.webm", outputBytes);
+    expect(ffmpeg.exec).toHaveBeenCalledWith(expect.arrayContaining(["libx264", "video.mp4"]));
+    expect(ffmpeg.readFile).toHaveBeenCalledWith("video.mp4");
+    expect(writeVideoFile).toHaveBeenCalledExactlyOnceWith("/tmp/result.mp4", [9, 8, 7]);
+    expect(state.selectedVideoFormat).toBe("webm");
+    expect(downloadAnchors).toHaveLength(0);
+  });
+
+  it("rejects a nonzero FFmpeg exit code even if an output file could be read", async () => {
+    const ffmpeg = { load: vi.fn().mockResolvedValue(undefined), writeFile: vi.fn().mockResolvedValue(undefined),
+      exec: vi.fn().mockResolvedValue(1), readFile: vi.fn().mockResolvedValue(new Uint8Array([99])) };
+    vi.mocked(FFmpeg).mockImplementation(function () { return ffmpeg as any; });
+    vi.mocked(toBlobURL).mockResolvedValue("blob:ffmpeg-core");
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.mp4", "mp4");
+    const failure = expect(pending).rejects.toThrow("FFmpeg exit code 1");
+    await vi.advanceTimersByTimeAsync(1000);
+    await failure;
+    expect(ffmpeg.readFile).not.toHaveBeenCalled();
+    expect(writeVideoFile).not.toHaveBeenCalled();
+    expect(downloadAnchors).toHaveLength(0);
+  });
+
+  it("rejects an FFmpeg load failure without writing", async () => {
+    vi.mocked(FFmpeg).mockImplementation(function () { return { load: vi.fn().mockRejectedValue(new Error("FFmpeg unavailable")) } as any; });
+    vi.mocked(toBlobURL).mockResolvedValue("blob:ffmpeg-core");
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.mp4", "mp4");
+    const failure = expect(pending).rejects.toThrow("FFmpeg unavailable");
+    await vi.advanceTimersByTimeAsync(1000);
+    await failure;
+    expect(writeVideoFile).not.toHaveBeenCalled();
+    expect(downloadAnchors).toHaveLength(0);
+  });
+
+  it("does not deliver a file if recording fails while post-processing is awaiting", async () => {
+    let completeFix!: (blob: any) => void;
+    vi.mocked(fixWebmDuration).mockImplementation(() => new Promise(resolve => { completeFix = resolve; }));
+    const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm");
+    const failure = expect(pending).rejects.toThrow("late recorder error");
+    await vi.advanceTimersByTimeAsync(1000);
+    MockMediaRecorder.instances[0].emitError(new Error("late recorder error"));
+    await failure;
+    completeFix({ arrayBuffer: async () => outputBytes.buffer });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(writeVideoFile).not.toHaveBeenCalled();
+    expect(downloadAnchors).toHaveLength(0);
+  });
+
+  it("rejects when no canvas or capture stream is available", async () => {
+    state.canvasStore.layer = null;
+    await expect(state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm")).rejects.toThrow("No Konva layer");
+    expect(writeVideoFile).not.toHaveBeenCalled();
+  });
+
+  it("retains the UI WebM download route", async () => {
+    state.setVideoFormat("webm");
+    state.saveCanvasToVideoWithAudio();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(downloadAnchors).toHaveLength(1);
+    expect(downloadAnchors[0].download).toBe("video.webm");
+    expect(downloadAnchors[0].click).toHaveBeenCalledOnce();
+    expect(writeVideoFile).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { MCP_TOOLS } from "./tool-schemas";
 import { RendererBridge } from "./bridge";
+import { callEditorTool } from "./tool-call";
 
 export const MCP_PATH = "/mcp";
 const MAX_BODY_BYTES = 1_000_000;
@@ -67,7 +68,7 @@ export class AniMathIOMcpServer {
     mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       try {
-        const data = await this.bridge.call(name, (args ?? {}) as Record<string, unknown>);
+        const data = await callEditorTool(this.bridge, name, (args ?? {}) as Record<string, unknown>);
         return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error) {
         // Reported as a tool error, not a protocol error, so the agent can read

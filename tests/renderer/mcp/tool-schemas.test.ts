@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { MCP_TOOLS } from '../../../main/mcp/tool-schemas';
 
 describe('MCP_TOOLS', () => {
-  it('has exactly 11 entries', () => {
-    expect(MCP_TOOLS).toHaveLength(11);
+  it('has exactly 13 entries', () => {
+    expect(MCP_TOOLS).toHaveLength(13);
   });
 
   it('has exactly the expected tool names', () => {
@@ -18,7 +18,9 @@ describe('MCP_TOOLS', () => {
       'set_canvas',
       'seek',
       'set_playing',
-      'save_project'
+      'save_project',
+      'add_media',
+      'export_video'
     ];
     const actualNames = MCP_TOOLS.map(tool => tool.name);
     expect(actualNames).toEqual(expectedNames);

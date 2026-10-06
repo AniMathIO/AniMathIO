@@ -22,17 +22,21 @@ re-validating the specific incompatibility below first.
 
   **Dependabot will keep proposing this one, bundled into security-group PRs
   where it is easy to miss** — it has arrived twice inside PRs whose body
-  listed only the unrelated packages. Always diff `package.json` on a
+  listed only the unrelated packages (and again in PR #128). Always diff `package.json` on a
   dependabot PR before merging, not just the summary table. Nextron is what
   builds the release binaries, so a surprise major here breaks packaging.
 
-  Holding it also pins six build-time advisories that `npm audit` reports as
-  fixable only via `nextron@10.3.0`: `serialize-javascript` (high),
-  `@babel/runtime`, `terser-webpack-plugin`, `nextron` itself (moderate),
-  `@babel/core` and `webpack` (low). All six are build-toolchain packages —
-  they are devDependencies and none ship inside the packaged Electron app, so
-  they are not reachable by end users. They stay open until the pnpm migration
-  happens; do not merge a nextron major purely to clear them.
+  PR #128's security versions of `@babel/core` (7.29.7) and `webpack`
+  (5.109.2) are pinned as devDependencies with scoped `nextron` overrides
+  referencing those pins. Direct pins alone leave Nextron's exact older
+  dependencies installed in nested directories, so the overrides are needed
+  to update the build pipeline without changing Nextron itself.
+
+  The previously reported advisories for `serialize-javascript`,
+  `@babel/runtime`, `terser-webpack-plugin`, and Nextron itself are separate
+  from those two updates. These are build-toolchain devDependencies; do not
+  merge a Nextron major purely to clear them. Recheck with an online audit
+  when revisiting the deferred migration.
 - **TypeScript 5.x → 7.x** — TypeScript 7 moves to a native (Go-based)
   compiler. Next.js's own dependency verification/tooling has not been
   validated against the native compiler yet, and a mismatch here risks
