@@ -5,6 +5,9 @@ import { readFile } from "fs/promises";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
 import Store from "electron-store";
+import { randomBytes } from "crypto";
+import { RendererBridge } from "./mcp/bridge";
+import { AniMathIOMcpServer } from "./mcp/server";
 
 const store = new Store();
 const isProd = process.env.NODE_ENV === "production";
@@ -12,6 +15,35 @@ const isProd = process.env.NODE_ENV === "production";
 // Store file path to open when app is ready
 let fileToOpen: string | null = null;
 let mainWindow: BrowserWindow | null = null;
+
+const DEFAULT_MCP_PORT = 4517;
+const mcpBridge = new RendererBridge(() => mainWindow);
+const mcpServer = new AniMathIOMcpServer(mcpBridge);
+
+function getMcpToken(): string {
+  let token = (store as any).get("mcpServerToken", "") as string;
+  if (!token) {
+    token = randomBytes(24).toString("hex");
+    (store as any).set("mcpServerToken", token);
+  }
+  return token;
+}
+
+function getMcpPort(): number {
+  return (store as any).get("mcpServerPort", DEFAULT_MCP_PORT) as number;
+}
+
+async function startMcpServer(): Promise<{ running: boolean; error?: string }> {
+  try {
+    mcpBridge.start();
+    await mcpServer.start(getMcpPort(), getMcpToken());
+    return { running: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Failed to start MCP server:", message);
+    return { running: false, error: message };
+  }
+}
 
 if (isProd) {
   serve({ directory: "app" });
@@ -140,6 +172,12 @@ async function handleOpenFile(filePath: string) {
     // mainWindow.webContents.openDevTools();
   }
 
+  // Restore the MCP server if the user had it enabled. Deliberately after the
+  // window loads, since every tool call needs a renderer to talk to.
+  if ((store as any).get("mcpServerEnabled", false)) {
+    void startMcpServer();
+  }
+
   // Handle file that was queued before app was ready
   if (fileToOpen) {
     handleOpenFile(fileToOpen);
@@ -157,6 +195,10 @@ async function handleOpenFile(filePath: string) {
 
 app.on("window-all-closed", () => {
   app.quit();
+});
+
+app.on("before-quit", () => {
+  void mcpServer.stop();
 });
 
 ipcMain.on("run-sh", async (event, value) => {
@@ -193,6 +235,41 @@ ipcMain.handle("get-gemini-model", () => {
 ipcMain.handle("set-gemini-model", (_, model) => {
   (store as any).set("geminiModel", model);
   return true;
+});
+
+// ---------- MCP server (AI agent integration) ----------
+// Off by default: enabling it lets a connected agent read and modify the open
+// project, so it stays opt-in and loopback-only, gated on a bearer token.
+
+ipcMain.handle("get-mcp-settings", () => {
+  return {
+    enabled: (store as any).get("mcpServerEnabled", false) as boolean,
+    port: getMcpPort(),
+    token: getMcpToken(),
+    running: mcpServer.running,
+  };
+});
+
+ipcMain.handle("set-mcp-enabled", async (_, enabled: boolean) => {
+  (store as any).set("mcpServerEnabled", Boolean(enabled));
+  if (enabled) {
+    const result = await startMcpServer();
+    if (!result.running) (store as any).set("mcpServerEnabled", false);
+    return { success: result.running, running: result.running, error: result.error };
+  }
+  await mcpServer.stop();
+  return { success: true, running: false };
+});
+
+ipcMain.handle("regenerate-mcp-token", async () => {
+  const token = randomBytes(24).toString("hex");
+  (store as any).set("mcpServerToken", token);
+  // The running server captured the old token, so restart to pick up the new one.
+  if (mcpServer.running) {
+    await mcpServer.stop();
+    await startMcpServer();
+  }
+  return { success: true, token };
 });
 
 // Request microphone permissions (macOS)
