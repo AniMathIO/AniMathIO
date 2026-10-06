@@ -81,6 +81,7 @@
     "webm-duration-fix": "1.0.4"
   },
   "devDependencies": {
+    "@babel/core": "7.29.7",
     "@electron/rebuild": "4.2.0",
     "@eslint/config-array": "0.23.5",
     "@eslint/eslintrc": "3.3.7",
@@ -117,13 +118,18 @@
     "tailwindcss": "4.3.3",
     "tar": "7.5.22",
     "typescript": "5.9.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "webpack": "5.109.2"
   },
   "optionalDependencies": {
     "dmg-license": "1.0.11"
   },
   "overrides": {
-    "node-abi": "4.33.0"
+    "node-abi": "4.33.0",
+    "nextron": {
+      "@babel/core": "$@babel/core",
+      "webpack": "$webpack"
+    }
   },
   "engines": {
     "node": ">=26.0.0",
