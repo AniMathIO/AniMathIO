@@ -7,6 +7,7 @@ import { StateContext } from '@/states';
 import { RootStore as State } from '../states/RootStore';
 import { addProjectToHistory } from '@/utils';
 import { ProjectLoadingModal } from './components/partials/ProjectLoadingModal';
+import { createMcpDispatcher } from '@/mcp/dispatcher';
 
 const HomePage = () => {
   // Create a single shared state instance
@@ -77,7 +78,35 @@ const HomePage = () => {
       };
     }
   }, [state]);
-  
+
+  useEffect(() => {
+    // The MCP server runs in the main process but every tool acts on this store,
+    // so commands arrive here and the reply is paired by id on the way back.
+    if (typeof window === 'undefined' || !window.electron?.ipcRenderer) return;
+
+    const dispatch = createMcpDispatcher(state);
+    const unsubscribe = window.electron.ipcRenderer.on(
+      'mcp-command',
+      async (command: { id: string; tool: string; args: Record<string, unknown> }) => {
+        if (!command?.id) return;
+        try {
+          const data = await dispatch(command.tool, command.args ?? {});
+          window.electron.ipcRenderer.send('mcp-result', { id: command.id, ok: true, data });
+        } catch (error) {
+          window.electron.ipcRenderer.send('mcp-result', {
+            id: command.id,
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    );
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [state]);
+
   return (
     <StateContext.Provider value={state}>
       <ProjectLoadingModal />
