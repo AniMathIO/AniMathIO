@@ -9,7 +9,7 @@
     "url": "https://github.com/AniMathIO/AniMathIO.git"
   },
   "author": {
-    "name": "Kovács Bálint-Hunor",
+    "name": "Kov\u00e1cs B\u00e1lint-Hunor",
     "email": "kovacsbalinthunor53@gmail.com"
   },
   "main": "app/background.js",
@@ -53,6 +53,7 @@
     "@hello-pangea/color-picker": "3.2.2",
     "@heroicons/react": "2.2.0",
     "@imgly/background-removal": "1.7.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@tailwindcss/postcss": "4.3.3",
     "@wavesurfer/react": "1.0.12",
     "animejs": "4.5.0",
@@ -85,7 +86,6 @@
     "@eslint/eslintrc": "3.3.7",
     "@eslint/object-schema": "3.0.5",
     "@playwright/test": "1.63.0",
-    "@vitest/browser-playwright": "4.1.10",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.7",
@@ -98,6 +98,7 @@
     "@types/react-dom": "19.2.7",
     "@types/react-modal": "3.16.3",
     "@vitest/browser": "4.1.10",
+    "@vitest/browser-playwright": "4.1.10",
     "@vitest/coverage-v8": "4.1.10",
     "@vitest/ui": "4.1.10",
     "autoprefixer": "10.5.5",
