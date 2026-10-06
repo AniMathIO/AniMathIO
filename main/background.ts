@@ -8,6 +8,7 @@ import Store from "electron-store";
 import { randomBytes } from "crypto";
 import { RendererBridge } from "./mcp/bridge";
 import { AniMathIOMcpServer } from "./mcp/server";
+import { registerMediaFileHandlers } from "./media-files";
 
 const store = new Store();
 const isProd = process.env.NODE_ENV === "production";
@@ -384,6 +385,9 @@ ipcMain.handle("write-project-file", async (event, filePath: string, fileData: n
     return { success: false, error: error.message || "Failed to write file" };
   }
 });
+
+// Direct media import and export paths, without file dialogs.
+registerMediaFileHandlers(ipcMain);
 
 // Handler to open external URLs
 ipcMain.handle("open-external-url", async (event, url: string) => {

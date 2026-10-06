@@ -114,3 +114,16 @@ describe("Preload Script", () => {
     });
   });
 });
+
+it("exposes working media and video IPC APIs through the actual preload", async () => {
+  vi.clearAllMocks();
+  await import("../../main/preload");
+  const [name, api] = mockContextBridge.exposeInMainWorld.mock.calls[0];
+  expect(name).toBe("electron");
+  mockIpcRenderer.invoke.mockResolvedValueOnce({ success: true, dataUrl: "data:image/png;base64,AA==", type: "image" });
+  await expect(api.readMediaFile("/tmp/image.png")).resolves.toMatchObject({ success: true, type: "image" });
+  expect(mockIpcRenderer.invoke).toHaveBeenLastCalledWith("read-media-file", "/tmp/image.png");
+  mockIpcRenderer.invoke.mockResolvedValueOnce({ success: false, error: "disk full" });
+  await expect(api.writeVideoFile("/tmp/movie.webm", [1, 2, 255])).resolves.toEqual({ success: false, error: "disk full" });
+  expect(mockIpcRenderer.invoke).toHaveBeenLastCalledWith("write-video-file", "/tmp/movie.webm", [1, 2, 255]);
+});

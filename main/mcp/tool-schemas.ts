@@ -185,6 +185,31 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "add_media",
+    description:
+      "Import an image, video, or audio file from an absolute path on the machine running AniMathIO into the open project. Selects the matching resource panel and waits for decoded media before adding timeline elements. Returns the created element IDs; video creates both video and audio elements. Common image formats, MP4/WebM/MOV/M4V video, and MP3/WAV/OGG/M4A/AAC/FLAC audio are accepted by extension; decoding depends on Electron's codecs. Missing, unsupported, or undecodable files fail with a clear error.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Absolute local filesystem path to an existing media file." } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "export_video",
+    description:
+      "Render the open project to an absolute .mp4 or .webm file path, overwriting an existing file. Requires an existing parent directory. Format defaults to the path extension; an explicit format must match it. Recording runs in real time: a 30-second project takes at least 30 seconds, plus conversion and disk writing. MP4 conversion downloads the FFmpeg core if needed. Returns only after the file is written; allow a long client timeout and avoid editing the project during export.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Absolute destination path ending in .mp4 or .webm." },
+        format: { type: "string", enum: ["mp4", "webm"], description: "Optional output format; inferred from path when omitted, must match its extension." },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export const MCP_TOOL_NAMES = MCP_TOOLS.map(t => t.name);

@@ -36,6 +36,16 @@ declare global {
                 success: boolean;
                 error?: string;
             }>;
+            readMediaFile: (filePath: string) => Promise<{
+                success: boolean;
+                type?: "image" | "video" | "audio";
+                dataUrl?: string;
+                error?: string;
+            }>;
+            writeVideoFile: (filePath: string, fileData: number[]) => Promise<{
+                success: boolean;
+                error?: string;
+            }>;
             onOpenFileFromSystem: (callback: (data: {
                 success: boolean;
                 data?: number[];

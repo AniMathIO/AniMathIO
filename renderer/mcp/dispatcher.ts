@@ -5,6 +5,7 @@ import { parseManimScene } from "@/utils/manim/parser";
 import { translateManimScene } from "@/utils/manim/translator";
 import type { Animation, EditorElement, Placement, TimeFrame } from "@/types";
 import type { RootStore } from "@/states/RootStore";
+import { waitForElementById, waitForMediaReady } from "@/utils/domLoad";
 
 type Args = Record<string, any>;
 
@@ -86,7 +87,71 @@ function describeElement(element: EditorElement) {
  * plain JSON-serialisable data — it crosses an IPC boundary.
  */
 export function createMcpDispatcher(state: RootStore) {
+  let importingMedia = false;
   const handlers: Record<string, (args: Args) => Promise<unknown>> = {
+    async add_media(args) {
+      requireEditor(state);
+      const path = requireString(args, "path");
+      if (importingMedia) throw new ToolError("Another media import is in progress. Wait for it to finish.");
+      importingMedia = true;
+      try {
+        const result = await window.electron.readMediaFile(path);
+        if (!result.success || !result.type || !result.dataUrl) {
+          throw new ToolError(result.error ?? `Could not read media file "${path}".`);
+        }
+        const { type, dataUrl } = result;
+        const index = type === "video" ? state.videos.length : type === "image" ? state.images.length : state.audios.length;
+        if (type === "video") { state.addVideoResource(dataUrl); state.selectedMenuOption = "Videos"; }
+        else if (type === "image") { state.addImageResource(dataUrl); state.selectedMenuOption = "Images"; }
+        else { state.addAudioResource(dataUrl); state.selectedMenuOption = "Audios"; }
+
+        const element = await waitForElementById(`${type}-${index}`);
+        if (!element) throw new ToolError(`The ${type} resource element never mounted. Keep the editor and resource panel open.`);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            waitForMediaReady(element as HTMLVideoElement | HTMLImageElement | HTMLAudioElement),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => reject(new ToolError(`Timed out decoding media file "${path}".`)), 10_000);
+            }),
+          ]);
+        } finally { clearTimeout(timer); }
+        if (type === "image") {
+          const image = element as HTMLImageElement;
+          if (!(image.naturalWidth > 0 && image.naturalHeight > 0)) throw new ToolError(`Could not decode image "${path}".`);
+        } else {
+          const media = element as HTMLMediaElement;
+          if (media.error || !Number.isFinite(media.duration) || media.duration <= 0) throw new ToolError(`Could not decode ${type} "${path}".`);
+          if (type === "video") {
+            const video = element as HTMLVideoElement;
+            if (!(video.videoWidth > 0 && video.videoHeight > 0)) throw new ToolError(`Could not decode video "${path}".`);
+          }
+        }
+        requireEditor(state);
+        const before = new Set(state.editorElements.map(e => e.id));
+        if (type === "video") state.addVideo(index);
+        else if (type === "image") state.addImage(index);
+        else state.addAudio(index);
+        const ids = state.editorElements.filter(e => !before.has(e.id)).map(e => e.id);
+        if (!ids.length) throw new ToolError(`The ${type} timeline element could not be created.`);
+        return { ids, type };
+      } finally { importingMedia = false; }
+    },
+
+    async export_video(args) {
+      requireEditor(state);
+      const path = requireString(args, "path");
+      if (!path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path) && !path.startsWith("\\\\")) {
+        throw new ToolError("An absolute destination path is required.");
+      }
+      const extension = /\.(mp4|webm)$/i.exec(path)?.[1].toLowerCase();
+      if (!extension) throw new ToolError("Video destination must end in .mp4 or .webm.");
+      const format = args.format ?? extension;
+      if (format !== "mp4" && format !== "webm") throw new ToolError('"format" must be mp4 or webm.');
+      if (format !== extension) throw new ToolError("Export format must match the destination extension.");
+      await state.exportStore.saveCanvasToVideoToPath(path, format);
+      return { exported: true, path, format };
+    },
     async get_project_state() {
       return {
         isEditorActive: state.isEditorActive,
