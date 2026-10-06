@@ -48,36 +48,30 @@ function readBody(req: IncomingMessage): Promise<unknown> {
 
 export class AniMathIOMcpServer {
   private http: HttpServer | null = null;
-  private transport: StreamableHTTPServerTransport | null = null;
 
   constructor(private readonly bridge: RendererBridge) {}
 
-  get running(): boolean {
-    return this.http !== null;
-  }
-
-  async start(port: number, token: string): Promise<void> {
-    if (this.http) return;
-
+  /**
+   * A stateless StreamableHTTPServerTransport handles exactly one request: the
+   * first succeeds and every later one answers 500. So each request gets its own
+   * server and transport, torn down once the response is done.
+   */
+  private buildInstance() {
     const mcp = new McpServer(
       { name: "animathio", version: "1.7.1" },
       { capabilities: { tools: {} } }
     );
 
-    mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: MCP_TOOLS,
-    }));
+    mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: MCP_TOOLS }));
 
     mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       try {
         const data = await this.bridge.call(name, (args ?? {}) as Record<string, unknown>);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-        };
+        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
       } catch (error) {
-        // Surfaced to the agent as a tool error rather than a protocol error, so
-        // it can read the reason and retry rather than losing the connection.
+        // Reported as a tool error, not a protocol error, so the agent can read
+        // the reason and retry instead of losing the connection.
         return {
           isError: true,
           content: [
@@ -90,16 +84,23 @@ export class AniMathIOMcpServer {
       }
     });
 
-    // Stateless: every request carries its own context, so there are no sessions
-    // to resume and nothing to clean up if an agent disconnects abruptly.
-    this.transport = new StreamableHTTPServerTransport({
+    const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
     });
-    mcp.onerror = (error) => console.error("[mcp] server error:", error);
-    this.transport.onerror = (error) => console.error("[mcp] transport error:", error);
 
-    await mcp.connect(this.transport);
+    mcp.onerror = (error) => console.error("[mcp] server error:", error);
+    transport.onerror = (error) => console.error("[mcp] transport error:", error);
+
+    return { mcp, transport };
+  }
+
+  get running(): boolean {
+    return this.http !== null;
+  }
+
+  async start(port: number, token: string): Promise<void> {
+    if (this.http) return;
 
     this.http = createServer((req, res) => {
       void this.handle(req, res, token);
@@ -120,10 +121,6 @@ export class AniMathIOMcpServer {
     this.bridge.abortAll("The AniMathIO MCP server was stopped.");
     const server = this.http;
     this.http = null;
-    if (this.transport) {
-      await this.transport.close().catch(() => {});
-      this.transport = null;
-    }
     if (server) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -144,9 +141,16 @@ export class AniMathIOMcpServer {
       return;
     }
 
+    const { mcp, transport } = this.buildInstance();
+    res.on("close", () => {
+      void transport.close().catch(() => {});
+      void mcp.close().catch(() => {});
+    });
+
     try {
+      await mcp.connect(transport);
       const body = req.method === "POST" ? await readBody(req) : undefined;
-      await this.transport!.handleRequest(req, res, body);
+      await transport.handleRequest(req, res, body);
     } catch (error) {
       console.error("[mcp] request failed:", error);
       if (!res.headersSent) {

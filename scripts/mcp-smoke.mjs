@@ -45,13 +45,22 @@ const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${
   requestInit: { headers: { Authorization: `Bearer ${token}` } },
 });
 
+function reportError(error) {
+  console.error(`  ${error?.message ?? error}`);
+  if (error?.code !== undefined) console.error(`  Code: ${error.code}`);
+  if (error?.cause) {
+    console.error(`  Cause: ${error.cause.code ?? ""} ${error.cause.message ?? error.cause}`);
+  }
+}
+
 try {
   await client.connect(transport);
 } catch (error) {
   console.error(`Could not connect to http://127.0.0.1:${port}/mcp`);
-  console.error(`  ${error?.message ?? error}`);
+  reportError(error);
   console.error("Check that AniMathIO is running, the MCP server is enabled in Settings,");
   console.error("and that the port and token match what Settings shows.");
+  await client.close().catch(() => {});
   process.exit(1);
 }
 
@@ -82,6 +91,7 @@ try {
   }
 } catch (error) {
   console.error(`Request failed: ${error?.message ?? error}`);
+  if (error?.cause || error?.code !== undefined) reportError(error);
   process.exitCode = 1;
 } finally {
   await client.close().catch(() => {});
