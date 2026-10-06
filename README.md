@@ -152,12 +152,16 @@ The server runs inside the Electron main process, so AniMathIO must be running w
 | `set_canvas` | Canvas size, background colour, timeline duration |
 | `seek` / `set_playing` | Move the playhead, start/stop playback |
 | `save_project` | Save the open project |
+| `add_media` | Import an image, video, or audio file from an absolute local path into the project |
+| `export_video` | Render the project to an absolute `.mp4` or `.webm` path |
 
 `import_manim_scene` is the highest-leverage one: it builds an entire scene in a single call.
 
-Importing media files and exporting video are not yet exposed over MCP — use the normal UI for those.
+`add_media` takes a required `path` on the machine running AniMathIO and returns the created element IDs; a video creates both video and audio elements. It selects the matching resource panel and waits for the media to decode. Unsupported file types, missing files, and decoding failures report an error.
 
-> **Security:** a connected agent can read and modify the open project and write files. Keep the token private, and enable the server only while you are using it.
+`export_video` takes a required absolute `path` ending in `.mp4` or `.webm` and an optional `format` that must match the extension (otherwise the extension determines the format). The parent directory must exist; an existing destination is overwritten. Export records in **real time**: a 30-second project takes at least 30 seconds, plus conversion and writing. MP4 conversion fetches the FFmpeg core if needed. Allow a long client timeout, keep the project open, and avoid editing during export. The tool returns after the file is written.
+
+> **Security:** a connected agent can read local media, modify the open project, and write files. Keep the token private, and enable the server only while you are using it.
 
 ### Testing the connection
 
