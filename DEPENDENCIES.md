@@ -159,3 +159,9 @@ The app has no direct zod dependency; everything resolves to one
 it would crash the image background-removal feature at runtime. Alert #410
 (zod < 4.6.6) has no 3.x fix, so it stays open until background-removal is
 replaced or updated upstream.
+
+## Open dependency items (2026-11-02 maintenance run)
+
+- **zod** — alert stays open, blocked on `@imgly/background-removal` (latest 1.7.0 has no zod 4 support); see "zod 3 -> 4 stays deferred".
+- **eslint 10 peer ranges** — `npm ls` reports `eslint-plugin-import`, `eslint-plugin-jsx-a11y` and `eslint-plugin-react` as invalid because their peer ranges stop below eslint 10. Linting works; accept until those plugins widen their ranges.
+- **minimatch pins** — `overrides` pin minimatch 3.1.5 for `@electron/asar` and `dir-compare` (under `app-builder-lib`) and 5.1.9 for `ejs`, because those consumers need the older API. Do not bump these to 11.x without checking each consumer.
