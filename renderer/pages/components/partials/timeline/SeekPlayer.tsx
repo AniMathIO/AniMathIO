@@ -26,6 +26,7 @@ const MARKINGS = [
     }
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- intentionally empty props placeholder
 export type SeekPlayerProps = {};
 
 
@@ -93,7 +94,7 @@ const SeekPlayer = observer((_props: SeekPlayerProps) => {
             <ScaleRangeInput
                 max={state.maxTime}
                 value={state.currentTimeInMs}
-                onChange={(value: any) => {
+                onChange={(value: number) => {
                     state.handleSeek(value);
                 }}
                 height={32}

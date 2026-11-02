@@ -44,27 +44,12 @@ import type {
 const DEFAULT_RUN_TIME = 1;
 /** Default pause added after each self.play() if no explicit wait follows */
 const DEFAULT_POST_PLAY_PAUSE = 0;
-/** Manim canvas half-widths */
-const MANIM_HW = 7;
-const MANIM_HH = 4;
 
 // ---------- coordinate helpers ----------
 
 interface CanvasSize {
   width: number;
   height: number;
-}
-
-/** Convert Manim [x, y, z] to AniMathIO pixel coords (top-left origin) */
-function manimToPixel(
-  mx: number,
-  my: number,
-  canvas: CanvasSize
-): { x: number; y: number } {
-  return {
-    x: ((mx + MANIM_HW) / (2 * MANIM_HW)) * canvas.width,
-    y: ((MANIM_HH - my) / (2 * MANIM_HH)) * canvas.height,
-  };
 }
 
 function defaultPlacement(canvas: CanvasSize, index: number): Placement {

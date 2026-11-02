@@ -126,7 +126,7 @@ const MafsModal = observer(({ isOpen, onClose, mafsElement, className }: MafsMod
 
     if (!isOpen) return null;
 
-    const handleMafsConfigChange = (key: keyof typeof mafsConfig, value: any) => {
+    const handleMafsConfigChange = (key: keyof typeof mafsConfig, value: unknown) => {
         try {
             setMafsConfig((prevConfig) => ({
                 ...prevConfig,

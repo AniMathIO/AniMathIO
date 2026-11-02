@@ -32,7 +32,7 @@ Object.defineProperty(global, "window", {
 });
 
 let videoPlayImpl: () => Promise<void> = () => Promise.resolve();
-let lastCreatedVideoEl: any = null;
+let _lastCreatedVideoEl: any = null;
 const audioElementsById = new Map<string, any>();
 
 Object.defineProperty(global, "document", {
@@ -52,7 +52,7 @@ Object.defineProperty(global, "document", {
           play: vi.fn(() => videoPlayImpl()),
           remove: vi.fn(),
         };
-        lastCreatedVideoEl = el;
+        _lastCreatedVideoEl = el;
         return el;
       }
       return {};
@@ -141,7 +141,7 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     videoPlayImpl = () => Promise.resolve();
-    lastCreatedVideoEl = null;
+    _lastCreatedVideoEl = null;
     MockAudioContext.instances.length = 0;
     MockMediaRecorder.instances.length = 0;
     downloadAnchors.length = 0;

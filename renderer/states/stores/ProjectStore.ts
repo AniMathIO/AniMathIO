@@ -51,7 +51,7 @@ export class ProjectStore {
     for (const element of this.root.elementStore.editorElements) {
       if (["image", "video", "audio"].includes(element.type)) {
         if ("src" in element.properties) {
-          const src = (element.properties as any).src as string;
+          const src = (element.properties as { src?: unknown }).src as string;
           if (typeof src === "string" && (src.startsWith("blob:") || src.startsWith("data:"))) {
             mediaPromises.push(
               fetch(src)
@@ -156,7 +156,7 @@ export class ProjectStore {
     // cannot be re-established against a new context (see AudioContextStore).
     this.root.audioContextStore.releaseDetached();
 
-    this.root.elementStore.editorElements = stateObject.editorElements.map((element: any) => {
+    this.root.elementStore.editorElements = stateObject.editorElements.map((element: EditorElement) => {
       if (element.type === "audio") {
         return {
           ...element,
@@ -201,15 +201,15 @@ export class ProjectStore {
 
     for (const element of this.root.elementStore.editorElements) {
       if (["image", "video", "audio"].includes(element.type)) {
-        if ("properties" in element && "src" in (element.properties as any)) {
+        if ("properties" in element && "src" in (element.properties as { src?: unknown })) {
           const dataUrl = mediaDataMap.get(element.id);
           if (dataUrl) {
-            (element.properties as any).src = dataUrl;
+            (element.properties as { src?: unknown }).src = dataUrl;
             if (element.type === "image") validImages.add(dataUrl);
             if (element.type === "video") validVideos.add(dataUrl);
             if (element.type === "audio") validAudios.add(dataUrl);
-          } else if (typeof (element.properties as any).src === "string") {
-            const src = (element.properties as any).src as string;
+          } else if (typeof (element.properties as { src?: unknown }).src === "string") {
+            const src = (element.properties as { src?: unknown }).src as string;
             if (element.type === "image") validImages.add(src);
             if (element.type === "video") validVideos.add(src);
             if (element.type === "audio") validAudios.add(src);

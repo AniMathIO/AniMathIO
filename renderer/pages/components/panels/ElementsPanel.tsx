@@ -4,7 +4,7 @@ import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import Element from "../entity/Element";
 
-const ElementsPanel = observer((_props: {}) => {
+const ElementsPanel = observer(() => {
   const state = React.useContext(StateContext);
   return (
     <div className="bg-slate-200 text-black dark:bg-gray-700 dark:text-white h-full overflow-scroll">

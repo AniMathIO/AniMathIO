@@ -7,6 +7,7 @@ import type { Animation, EditorElement, Placement, TimeFrame } from "@/types";
 import type { RootStore } from "@/states/RootStore";
 import { waitForElementById, waitForMediaReady } from "@/utils/domLoad";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- MCP tool arguments are untyped JSON validated per-tool at runtime
 type Args = Record<string, any>;
 
 /** Thrown for problems the agent can act on; surfaced as the tool's error text. */

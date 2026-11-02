@@ -12,11 +12,7 @@ type TextToLatexProps = {
 };
 
 const TextToLatex: React.FC<TextToLatexProps> = ({
-    latexProps,
-    setLatexProps,
-    latexInput,
     setLatexInput,
-    handleLatexSubmit,
 }) => {
     const [textInput, setTextInput] = useState('');
     const [isConverting, setIsConverting] = useState(false);

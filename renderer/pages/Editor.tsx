@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useCallback } from "react";
 import { StateContext } from "@/states";
+import type { RootStore } from "@/states/RootStore";
 import { observer } from "mobx-react";
 import Resources from "./components/Resources";
 import ElementsPanel from "./components/panels/ElementsPanel";
@@ -15,7 +16,6 @@ import { Stage, Layer, Image, Text, Line, Transformer } from "react-konva";
 import type { EditorElement, VideoEditorElement, ImageEditorElement, TextEditorElement, MafsEditorElement } from "@/types";
 import {
   makeImageSceneFunc,
-  getFilterFromEffectType,
   snapNodeToGuides,
   clampNodeToStage,
   NO_GUIDES,
@@ -39,6 +39,7 @@ function useDomElementById<T extends HTMLElement>(id: string): T | null {
   const [el, setEl] = React.useState<T | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the tracked node when the id changes, then re-resolve it via the DOM observer below
     setEl(null);
     const existing = document.getElementById(id) as T | null;
     if (existing) {
@@ -59,7 +60,7 @@ function useDomElementById<T extends HTMLElement>(id: string): T | null {
   return el;
 }
 
-const VideoElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: VideoEditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
+const VideoElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: VideoEditorElement; stateCtx: RootStore; onGuidesChange: (guides: SnapGuides) => void }) => {
   const nodeRef = useRef<Konva.Image>(null);
   const animRef = useRef<Konva.Animation | null>(null);
   const videoElement = useDomElementById<HTMLVideoElement>(element.properties.elementId);
@@ -100,7 +101,7 @@ const VideoElementNode = observer(({ element, stateCtx, onGuidesChange }: { elem
       rotation={rotation}
       draggable
       dragBoundFunc={(pos) => clampNodeToStage(nodeRef.current!, pos, stateCtx.canvas_width, stateCtx.canvas_height)}
-      sceneFunc={makeImageSceneFunc(() => videoElement, effect as any)}
+      sceneFunc={makeImageSceneFunc(() => videoElement, effect)}
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
       onDragMove={(e) => {
@@ -131,7 +132,7 @@ const VideoElementNode = observer(({ element, stateCtx, onGuidesChange }: { elem
   );
 });
 
-const ImageElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: ImageEditorElement | MafsEditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
+const ImageElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: ImageEditorElement | MafsEditorElement; stateCtx: RootStore; onGuidesChange: (guides: SnapGuides) => void }) => {
   const nodeRef = useRef<Konva.Image>(null);
   const imgElement = useDomElementById<HTMLImageElement>(element.properties.elementId);
 
@@ -164,7 +165,7 @@ const ImageElementNode = observer(({ element, stateCtx, onGuidesChange }: { elem
       rotation={rotation}
       draggable
       dragBoundFunc={(pos) => clampNodeToStage(nodeRef.current!, pos, stateCtx.canvas_width, stateCtx.canvas_height)}
-      sceneFunc={makeImageSceneFunc(() => imgElement, effect as any)}
+      sceneFunc={makeImageSceneFunc(() => imgElement, effect)}
       onClick={() => stateCtx.setSelectedElement(element)}
       onTap={() => stateCtx.setSelectedElement(element)}
       onDragMove={(e) => {
@@ -195,7 +196,7 @@ const ImageElementNode = observer(({ element, stateCtx, onGuidesChange }: { elem
   );
 });
 
-const TextElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: TextEditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
+const TextElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: TextEditorElement; stateCtx: RootStore; onGuidesChange: (guides: SnapGuides) => void }) => {
   const nodeRef = useRef<Konva.Text>(null);
 
   useEffect(() => {
@@ -254,7 +255,7 @@ const TextElementNode = observer(({ element, stateCtx, onGuidesChange }: { eleme
   );
 });
 
-const EditorElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: EditorElement; stateCtx: any; onGuidesChange: (guides: SnapGuides) => void }) => {
+const EditorElementNode = observer(({ element, stateCtx, onGuidesChange }: { element: EditorElement; stateCtx: RootStore; onGuidesChange: (guides: SnapGuides) => void }) => {
   switch (element.type) {
     case "video":
       return <VideoElementNode element={element} stateCtx={stateCtx} onGuidesChange={onGuidesChange} />;
@@ -307,7 +308,7 @@ const EditorCanvas = observer(() => {
 
   // Deselect when clicking empty stage area
   const handleStageClick = useCallback(
-    (e: Konva.KonvaEventObject<MouseEvent>) => {
+    (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       if (e.target === stageRef.current) {
         state.setSelectedElement(null);
       }
@@ -322,7 +323,7 @@ const EditorCanvas = observer(() => {
       height={state.canvas_height}
       style={{ backgroundColor: state.backgroundColor }}
       onClick={handleStageClick}
-      onTap={handleStageClick as any}
+      onTap={handleStageClick}
     >
       <Layer ref={layerRef}>
         {state.editorElements.map((element) => (

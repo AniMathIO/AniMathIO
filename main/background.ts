@@ -1,7 +1,7 @@
 import path from "path";
 import { exec } from "child_process";
 import { IpcMainEvent, app, ipcMain, systemPreferences, dialog, BrowserWindow, shell } from "electron";
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import serve from "electron-serve";
 import { createWindow } from "./helpers";
 import Store from "electron-store";
@@ -22,16 +22,16 @@ const mcpBridge = new RendererBridge(() => mainWindow);
 const mcpServer = new AniMathIOMcpServer(mcpBridge);
 
 function getMcpToken(): string {
-  let token = (store as any).get("mcpServerToken", "") as string;
+  let token = store.get("mcpServerToken", "") as string;
   if (!token) {
     token = randomBytes(24).toString("hex");
-    (store as any).set("mcpServerToken", token);
+    store.set("mcpServerToken", token);
   }
   return token;
 }
 
 function getMcpPort(): number {
-  return (store as any).get("mcpServerPort", DEFAULT_MCP_PORT) as number;
+  return store.get("mcpServerPort", DEFAULT_MCP_PORT) as number;
 }
 
 async function startMcpServer(): Promise<{ running: boolean; error?: string }> {
@@ -104,12 +104,12 @@ async function handleOpenFile(filePath: string) {
       fileName: fileName,
       filePath: filePath,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error opening file:", error);
     if (mainWindow) {
       mainWindow.webContents.send("open-file-from-system", {
         success: false,
-        error: error.message || "Failed to open file",
+        error: (error as Error).message || "Failed to open file",
       });
     }
   }
@@ -135,7 +135,7 @@ async function handleOpenFile(filePath: string) {
     app.quit();
   } else {
     // Handle second instance (when user tries to open file with already running app)
-    app.on("second-instance", (event, commandLine, workingDirectory) => {
+    app.on("second-instance", (event, commandLine, _workingDirectory) => {
       // Focus existing window
       if (mainWindow) {
         if (mainWindow.isMinimized()) mainWindow.restore();
@@ -175,7 +175,7 @@ async function handleOpenFile(filePath: string) {
 
   // Restore the MCP server if the user had it enabled. Deliberately after the
   // window loads, since every tool call needs a renderer to talk to.
-  if ((store as any).get("mcpServerEnabled", false)) {
+  if (store.get("mcpServerEnabled", false)) {
     void startMcpServer();
   }
 
@@ -213,28 +213,28 @@ ipcMain.on("message", async (event, arg) => {
 });
 
 ipcMain.handle("get-theme-mode", () => {
-  return (store as any).get("themeMode", "light");
+  return store.get("themeMode", "light");
 });
 
 ipcMain.on("set-theme-mode", (event, themeMode) => {
-  (store as any).set("themeMode", themeMode);
+  store.set("themeMode", themeMode);
 });
 
 ipcMain.handle("get-gemini-api-token", () => {
-  return (store as any).get("geminiApiToken", "");
+  return store.get("geminiApiToken", "");
 });
 
 ipcMain.handle("set-gemini-api-token", (_, apiToken) => {
-  (store as any).set("geminiApiToken", apiToken);
+  store.set("geminiApiToken", apiToken);
   return true;
 });
 
 ipcMain.handle("get-gemini-model", () => {
-  return (store as any).get("geminiModel", "gemini-2.0-flash");
+  return store.get("geminiModel", "gemini-2.0-flash");
 });
 
 ipcMain.handle("set-gemini-model", (_, model) => {
-  (store as any).set("geminiModel", model);
+  store.set("geminiModel", model);
   return true;
 });
 
@@ -244,7 +244,7 @@ ipcMain.handle("set-gemini-model", (_, model) => {
 
 ipcMain.handle("get-mcp-settings", () => {
   return {
-    enabled: (store as any).get("mcpServerEnabled", false) as boolean,
+    enabled: store.get("mcpServerEnabled", false) as boolean,
     port: getMcpPort(),
     token: getMcpToken(),
     running: mcpServer.running,
@@ -252,10 +252,10 @@ ipcMain.handle("get-mcp-settings", () => {
 });
 
 ipcMain.handle("set-mcp-enabled", async (_, enabled: boolean) => {
-  (store as any).set("mcpServerEnabled", Boolean(enabled));
+  store.set("mcpServerEnabled", Boolean(enabled));
   if (enabled) {
     const result = await startMcpServer();
-    if (!result.running) (store as any).set("mcpServerEnabled", false);
+    if (!result.running) store.set("mcpServerEnabled", false);
     return { success: result.running, running: result.running, error: result.error };
   }
   await mcpServer.stop();
@@ -264,7 +264,7 @@ ipcMain.handle("set-mcp-enabled", async (_, enabled: boolean) => {
 
 ipcMain.handle("regenerate-mcp-token", async () => {
   const token = randomBytes(24).toString("hex");
-  (store as any).set("mcpServerToken", token);
+  store.set("mcpServerToken", token);
   // The running server captured the old token, so restart to pick up the new one.
   if (mcpServer.running) {
     await mcpServer.stop();
@@ -272,16 +272,6 @@ ipcMain.handle("regenerate-mcp-token", async () => {
   }
   return { success: true, token };
 });
-
-// Request microphone permissions (macOS)
-function requestMicrophonePermission() {
-  if (process.platform === "darwin") {
-    const status = systemPreferences.getMediaAccessStatus("microphone");
-    if (status !== "granted") {
-      systemPreferences.askForMediaAccess("microphone");
-    }
-  }
-}
 
 // Set up ipcMain handler for permission requests from the renderer
 ipcMain.handle("request-microphone-permission", async () => {
@@ -310,14 +300,14 @@ ipcMain.handle("read-project-file", async (event, filePath: string) => {
       fileName: path.basename(filePath),
       filePath: filePath,
     };
-  } catch (error: any) {
+  } catch (error) {
     // Return error without showing dialog
-    return { success: false, error: error.message || "Failed to read file" };
+    return { success: false, error: (error as Error).message || "Failed to read file" };
   }
 });
 
 // Handler to open project file with dialog (for files not in history)
-ipcMain.handle("open-project-file", async (event) => {
+ipcMain.handle("open-project-file", async (_event) => {
   try {
     const result = await dialog.showOpenDialog({
       title: "Open Project File",
@@ -340,8 +330,8 @@ ipcMain.handle("open-project-file", async (event) => {
       fileName: path.basename(selectedPath),
       filePath: selectedPath,
     };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Failed to open file" };
+  } catch (error) {
+    return { success: false, error: (error as Error).message || "Failed to open file" };
   }
 });
 
@@ -363,15 +353,15 @@ ipcMain.handle("save-project-file", async (event, fileData: number[], suggestedN
 
     const filePath = result.filePath;
     const fileBuffer = Buffer.from(fileData);
-    await require("fs/promises").writeFile(filePath, fileBuffer);
+    await writeFile(filePath, fileBuffer);
 
     return {
       success: true,
       fileName: path.basename(filePath),
       filePath: filePath,
     };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Failed to save file" };
+  } catch (error) {
+    return { success: false, error: (error as Error).message || "Failed to save file" };
   }
 });
 
@@ -379,10 +369,10 @@ ipcMain.handle("save-project-file", async (event, fileData: number[], suggestedN
 ipcMain.handle("write-project-file", async (event, filePath: string, fileData: number[]) => {
   try {
     const fileBuffer = Buffer.from(fileData);
-    await require("fs/promises").writeFile(filePath, fileBuffer);
+    await writeFile(filePath, fileBuffer);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Failed to write file" };
+  } catch (error) {
+    return { success: false, error: (error as Error).message || "Failed to write file" };
   }
 });
 
@@ -394,7 +384,7 @@ ipcMain.handle("open-external-url", async (event, url: string) => {
   try {
     await shell.openExternal(url);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Failed to open URL" };
+  } catch (error) {
+    return { success: false, error: (error as Error).message || "Failed to open URL" };
   }
 });

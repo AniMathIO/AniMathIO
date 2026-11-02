@@ -60,7 +60,7 @@ const ScaleRangeInput: React.FC<ScaleRangeInputProps> = (props) => {
             refIsMouseDown.current = true;
             updateFromMouseEvent(e);
         }}
-        onMouseUp={(e) => {
+        onMouseUp={() => {
             refIsMouseDown.current = false;
         }}
         onMouseMove={(e) => {
@@ -68,7 +68,7 @@ const ScaleRangeInput: React.FC<ScaleRangeInputProps> = (props) => {
                 updateFromMouseEvent(e);
             }
         }}
-        onMouseLeave={(e) => {
+        onMouseLeave={() => {
             refIsMouseDown.current = false;
         }}
     >

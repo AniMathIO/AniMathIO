@@ -233,7 +233,7 @@ describe("AniMathIO UI Components", () => {
 
     document.body.appendChild(editorContainer);
 
-    let shortcutsTriggered = {
+    const shortcutsTriggered = {
       ctrlS: false,
       ctrlZ: false,
       delete: false,

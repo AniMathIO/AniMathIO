@@ -1,20 +1,20 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 contextBridge.exposeInMainWorld("electron", {
   ipcRenderer: {
-    send: (channel: string, data: any) => ipcRenderer.send(channel, data),
-    on: (channel: string, func: (...args: any[]) => void) => {
+    send: (channel: string, data: unknown) => ipcRenderer.send(channel, data),
+    on: (channel: string, func: (...args: unknown[]) => void) => {
       // Create a wrapper function that we can properly remove
-      const wrapper = (event: any, ...args: any[]) => func(...args);
+      const wrapper = (_event: IpcRendererEvent, ...args: unknown[]) => func(...args);
       ipcRenderer.on(channel, wrapper);
       // Return cleanup function
       return () => {
         ipcRenderer.removeListener(channel, wrapper);
       };
     },
-    removeListener: (channel: string, func: (...args: any[]) => void) =>
+    removeListener: (channel: string, func: (...args: unknown[]) => void) =>
       ipcRenderer.removeListener(channel, func),
-    invoke: (channel: string, data: any) => ipcRenderer.invoke(channel, data),
+    invoke: (channel: string, data: unknown) => ipcRenderer.invoke(channel, data),
   },
   // Add the microphone permission request function
   requestMicrophonePermission: () => 
@@ -36,8 +36,8 @@ contextBridge.exposeInMainWorld("electron", {
   writeVideoFile: (filePath: string, fileData: number[]) =>
     ipcRenderer.invoke('write-video-file', filePath, fileData),
   // Listen for file opened from system (Open with)
-  onOpenFileFromSystem: (callback: (data: any) => void) => {
-    const wrapper = (event: any, data: any) => callback(data);
+  onOpenFileFromSystem: (callback: (data: unknown) => void) => {
+    const wrapper = (_event: IpcRendererEvent, data: unknown) => callback(data);
     ipcRenderer.on('open-file-from-system', wrapper);
     // Return cleanup function
     return () => {

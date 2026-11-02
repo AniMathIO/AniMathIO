@@ -5,7 +5,6 @@ import {
   Rectangle,
   Menu,
   shell,
-  ipcMain,
 } from "electron";
 import Store from "electron-store";
 import path from "path";
@@ -25,7 +24,7 @@ export const createWindow = (
   };
   let state = {};
 
-  const restore = () => (store as any).get(key, defaultSize);
+  const restore = () => store.get(key, defaultSize) as typeof defaultSize;
 
   const getCurrentPosition = () => {
     const position = win.getPosition();
@@ -71,7 +70,7 @@ export const createWindow = (
     if (!win.isMinimized() && !win.isMaximized()) {
       Object.assign(state, getCurrentPosition());
     }
-    (store as any).set(key, state);
+    store.set(key, state);
   };
 
   state = ensureVisibleOnSomeDisplay(restore());

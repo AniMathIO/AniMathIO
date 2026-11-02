@@ -95,6 +95,7 @@ export type BlackAndWhiteEffect =
 export type Effect = BlackAndWhiteEffect;
 export type EffectType = Effect["type"];
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- `{}` is the intended no-extra-properties default for the intersected P
 export type AnimationBase<T, P = {}> = {
   id: string;
   targetId: string;
