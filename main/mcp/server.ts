@@ -9,6 +9,7 @@ import {
 import { MCP_TOOLS } from "./tool-schemas";
 import { RendererBridge } from "./bridge";
 import { callEditorTool } from "./tool-call";
+import packageJson from "../../package.json";
 
 export const MCP_PATH = "/mcp";
 const MAX_BODY_BYTES = 1_000_000;
@@ -59,7 +60,7 @@ export class AniMathIOMcpServer {
    */
   private buildInstance() {
     const mcp = new McpServer(
-      { name: "animathio", version: "1.7.1" },
+      { name: "animathio", version: packageJson.version },
       { capabilities: { tools: {} } }
     );
 

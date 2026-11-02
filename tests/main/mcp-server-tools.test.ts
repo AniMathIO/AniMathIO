@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { AniMathIOMcpServer } from "../../main/mcp/server";
+import packageJson from "../../package.json";
 import type { RendererBridge } from "../../main/mcp/bridge";
 
 vi.mock("@modelcontextprotocol/sdk/server/index.js", () => ({
   Server: class {
     handlers = new Map();
+    constructor(public info: unknown) {}
     setRequestHandler(schema: unknown, handler: unknown) { this.handlers.set(schema, handler); }
   },
 }));
@@ -21,6 +23,11 @@ function handler(call: ReturnType<typeof vi.fn>) {
 }
 
 describe("MCP server tool requests", () => {
+  it("reports the version from package.json", () => {
+    const server = new AniMathIOMcpServer({ call: vi.fn() } as unknown as RendererBridge);
+    const instance = (server as any).buildInstance();
+    expect(instance.mcp.info).toEqual({ name: "animathio", version: packageJson.version });
+  });
   it("passes a project-derived export deadline through the actual request handler", async () => {
     const call = vi.fn().mockResolvedValueOnce({ maxTimeMs: 45000 }).mockResolvedValueOnce({ exported: true });
     const args = { path: "/tmp/scene.webm" };

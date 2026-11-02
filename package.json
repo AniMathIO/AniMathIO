@@ -9,7 +9,7 @@
     "url": "https://github.com/AniMathIO/AniMathIO.git"
   },
   "author": {
-    "name": "Kovács Bálint-Hunor",
+    "name": "Kov\u00e1cs B\u00e1lint-Hunor",
     "email": "kovacsbalinthunor53@gmail.com"
   },
   "main": "app/background.js",
@@ -119,7 +119,8 @@
     "tar": "7.5.22",
     "typescript": "5.9.2",
     "vitest": "4.1.12",
-    "webpack": "5.109.2"
+    "webpack": "5.109.2",
+    "glob": "14.0.3"
   },
   "optionalDependencies": {
     "dmg-license": "1.0.11"
@@ -131,6 +132,32 @@
     "nextron": {
       "@babel/core": "$@babel/core",
       "webpack": "$webpack"
+    },
+    "@eslint/config-array": {
+      "minimatch": "11.0.4"
+    },
+    "eslint": {
+      "minimatch": "11.0.4"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.4"
+    },
+    "rimraf": {
+      "glob": "$glob"
+    },
+    "app-builder-lib": {
+      "minimatch": "11.0.4",
+      "@electron/asar": {
+        "minimatch": "3.1.5"
+      },
+      "@electron/universal": {
+        "dir-compare": {
+          "minimatch": "3.1.5"
+        }
+      },
+      "ejs": {
+        "minimatch": "5.1.9"
+      }
     }
   },
   "engines": {
