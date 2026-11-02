@@ -300,3 +300,24 @@ export class KonvaUtils {
     };
   }
 }
+
+/**
+ * Hides every Konva.Transformer on the stage (so selection handles are not drawn
+ * into captured frames) and redraws. Returns a function that restores each
+ * transformer's previous visibility.
+ */
+export function hideTransformers(stage: Konva.Stage): () => void {
+  const hidden = (stage.find("Transformer") as Konva.Transformer[]).map((t) => ({
+    t,
+    wasVisible: t.visible(),
+  }));
+  hidden.forEach(({ t }) => t.visible(false));
+  stage.batchDraw();
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    hidden.forEach(({ t, wasVisible }) => t.visible(wasVisible));
+    stage.batchDraw();
+  };
+}
