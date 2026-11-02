@@ -126,6 +126,7 @@
   },
   "overrides": {
     "node-abi": "4.33.0",
+    "katex": "0.18.11",
     "nextron": {
       "@babel/core": "$@babel/core",
       "webpack": "$webpack"
