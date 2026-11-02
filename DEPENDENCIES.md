@@ -121,3 +121,31 @@ the unreachable branch). Fix: a small Turbopack loader
 worker into `static/media/`. The loader throws if the upstream source changes
 shape, and is covered by `tests/renderer/build/`. Drop it once an
 `@ffmpeg/ffmpeg` release (or Next) fixes this.
+
+## Trial of deferred upgrades (draft PR, not merged)
+
+Results of trying four deferred bumps on `chore/try-deferred-majors`. Baseline
+before any change: tsc 0 errors, unit 363 passed, browser 111 passed,
+`npm run build` OK, `npm audit` 40 vulnerabilities (2 low / 34 moderate / 4 high).
+
+- **happy-dom 20.10.6 -> 21.0.4 — works.** Plain devDependency bump; tsc, unit,
+  browser and build unchanged vs baseline. Clears Dependabot #392/#393.
+- **katex 0.16 -> 0.18.11 — works.** `mafs@0.21.0` (still the latest) depends
+  on `katex@^0.16`, and katex is not a direct dependency (the app imports it
+  transitively), so this is a top-level `overrides.katex` entry. Dedupes to a
+  single katex. KaTeX/Manim Tex unit tests and Mafs browser tests pass. Clears
+  #366 (katex < 0.18.2). Latest katex is 0.19.1, not tried. Consider declaring
+  katex as a direct dependency since the app imports it.
+- **zod 3 -> 4 dedupe — BROKEN, reverted.** The app has no direct zod
+  dependency; everything resolves to one `zod@3.25.76` (via
+  `@imgly/background-removal@1.7.0`, `@modelcontextprotocol/sdk`, and
+  eslint-plugin-react-hooks). An `overrides.zod: 4.6.7` plus sdk 1.32.2 passed
+  tsc/unit/browser/build, but `@imgly/background-removal@1.7.0` (latest, no
+  newer release) evaluates `z.function().args(...)` at module load, and zod 4
+  throws `z.function(...).args is not a function`. Tests do not cover this
+  import, so it would crash the image background-removal feature at runtime.
+  Alert #410 (zod < 4.6.6) has no 3.x fix, so it stays open until
+  background-removal is replaced or updated upstream.
+- **serialize-javascript 6.0.2 -> 7.1.4 — works.** `overrides.serialize-javascript`
+  only; nextron stays at 9.5.0. Only consumer is nextron's
+  `terser-webpack-plugin@5.3.11`. Build passes. Clears #98 and #212.
