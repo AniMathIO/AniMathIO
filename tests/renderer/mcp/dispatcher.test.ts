@@ -51,7 +51,7 @@ describe("MCP dispatcher", () => {
         id: element.id,
         name: "Text 1",
         type: "text",
-        placement: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
+        placement: { x: 0, y: 0, width: element.placement.width, height: 100, rotation: 0, scaleX: 1, scaleY: 1 },
         timeFrame: { start: 0, end: 12000 },
       }],
       animations: [],

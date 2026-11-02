@@ -160,7 +160,7 @@ describe("ExportStore teardown on failure paths (Defect 2)", () => {
       add: vi.fn(),
       getCanvas: vi.fn(() => makeFakeCanvas()),
     };
-    const mockStage: any = { width: vi.fn(), height: vi.fn(), container: vi.fn(() => ({ style: {}, querySelector: vi.fn() })) };
+    const mockStage: any = { find: vi.fn(() => []), batchDraw: vi.fn(), width: vi.fn(), height: vi.fn(), container: vi.fn(() => ({ style: {}, querySelector: vi.fn() })) };
     state = new State();
     state.setStage(mockStage, mockLayer, 800, 600);
   });
@@ -273,7 +273,7 @@ describe("ExportStore destination delivery", () => {
     writeVideoFile = vi.fn().mockResolvedValue({ success: true });
     (window as any).electron = { writeVideoFile };
     state = new State();
-    state.setStage({ width: vi.fn(), height: vi.fn(), container: vi.fn(() => ({ style: {}, querySelector: vi.fn() })) } as any,
+    state.setStage({ find: vi.fn(() => []), batchDraw: vi.fn(), width: vi.fn(), height: vi.fn(), container: vi.fn(() => ({ style: {}, querySelector: vi.fn() })) } as any,
       { batchDraw: vi.fn(), add: vi.fn(), getCanvas: vi.fn(() => makeFakeCanvas()) } as any, 800, 600);
     state.setMaxTime(1000);
     vi.mocked(fixWebmDuration).mockResolvedValue({ arrayBuffer: async () => outputBytes.buffer } as any);
@@ -300,6 +300,52 @@ describe("ExportStore destination delivery", () => {
     expect(settled).toBe(true);
     expect(state.playing).toBe(false);
     expect(downloadAnchors).toHaveLength(0);
+  });
+
+  describe("selection handles (Transformer)", () => {
+    function setStageWithTransformer() {
+      let visible = true;
+      const visibleDuringCapture: boolean[] = [];
+      const transformer = { visible: vi.fn((v?: boolean) => { if (v !== undefined) visible = v; return visible; }) };
+      const stage: any = { find: vi.fn(() => [transformer]), batchDraw: vi.fn(), width: vi.fn(), height: vi.fn(), container: vi.fn(() => ({ style: {} })) };
+      const layer: any = {
+        batchDraw: vi.fn(),
+        add: vi.fn(),
+        // Frames are captured from the canvas stream once it is requested.
+        getCanvas: vi.fn(() => { visibleDuringCapture.push(visible); return makeFakeCanvas(); }),
+      };
+      state.setStage(stage, layer, 800, 600);
+      return { transformer, visibleDuringCapture, isVisible: () => visible };
+    }
+
+    it("hides the Transformer while recording and restores it after a successful export", async () => {
+      const t = setStageWithTransformer();
+      const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.visibleDuringCapture).toEqual([false]);
+      expect(t.isVisible()).toBe(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      await pending;
+      expect(t.isVisible()).toBe(true);
+    });
+
+    it("restores the Transformer when the export fails", async () => {
+      const t = setStageWithTransformer();
+      videoPlayImpl = () => Promise.reject(new Error("play failed"));
+      await expect(state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm")).rejects.toThrow("play failed");
+      expect(t.isVisible()).toBe(true);
+    });
+
+    it("restores the Transformer when recording errors mid-export", async () => {
+      const t = setStageWithTransformer();
+      const pending = state.exportStore.saveCanvasToVideoToPath("/tmp/result.webm", "webm");
+      const assertion = expect(pending).rejects.toThrow("recorder broke");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.isVisible()).toBe(false);
+      MockMediaRecorder.instances[0].emitError(new Error("recorder broke"));
+      await assertion;
+      expect(t.isVisible()).toBe(true);
+    });
   });
 
   it("rejects disk-write failures and allows a subsequent export", async () => {

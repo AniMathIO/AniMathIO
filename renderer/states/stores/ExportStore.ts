@@ -4,6 +4,7 @@ import { toBlobURL } from "@ffmpeg/util";
 import fixWebmDuration from "webm-duration-fix";
 import type { RootStore } from "../RootStore";
 import { isEditorAudioElement } from "../state";
+import { hideTransformers } from "@/utils/konva-utils";
 
 export class ExportStore {
   possibleVideoFormats: string[] = ["mp4", "webm"];
@@ -52,6 +53,11 @@ export class ExportStore {
       return;
     }
     this.exporting = true;
+
+    // Selection handles must not appear in the exported frames; restored as
+    // soon as recording ends (or on any failure).
+    const stage = this.root.canvasStore.stage;
+    const restoreTransformers = stage ? hideTransformers(stage) : () => {};
 
     // Include synchronous capture/audio setup errors in the same completion
     // contract as asynchronous recording and conversion failures.
@@ -112,6 +118,7 @@ export class ExportStore {
         if (exportFailed) return;
         exportFailed = true;
         this.exporting = false;
+        restoreTransformers();
         console.error("Video export failed:", error);
         if (stopTimer !== null) {
           clearTimeout(stopTimer);
@@ -173,6 +180,7 @@ export class ExportStore {
         // would otherwise reject into the void, leaving the user with no file and
         // no error while the UI looks like the export succeeded.
         mediaRecorder.onstop = () => {
+          restoreTransformers();
           void (async () => {
             cleanupExportAudioGraph();
 
@@ -267,6 +275,7 @@ export class ExportStore {
         failExport(error);
       } else {
         this.exporting = false;
+        restoreTransformers();
         console.error("Video export failed:", error);
         onFailure?.(error);
       }

@@ -5,6 +5,7 @@ import {
   getCoverCrop,
   getFilterFromEffectType,
   getLineGuideStops,
+  hideTransformers,
   KonvaAnimProxy,
   KonvaUtils,
   makeImageSceneFunc,
@@ -336,5 +337,27 @@ describe("clampNodeToStage", () => {
     const result = clampNodeToStage(node, { x: 300, y: 700 }, 800, 600);
     expect(result.x).toBe(300); // width (1000) > stageWidth (800): x left unclamped
     expect(result.y).toBe(550); // height (50) <= stageHeight (600): y still clamped
+  });
+});
+
+describe("hideTransformers", () => {
+  function fakeStage(visibilities: boolean[]) {
+    const transformers = visibilities.map((v) => {
+      let visible = v;
+      return { visible: vi.fn((x?: boolean) => { if (x !== undefined) visible = x; return visible; }) };
+    });
+    return { transformers, stage: { find: vi.fn(() => transformers), batchDraw: vi.fn() } as any };
+  }
+
+  it("hides all transformers, redraws, and restores prior visibility once", () => {
+    const { transformers, stage } = fakeStage([true, false]);
+    const restore = hideTransformers(stage);
+    expect(stage.find).toHaveBeenCalledWith("Transformer");
+    expect(transformers.map((t) => t.visible())).toEqual([false, false]);
+    expect(stage.batchDraw).toHaveBeenCalledTimes(1);
+    restore();
+    restore();
+    expect(transformers.map((t) => t.visible())).toEqual([true, false]);
+    expect(stage.batchDraw).toHaveBeenCalledTimes(2);
   });
 });
