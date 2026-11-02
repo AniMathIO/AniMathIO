@@ -97,3 +97,27 @@ up over adding a permanent override.
 No `overrides` entry was added for this (unlike `node-abi`, where the pinned
 version was strictly necessary) — the existing silent-override behavior is
 the least-risk option available today.
+
+## `next` >= 16.4.1 / `@ffmpeg/ffmpeg` worker URL
+
+`next` is pinned at `16.4.4` (with `eslint-config-next` in lockstep) because of
+a critical security advisory fixed in 16.4.1. Next 16.4.1–16.4.4 make Turbopack
+fail `next build` on `@ffmpeg/ffmpeg@0.12.15`:
+
+```
+./node_modules/@ffmpeg/ffmpeg/dist/esm/classes.js:105:28
+Module not found: Can't resolve (<dynamic> | 'undefined')
+  new Worker(new URL(classWorkerURL, import.meta.url), ...)
+```
+
+`FFmpeg#load()` has a fully dynamic `new URL(classWorkerURL, import.meta.url)`
+branch, which older Turbopack tolerated and newer versions reject. 0.12.15 is
+the latest stable `@ffmpeg/ffmpeg`, so there is no upgrade path, and passing
+`classWorkerURL` ourselves does not help (the failure is at compile time, on
+the unreachable branch). Fix: a small Turbopack loader
+(`renderer/build/ffmpeg-static-worker-loader.js`, wired in
+`renderer/next.config.js`) removes that branch so only the static
+`new URL("./worker.js", import.meta.url)` remains; Turbopack then emits the
+worker into `static/media/`. The loader throws if the upstream source changes
+shape, and is covered by `tests/renderer/build/`. Drop it once an
+`@ffmpeg/ffmpeg` release (or Next) fixes this.
