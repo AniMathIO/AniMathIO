@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.1](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.8.0...animathio-v1.8.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **deps:** bump next to 16.4.4 (security) and fix ffmpeg worker build ([9aa585d](https://github.com/AniMathIO/AniMathIO/commit/9aa585d4196d7e2a9779740fb5892ee5395056d4))
+* **deps:** bump next to 16.4.4 and strip ffmpeg dynamic worker URL for Turbopack ([8269c46](https://github.com/AniMathIO/AniMathIO/commit/8269c46081ee80a6489613e72acbb4c7a96c9943))
+
 ## [1.8.0](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.7.1...animathio-v1.8.0) (2026-10-06)
 
 
