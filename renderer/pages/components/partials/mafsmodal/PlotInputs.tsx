@@ -9,7 +9,7 @@ type PlotInputsProps = {
     setPlotInput: (input: string) => void;
     handlePlotSubmit: () => void;
 }
-const PlotInputs = ({ plotProps, setPlotProps, plotInput, setPlotInput, handlePlotSubmit }: PlotInputsProps) => {
+const PlotInputs = ({ plotInput, setPlotInput, handlePlotSubmit }: PlotInputsProps) => {
     return (
         <>
             <div className="mb-4">

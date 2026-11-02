@@ -1,11 +1,10 @@
 "use client";
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { MicrophoneIcon, StopIcon, TrashIcon, CheckIcon, AdjustmentsHorizontalIcon } from "@heroicons/react/24/solid";
 import WaveSurfer from "wavesurfer.js";
 import RecordPlugin from 'wavesurfer.js/dist/plugins/record';
-import { getUid } from "@/utils";
 
 const AudioRecorder = observer(() => {
     const state = React.useContext(StateContext);
@@ -13,12 +12,11 @@ const AudioRecorder = observer(() => {
     const [isPaused, setIsPaused] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
-    const [visualizerData, setVisualizerData] = useState<number[]>([]);
     const [permissionError, setPermissionError] = useState<string | null>(null);
     const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
     const [showDeviceSelector, setShowDeviceSelector] = useState(false);
-    const [visualizerReady, setVisualizerReady] = useState(false);
+    const [, setVisualizerReady] = useState(false);
 
     // Element ID for the visualizer - must be unique
     const visualizerContainerId = "audio-recorder-visualizer";
@@ -27,7 +25,7 @@ const AudioRecorder = observer(() => {
     const audioChunksRef = useRef<Blob[]>([]);
     const streamRef = useRef<MediaStream | null>(null);
     const wavesurferRef = useRef<WaveSurfer | null>(null);
-    const recordPluginRef = useRef<any | null>(null);
+    const recordPluginRef = useRef<RecordPlugin | null>(null);
     const timeInterval = useRef<NodeJS.Timeout | null>(null);
     const recordingStartTimeRef = useRef<number | null>(null);
     const visualizerInitializedRef = useRef<boolean>(false);
@@ -200,7 +198,6 @@ const AudioRecorder = observer(() => {
 
     // Check if we're running in Electron
     const isElectron = () => {
-        // @ts-ignore
         return window?.electron !== undefined;
     };
 
@@ -209,9 +206,7 @@ const AudioRecorder = observer(() => {
 
         try {
             // Use the exposed function from preload
-            // @ts-ignore
             if (window.electron && window.electron.requestMicrophonePermission) {
-                // @ts-ignore
                 const permission = await window.electron.requestMicrophonePermission();
                 return permission === 'granted';
             }
@@ -635,7 +630,6 @@ const AudioRecorder = observer(() => {
                     // Try to call addEditorElement directly if available
                     const id = Math.random().toString(36).substring(2, 11); // Simple UID fallback
 
-                    // @ts-ignore - Assuming addEditorElement is accessible
                     state.addEditorElement({
                         id,
                         name: `Media(audio) ${index + 1}`,

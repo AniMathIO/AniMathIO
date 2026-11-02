@@ -1,8 +1,8 @@
-import React, { MouseEventHandler, useEffect, useRef, useCallback } from "react";
+import React, { MouseEventHandler, useEffect, useRef, useMemo } from "react";
 
-function debounce(func: Function, wait: number) {
+function debounce<A extends unknown[]>(func: (...args: A) => void, wait: number) {
     let timeout: NodeJS.Timeout;
-    return (...args: any[]) => {
+    return (...args: A) => {
         clearTimeout(timeout);
         timeout = setTimeout(() => func(...args), wait);
     };
@@ -28,7 +28,7 @@ function Dragable(props: {
     });
     const { current: data } = ref;
 
-    const debouncedOnChange = useCallback(debounce(props.onChange, 100), [props.onChange]);
+    const debouncedOnChange = useMemo(() => debounce(props.onChange, 100), [props.onChange]);
 
     function calculateNewValue(mouseX: number): number {
         if (!data.div) return 0;
@@ -63,11 +63,11 @@ function Dragable(props: {
     };
 
     useEffect(() => {
-        window.addEventListener("mouseup", handleMouseUp as any);
-        window.addEventListener("mousemove", handleMouseMove as any);
+        window.addEventListener("mouseup", handleMouseUp as unknown as EventListener);
+        window.addEventListener("mousemove", handleMouseMove as unknown as EventListener);
         return () => {
-            window.removeEventListener("mouseup", handleMouseUp as any);
-            window.removeEventListener("mousemove", handleMouseMove as any);
+            window.removeEventListener("mouseup", handleMouseUp as unknown as EventListener);
+            window.removeEventListener("mousemove", handleMouseMove as unknown as EventListener);
         };
     }, [handleMouseUp, handleMouseMove]);
 

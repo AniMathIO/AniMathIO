@@ -5,6 +5,7 @@ import { formatTimeToMinSec } from "@/utils";
 import { observer } from "mobx-react";
 import { PlusCircleIcon, PlayIcon, PauseIcon } from "@heroicons/react/24/solid";
 import WavesurferPlayer from "@wavesurfer/react";
+import type WaveSurfer from "wavesurfer.js";
 
 export type AudioResourceProps = {
   audio: string;
@@ -18,7 +19,7 @@ const AudioResource = observer(
     const [formatedAudioLength, setFormatedAudioLength] =
       React.useState("00:00");
 
-    const [wavesurfer, setWavesurfer] = React.useState<any>(null)
+    const [wavesurfer, setWavesurfer] = React.useState<WaveSurfer | null>(null)
     const [isPlaying, setIsPlaying] = React.useState(false)
 
     // Initialize with knownDuration if provided
@@ -28,7 +29,7 @@ const AudioResource = observer(
       }
     }, [knownDuration]);
 
-    const onReady = (ws: any) => {
+    const onReady = (ws: WaveSurfer) => {
       setWavesurfer(ws)
       setIsPlaying(false)
 
@@ -42,7 +43,7 @@ const AudioResource = observer(
     }
 
     const onPlayPause = () => {
-      wavesurfer && wavesurfer?.playPause();
+      wavesurfer?.playPause();
     }
 
     return (

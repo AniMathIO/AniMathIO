@@ -75,8 +75,8 @@ describe("Create Window Helper", () => {
   });
 
   it("should create a window with default options", () => {
-    const windowName = "test-window";
-    const options = { width: 800, height: 600 };
+    const _windowName = "test-window";
+    const _options = { width: 800, height: 600 };
 
     // Test that the function exists and can be called
     expect(createWindow).toBeDefined();
@@ -84,8 +84,8 @@ describe("Create Window Helper", () => {
   });
 
   it("should create a window with custom options", () => {
-    const windowName = "custom-window";
-    const options = {
+    const _windowName = "custom-window";
+    const _options = {
       width: 1200,
       height: 800,
       show: false,
@@ -107,77 +107,77 @@ describe("Create Window Helper", () => {
       "preferences-window",
     ];
 
-    windowNames.forEach((name) => {
+    windowNames.forEach((_name) => {
       expect(createWindow).toBeDefined();
       expect(typeof createWindow).toBe("function");
     });
   });
 
   it("should handle different window options", () => {
-    const windowName = "options-window";
+    const _windowName = "options-window";
     const optionsList = [
       { width: 800, height: 600 },
       { width: 1200, height: 800, show: false },
       { width: 1600, height: 900, webPreferences: { nodeIntegration: true } },
     ];
 
-    optionsList.forEach((options) => {
+    optionsList.forEach((_options) => {
       expect(createWindow).toBeDefined();
       expect(typeof createWindow).toBe("function");
     });
   });
 
   it("should handle empty options", () => {
-    const windowName = "empty-options-window";
-    const options = {};
+    const _windowName = "empty-options-window";
+    const _options = {};
 
     expect(createWindow).toBeDefined();
     expect(typeof createWindow).toBe("function");
   });
 
   it("should handle window name with special characters", () => {
-    const windowName = "special-chars-window-123!@#";
-    const options = { width: 800, height: 600 };
+    const _windowName = "special-chars-window-123!@#";
+    const _options = { width: 800, height: 600 };
 
     expect(createWindow).toBeDefined();
     expect(typeof createWindow).toBe("function");
   });
 
   it("should handle very large window dimensions", () => {
-    const windowName = "large-window";
-    const options = { width: 4000, height: 3000 };
+    const _windowName = "large-window";
+    const _options = { width: 4000, height: 3000 };
 
     expect(createWindow).toBeDefined();
     expect(typeof createWindow).toBe("function");
   });
 
   it("should handle very small window dimensions", () => {
-    const windowName = "small-window";
-    const options = { width: 100, height: 100 };
+    const _windowName = "small-window";
+    const _options = { width: 100, height: 100 };
 
     expect(createWindow).toBeDefined();
     expect(typeof createWindow).toBe("function");
   });
 
   it("should handle fractional dimensions", () => {
-    const windowName = "fractional-window";
-    const options = { width: 800.5, height: 600.7 };
+    const _windowName = "fractional-window";
+    const _options = { width: 800.5, height: 600.7 };
 
     expect(createWindow).toBeDefined();
     expect(typeof createWindow).toBe("function");
   });
 
   it("should handle negative dimensions", () => {
-    const windowName = "negative-window";
-    const options = { width: -800, height: -600 };
+    const _windowName = "negative-window";
+    const _options = { width: -800, height: -600 };
 
     expect(createWindow).toBeDefined();
     expect(typeof createWindow).toBe("function");
   });
 
   it("should handle zero dimensions", () => {
-    const windowName = "zero-window";
-    const options = { width: 0, height: 0 };
+    const _windowName = "zero-window";
+    const _options = { width: 0, height: 0 };
 
     expect(createWindow).toBeDefined();
     expect(typeof createWindow).toBe("function");

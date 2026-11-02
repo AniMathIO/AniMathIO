@@ -124,7 +124,7 @@ export function makeImageSceneFunc(
     const element = getElement();
     const width = shape.width();
     const height = shape.height();
-    const ctx = (context as any)._context as CanvasRenderingContext2D;
+    const ctx = (context as unknown as { _context: CanvasRenderingContext2D })._context;
 
     if (!width || !height) return;
 

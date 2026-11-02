@@ -241,11 +241,11 @@ describe("Playwright Integration Tests", () => {
     draggable.draggable = true;
     draggable.textContent = "Drag Me";
 
-    let dropEventFired = false;
+    let _dropEventFired = false;
     let dragEventFired = false;
 
     dropZone.addEventListener("drop", () => {
-      dropEventFired = true;
+      _dropEventFired = true;
     });
 
     draggable.addEventListener("dragstart", () => {

@@ -6,10 +6,13 @@ declare global {
     interface Window {
         electron: {
             ipcRenderer: {
-                send(channel: string, data: any): void;
+                send(channel: string, data: unknown): void;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- IPC listener args are channel-specific
                 on(channel: string, func: (...args: any[]) => void): () => void;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- IPC listener args are channel-specific
                 removeListener(channel: string, func: (...args: any[]) => void): void;
-                invoke(channel: string, data?: any): Promise<any>;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any -- IPC replies are untyped; callers rely on loose result shapes
+                invoke(channel: string, data?: unknown): Promise<any>;
             };
             requestMicrophonePermission: () => Promise<string>;
             readProjectFile: (filePath: string) => Promise<{
@@ -88,6 +91,7 @@ const SettingsModal: React.FC = () => {
         // Sync isDarkMode state with the theme already applied by _app.tsx
         // The theme is already loaded and applied in _app.tsx, so we just need to sync the toggle state
         const isDark = document.documentElement.classList.contains('dark');
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time sync with the theme class applied outside React (_app.tsx)
         setIsDarkMode(isDark);
     }, []);
 

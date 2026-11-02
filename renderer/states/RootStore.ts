@@ -149,7 +149,7 @@ export class RootStore {
   setSelectedElement(el: EditorElement | null) { this.elementStore.setSelectedElement(el); }
   updateSelectedElement() { this.elementStore.updateSelectedElement(); }
   refreshElements() { this.elementStore.refreshElements(); }
-  updateEffect(id: string, effect: Effect) { this.elementStore.updateEffect(id, effect as any); }
+  updateEffect(id: string, effect: Effect) { this.elementStore.updateEffect(id, effect); }
   addVideo(index: number, dropPosition?: { x: number; y: number }) { this.elementStore.addVideo(index, dropPosition); }
   addImage(index: number, dropPosition?: { x: number; y: number }) { this.elementStore.addImage(index, dropPosition); }
   addMafsResource(index: number, pngSrc: string, name: string) {

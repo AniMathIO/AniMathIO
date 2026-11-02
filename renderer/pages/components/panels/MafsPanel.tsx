@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { observer } from "mobx-react";
-import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text, LaTeX, Ellipse, Plot, Vector, Transform } from "mafs";
+import { Mafs, Coordinates, Line, Point, Circle, Polygon, Text, LaTeX, Ellipse, Plot, Vector } from "mafs";
 import MafsResource from "../entity/MafsResource";
 import MafsModal from "../partials/MafsModal";
 import { MafsResourceType } from "@/types";
@@ -21,7 +21,7 @@ const generateMafsResources = (): MafsResourceType[] => {
     {
       index: 2,
       name: "Text",
-      children: <Text x={0} y={2.3} children="Hello, AniMathIO!" />,
+      children: <Text x={0} y={2.3}>Hello, AniMathIO!</Text>,
       coordinates: false,
     },
     {

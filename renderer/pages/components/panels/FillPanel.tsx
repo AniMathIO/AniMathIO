@@ -3,6 +3,7 @@ import React from "react";
 import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import { TwitterPicker } from "@hello-pangea/color-picker";
+import type { ColorResult } from "@hello-pangea/color-picker";
 
 const professionalVideoColors = [
   "#000000", // Black
@@ -61,7 +62,7 @@ const FillPanel = observer(() => {
           width="250px"
           colors={professionalVideoColors}
           color={state.backgroundColor}
-          onChangeComplete={(color: any) => {
+          onChangeComplete={(color: ColorResult) => {
             // console.log(color);
             state.setBackgroundColor(color.hex);
           }}

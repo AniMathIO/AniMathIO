@@ -126,9 +126,9 @@ const DashboardPanel = observer(() => {
           // Reload projects list
           await loadProjects();
           return;
-        } catch (error: any) {
+        } catch (error) {
           // User cancelled or error occurred
-          if (error.message && error.message.includes("cancelled")) {
+          if ((error as Error).message?.includes("cancelled")) {
             return; // User cancelled, do nothing
           }
           console.error("Error creating new project:", error);
@@ -140,7 +140,7 @@ const DashboardPanel = observer(() => {
       // Fallback: Use File System Access API
       if ("showSaveFilePicker" in window) {
         try {
-          // @ts-ignore
+          // @ts-expect-error -- File System Access API is not in this TS lib.dom version
           const fileHandle = await window.showSaveFilePicker({
             suggestedName: `project-${new Date().toISOString()}.animathio`,
             types: [
@@ -154,7 +154,6 @@ const DashboardPanel = observer(() => {
           // Serialize and save empty project
           const buffer = await state.serialize();
           const blob = new Blob([buffer], { type: "application/octet-stream" });
-          // @ts-ignore
           const writable = await fileHandle.createWritable();
           await writable.write(blob);
           await writable.close();
@@ -169,7 +168,6 @@ const DashboardPanel = observer(() => {
           // Set current project path and file handle
           state.setCurrentProjectFilePath(filePath);
           state.setCurrentProjectFileName(fileName);
-          // @ts-ignore
           state.setCurrentProjectFileHandle(fileHandle);
 
           // Activate editor
@@ -179,9 +177,9 @@ const DashboardPanel = observer(() => {
           // Reload projects list
           await loadProjects();
           return;
-        } catch (error: any) {
+        } catch (error) {
           // User cancelled or error occurred
-          if (error.name !== "AbortError") {
+          if ((error as Error).name !== "AbortError") {
             console.error("Error creating new project:", error);
             alert("Failed to create new project.");
           }
@@ -454,7 +452,6 @@ const DashboardPanel = observer(() => {
               state.setProjectLoadingStatus('loading', 'Loading project...');
 
               const arrayBuffer = event.target?.result as ArrayBuffer;
-              const buffer = new Uint8Array(arrayBuffer);
 
               // Deserialize the project
               await state.deserialize(arrayBuffer);

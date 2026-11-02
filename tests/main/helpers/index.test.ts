@@ -46,8 +46,8 @@ describe("Helpers Index", () => {
   });
 
   it("should re-export createWindow from create-window module", () => {
-    const windowName = "test-window";
-    const options = { width: 800, height: 600 };
+    const _windowName = "test-window";
+    const _options = { width: 800, height: 600 };
 
     // Test that the function exists and can be called
     expect(helpers.createWindow).toBeDefined();
@@ -55,8 +55,8 @@ describe("Helpers Index", () => {
   });
 
   it("should handle window creation through index export", () => {
-    const windowName = "index-window";
-    const options = { width: 1000, height: 700 };
+    const _windowName = "index-window";
+    const _options = { width: 1000, height: 700 };
 
     // Test that the function exists and can be called
     expect(helpers.createWindow).toBeDefined();
@@ -64,8 +64,8 @@ describe("Helpers Index", () => {
   });
 
   it("should maintain function signature compatibility", () => {
-    const windowName = "compat-window";
-    const options = {
+    const _windowName = "compat-window";
+    const _options = {
       width: 800,
       height: 600,
       show: false,
@@ -87,53 +87,53 @@ describe("Helpers Index", () => {
       "preferences-window",
     ];
 
-    windowNames.forEach((name) => {
+    windowNames.forEach((_name) => {
       expect(helpers.createWindow).toBeDefined();
       expect(typeof helpers.createWindow).toBe("function");
     });
   });
 
   it("should handle different window options", () => {
-    const windowName = "options-window";
+    const _windowName = "options-window";
     const optionsList = [
       { width: 800, height: 600 },
       { width: 1200, height: 800, show: false },
       { width: 1600, height: 900, webPreferences: { nodeIntegration: true } },
     ];
 
-    optionsList.forEach((options) => {
+    optionsList.forEach((_options) => {
       expect(helpers.createWindow).toBeDefined();
       expect(typeof helpers.createWindow).toBe("function");
     });
   });
 
   it("should handle empty options", () => {
-    const windowName = "empty-options-window";
-    const options = {};
+    const _windowName = "empty-options-window";
+    const _options = {};
 
     expect(helpers.createWindow).toBeDefined();
     expect(typeof helpers.createWindow).toBe("function");
   });
 
   it("should handle window name with special characters", () => {
-    const windowName = "special-chars-window-123!@#";
-    const options = { width: 800, height: 600 };
+    const _windowName = "special-chars-window-123!@#";
+    const _options = { width: 800, height: 600 };
 
     expect(helpers.createWindow).toBeDefined();
     expect(typeof helpers.createWindow).toBe("function");
   });
 
   it("should handle very large window dimensions", () => {
-    const windowName = "large-window";
-    const options = { width: 4000, height: 3000 };
+    const _windowName = "large-window";
+    const _options = { width: 4000, height: 3000 };
 
     expect(helpers.createWindow).toBeDefined();
     expect(typeof helpers.createWindow).toBe("function");
   });
 
   it("should handle very small window dimensions", () => {
-    const windowName = "small-window";
-    const options = { width: 100, height: 100 };
+    const _windowName = "small-window";
+    const _options = { width: 100, height: 100 };
 
     expect(helpers.createWindow).toBeDefined();
     expect(typeof helpers.createWindow).toBe("function");

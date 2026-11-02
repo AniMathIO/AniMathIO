@@ -198,7 +198,7 @@ describe("Background Process", () => {
 
   it("should handle startProcess function in production", () => {
     // Mock the startProcess function behavior
-    const mockEvent = mockIpcMainEvent;
+    const _mockEvent = mockIpcMainEvent;
     const value = "test-value";
 
     // Test production script path
@@ -215,7 +215,7 @@ describe("Background Process", () => {
 
   it("should handle startProcess function in development", () => {
     // Mock the startProcess function behavior
-    const mockEvent = mockIpcMainEvent;
+    const _mockEvent = mockIpcMainEvent;
     const value = "test-value";
 
     // Test development script path
@@ -452,7 +452,7 @@ describe("Background Process", () => {
 
   it("should handle serve operations", () => {
     // Test serve operations
-    const serveResult = mockServe({ directory: "app" });
+    const _serveResult = mockServe({ directory: "app" });
     expect(mockServe).toHaveBeenCalledWith({ directory: "app" });
   });
 

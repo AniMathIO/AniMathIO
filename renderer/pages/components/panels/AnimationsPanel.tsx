@@ -30,10 +30,10 @@ const AnimationsPanel = observer(() => {
   });
 
   const hasMafsRevealInAnimation = selectedElementAnimations.some((animation) => {
-    return animation.type === "mafsReveal" && (animation as any).properties?.direction === "in";
+    return animation.type === "mafsReveal" && animation.properties?.direction === "in";
   });
   const hasMafsRevealOutAnimation = selectedElementAnimations.some((animation) => {
-    return animation.type === "mafsReveal" && (animation as any).properties?.direction === "out";
+    return animation.type === "mafsReveal" && animation.properties?.direction === "out";
   });
 
   const isMafsElement = selectedElement?.type === "mafs";

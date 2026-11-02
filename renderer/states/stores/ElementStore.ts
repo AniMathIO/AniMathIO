@@ -3,8 +3,8 @@ import Konva from "konva";
 import type { RootStore } from "../RootStore";
 import {
   EditorElement,
+  Effect,
   TimeFrame,
-  VideoEditorElement,
   AudioEditorElement,
   TextEditorElement,
   Placement,
@@ -336,11 +336,11 @@ export class ElementStore {
     }
   }
 
-  updateEffect(id: string, effect: { type: string }) {
+  updateEffect(id: string, effect: Effect) {
     const index = this.editorElements.findIndex((element) => element.id === id);
     const element = this.editorElements[index];
     if (element && (element.type === "video" || element.type === "image" || element.type === "mafs")) {
-      (element.properties as any).effect = effect;
+      element.properties.effect = effect;
     }
     this.refreshElements();
   }
@@ -382,7 +382,7 @@ export class ElementStore {
           10
         );
         const mafsName = this.clipboard.name.match(/\(([^)]+)\)/)?.[1] || "";
-        const mafsPngSrc = (this.clipboard.properties as any).src;
+        const mafsPngSrc = (this.clipboard.properties as { src: string }).src;
         this.addMafsResource(mafsIndex - 1, mafsPngSrc, mafsName);
         break;
       }

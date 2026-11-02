@@ -171,7 +171,7 @@ export class ExportStore {
         };
 
         mediaRecorder.onerror = (event: Event) => {
-          handleExportFailure((event as any)?.error ?? event);
+          handleExportFailure((event as Event & { error?: unknown })?.error ?? event);
         };
 
         // Wrapped rather than assigned as an `async function` directly: nothing

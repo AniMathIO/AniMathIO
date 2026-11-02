@@ -4,13 +4,11 @@ import { StateContext } from "@/states";
 import { observer } from "mobx-react";
 import Modal from "react-modal";
 import { IoIosSave } from "react-icons/io";
-import { PiUploadSimpleBold } from "react-icons/pi";
 import { addProjectToHistory } from "@/utils";
 
 
 const ExportVideoPanel = observer(() => {
   const state = React.useContext(StateContext);
-  const [resolution, setResolution] = React.useState('1920x1080');
   const [isRenderingModalOpen, setIsRenderingModalOpen] = React.useState(false);
   const [isSavingModalOpen, setIsSavingModalOpen] = React.useState(false);
   const [isLoadingModalOpen, setIsLoadingModalOpen] = React.useState(false);
@@ -81,7 +79,6 @@ const ExportVideoPanel = observer(() => {
       if (state.currentProjectFileHandle && 'showSaveFilePicker' in window) {
         try {
           const blob = new Blob([buffer], { type: "application/octet-stream" });
-          // @ts-ignore
           const writable = await state.currentProjectFileHandle.createWritable();
           await writable.write(blob);
           await writable.close();
@@ -169,7 +166,7 @@ const ExportVideoPanel = observer(() => {
       // Fallback: Try File System Access API if available
       if ('showSaveFilePicker' in window) {
         try {
-          // @ts-ignore
+          // @ts-expect-error -- File System Access API is not in this TS lib.dom version
           const fileHandle = await window.showSaveFilePicker({
             suggestedName: suggestedName,
             types: [{
@@ -179,7 +176,6 @@ const ExportVideoPanel = observer(() => {
           });
 
           const blob = new Blob([buffer], { type: "application/octet-stream" });
-          // @ts-ignore
           const writable = await fileHandle.createWritable();
           await writable.write(blob);
           await writable.close();
@@ -198,9 +194,9 @@ const ExportVideoPanel = observer(() => {
           setSaveModalStatus('success');
           setIsSavingModalOpen(true);
           return;
-        } catch (fsError: any) {
+        } catch (fsError) {
           // User might have canceled
-          if (fsError.name === 'AbortError') {
+          if ((fsError as Error).name === 'AbortError') {
             setIsSavingModalOpen(false);
             return;
           }
@@ -229,7 +225,7 @@ const ExportVideoPanel = observer(() => {
       setIsSavingModalOpen(true);
     }
   };
-  const handleLoadProject = async () => {
+  const _handleLoadProject = async () => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".animathio";
@@ -353,7 +349,7 @@ const ExportVideoPanel = observer(() => {
             name="video-format"
             value="mp4"
             checked={state.selectedVideoFormat === "mp4"}
-            onChange={(e) => {
+            onChange={() => {
               state.setVideoFormat("mp4");
             }}
             placeholder="Video Format"
@@ -367,7 +363,7 @@ const ExportVideoPanel = observer(() => {
             name="video-format"
             value="webm"
             checked={state.selectedVideoFormat === "webm"}
-            onChange={(e) => {
+            onChange={() => {
               state.setVideoFormat("webm");
             }}
             placeholder="Video Format"
