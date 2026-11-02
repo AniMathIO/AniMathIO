@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Keep security updates only (no routine version-update PRs).
+    open-pull-requests-limit: 0
+    ignore:
+      # Nextron 10 assumes a pnpm workspace; deferred per DEPENDENCIES.md.
+      - dependency-name: "nextron"
+        update-types: ["version-update:semver-major"]
