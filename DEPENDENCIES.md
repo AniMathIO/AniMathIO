@@ -51,6 +51,15 @@ re-validating the specific incompatibility below first.
   these packages pin exact matching peer versions of each other. Bumping one
   without the rest breaks resolution; bumping all of them is a larger,
   separate validation effort.
+- **zod 3.x → 4.x** (advisory GHSA-mrhx-c7xc-m3w5, **known high, deferred**) —
+  `npm audit` reports a HIGH for `zod@3.25.76`; the fix only exists in
+  `zod >= 4.6.6`, so it cannot be fixed on 3.x. zod is pulled in transitively
+  by `@imgly/background-removal`, which `npm audit` also flags via zod.
+  `@imgly/background-removal@1.7.0` is already the latest release and pins
+  zod 3, so a zod 4 override breaks it. **Risk accepted:** AniMathIO is a local
+  desktop app and exploiting the advisory needs attacker-controlled oversized
+  input to be fed into zod parsing. Revisit when `@imgly/background-removal`
+  ships a zod 4 compatible release.
 
 Everything else outdated at the time of writing was a same-major patch/minor
 bump and was applied directly (electron, react/react-dom, next +
