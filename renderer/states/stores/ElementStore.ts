@@ -9,6 +9,7 @@ import {
   TextEditorElement,
   Placement,
 } from "@/types";
+import { estimateTextBox } from "@/utils/text-size";
 import { getUid, isHtmlVideoElement, isHtmlAudioElement, isHtmlImageElement } from "@/utils";
 
 export class ElementStore {
@@ -291,8 +292,12 @@ export class ElementStore {
   addText(options: { text: string; fontSize: number; fontWeight: number }, dropPosition?: { x: number; y: number }) {
     const id = getUid();
     const index = this.editorElements.length;
-    const width = 100;
-    const height = 100;
+    const { width, height } = estimateTextBox(
+      options.text,
+      options.fontSize,
+      options.fontWeight,
+      this.root.canvasStore.canvas_width
+    );
     const x = dropPosition ? dropPosition.x - width / 2 : 0;
     const y = dropPosition ? dropPosition.y - height / 2 : 0;
     this.addEditorElement({

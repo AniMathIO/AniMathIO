@@ -263,13 +263,20 @@ describe("State (RootStore)", () => {
       expect(placement.y).toBe(0);
     });
 
+    it("sizes the box to fit the text so short words are not wrapped mid-word", () => {
+      const spy = vi.spyOn(state.elementStore, "addEditorElement");
+      state.addText({ text: "Smoke test", fontSize: 32, fontWeight: 400 });
+      const placement = spy.mock.calls[0][0].placement;
+      // "Smoke test" is 10 chars; at 32px it needs well over the old 100px default.
+      expect(placement.width).toBeGreaterThanOrEqual(10 * 32 * 0.5);
+    });
+
     it("with a dropPosition, centers the element on the drop point", () => {
       const spy = vi.spyOn(state.elementStore, "addEditorElement");
       state.addText({ text: "Hello world", fontSize: 20, fontWeight: 400 }, { x: 500, y: 300 });
       const placement = spy.mock.calls[0][0].placement;
-      // default text placement is 100x100, so centering subtracts half that
-      expect(placement.x).toBe(450);
-      expect(placement.y).toBe(250);
+      expect(placement.x).toBe(500 - placement.width / 2);
+      expect(placement.y).toBe(300 - placement.height / 2);
     });
   });
 
