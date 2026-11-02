@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.2](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.8.1...animathio-v1.8.2) (2026-11-02)
+
+
+### Documentation
+
+* **deps:** record zod GHSA-mrhx-c7xc-m3w5 as deferred ([fc9690d](https://github.com/AniMathIO/AniMathIO/commit/fc9690d7ca97e62b2ca555e34e5cd6d61279bd51))
+* **deps:** record zod GHSA-mrhx-c7xc-m3w5 as deferred ([7bd7685](https://github.com/AniMathIO/AniMathIO/commit/7bd7685d2774d87c6385abb5103c7573c4407a3a))
+
 ## [1.8.1](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.8.0...animathio-v1.8.1) (2026-11-02)
 
 
