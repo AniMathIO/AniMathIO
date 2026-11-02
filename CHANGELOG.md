@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.3](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.8.2...animathio-v1.8.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* **export:** hide selection handles in exported video ([28b5fda](https://github.com/AniMathIO/AniMathIO/commit/28b5fdaabf944cdf389d627b8c2a6a35d36eb1c6))
+* **export:** hide selection handles in exported video ([36f1a78](https://github.com/AniMathIO/AniMathIO/commit/36f1a78b28811600487f47c934358fc702cf92e7))
+* MCP server version from package.json; patch minimatch/glob advisories ([a69af05](https://github.com/AniMathIO/AniMathIO/commit/a69af0506475e4f1e9ddefd40d73893347278662))
+* report real version from MCP server and patch minimatch/glob advisories ([0ce5555](https://github.com/AniMathIO/AniMathIO/commit/0ce5555003882292c93ea09964a42e5ea2141bd1))
+* size new text elements to fit their content ([cddb340](https://github.com/AniMathIO/AniMathIO/commit/cddb340ba7eb4050802948433da7a6ae0b2296b9))
+* size new text elements to fit their content ([a485de0](https://github.com/AniMathIO/AniMathIO/commit/a485de0ba9d68e95e82d06e393e00f207eb7a54a))
+
 ## [1.8.2](https://github.com/AniMathIO/AniMathIO/compare/animathio-v1.8.1...animathio-v1.8.2) (2026-11-02)
 
 
