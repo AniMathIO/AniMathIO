@@ -1,0 +1,6 @@
+   Compiling vello v0.12.0
+   Compiling pollster v0.4.0
+   Compiling animathio-viewport-spike v0.1.0 (/home/hunor/.t3/worktrees/AniMathIO/t3-c7b8f2f7-5a3145dcb3d94d10/spikes/viewport)
+    Finished `release` profile [optimized] target(s) in 4m 31s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
