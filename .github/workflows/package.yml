@@ -8,10 +8,7 @@ name: Package
 #     release PR proves the installers build, install/extract and run before
 #     the release is merged.
 #
-# TODO(animathio): once `apps/animathio` (the GPUI desktop app) lands, switch
-# the packaging target below from `animathio-cli` to `animathio` and smoke-test
-# `animathio --version`. See also the commented config block in
-# apps/animathio-cli/Cargo.toml.
+
 
 on:
   workflow_dispatch:
@@ -50,10 +47,13 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
+      - name: Install Linux development headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
       - name: Install cargo-packager
         run: cargo install cargo-packager@0.11.8
       - name: Build and package installers
-        run: cargo packager --release --packages animathio-cli --formats ${{ matrix.formats }}
+        run: cargo packager --release --packages animathio --formats ${{ matrix.formats }}
       - name: Smoke test installers (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -64,22 +64,22 @@ jobs:
           appimage="$(find target/packages -maxdepth 1 -name '*.AppImage' -print -quit)"
           chmod +x "$appimage"
           "$appimage" --appimage-extract >/dev/null
-          appimage_bin="$(find squashfs-root -type f -name 'animathio-cli' -print -quit)"
+          appimage_bin="$(find squashfs-root -type f -name 'animathio' -print -quit)"
           "$appimage_bin" --version
 
           # deb: extract and run the binary.
           deb="$(find target/packages -maxdepth 1 -name '*.deb' -print -quit)"
           mkdir -p deb-root
           dpkg-deb -x "$deb" deb-root
-          deb_bin="$(find deb-root -type f -name 'animathio-cli' -print -quit)"
+          deb_bin="$(find deb-root -type f -name 'animathio' -print -quit)"
           "$deb_bin" --version
       - name: Smoke test installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $installer = Get-ChildItem 'target/packages/*.exe' | Select-Object -First 1
-          Start-Process -FilePath $installer.FullName -ArgumentList @('/S', '/D=C:\animathio-cli') -Wait
-          & 'C:\animathio-cli\animathio-cli.exe' --version
+          Start-Process -FilePath $installer.FullName -ArgumentList @('/S', '/D=C:\animathio') -Wait
+          & 'C:\animathio\animathio.exe' --version
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:

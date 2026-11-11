@@ -23,7 +23,11 @@ use animathio_render::sample;
 use gpui::{prelude::*, *};
 
 fn main() {
-    let (project, assets, path) = initial_project();
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        println!("animathio {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    let (project, assets, path, recovered) = initial_project();
     Application::new().run(move |cx: &mut App| {
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
@@ -40,7 +44,7 @@ fn main() {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    cx.new(|cx| editor::Editor::new(cx, window, project, assets, path))
+                    cx.new(|cx| editor::Editor::new(cx, window, project, assets, path, recovered))
                 },
             )
             .expect("open editor window");
@@ -56,14 +60,14 @@ fn main() {
 }
 
 /// `animathio [file.amio]` opens a project; no argument opens the shared sample.
-fn initial_project() -> (Project, BTreeMap<AssetId, Vec<u8>>, Option<PathBuf>) {
+fn initial_project() -> (Project, BTreeMap<AssetId, Vec<u8>>, Option<PathBuf>, bool) {
     let Some(arg) = std::env::args().nth(1) else {
         let sample = sample::build().expect("build sample project");
-        return (sample.project, sample.assets, None);
+        return (sample.project, sample.assets, None, false);
     };
     let path = PathBuf::from(arg);
-    match editor::read_project(&path) {
-        Ok((project, assets)) => (project, assets, Some(path)),
+    match editor::read_project_with_recovery(&path) {
+        Ok((project, assets, recovered)) => (project, assets, Some(path), recovered),
         Err(error) => {
             eprintln!("error: {error}");
             std::process::exit(1);

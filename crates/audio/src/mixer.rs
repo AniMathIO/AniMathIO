@@ -37,6 +37,11 @@ impl AudioPool {
     pub fn len(&self) -> usize {
         self.sources.len()
     }
+    /// Whether a decoded resource is present for this asset.
+    #[must_use]
+    pub fn contains(&self, id: &AssetId) -> bool {
+        self.sources.contains_key(id)
+    }
     /// Whether the pool is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {

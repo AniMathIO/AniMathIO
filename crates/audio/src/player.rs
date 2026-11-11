@@ -1,5 +1,6 @@
 use crate::{Error, Mixer};
 use animathio_core::{Project, TICKS_PER_SECOND, Time, TimeRange};
+use arc_swap::ArcSwap;
 use cpal::{
     FromSample, SampleFormat, SizedSample,
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -25,8 +26,8 @@ pub struct Player {
     device: cpal::Device,
     config: cpal::StreamConfig,
     format: SampleFormat,
-    mixer: Arc<Mixer>,
-    project: Arc<Project>,
+    mixer: Arc<ArcSwap<Mixer>>,
+    project: Arc<ArcSwap<Project>>,
     position: Time,
     session: Option<Session>,
 }
@@ -49,11 +50,21 @@ impl Player {
             device,
             config: supported.config(),
             format: supported.sample_format(),
-            mixer,
-            project,
+            mixer: Arc::new(ArcSwap::from(mixer)),
+            project: Arc::new(ArcSwap::from(project)),
             position: Time(0),
             session: None,
         })
+    }
+    /// Atomically replace the prepared mixer snapshot. The mixer worker picks the
+    /// new snapshot up at the next chunk boundary; nothing in the device callback
+    /// reads it, so there is no glitch.
+    pub fn set_mixer(&self, mixer: Arc<Mixer>) {
+        self.mixer.store(mixer);
+    }
+    /// Atomically replace the project snapshot (e.g. after a history edit).
+    pub fn set_project(&self, project: Arc<Project>) {
+        self.project.store(project);
     }
     /// Discover the format needed by `AudioPool::prepare` without starting playback.
     pub fn default_output_format() -> Result<(u32, u16), Error> {
@@ -119,8 +130,10 @@ impl Player {
             .is_some_and(|s| s.failed.load(Ordering::Acquire))
     }
     fn start<T: SizedSample + FromSample<f32>>(&mut self) -> Result<(), Error> {
-        let channels = usize::from(self.mixer.channels());
-        let rate = self.mixer.rate();
+        let mixer = self.mixer.load_full();
+        let project = self.project.load_full();
+        let channels = usize::from(mixer.channels());
+        let rate = mixer.rate();
         let (mut producer, consumer) = RingBuffer::new(BUFFER_FRAMES * channels);
         // Prefill on the control thread so the first callback already has data.
         let mut cursor = crate::source::sample_bounds(
@@ -131,7 +144,7 @@ impl Player {
             rate,
         )?
         .0;
-        let prefill = mix_block(&self.mixer, &self.project, cursor, BUFFER_FRAMES)?;
+        let prefill = mix_block(&mixer, &project, cursor, BUFFER_FRAMES)?;
         for sample in prefill {
             producer
                 .push(sample)
@@ -181,6 +194,10 @@ impl Player {
                             thread::sleep(Duration::from_millis(1));
                             continue;
                         }
+                        // Reload the snapshots once per chunk so edits are audible
+                        // at the next boundary without ever tearing a chunk in two.
+                        let mixer = mixer.load_full();
+                        let project = project.load_full();
                         for sample in mix_block(&mixer, &project, cursor, BLOCK)? {
                             producer
                                 .push(sample)
@@ -298,6 +315,64 @@ impl Callback {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mix_block_reflects_a_swapped_project_snapshot() {
+        use crate::{AudioPool, Pcm};
+        use animathio_core::{Asset, AssetId, Clip, ClipId, ClipKind, Command, Track, TrackId};
+
+        let rate = 48_000;
+        let id = AssetId::of(b"tone");
+        let pcm = Pcm::new(rate, 1, vec![0.5; 4_800]).unwrap();
+        let mut pool = AudioPool::default();
+        pool.insert(id.clone(), &pcm).unwrap();
+        let mixer = pool.prepare(rate, 1).unwrap();
+
+        let project = |gain: f64| {
+            let mut project = Project::default();
+            Command::AddAsset {
+                id: id.clone(),
+                asset: Asset {
+                    name: "tone".into(),
+                    media_type: "audio/pcm".into(),
+                },
+            }
+            .apply(&mut project)
+            .unwrap();
+            Command::AddTrack {
+                track: Track::new(TrackId(0), "audio"),
+                index: 0,
+            }
+            .apply(&mut project)
+            .unwrap();
+            Command::AddClip {
+                track: TrackId(0),
+                clip: Clip::new(
+                    ClipId(0),
+                    ClipKind::Audio(id.clone()),
+                    TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+                ),
+            }
+            .apply(&mut project)
+            .unwrap();
+            Command::SetParam {
+                id: ClipId(0),
+                name: "gain".into(),
+                value: Some(gain),
+            }
+            .apply(&mut project)
+            .unwrap();
+            project
+        };
+
+        let swap = ArcSwap::from(Arc::new(project(1.0)));
+        let audible = mix_block(&mixer, &swap.load_full(), 0, 100).unwrap();
+        assert!(audible.iter().any(|sample| sample.abs() > 0.4));
+        swap.store(Arc::new(project(0.0)));
+        let silent = mix_block(&mixer, &swap.load_full(), 0, 100).unwrap();
+        assert!(silent.iter().all(|sample| *sample == 0.0));
+    }
+
     #[test]
     fn fake_device_clock_is_monotonic_latency_corrected_and_freezes_on_underrun() {
         let (mut producer, consumer) = RingBuffer::new(9600);
