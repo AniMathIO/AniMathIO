@@ -45,7 +45,24 @@ CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c
 ```
 
 `core` owns the plain project model and command-only mutation API; `format` owns
-versioned JSON and `.amio` containers. Neither the renderer nor media runtime is implemented yet.
+versioned JSON and `.amio` containers. `render` owns the deterministic Vello CPU
+backend, embedded font shaping and engine resource pool; `animathio-cli` provides
+headless PNG rendering. Text/shapes under `core::builtin` are temporary plugin stand-ins.
+Video uses a labelled checkerboard until a media decoder is integrated. Do not add
+runtime resources to `Project` or store evaluated animation state in the renderer.
+
+CLI smoke run and intentional golden regeneration:
+
+```bash
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo run -p animathio-cli --locked -- new-sample -o /tmp/sample.amio
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo run -p animathio-cli --locked -- render /tmp/sample.amio --frame 30 -o /tmp/frame.png
+UPDATE_GOLDEN=1 CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo test -p animathio-render --test golden --locked
+```
+
+Commit reviewed PNGs from `crates/render/tests/golden` together with their fixtures.
+Goldens permit a maximum absolute error of 2 per RGBA channel; regular workspace
+CI runs them without regeneration on Linux and Windows.
+
 After a final push on disk-constrained machines, clean build artifacts with:
 
 ```bash

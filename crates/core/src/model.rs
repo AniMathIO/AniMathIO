@@ -140,6 +140,8 @@ pub enum ClipKind {
     Image(AssetId),
     /// Audio source, included in the scene for a future audio mixer.
     Audio(AssetId),
+    /// Temporary text/shape sources; replaced by plugins after the prototype.
+    Builtin(crate::builtin::Builtin),
     /// Namespaced plugin identity and opaque, plugin-versioned JSON data.
     Plugin {
         /// Reverse-domain plugin identifier.
@@ -345,6 +347,7 @@ impl Project {
                         return Err(invalid("empty plugin id"));
                     }
                     ClipKind::Plugin { .. } => {}
+                    ClipKind::Builtin(source) => source.validate()?,
                 }
                 if clip
                     .animations
