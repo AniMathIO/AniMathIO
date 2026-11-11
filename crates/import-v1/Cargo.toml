@@ -1,0 +1,23 @@
+[package]
+name = "animathio-import-v1"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+animathio-core.workspace = true
+base64 = "0.22"
+blake3.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+animathio-format = { path = "../../crates/format" }
+proptest.workspace = true
+
+[lints]
+workspace = true

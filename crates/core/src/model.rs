@@ -1,3 +1,4 @@
+use crate::builtin::Color;
 use crate::{Error, FrameRate, Keyframes, Time, invalid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -261,18 +262,35 @@ impl Track {
 }
 
 /// Serializable, resource-free project. Mutations go through `Command::apply`.
+/// A resolution of `(0, 0)` means the project has no explicit output size yet.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "ProjectData", into = "ProjectData")]
 pub struct Project {
     pub(crate) frame_rate: FrameRate,
     pub(crate) tracks: Vec<Track>,
     pub(crate) assets: BTreeMap<AssetId, Asset>,
+    /// Output width in pixels, or `0` when unset.
+    pub(crate) width: u32,
+    /// Output height in pixels, or `0` when unset.
+    pub(crate) height: u32,
+    /// Straight-alpha sRGB canvas background; alpha `0` is transparent.
+    pub(crate) background: Color,
+    /// Explicit project duration in ticks; `0` means derive from clips.
+    pub(crate) duration: Time,
 }
 #[derive(Serialize, Deserialize)]
 struct ProjectData {
     frame_rate: FrameRate,
     tracks: Vec<Track>,
     assets: BTreeMap<AssetId, Asset>,
+    #[serde(default)]
+    width: u32,
+    #[serde(default)]
+    height: u32,
+    #[serde(default)]
+    background: Color,
+    #[serde(default)]
+    duration: Time,
 }
 impl From<Project> for ProjectData {
     fn from(p: Project) -> Self {
@@ -280,6 +298,10 @@ impl From<Project> for ProjectData {
             frame_rate: p.frame_rate,
             tracks: p.tracks,
             assets: p.assets,
+            width: p.width,
+            height: p.height,
+            background: p.background,
+            duration: p.duration,
         }
     }
 }
@@ -290,6 +312,10 @@ impl TryFrom<ProjectData> for Project {
             frame_rate: p.frame_rate,
             tracks: p.tracks,
             assets: p.assets,
+            width: p.width,
+            height: p.height,
+            background: p.background,
+            duration: p.duration,
         };
         project.validate()?;
         Ok(project)
@@ -319,8 +345,40 @@ impl Project {
     pub fn assets(&self) -> &BTreeMap<AssetId, Asset> {
         &self.assets
     }
+    /// Output width in pixels; `0` means no explicit resolution is set.
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+    /// Output height in pixels; `0` means no explicit resolution is set.
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+    /// Straight-alpha sRGB canvas background.
+    #[must_use]
+    pub const fn background(&self) -> Color {
+        self.background
+    }
+    /// Explicit project duration in ticks; `0` means derive from clips.
+    #[must_use]
+    pub const fn duration(&self) -> Time {
+        self.duration
+    }
     /// Check identities, references, finite values and nonoverlapping half-open ranges.
     pub fn validate(&self) -> Result<(), Error> {
+        if self.width > 65_535 || self.height > 65_535 {
+            return Err(invalid("invalid resolution"));
+        }
+        if self.width != 0
+            && self.height != 0
+            && u64::from(self.width) * u64::from(self.height) > 32 * 1024 * 1024
+        {
+            return Err(invalid("resolution exceeds 32 megapixels"));
+        }
+        if self.duration.0 < 0 {
+            return Err(invalid("negative project duration"));
+        }
         let mut track_ids = BTreeSet::new();
         let mut clip_ids = BTreeSet::new();
         for track in &self.tracks {
