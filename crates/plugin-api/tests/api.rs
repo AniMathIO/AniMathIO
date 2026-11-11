@@ -73,7 +73,16 @@ fn package_roundtrip_zip_archive() {
 fn inspector_schema_roundtrip() {
     let schema = InspectorSchema::new()
         .with_number("radius", "Radius", 10.0, 200.0, 50.0, 1.0)
-        .with_color("color", "Fill Color", ColorValue { r: 255, g: 0, b: 0, a: 255 })
+        .with_color(
+            "color",
+            "Fill Color",
+            ColorValue {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+        )
         .with_string("label", "Text", "Default")
         .with_enum("mode", "Mode", vec!["A".into(), "B".into()], "A")
         .with_bool("visible", "Visible", true)

@@ -1,4 +1,4 @@
-//! Tests for VectorScene and vector graphics primitives in core.
+//! Tests for `VectorScene` and vector graphics primitives in core.
 use animathio_core::*;
 
 #[test]

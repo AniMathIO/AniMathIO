@@ -21,3 +21,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 log = "0.4"
 tempfile = "3"
+
+[dev-dependencies]
+animathio-core = { workspace = true }
+animathio-plugin-api = { path = "../plugin-api" }
+serde_json = { workspace = true }

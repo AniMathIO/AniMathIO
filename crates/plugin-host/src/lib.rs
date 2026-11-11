@@ -196,7 +196,9 @@ impl ComponentDiskCache {
             .map_err(|e| HostError::CompilationFailed(e.to_string()))?;
 
         if let Ok(serialized) = component.serialize() {
-            let tmp_file = self.cache_dir.join(format!(".tmp_{key}_{}", std::process::id()));
+            let tmp_file = self
+                .cache_dir
+                .join(format!(".tmp_{key}_{}", std::process::id()));
             if fs::write(&tmp_file, &serialized).is_ok() {
                 let _ = fs::rename(&tmp_file, &cache_file);
             }
@@ -404,8 +406,8 @@ impl PluginHost {
 
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
 
-        // 2. Prepare WIT parameters
-        let wit_params = build_wit_params(params, opaque_params);
+        // 2. Prepare WIT parameters (typed against the plugin's declared schema)
+        let wit_params = build_wit_params(&plugin.wit_manifest, params, opaque_params);
         let size = wit_types::Size {
             width: canvas_size.0,
             height: canvas_size.1,
@@ -487,59 +489,36 @@ fn compute_cache_key(
         hasher.update(&v.to_le_bytes());
     }
 
-    if !opaque_params.is_null() {
-        if let Ok(s) = serde_json::to_string(opaque_params) {
-            hasher.update(s.as_bytes());
-        }
+    if !opaque_params.is_null()
+        && let Ok(s) = serde_json::to_string(opaque_params)
+    {
+        hasher.update(s.as_bytes());
     }
 
     *hasher.finalize().as_bytes()
 }
 
 fn build_wit_params(
+    manifest: &wit_types::Manifest,
     numeric_params: &BTreeMap<String, f64>,
     opaque: &serde_json::Value,
 ) -> Vec<wit_types::ParamEntry> {
     let mut entries = Vec::new();
+    let mut schema = BTreeMap::new();
+    for spec in &manifest.params {
+        schema.insert(spec.id.as_str(), &spec.kind);
+    }
 
     if let serde_json::Value::Object(map) = opaque {
         for (k, v) in map {
             if numeric_params.contains_key(k) {
                 continue; // animated numeric param overrides static base param
             }
-            match v {
-                serde_json::Value::Number(n) => {
-                    if let Some(f) = n.as_f64() {
-                        entries.push(wit_types::ParamEntry {
-                            id: k.clone(),
-                            value: wit_types::ParamValue::Number(f),
-                        });
-                    }
-                }
-                serde_json::Value::Bool(b) => {
-                    entries.push(wit_types::ParamEntry {
-                        id: k.clone(),
-                        value: wit_types::ParamValue::Bool(*b),
-                    });
-                }
-                serde_json::Value::String(s) => {
-                    entries.push(wit_types::ParamEntry {
-                        id: k.clone(),
-                        value: wit_types::ParamValue::String(s.clone()),
-                    });
-                }
-                serde_json::Value::Array(arr) if arr.len() == 4 => {
-                    // Try parsing as Color [r, g, b, a]
-                    let r = arr[0].as_u64().unwrap_or(0) as u8;
-                    let g = arr[1].as_u64().unwrap_or(0) as u8;
-                    let b = arr[2].as_u64().unwrap_or(0) as u8;
-                    let a = arr[3].as_u64().unwrap_or(255) as u8;
-                    entries.push(wit_types::ParamEntry {
-                        id: k.clone(),
-                        value: wit_types::ParamValue::Color(wit_types::Color { r, g, b, a }),
-                    });
-                }
-                _ => {}
+            if let Some(value) = json_to_param_value(v, schema.get(k.as_str()).copied()) {
+                entries.push(wit_types::ParamEntry {
+                    id: k.clone(),
+                    value,
+                });
             }
         }
     }
@@ -552,6 +531,101 @@ fn build_wit_params(
     }
 
     entries
+}
+
+fn json_to_param_value(
+    value: &serde_json::Value,
+    kind: Option<&wit_types::ParamKind>,
+) -> Option<wit_types::ParamValue> {
+    match kind {
+        Some(wit_types::ParamKind::EnumChoice(_)) => value
+            .as_str()
+            .map(|s| wit_types::ParamValue::EnumChoice(s.to_string())),
+        Some(wit_types::ParamKind::Bool(_)) => value.as_bool().map(wit_types::ParamValue::Bool),
+        Some(wit_types::ParamKind::Color(_)) => {
+            json_to_color(value).map(wit_types::ParamValue::Color)
+        }
+        Some(wit_types::ParamKind::Point(_)) => {
+            json_to_point(value).map(wit_types::ParamValue::Point)
+        }
+        Some(wit_types::ParamKind::AssetRef(_)) => value
+            .as_str()
+            .map(|s| wit_types::ParamValue::AssetRef(s.to_string())),
+        Some(wit_types::ParamKind::Number(_)) => value.as_f64().map(wit_types::ParamValue::Number),
+        Some(wit_types::ParamKind::String(_)) => value
+            .as_str()
+            .map(|s| wit_types::ParamValue::String(s.to_string())),
+        None => match value {
+            serde_json::Value::Number(n) => n.as_f64().map(wit_types::ParamValue::Number),
+            serde_json::Value::Bool(b) => Some(wit_types::ParamValue::Bool(*b)),
+            serde_json::Value::String(s) => Some(wit_types::ParamValue::String(s.clone())),
+            serde_json::Value::Array(arr) if arr.len() == 4 => {
+                json_to_color(value).map(wit_types::ParamValue::Color)
+            }
+            serde_json::Value::Array(arr) if arr.len() == 2 => {
+                json_to_point(value).map(wit_types::ParamValue::Point)
+            }
+            _ => None,
+        },
+    }
+}
+
+fn json_to_color(value: &serde_json::Value) -> Option<wit_types::Color> {
+    if let serde_json::Value::Array(arr) = value
+        && arr.len() == 4
+    {
+        return Some(wit_types::Color {
+            r: arr[0].as_u64().unwrap_or(0) as u8,
+            g: arr[1].as_u64().unwrap_or(0) as u8,
+            b: arr[2].as_u64().unwrap_or(0) as u8,
+            a: arr[3].as_u64().unwrap_or(255) as u8,
+        });
+    }
+    if let serde_json::Value::Object(map) = value {
+        return Some(wit_types::Color {
+            r: map
+                .get("r")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u8,
+            g: map
+                .get("g")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u8,
+            b: map
+                .get("b")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u8,
+            a: map
+                .get("a")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(255) as u8,
+        });
+    }
+    None
+}
+
+fn json_to_point(value: &serde_json::Value) -> Option<wit_types::Point> {
+    if let serde_json::Value::Array(arr) = value
+        && arr.len() == 2
+    {
+        return Some(wit_types::Point {
+            x: arr[0].as_f64().unwrap_or(0.0) as f32,
+            y: arr[1].as_f64().unwrap_or(0.0) as f32,
+        });
+    }
+    if let serde_json::Value::Object(map) = value {
+        return Some(wit_types::Point {
+            x: map
+                .get("x")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0) as f32,
+            y: map
+                .get("y")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0) as f32,
+        });
+    }
+    None
 }
 
 fn wit_scene_to_core(scene: wit_types::Scene) -> VectorScene {
@@ -647,46 +721,34 @@ fn wit_manifest_to_inspector(manifest: &wit_types::Manifest) -> InspectorSchema 
                     step: n.step,
                 })
             }
-            wit_types::ParamKind::Color(c) => {
-                animathio_plugin_api::ControlWidget::ColorPicker {
-                    default: animathio_plugin_api::ColorValue {
-                        r: c.default.r,
-                        g: c.default.g,
-                        b: c.default.b,
-                        a: c.default.a,
-                    },
-                }
-            }
-            wit_types::ParamKind::String(s) => {
-                animathio_plugin_api::ControlWidget::TextInput {
-                    default: s.default.clone(),
-                }
-            }
-            wit_types::ParamKind::EnumChoice(e) => {
-                animathio_plugin_api::ControlWidget::Dropdown {
-                    options: e.options.clone(),
-                    default: e.default.clone(),
-                }
-            }
+            wit_types::ParamKind::Color(c) => animathio_plugin_api::ControlWidget::ColorPicker {
+                default: animathio_plugin_api::ColorValue {
+                    r: c.default.r,
+                    g: c.default.g,
+                    b: c.default.b,
+                    a: c.default.a,
+                },
+            },
+            wit_types::ParamKind::String(s) => animathio_plugin_api::ControlWidget::TextInput {
+                default: s.default.clone(),
+            },
+            wit_types::ParamKind::EnumChoice(e) => animathio_plugin_api::ControlWidget::Dropdown {
+                options: e.options.clone(),
+                default: e.default.clone(),
+            },
             wit_types::ParamKind::Bool(b) => {
-                animathio_plugin_api::ControlWidget::Toggle {
-                    default: b.default,
-                }
+                animathio_plugin_api::ControlWidget::Toggle { default: b.default }
             }
-            wit_types::ParamKind::Point(p) => {
-                animathio_plugin_api::ControlWidget::Point2D {
-                    default: animathio_plugin_api::PointValue {
-                        x: p.default.x,
-                        y: p.default.y,
-                    },
-                }
-            }
-            wit_types::ParamKind::AssetRef(a) => {
-                animathio_plugin_api::ControlWidget::AssetPicker {
-                    media_type: a.media_type.clone(),
-                    default_asset: a.default_asset.clone(),
-                }
-            }
+            wit_types::ParamKind::Point(p) => animathio_plugin_api::ControlWidget::Point2D {
+                default: animathio_plugin_api::PointValue {
+                    x: p.default.x,
+                    y: p.default.y,
+                },
+            },
+            wit_types::ParamKind::AssetRef(a) => animathio_plugin_api::ControlWidget::AssetPicker {
+                media_type: a.media_type.clone(),
+                default_asset: a.default_asset.clone(),
+            },
         };
 
         schema.params.push(animathio_plugin_api::InspectorParam {
@@ -707,6 +769,9 @@ fn load_system_font_bytes() -> Vec<u8> {
         "/usr/share/fonts/TTF/OpenSans-Regular.ttf",
         "/usr/share/fonts/TTF/Lato-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        // Windows fallbacks (CI runs the host tests on windows-latest too).
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
     ];
 
     for path in CANDIDATES {
@@ -719,7 +784,11 @@ fn load_system_font_bytes() -> Vec<u8> {
     Vec::new()
 }
 
-fn shape_text_skrifa(font_bytes: &[u8], text: &str, font_size: f32) -> Vec<Vec<wit_types::PathVerb>> {
+fn shape_text_skrifa(
+    font_bytes: &[u8],
+    text: &str,
+    font_size: f32,
+) -> Vec<Vec<wit_types::PathVerb>> {
     if font_bytes.is_empty() || text.is_empty() {
         return Vec::new();
     }
@@ -747,17 +816,19 @@ fn shape_text_skrifa(font_bytes: &[u8], text: &str, font_size: f32) -> Vec<Vec<w
             if !self.current.is_empty() {
                 self.paths.push(std::mem::take(&mut self.current));
             }
-            self.current.push(wit_types::PathVerb::MoveTo(wit_types::Point {
-                x: self.cursor_x + x,
-                y: -y,
-            }));
+            self.current
+                .push(wit_types::PathVerb::MoveTo(wit_types::Point {
+                    x: self.cursor_x + x,
+                    y: -y,
+                }));
         }
 
         fn line_to(&mut self, x: f32, y: f32) {
-            self.current.push(wit_types::PathVerb::LineTo(wit_types::Point {
-                x: self.cursor_x + x,
-                y: -y,
-            }));
+            self.current
+                .push(wit_types::PathVerb::LineTo(wit_types::Point {
+                    x: self.cursor_x + x,
+                    y: -y,
+                }));
         }
 
         fn quad_to(&mut self, cx0: f32, cy0: f32, x: f32, y: f32) {

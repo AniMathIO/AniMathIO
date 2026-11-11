@@ -22,6 +22,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Install wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+      - name: Build plugins
+        if: runner.os == 'Linux'
+        run: ./scripts/build-plugins.sh
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Clippy

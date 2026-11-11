@@ -1,0 +1,7 @@
+api_version = "0.1.0"
+id = "org.animathio.shapes"
+name = "Shapes"
+version = "0.1.0"
+description = "Basic vector shapes: rect, ellipse, polygon, star, arrow, line"
+kinds = ["clip-source"]
+capabilities = []
