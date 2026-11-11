@@ -19,6 +19,17 @@ AniMathIO 2.0 is a from-scratch Rust rewrite of AniMathIO, an editor for Manim-l
 - Don't merge `main`/`staging` into `v2`. The only planned merge is the one-time `git merge -s ours main` at the 2.0 swap (see #156, "Repository and branch plan").
 - Use Conventional Commits. release-plz will derive versions and the changelog from them.
 
+## Automation
+
+Automation is configured in `renovate.json`, `release-plz.toml` and `.github/workflows/{release-plz,package,security-audit}.yml`. It is scoped to the `v2` branch and stays in "release-PR only" mode until the 2.0 swap.
+
+- **Renovate** (`renovate.json`) targets `baseBranchPatterns: ["v2"]` (Renovate's current name for what was formerly `baseBranches`). Patch/minor/security updates are grouped and auto-merged once CI passes (GitHub auto-merge); majors are never auto-merged and get a `needs-human` label. Lockfile maintenance runs weekly and vulnerability alerts are on. GitHub Actions are pinned by digest.
+  - **Manual step:** the GitHub **Renovate** app must be enabled for the repo (an agent cannot enable it). Renovate reads config from the default branch, so it activates when `v2` becomes the default at the swap; change `baseBranchPatterns` to `["main"]` then. Auto-merge needs "Allow auto-merge" enabled in the repo settings and CI as a required status check.
+- **Dependabot is v1-only.** `.github/dependabot.yml` lives on `main`/`staging`; do not add one on `v2` — Renovate covers it.
+- **release-plz** (`release-plz.toml` + `.github/workflows/release-plz.yml`) opens a release PR (version bump + git-cliff changelog) on pushes to `v2`. Tagging, GitHub releases and crates.io publishing are disabled until the swap; the single tag is `v{{version}}`, starting at `2.0.0` (workspace version is already `2.0.0`, unreleased). Enablement steps are commented in both files.
+- **Packaging** (`apps/animathio-cli/Cargo.toml` `[package.metadata.packager]` + `.github/workflows/package.yml`) builds AppImage + deb on Linux and NSIS on Windows, runs on `workflow_dispatch` and release PRs, smoke-tests each installer (`animathio-cli --version`) and adds build-provenance attestations. It targets `animathio-cli` until `apps/animathio` lands (see the TODO in the Cargo.toml and workflow).
+- **Security** (`.github/workflows/security-audit.yml`) runs daily: `cargo deny check advisories` once `deny.toml` exists (added in the media PR), else `cargo audit`.
+
 ## Porting from v1
 
 The v1 implementation (Electron/TypeScript) is still on `main` and is a useful reference. Read it without checking it out:
