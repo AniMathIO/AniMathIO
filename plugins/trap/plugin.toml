@@ -1,0 +1,7 @@
+api_version = "0.1.0"
+id = "org.animathio.trap"
+name = "Trap Fixture"
+version = "0.1.0"
+description = "Infinite-loop fixture for sandbox containment tests"
+kinds = ["clip-source"]
+capabilities = []

@@ -1,0 +1,1175 @@
+//! WebAssembly Component Model plugin host runtime and registry for AniMathIO 2.0.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
+
+use animathio_core::{ClipKind, Scene as CoreScene, VectorScene};
+use animathio_plugin_api::{InspectorSchema, PluginManifestToml, PluginPackage};
+use lru::LruCache;
+use thiserror::Error;
+use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+
+wasmtime::component::bindgen!({
+    path: "../plugin-api/wit",
+    world: "plugin",
+});
+
+use animathio::plugin::host::Host;
+use animathio::plugin::types as wit_types;
+
+/// Errors encountered in the plugin host runtime.
+#[derive(Debug, Error)]
+pub enum HostError {
+    /// Wasmtime runtime or engine error.
+    #[error("wasmtime error: {0}")]
+    Wasmtime(#[from] wasmtime::Error),
+    /// IO error reading files or disk cache.
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    /// Error in plugin package packaging or extraction.
+    #[error("package error: {0}")]
+    Package(#[from] animathio_plugin_api::PackageError),
+    /// Plugin compilation failure.
+    #[error("compilation error: {0}")]
+    CompilationFailed(String),
+    /// Plugin not registered in the host.
+    #[error("plugin not found: {0}")]
+    NotFound(String),
+    /// Plugin execution trapped or failed.
+    #[error("plugin execution trapped: {0}")]
+    Trapped(String),
+    /// A plugin with this id is already registered.
+    #[error("plugin id already registered: {0}")]
+    DuplicateId(String),
+    /// The plugin produced a scene that failed validation.
+    #[error("plugin produced an invalid scene: {0}")]
+    InvalidOutput(String),
+}
+
+/// Maximum characters accepted by the host `shape_text` import.
+const MAX_SHAPE_TEXT_CHARS: usize = 10_000;
+/// Maximum total path verbs returned by the host `shape_text` import.
+const MAX_SHAPE_TEXT_VERBS: usize = 200_000;
+/// Maximum UTF-8 bytes accepted by the host `svg_to_paths` import.
+const MAX_SVG_INPUT_BYTES: usize = 1024 * 1024;
+/// Maximum total path verbs returned by the host `svg_to_paths` import.
+const MAX_SVG_VERBS: usize = 100_000;
+/// Maximum UTF-8 bytes per `log` message.
+const MAX_LOG_MESSAGE_BYTES: usize = 4 * 1024;
+/// Maximum retained log messages per store.
+const MAX_LOG_ENTRIES: usize = 1_000;
+/// How often the epoch ticker advances the engine epoch.
+const EPOCH_TICK_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Resource limits applied to sandboxed plugin execution.
+#[derive(Clone, Copy, Debug)]
+pub struct SandboxLimits {
+    /// Memory growth limit in bytes (default: 64 MB).
+    pub max_memory_bytes: usize,
+    /// Maximum table elements (default: 50,000).
+    pub max_table_elements: usize,
+    /// Fuel units allocated per execution call (default: 50,000,000).
+    pub fuel_per_call: u64,
+    /// Epoch deadline ticks (default: 100). At a 10 ms tick interval this is a
+    /// ~1 s backstop; fuel metering catches most runaway plugins much sooner.
+    /// A low deadline races the epoch ticker and can spuriously trap fast
+    /// calls such as `describe` during plugin loading.
+    pub epoch_deadline_ticks: u64,
+}
+
+impl Default for SandboxLimits {
+    fn default() -> Self {
+        Self {
+            max_memory_bytes: 64 * 1024 * 1024,
+            max_table_elements: 50_000,
+            fuel_per_call: 50_000_000,
+            epoch_deadline_ticks: 100,
+        }
+    }
+}
+
+/// Capabilities granted by the host to a plugin. Default is none.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CapabilityGrants {
+    /// Allowed filesystem directories (read-only or read-write).
+    pub allowed_directories: Vec<PathBuf>,
+    /// Whether network socket access is granted. Default is false.
+    pub allow_network: bool,
+    /// Environment variables passed to WASI context.
+    pub environment_variables: Vec<(String, String)>,
+}
+
+/// Build the [`StoreLimits`] applied to every plugin store. A single memory of at most
+/// `max_memory_bytes` makes the per-memory limit effectively the aggregate plugin allocation.
+/// Instances, memories and tables are capped far below wasmtime's defaults; wasmtime 50's
+/// component runtime needs at least three core instances per component, hence the eight here.
+fn sandbox_store_limits(limits: &SandboxLimits) -> StoreLimits {
+    StoreLimitsBuilder::new()
+        .memory_size(limits.max_memory_bytes)
+        .table_elements(limits.max_table_elements)
+        .instances(8)
+        .memories(1)
+        .tables(2)
+        .trap_on_grow_failure(true)
+        .build()
+}
+
+/// Background thread that advances the engine epoch on a fixed interval. Without this the
+/// `epoch_deadline_ticks` configured on each store would never fire while a plugin runs.
+struct EpochTicker {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl EpochTicker {
+    fn start(engine: Engine, interval: Duration) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&shutdown);
+        let handle = std::thread::spawn(move || {
+            while !flag.load(Ordering::Relaxed) {
+                std::thread::sleep(interval);
+                engine.increment_epoch();
+            }
+        });
+        Self {
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for EpochTicker {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Internal host state for WASI and host imports.
+pub struct HostState {
+    table: ResourceTable,
+    wasi: WasiCtx,
+    font_data: Vec<u8>,
+    limiter: StoreLimits,
+    logs: Vec<String>,
+}
+
+impl WasiView for HostState {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
+    }
+}
+
+impl animathio::plugin::types::Host for HostState {}
+
+impl Host for HostState {
+    fn shape_text(&mut self, text: String, font_size: f32) -> Vec<Vec<wit_types::PathVerb>> {
+        let char_count = text.chars().count();
+        if char_count > MAX_SHAPE_TEXT_CHARS {
+            log::warn!(
+                "shape_text: rejecting {char_count} characters (max {MAX_SHAPE_TEXT_CHARS})"
+            );
+            return Vec::new();
+        }
+        shape_text_skrifa(&self.font_data, &text, font_size, MAX_SHAPE_TEXT_VERBS)
+    }
+
+    fn svg_to_paths(&mut self, svg_xml: String) -> Vec<Vec<wit_types::PathVerb>> {
+        if svg_xml.len() > MAX_SVG_INPUT_BYTES {
+            log::warn!(
+                "svg_to_paths: rejecting {} input bytes (max {MAX_SVG_INPUT_BYTES})",
+                svg_xml.len()
+            );
+            return Vec::new();
+        }
+        parse_svg_to_paths(&svg_xml, MAX_SVG_VERBS)
+    }
+
+    fn log(&mut self, message: String) {
+        let message = truncate_utf8(&message, MAX_LOG_MESSAGE_BYTES);
+        log::info!("[plugin log] {}", message);
+        if self.logs.len() < MAX_LOG_ENTRIES {
+            self.logs.push(message);
+        }
+    }
+}
+
+/// Loaded precompiled plugin entry.
+pub struct LoadedPlugin {
+    /// Package manifest.
+    pub manifest: PluginManifestToml,
+    /// Component compiled for wasmtime.
+    pub component: Component,
+    /// BLAKE3 content hash of the wasm binary.
+    pub wasm_hash: [u8; 32],
+    /// UI Inspector schema derived from WIT manifest.
+    pub inspector_schema: InspectorSchema,
+    /// Full WIT manifest returned by describe().
+    pub wit_manifest: wit_types::Manifest,
+}
+
+/// Disk cache for compiled WebAssembly components.
+pub struct ComponentDiskCache {
+    cache_dir: PathBuf,
+}
+
+impl ComponentDiskCache {
+    /// Initialize or create a cache directory.
+    pub fn new(cache_dir: impl Into<PathBuf>) -> Self {
+        let dir = cache_dir.into();
+        let _ = fs::create_dir_all(&dir);
+        Self { cache_dir: dir }
+    }
+
+    /// Compute disk cache key from wasm hash and wasmtime engine version.
+    #[must_use]
+    pub fn cache_key(wasm_bytes: &[u8]) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(wasm_bytes);
+        hasher.update(b"wasmtime-50.0.1");
+        hasher.finalize().to_hex().to_string()
+    }
+
+    /// Get precompiled component from disk cache, or compile and write to disk cache.
+    pub fn get_or_compile(
+        &self,
+        engine: &Engine,
+        wasm_bytes: &[u8],
+    ) -> Result<Component, HostError> {
+        let key = Self::cache_key(wasm_bytes);
+        let cache_file = self.cache_dir.join(format!("{key}.bin"));
+
+        if cache_file.exists()
+            && let Ok(bytes) = fs::read(&cache_file)
+            && let Ok(comp) = unsafe { Component::deserialize(engine, &bytes) }
+        {
+            return Ok(comp);
+        }
+
+        let component = Component::from_binary(engine, wasm_bytes)
+            .map_err(|e| HostError::CompilationFailed(e.to_string()))?;
+
+        if let Ok(serialized) = component.serialize() {
+            let tmp_file = self
+                .cache_dir
+                .join(format!(".tmp_{key}_{}", std::process::id()));
+            if fs::write(&tmp_file, &serialized).is_ok() {
+                let _ = fs::rename(&tmp_file, &cache_file);
+            }
+        }
+
+        Ok(component)
+    }
+}
+
+/// Central registry managing plugin loading, sandboxing, output caching and scene resolution.
+pub struct PluginHost {
+    engine: Engine,
+    linker: Linker<HostState>,
+    disk_cache: ComponentDiskCache,
+    plugins: BTreeMap<String, LoadedPlugin>,
+    limits: SandboxLimits,
+    font_data: Vec<u8>,
+    output_cache: LruCache<[u8; 32], VectorScene>,
+    cache_hits: AtomicUsize,
+    cache_misses: AtomicUsize,
+    /// Held only so its `Drop` stops and joins the epoch ticker thread.
+    _epoch_ticker: EpochTicker,
+}
+
+impl PluginHost {
+    /// Create a new plugin host with default sandbox limits and disk cache in `cache_dir`.
+    pub fn new(cache_dir: impl Into<PathBuf>) -> Result<Self, HostError> {
+        Self::with_limits(cache_dir, SandboxLimits::default())
+    }
+
+    /// Create a plugin host with explicit sandbox limits.
+    pub fn with_limits(
+        cache_dir: impl Into<PathBuf>,
+        limits: SandboxLimits,
+    ) -> Result<Self, HostError> {
+        let mut config = Config::new();
+        config.wasm_component_model(true);
+        config.consume_fuel(true);
+        config.epoch_interruption(true);
+
+        let engine = Engine::new(&config)?;
+        let mut linker: Linker<HostState> = Linker::new(&engine);
+
+        wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+        Plugin::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |s| s)?;
+
+        let font_data = load_system_font_bytes();
+        let disk_cache = ComponentDiskCache::new(cache_dir);
+        let output_cache = LruCache::new(NonZeroUsize::new(512).unwrap());
+        let epoch_ticker = EpochTicker::start(engine.clone(), EPOCH_TICK_INTERVAL);
+
+        Ok(Self {
+            engine,
+            linker,
+            disk_cache,
+            plugins: BTreeMap::new(),
+            limits,
+            font_data,
+            output_cache,
+            cache_hits: AtomicUsize::new(0),
+            cache_misses: AtomicUsize::new(0),
+            _epoch_ticker: epoch_ticker,
+        })
+    }
+
+    /// Set font data used for host-side text shaping.
+    pub fn set_font_data(&mut self, font_bytes: Vec<u8>) {
+        self.font_data = font_bytes;
+    }
+
+    /// Number of cache hits recorded.
+    pub fn cache_hits(&self) -> usize {
+        self.cache_hits.load(Ordering::Relaxed)
+    }
+
+    /// Number of cache misses recorded.
+    pub fn cache_misses(&self) -> usize {
+        self.cache_misses.load(Ordering::Relaxed)
+    }
+
+    /// Clear output cache.
+    pub fn clear_output_cache(&mut self) {
+        self.output_cache.clear();
+    }
+
+    /// Load an `.amplugin` file from disk.
+    pub fn load_plugin_file(&mut self, path: impl AsRef<Path>) -> Result<String, HostError> {
+        let bytes = fs::read(path)?;
+        let package = PluginPackage::from_bytes(&bytes)?;
+        self.load_plugin_package(package)
+    }
+
+    /// Load all `.amplugin` files from a directory.
+    pub fn load_plugins_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<String>, HostError> {
+        let mut ids = Vec::new();
+        let dir = dir.as_ref();
+        if !dir.exists() {
+            return Ok(ids);
+        }
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "amplugin")
+                && let Ok(id) = self.load_plugin_file(&path)
+            {
+                ids.push(id);
+            }
+        }
+        Ok(ids)
+    }
+
+    /// Load a `PluginPackage` directly into the host.
+    ///
+    /// Plugin ids must be unique within a host. Signing is deferred: an untrusted package may
+    /// still claim any id, so callers must only load packages from trusted sources for now.
+    pub fn load_plugin_package(&mut self, package: PluginPackage) -> Result<String, HostError> {
+        let id = package.manifest.id.clone();
+        if self.plugins.contains_key(&id) {
+            return Err(HostError::DuplicateId(id));
+        }
+
+        let wasm_hash = *blake3::hash(&package.wasm_bytes).as_bytes();
+        let component = self
+            .disk_cache
+            .get_or_compile(&self.engine, &package.wasm_bytes)?;
+
+        // Describe plugin to extract WIT manifest and parameter schema
+        let mut store = self.create_store(CapabilityGrants::default())?;
+        let instance = Plugin::instantiate(&mut store, &component, &self.linker)?;
+        let wit_manifest = instance.call_describe(&mut store)?;
+
+        let inspector_schema = wit_manifest_to_inspector(&wit_manifest);
+
+        self.plugins.insert(
+            id.clone(),
+            LoadedPlugin {
+                manifest: package.manifest,
+                component,
+                wasm_hash,
+                inspector_schema,
+                wit_manifest,
+            },
+        );
+
+        Ok(id)
+    }
+
+    /// Get inspector schema for a loaded plugin.
+    pub fn get_inspector_schema(&self, plugin_id: &str) -> Option<&InspectorSchema> {
+        self.plugins.get(plugin_id).map(|p| &p.inspector_schema)
+    }
+
+    /// Get loaded plugin information.
+    pub fn get_plugin(&self, plugin_id: &str) -> Option<&LoadedPlugin> {
+        self.plugins.get(plugin_id)
+    }
+
+    /// List all loaded plugin IDs.
+    pub fn loaded_plugin_ids(&self) -> Vec<String> {
+        self.plugins.keys().cloned().collect()
+    }
+
+    fn create_store(&self, capabilities: CapabilityGrants) -> Result<Store<HostState>, HostError> {
+        let mut wasi_builder = WasiCtxBuilder::new();
+        for (k, v) in &capabilities.environment_variables {
+            wasi_builder.env(k, v);
+        }
+        let wasi = wasi_builder.build();
+
+        let state = HostState {
+            table: ResourceTable::new(),
+            wasi,
+            font_data: self.font_data.clone(),
+            limiter: sandbox_store_limits(&self.limits),
+            logs: Vec::new(),
+        };
+
+        let mut store = Store::new(&self.engine, state);
+        let _ = store.set_fuel(self.limits.fuel_per_call);
+        store.set_epoch_deadline(self.limits.epoch_deadline_ticks);
+        store.limiter(|s| &mut s.limiter);
+
+        Ok(store)
+    }
+
+    /// Execute a clip-source plugin under sandbox protection and return a VectorScene.
+    pub fn render_clip(
+        &mut self,
+        plugin_id: &str,
+        params: &BTreeMap<String, f64>,
+        opaque_params: &serde_json::Value,
+        time_ticks: i64,
+        canvas_size: (u32, u32),
+    ) -> Result<VectorScene, HostError> {
+        let plugin = self
+            .plugins
+            .get(plugin_id)
+            .ok_or_else(|| HostError::NotFound(plugin_id.to_string()))?;
+
+        // 1. Check output cache
+        let cache_key = compute_cache_key(
+            &plugin.wasm_hash,
+            time_ticks,
+            canvas_size,
+            params,
+            opaque_params,
+        );
+
+        if let Some(cached) = self.output_cache.get(&cache_key) {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(cached.clone());
+        }
+
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
+
+        // 2. Prepare WIT parameters (typed against the plugin's declared schema)
+        let wit_params = build_wit_params(&plugin.wit_manifest, params, opaque_params);
+        let size = wit_types::Size {
+            width: canvas_size.0,
+            height: canvas_size.1,
+        };
+
+        // 3. Sandboxed execution with fuel and epoch limit
+        let mut store = self.create_store(CapabilityGrants::default())?;
+        let instance = Plugin::instantiate(&mut store, &plugin.component, &self.linker)
+            .map_err(|e| HostError::Trapped(e.to_string()))?;
+
+        let wit_scene = instance
+            .call_render_clip(&mut store, &wit_params, time_ticks, size)
+            .map_err(|e| HostError::Trapped(e.to_string()))?;
+
+        let core_scene = wit_scene_to_core(wit_scene);
+        core_scene
+            .validate()
+            .map_err(|e| HostError::InvalidOutput(e.to_string()))?;
+
+        // 4. Cache output
+        self.output_cache.put(cache_key, core_scene.clone());
+
+        Ok(core_scene)
+    }
+
+    /// Resolve an evaluated scene by running all plugin clips and replacing them with vector scenes.
+    /// Render can then draw it without knowing about plugins.
+    /// Trapped or missing plugins are converted to `ClipKind::Error` without crashing the host.
+    pub fn resolve(&mut self, scene: &CoreScene, canvas_size: (u32, u32)) -> CoreScene {
+        let mut resolved_scene = CoreScene {
+            clips: Vec::with_capacity(scene.clips.len()),
+        };
+
+        for clip in &scene.clips {
+            let mut resolved_clip = clip.clone();
+
+            if let ClipKind::Plugin {
+                ref plugin_id,
+                ref params,
+            } = clip.kind
+            {
+                match self.render_clip(
+                    plugin_id,
+                    &clip.params,
+                    params,
+                    clip.source_time.0,
+                    canvas_size,
+                ) {
+                    Ok(vector_scene) => {
+                        resolved_clip.kind = ClipKind::Vector(vector_scene);
+                    }
+                    Err(err) => {
+                        log::warn!("Plugin '{}' failed to evaluate: {}", plugin_id, err);
+                        resolved_clip.kind =
+                            ClipKind::Error(format!("Plugin '{plugin_id}' error: {err}"));
+                    }
+                }
+            }
+
+            resolved_scene.clips.push(resolved_clip);
+        }
+
+        resolved_scene
+    }
+}
+
+fn compute_cache_key(
+    plugin_hash: &[u8; 32],
+    time_ticks: i64,
+    size: (u32, u32),
+    params: &BTreeMap<String, f64>,
+    opaque_params: &serde_json::Value,
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(plugin_hash);
+    hasher.update(&time_ticks.to_le_bytes());
+    hasher.update(&size.0.to_le_bytes());
+    hasher.update(&size.1.to_le_bytes());
+
+    for (k, v) in params {
+        hasher.update(k.as_bytes());
+        hasher.update(&v.to_le_bytes());
+    }
+
+    if !opaque_params.is_null()
+        && let Ok(s) = serde_json::to_string(opaque_params)
+    {
+        hasher.update(s.as_bytes());
+    }
+
+    *hasher.finalize().as_bytes()
+}
+
+fn build_wit_params(
+    manifest: &wit_types::Manifest,
+    numeric_params: &BTreeMap<String, f64>,
+    opaque: &serde_json::Value,
+) -> Vec<wit_types::ParamEntry> {
+    let mut entries = Vec::new();
+    let mut schema = BTreeMap::new();
+    for spec in &manifest.params {
+        schema.insert(spec.id.as_str(), &spec.kind);
+    }
+
+    if let serde_json::Value::Object(map) = opaque {
+        for (k, v) in map {
+            if numeric_params.contains_key(k) {
+                continue; // animated numeric param overrides static base param
+            }
+            if let Some(value) = json_to_param_value(v, schema.get(k.as_str()).copied()) {
+                entries.push(wit_types::ParamEntry {
+                    id: k.clone(),
+                    value,
+                });
+            }
+        }
+    }
+
+    for (k, v) in numeric_params {
+        entries.push(wit_types::ParamEntry {
+            id: k.clone(),
+            value: wit_types::ParamValue::Number(*v),
+        });
+    }
+
+    entries
+}
+
+fn json_to_param_value(
+    value: &serde_json::Value,
+    kind: Option<&wit_types::ParamKind>,
+) -> Option<wit_types::ParamValue> {
+    match kind {
+        Some(wit_types::ParamKind::EnumChoice(_)) => value
+            .as_str()
+            .map(|s| wit_types::ParamValue::EnumChoice(s.to_string())),
+        Some(wit_types::ParamKind::Bool(_)) => value.as_bool().map(wit_types::ParamValue::Bool),
+        Some(wit_types::ParamKind::Color(_)) => {
+            json_to_color(value).map(wit_types::ParamValue::Color)
+        }
+        Some(wit_types::ParamKind::Point(_)) => {
+            json_to_point(value).map(wit_types::ParamValue::Point)
+        }
+        Some(wit_types::ParamKind::AssetRef(_)) => value
+            .as_str()
+            .map(|s| wit_types::ParamValue::AssetRef(s.to_string())),
+        Some(wit_types::ParamKind::Number(_)) => value.as_f64().map(wit_types::ParamValue::Number),
+        Some(wit_types::ParamKind::String(_)) => value
+            .as_str()
+            .map(|s| wit_types::ParamValue::String(s.to_string())),
+        None => match value {
+            serde_json::Value::Number(n) => n.as_f64().map(wit_types::ParamValue::Number),
+            serde_json::Value::Bool(b) => Some(wit_types::ParamValue::Bool(*b)),
+            serde_json::Value::String(s) => Some(wit_types::ParamValue::String(s.clone())),
+            serde_json::Value::Array(arr) if arr.len() == 4 => {
+                json_to_color(value).map(wit_types::ParamValue::Color)
+            }
+            serde_json::Value::Array(arr) if arr.len() == 2 => {
+                json_to_point(value).map(wit_types::ParamValue::Point)
+            }
+            _ => None,
+        },
+    }
+}
+
+fn json_to_color(value: &serde_json::Value) -> Option<wit_types::Color> {
+    if let serde_json::Value::Array(arr) = value
+        && arr.len() == 4
+    {
+        return Some(wit_types::Color {
+            r: arr[0].as_u64().unwrap_or(0) as u8,
+            g: arr[1].as_u64().unwrap_or(0) as u8,
+            b: arr[2].as_u64().unwrap_or(0) as u8,
+            a: arr[3].as_u64().unwrap_or(255) as u8,
+        });
+    }
+    if let serde_json::Value::Object(map) = value {
+        return Some(wit_types::Color {
+            r: map
+                .get("r")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u8,
+            g: map
+                .get("g")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u8,
+            b: map
+                .get("b")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u8,
+            a: map
+                .get("a")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(255) as u8,
+        });
+    }
+    None
+}
+
+fn json_to_point(value: &serde_json::Value) -> Option<wit_types::Point> {
+    if let serde_json::Value::Array(arr) = value
+        && arr.len() == 2
+    {
+        return Some(wit_types::Point {
+            x: arr[0].as_f64().unwrap_or(0.0) as f32,
+            y: arr[1].as_f64().unwrap_or(0.0) as f32,
+        });
+    }
+    if let serde_json::Value::Object(map) = value {
+        return Some(wit_types::Point {
+            x: map
+                .get("x")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0) as f32,
+            y: map
+                .get("y")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0) as f32,
+        });
+    }
+    None
+}
+
+fn wit_scene_to_core(scene: wit_types::Scene) -> VectorScene {
+    let mut elements = Vec::with_capacity(scene.elements.len());
+
+    for cmd in scene.elements {
+        match cmd {
+            wit_types::DrawCommand::FillPath((verbs, color)) => {
+                elements.push(animathio_core::VectorElement::FillPath {
+                    path: verbs.into_iter().map(wit_verb_to_core).collect(),
+                    color: animathio_core::Color::rgba(color.r, color.g, color.b, color.a),
+                });
+            }
+            wit_types::DrawCommand::StrokePath((verbs, style)) => {
+                let cap = match style.cap {
+                    wit_types::StrokeCap::Butt => animathio_core::StrokeCap::Butt,
+                    wit_types::StrokeCap::Round => animathio_core::StrokeCap::Round,
+                    wit_types::StrokeCap::Square => animathio_core::StrokeCap::Square,
+                };
+                let join = match style.join {
+                    wit_types::StrokeJoin::Miter => animathio_core::StrokeJoin::Miter,
+                    wit_types::StrokeJoin::Round => animathio_core::StrokeJoin::Round,
+                    wit_types::StrokeJoin::Bevel => animathio_core::StrokeJoin::Bevel,
+                };
+                elements.push(animathio_core::VectorElement::StrokePath {
+                    path: verbs.into_iter().map(wit_verb_to_core).collect(),
+                    style: animathio_core::StrokeStyle {
+                        width: style.width as f64,
+                        color: animathio_core::Color::rgba(
+                            style.color.r,
+                            style.color.g,
+                            style.color.b,
+                            style.color.a,
+                        ),
+                        cap,
+                        join,
+                    },
+                });
+            }
+            wit_types::DrawCommand::TextRun(text_elem) => {
+                elements.push(animathio_core::VectorElement::TextRun(
+                    animathio_core::TextElement {
+                        text: text_elem.text,
+                        font_size: text_elem.font_size as f64,
+                        x: text_elem.x as f64,
+                        y: text_elem.y as f64,
+                        color: animathio_core::Color::rgba(
+                            text_elem.color.r,
+                            text_elem.color.g,
+                            text_elem.color.b,
+                            text_elem.color.a,
+                        ),
+                    },
+                ));
+            }
+        }
+    }
+
+    VectorScene { elements }
+}
+
+fn wit_verb_to_core(v: wit_types::PathVerb) -> animathio_core::PathVerb {
+    match v {
+        wit_types::PathVerb::MoveTo(p) => {
+            animathio_core::PathVerb::MoveTo(animathio_core::Point::new(p.x as f64, p.y as f64))
+        }
+        wit_types::PathVerb::LineTo(p) => {
+            animathio_core::PathVerb::LineTo(animathio_core::Point::new(p.x as f64, p.y as f64))
+        }
+        wit_types::PathVerb::QuadTo((c, to)) => animathio_core::PathVerb::QuadTo(
+            animathio_core::Point::new(c.x as f64, c.y as f64),
+            animathio_core::Point::new(to.x as f64, to.y as f64),
+        ),
+        wit_types::PathVerb::CubicTo((c1, c2, to)) => animathio_core::PathVerb::CubicTo(
+            animathio_core::Point::new(c1.x as f64, c1.y as f64),
+            animathio_core::Point::new(c2.x as f64, c2.y as f64),
+            animathio_core::Point::new(to.x as f64, to.y as f64),
+        ),
+        wit_types::PathVerb::Close => animathio_core::PathVerb::Close,
+    }
+}
+
+fn wit_manifest_to_inspector(manifest: &wit_types::Manifest) -> InspectorSchema {
+    let mut schema = InspectorSchema::new();
+
+    for param in &manifest.params {
+        let widget = match &param.kind {
+            wit_types::ParamKind::Number(n) => {
+                animathio_plugin_api::ControlWidget::Slider(animathio_plugin_api::SliderControl {
+                    min: n.min,
+                    max: n.max,
+                    default: n.default,
+                    step: n.step,
+                })
+            }
+            wit_types::ParamKind::Color(c) => animathio_plugin_api::ControlWidget::ColorPicker {
+                default: animathio_plugin_api::ColorValue {
+                    r: c.default.r,
+                    g: c.default.g,
+                    b: c.default.b,
+                    a: c.default.a,
+                },
+            },
+            wit_types::ParamKind::String(s) => animathio_plugin_api::ControlWidget::TextInput {
+                default: s.default.clone(),
+            },
+            wit_types::ParamKind::EnumChoice(e) => animathio_plugin_api::ControlWidget::Dropdown {
+                options: e.options.clone(),
+                default: e.default.clone(),
+            },
+            wit_types::ParamKind::Bool(b) => {
+                animathio_plugin_api::ControlWidget::Toggle { default: b.default }
+            }
+            wit_types::ParamKind::Point(p) => animathio_plugin_api::ControlWidget::Point2D {
+                default: animathio_plugin_api::PointValue {
+                    x: p.default.x,
+                    y: p.default.y,
+                },
+            },
+            wit_types::ParamKind::AssetRef(a) => animathio_plugin_api::ControlWidget::AssetPicker {
+                media_type: a.media_type.clone(),
+                default_asset: a.default_asset.clone(),
+            },
+        };
+
+        schema.params.push(animathio_plugin_api::InspectorParam {
+            id: param.id.clone(),
+            label: param.label.clone(),
+            keyframeable: true,
+            widget,
+        });
+    }
+
+    schema
+}
+
+fn load_system_font_bytes() -> Vec<u8> {
+    const CANDIDATES: &[&str] = &[
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/TTF/OpenSans-Regular.ttf",
+        "/usr/share/fonts/TTF/Lato-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        // Windows fallbacks (CI runs the host tests on windows-latest too).
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+    ];
+
+    for path in CANDIDATES {
+        if let Ok(bytes) = fs::read(path) {
+            return bytes;
+        }
+    }
+
+    log::warn!("No system font found; host text shaping will return empty contours");
+    Vec::new()
+}
+
+/// Truncate a string to at most `max` bytes on a UTF-8 character boundary.
+fn truncate_utf8(value: &str, max: usize) -> String {
+    if value.len() <= max {
+        return value.to_owned();
+    }
+    let mut end = max;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_owned()
+}
+
+fn shape_text_skrifa(
+    font_bytes: &[u8],
+    text: &str,
+    font_size: f32,
+    max_verbs: usize,
+) -> Vec<Vec<wit_types::PathVerb>> {
+    if font_bytes.is_empty() || text.is_empty() {
+        return Vec::new();
+    }
+
+    let Ok(font) = skrifa::FontRef::new(font_bytes) else {
+        return Vec::new();
+    };
+
+    use skrifa::MetadataProvider;
+    let outlines = font.outline_glyphs();
+    let charmap = font.charmap();
+    let metrics = font.glyph_metrics(
+        skrifa::instance::Size::new(font_size),
+        skrifa::instance::LocationRef::default(),
+    );
+
+    struct OutlineCollector {
+        paths: Vec<Vec<wit_types::PathVerb>>,
+        current: Vec<wit_types::PathVerb>,
+        cursor_x: f32,
+    }
+
+    impl skrifa::outline::OutlinePen for OutlineCollector {
+        fn move_to(&mut self, x: f32, y: f32) {
+            if !self.current.is_empty() {
+                self.paths.push(std::mem::take(&mut self.current));
+            }
+            self.current
+                .push(wit_types::PathVerb::MoveTo(wit_types::Point {
+                    x: self.cursor_x + x,
+                    y: -y,
+                }));
+        }
+
+        fn line_to(&mut self, x: f32, y: f32) {
+            self.current
+                .push(wit_types::PathVerb::LineTo(wit_types::Point {
+                    x: self.cursor_x + x,
+                    y: -y,
+                }));
+        }
+
+        fn quad_to(&mut self, cx0: f32, cy0: f32, x: f32, y: f32) {
+            self.current.push(wit_types::PathVerb::QuadTo((
+                wit_types::Point {
+                    x: self.cursor_x + cx0,
+                    y: -cy0,
+                },
+                wit_types::Point {
+                    x: self.cursor_x + x,
+                    y: -y,
+                },
+            )));
+        }
+
+        fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+            self.current.push(wit_types::PathVerb::CubicTo((
+                wit_types::Point {
+                    x: self.cursor_x + cx0,
+                    y: -cy0,
+                },
+                wit_types::Point {
+                    x: self.cursor_x + cx1,
+                    y: -cy1,
+                },
+                wit_types::Point {
+                    x: self.cursor_x + x,
+                    y: -y,
+                },
+            )));
+        }
+
+        fn close(&mut self) {
+            self.current.push(wit_types::PathVerb::Close);
+            if !self.current.is_empty() {
+                self.paths.push(std::mem::take(&mut self.current));
+            }
+        }
+    }
+
+    let mut collector = OutlineCollector {
+        paths: Vec::new(),
+        current: Vec::new(),
+        cursor_x: 0.0,
+    };
+
+    for ch in text.chars() {
+        if ch == ' ' {
+            collector.cursor_x += font_size * 0.32;
+            continue;
+        }
+
+        let glyph_id = charmap.map(ch).unwrap_or_default();
+        if let Some(glyph) = outlines.get(glyph_id) {
+            let draw_settings = skrifa::outline::DrawSettings::unhinted(
+                skrifa::instance::Size::new(font_size),
+                skrifa::instance::LocationRef::default(),
+            );
+            let _ = glyph.draw(draw_settings, &mut collector);
+        }
+        let advance = metrics.advance_width(glyph_id).unwrap_or(font_size * 0.6);
+        collector.cursor_x += advance;
+    }
+
+    if !collector.current.is_empty() {
+        collector.paths.push(collector.current);
+    }
+
+    let total_verbs: usize = collector.paths.iter().map(Vec::len).sum();
+    if total_verbs > max_verbs {
+        log::warn!("shape_text: rejecting {total_verbs} path verbs (max {max_verbs})");
+        return Vec::new();
+    }
+
+    collector.paths
+}
+
+fn parse_svg_to_paths(svg: &str, max_verbs: usize) -> Vec<Vec<wit_types::PathVerb>> {
+    let mut results = Vec::new();
+    let trimmed = svg.trim();
+    if trimmed.is_empty() {
+        return results;
+    }
+
+    if !trimmed.starts_with('<') {
+        if let Ok(bez) = kurbo::BezPath::from_svg(trimmed) {
+            let verbs = bez_to_wit_verbs(&bez);
+            if !verbs.is_empty() {
+                results.push(verbs);
+            }
+        }
+        return results;
+    }
+
+    let mut cursor = 0;
+    while let Some(d_idx) = svg[cursor..].find("d=\"") {
+        let start = cursor + d_idx + 3;
+        if let Some(end_offset) = svg[start..].find('"') {
+            let d_str = &svg[start..start + end_offset];
+            if let Ok(bez) = kurbo::BezPath::from_svg(d_str) {
+                let verbs = bez_to_wit_verbs(&bez);
+                if !verbs.is_empty() {
+                    results.push(verbs);
+                }
+            }
+            cursor = start + end_offset + 1;
+        } else {
+            break;
+        }
+    }
+
+    let total_verbs: usize = results.iter().map(Vec::len).sum();
+    if total_verbs > max_verbs {
+        log::warn!("svg_to_paths: rejecting {total_verbs} path verbs (max {max_verbs})");
+        return Vec::new();
+    }
+
+    results
+}
+
+fn bez_to_wit_verbs(bez: &kurbo::BezPath) -> Vec<wit_types::PathVerb> {
+    let mut verbs = Vec::new();
+    for el in bez.elements() {
+        match el {
+            kurbo::PathEl::MoveTo(p) => verbs.push(wit_types::PathVerb::MoveTo(wit_types::Point {
+                x: p.x as f32,
+                y: p.y as f32,
+            })),
+            kurbo::PathEl::LineTo(p) => verbs.push(wit_types::PathVerb::LineTo(wit_types::Point {
+                x: p.x as f32,
+                y: p.y as f32,
+            })),
+            kurbo::PathEl::QuadTo(p1, p2) => verbs.push(wit_types::PathVerb::QuadTo((
+                wit_types::Point {
+                    x: p1.x as f32,
+                    y: p1.y as f32,
+                },
+                wit_types::Point {
+                    x: p2.x as f32,
+                    y: p2.y as f32,
+                },
+            ))),
+            kurbo::PathEl::CurveTo(p1, p2, p3) => verbs.push(wit_types::PathVerb::CubicTo((
+                wit_types::Point {
+                    x: p1.x as f32,
+                    y: p1.y as f32,
+                },
+                wit_types::Point {
+                    x: p2.x as f32,
+                    y: p2.y as f32,
+                },
+                wit_types::Point {
+                    x: p3.x as f32,
+                    y: p3.y as f32,
+                },
+            ))),
+            kurbo::PathEl::ClosePath => verbs.push(wit_types::PathVerb::Close),
+        }
+    }
+    verbs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasmtime::{Instance, Module};
+
+    struct LimiterState {
+        limiter: StoreLimits,
+    }
+
+    #[test]
+    fn memory_growth_beyond_limit_traps() {
+        let engine = Engine::default();
+        let module = Module::new(
+            &engine,
+            r#"(module
+                (memory 1)
+                (func (export "grow") (param i32) (result i32)
+                    local.get 0
+                    memory.grow))"#,
+        )
+        .unwrap();
+        let limits = SandboxLimits {
+            max_memory_bytes: 64 * 1024,
+            ..SandboxLimits::default()
+        };
+        let mut store = Store::new(
+            &engine,
+            LimiterState {
+                limiter: sandbox_store_limits(&limits),
+            },
+        );
+        store.limiter(|s| &mut s.limiter);
+        let instance = Instance::new(&mut store, &module, &[]).unwrap();
+        let grow = instance
+            .get_typed_func::<i32, i32>(&mut store, "grow")
+            .unwrap();
+        assert!(grow.call(&mut store, 1024).is_err());
+    }
+
+    #[test]
+    fn multiple_memories_are_rejected() {
+        let engine = Engine::default();
+        let module = Module::new(&engine, r#"(module (memory 1) (memory 1))"#).unwrap();
+        let mut store = Store::new(
+            &engine,
+            LimiterState {
+                limiter: sandbox_store_limits(&SandboxLimits::default()),
+            },
+        );
+        store.limiter(|s| &mut s.limiter);
+        assert!(Instance::new(&mut store, &module, &[]).is_err());
+    }
+
+    #[test]
+    fn nan_vector_scene_fails_validation() {
+        let wit_scene = wit_types::Scene {
+            elements: vec![wit_types::DrawCommand::FillPath((
+                vec![wit_types::PathVerb::MoveTo(wit_types::Point {
+                    x: f32::NAN,
+                    y: 0.0,
+                })],
+                wit_types::Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            ))],
+        };
+        let core_scene = wit_scene_to_core(wit_scene);
+        assert!(core_scene.validate().is_err());
+    }
+
+    #[test]
+    fn oversized_log_messages_are_truncated() {
+        assert_eq!(truncate_utf8("hello", 10), "hello");
+        let long = "é".repeat(100);
+        let truncated = truncate_utf8(&long, 4);
+        assert!(truncated.len() <= 4);
+        assert!(truncated.is_char_boundary(truncated.len()));
+    }
+
+    #[test]
+    fn oversized_svg_input_is_rejected() {
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0 {}\"/></svg>",
+            "L1 1 ".repeat(MAX_SVG_INPUT_BYTES / 5)
+        );
+        assert!(svg.len() > MAX_SVG_INPUT_BYTES);
+        assert!(parse_svg_to_paths(&svg, MAX_SVG_VERBS).is_empty());
+    }
+}

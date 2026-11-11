@@ -984,6 +984,8 @@ fn kind_label(kind: &ClipKind) -> String {
             animathio_core::builtin::Builtin::Shape { .. } => "shape".into(),
         },
         ClipKind::Plugin { plugin_id, .. } => format!("plugin {plugin_id}"),
+        ClipKind::Vector(_) => "vector".into(),
+        ClipKind::Error(_) => "error".into(),
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::{Backend, Error, Frame, FrameSource, ResourcePool, Size, check_size};
 use animathio_core::{
-    ClipKind, Scene, Transform,
+    ClipKind, Color as CoreColor, PathVerb, Scene, StrokeCap, StrokeJoin, StrokeStyle, TextElement,
+    Transform, VectorElement, VectorScene,
     builtin::{Builtin, Color, PathElement, Shape},
 };
 use parley::{
@@ -13,7 +14,7 @@ use vello_cpu::{
     Glyph, Image, ImageSource, Level, PixelMetadata, Pixmap, RenderContext, RenderSettings,
     Resources,
     color::{AlphaColor, Srgb},
-    kurbo::{Affine, BezPath, Ellipse, Rect, Shape as _, Stroke},
+    kurbo::{Affine, BezPath, Cap, Ellipse, Join, Rect, Shape as _, Stroke},
     peniko::{Blob, ImageAlphaType, ImageSampler},
 };
 
@@ -64,11 +65,17 @@ impl Backend for CpuBackend {
             if matches!(clip.kind, ClipKind::Audio(_)) || clip.transform.opacity == 0.0 {
                 continue;
             }
-            let transform = unit_transform(clip.transform, size)?;
             // Singular transforms have no visible area and cannot be inverted for image paints.
             if clip.transform.scale_x == 0.0 || clip.transform.scale_y == 0.0 {
                 continue;
             }
+            // Vector scenes are already in canvas pixel coordinates, so they use a
+            // pixel-space transform instead of the unit-square transform used by media
+            // and temporary builtin clips.
+            let transform = match &clip.kind {
+                ClipKind::Vector(_) => pixel_transform(clip.transform, size)?,
+                _ => unit_transform(clip.transform, size)?,
+            };
             ctx.set_transform(transform);
             #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
             ctx.push_opacity_layer(clip.transform.opacity as f32);
@@ -115,6 +122,12 @@ impl Backend for CpuBackend {
                     size,
                     &format!("PLUGIN\n{plugin_id}"),
                 )?,
+                ClipKind::Vector(scene) => {
+                    self.vector_scene(&mut ctx, &mut resources, size, scene)?;
+                }
+                ClipKind::Error(message) => {
+                    self.placeholder(&mut ctx, &mut resources, size, &format!("ERROR\n{message}"))?;
+                }
                 ClipKind::Audio(_) => {}
             }
             ctx.pop_layer();
@@ -134,11 +147,7 @@ fn color(value: Color) -> AlphaColor<Srgb> {
 }
 
 fn unit_transform(t: Transform, size: Size) -> Result<Affine, Error> {
-    if ![t.x, t.y, t.scale_x, t.scale_y, t.rotation, t.opacity]
-        .iter()
-        .all(|v| v.is_finite())
-        || !(0.0..=1.0).contains(&t.opacity)
-    {
+    if !transform_valid(t) {
         return Err(Error::Invalid("invalid scene transform"));
     }
     let width = f64::from(size.0);
@@ -147,10 +156,71 @@ fn unit_transform(t: Transform, size: Size) -> Result<Affine, Error> {
         * Affine::rotate(t.rotation)
         * Affine::scale_non_uniform(t.scale_x * width, t.scale_y * height)
         * Affine::translate((-0.5, -0.5));
+    finite_transform(transform)
+}
+
+/// Transform for resolved vector scenes, whose coordinates are already canvas pixels.
+/// The default transform (x/y = 0.5, scale 1) is the identity: content is anchored at the
+/// canvas center. Position, rotation and scale otherwise behave like other clip kinds.
+fn pixel_transform(t: Transform, size: Size) -> Result<Affine, Error> {
+    if !transform_valid(t) {
+        return Err(Error::Invalid("invalid scene transform"));
+    }
+    let width = f64::from(size.0);
+    let height = f64::from(size.1);
+    let transform = Affine::translate((t.x * width, t.y * height))
+        * Affine::rotate(t.rotation)
+        * Affine::scale_non_uniform(t.scale_x, t.scale_y)
+        * Affine::translate((-0.5 * width, -0.5 * height));
+    finite_transform(transform)
+}
+
+fn transform_valid(t: Transform) -> bool {
+    [t.x, t.y, t.scale_x, t.scale_y, t.rotation, t.opacity]
+        .iter()
+        .all(|v| v.is_finite())
+        && (0.0..=1.0).contains(&t.opacity)
+}
+
+fn finite_transform(transform: Affine) -> Result<Affine, Error> {
     if !transform.as_coeffs().iter().all(|c| c.is_finite()) {
         return Err(Error::Invalid("scene transform overflow"));
     }
     Ok(transform)
+}
+
+fn color_core(value: CoreColor) -> AlphaColor<Srgb> {
+    color([value.r, value.g, value.b, value.a])
+}
+
+fn vector_path(path: &[PathVerb]) -> BezPath {
+    let mut bez = BezPath::new();
+    for verb in path {
+        match *verb {
+            PathVerb::MoveTo(p) => bez.move_to((p.x, p.y)),
+            PathVerb::LineTo(p) => bez.line_to((p.x, p.y)),
+            PathVerb::QuadTo(c, to) => bez.quad_to((c.x, c.y), (to.x, to.y)),
+            PathVerb::CubicTo(c1, c2, to) => {
+                bez.curve_to((c1.x, c1.y), (c2.x, c2.y), (to.x, to.y));
+            }
+            PathVerb::Close => bez.close_path(),
+        }
+    }
+    bez
+}
+
+fn vector_stroke(style: &StrokeStyle) -> Stroke {
+    let cap = match style.cap {
+        StrokeCap::Butt => Cap::Butt,
+        StrokeCap::Round => Cap::Round,
+        StrokeCap::Square => Cap::Square,
+    };
+    let join = match style.join {
+        StrokeJoin::Miter => Join::Miter,
+        StrokeJoin::Round => Join::Round,
+        StrokeJoin::Bevel => Join::Bevel,
+    };
+    Stroke::new(style.width).with_join(join).with_caps(cap)
 }
 
 fn path(shape: &Shape) -> BezPath {
@@ -261,6 +331,73 @@ impl CpuBackend {
             unit * Affine::scale_non_uniform(1.0 / f64::from(size.0), 1.0 / f64::from(size.1)),
         );
         ctx.set_paint(color(fill));
+        for line in layout.lines() {
+            for item in line.items() {
+                if let PositionedLayoutItem::GlyphRun(run) = item {
+                    ctx.glyph_run(resources, run.run().font())
+                        .font_size(run.run().font_size())
+                        .hint(false)
+                        .fill_glyphs(run.positioned_glyphs().map(|g| Glyph {
+                            id: g.id,
+                            x: g.x,
+                            y: g.y,
+                        }))
+                        .map_err(|e| Error::Glyph(e.to_string()))?;
+                }
+            }
+        }
+        ctx.set_transform(unit);
+        Ok(())
+    }
+
+    fn vector_scene(
+        &mut self,
+        ctx: &mut RenderContext,
+        resources: &mut Resources,
+        size: Size,
+        scene: &VectorScene,
+    ) -> Result<(), Error> {
+        for element in &scene.elements {
+            match element {
+                VectorElement::FillPath { path, color } => {
+                    ctx.set_paint(color_core(*color));
+                    ctx.fill_path(&vector_path(path));
+                }
+                VectorElement::StrokePath { path, style } => {
+                    ctx.set_paint(color_core(style.color));
+                    ctx.set_stroke(vector_stroke(style));
+                    ctx.stroke_path(&vector_path(path));
+                }
+                VectorElement::TextRun(text) => {
+                    self.vector_text(ctx, resources, size, text)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::cast_possible_truncation)] // Pixel-space font dimensions are bounded below.
+    fn vector_text(
+        &mut self,
+        ctx: &mut RenderContext,
+        resources: &mut Resources,
+        size: Size,
+        text: &TextElement,
+    ) -> Result<(), Error> {
+        if !text.font_size.is_finite() || text.font_size <= 0.0 || text.font_size > 1_048_560.0 {
+            return Err(Error::Invalid("invalid scene font size"));
+        }
+        let mut builder = self
+            .layout
+            .ranged_builder(&mut self.fonts, &text.text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily("DejaVu Sans".into()));
+        builder.push_default(StyleProperty::FontSize(text.font_size as f32));
+        let mut layout: Layout<()> = builder.build(&text.text);
+        layout.break_all_lines(Some(f32::from(check_size(size)?.0)));
+        layout.align(Alignment::Start, AlignmentOptions::default());
+        let unit = *ctx.transform();
+        ctx.set_transform(unit * Affine::translate((text.x, text.y)));
+        ctx.set_paint(color_core(text.color));
         for line in layout.lines() {
             for item in line.items() {
                 if let PositionedLayoutItem::GlyphRun(run) = item {
