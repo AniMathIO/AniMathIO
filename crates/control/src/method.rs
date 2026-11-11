@@ -229,5 +229,7 @@ pub fn clip_kind_label(kind: &animathio_core::ClipKind) -> String {
             animathio_core::builtin::Builtin::Shape { .. } => "shape".to_owned(),
         },
         animathio_core::ClipKind::Plugin { plugin_id, .. } => format!("plugin {plugin_id}"),
+        animathio_core::ClipKind::Vector(_) => "vector".to_owned(),
+        animathio_core::ClipKind::Error(_) => "error".to_owned(),
     }
 }

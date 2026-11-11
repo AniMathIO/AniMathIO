@@ -1,0 +1,23 @@
+[package]
+name = "animathio-plugin-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Plugin WIT definition, manifest schemas, .amplugin package format, and guest SDK for AniMathIO 2.0"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zip = { workspace = true }
+toml = "0.8"
+wit-bindgen = { version = "0.40.0", optional = true }
+
+[features]
+default = []
+guest = ["dep:wit-bindgen"]
+
+[dev-dependencies]
+zip = { workspace = true }
