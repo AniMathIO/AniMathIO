@@ -52,6 +52,14 @@ enum Action {
     },
     /// Check model invariants and all asset content hashes.
     Validate { project: PathBuf },
+    /// Convert a v1 `.animathio` project to a `.amio` archive.
+    ImportV1 {
+        /// v1 `.animathio` project file (deflated JSON).
+        input: PathBuf,
+        /// Output `.amio` archive.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
     /// Write a three-second animated image/text/shape demo archive.
     NewSample {
         #[arg(short, long)]
@@ -69,10 +77,21 @@ struct OutputSize {
 }
 impl OutputSize {
     fn tuple(&self, project: &Project) -> (u32, u32) {
-        let settings = project.settings();
+        // An unset project resolution (`0`) falls back to the historical CLI
+        // defaults so headless renders of imported projects still work.
+        let fallback_width = if project.width() == 0 {
+            640
+        } else {
+            project.width()
+        };
+        let fallback_height = if project.height() == 0 {
+            360
+        } else {
+            project.height()
+        };
         (
-            self.width.unwrap_or(settings.width),
-            self.height.unwrap_or(settings.height),
+            self.width.unwrap_or(fallback_width),
+            self.height.unwrap_or(fallback_height),
         )
     }
 }
@@ -100,6 +119,24 @@ fn run(cli: Cli) -> Result<()> {
                 "valid: {} tracks, {} assets",
                 bundle.project.tracks().len(),
                 bundle.assets.len()
+            );
+        }
+        Action::ImportV1 { input, output } => {
+            let bytes = read_import_input(&input)?;
+            let (project, assets, report) = animathio_import_v1::import_v1_with_report(&bytes)?;
+            for warning in report.warnings() {
+                eprintln!("warning: {warning}");
+            }
+            let asset_map: BTreeMap<AssetId, Vec<u8>> = assets
+                .into_iter()
+                .map(|asset| (asset.id, asset.bytes))
+                .collect();
+            write_amio(File::create(&output)?, &project, &asset_map)?;
+            println!(
+                "imported {} tracks, {} assets into {}",
+                project.tracks().len(),
+                asset_map.len(),
+                output.display()
             );
         }
         Action::Render {
@@ -171,6 +208,20 @@ fn context(assets: BTreeMap<AssetId, Vec<u8>>) -> Result<RenderCtx> {
         ctx.resources.insert(id, bytes)?;
     }
     Ok(ctx)
+}
+
+fn read_import_input(path: &Path) -> Result<Vec<u8>> {
+    // The raw .animathio payload is deflated; bound it to the inflate budget
+    // so an untrusted file cannot force a larger read than the importer allows.
+    let limit = animathio_import_v1::ImportLimits::default().inflated_bytes;
+    let mut bytes = Vec::new();
+    File::open(path)?
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len())? > limit {
+        return Err("v1 project input exceeds the size limit".into());
+    }
+    Ok(bytes)
 }
 
 fn load(path: &Path) -> Result<Bundle> {

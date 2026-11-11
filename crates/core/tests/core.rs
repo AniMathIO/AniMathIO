@@ -582,28 +582,20 @@ proptest! {
 }
 
 #[test]
-fn project_settings_default_to_1080p30_and_change_only_through_commands() {
-    let project = Project::default();
-    let settings = project.settings();
-    assert_eq!(settings.width, 1920);
-    assert_eq!(settings.height, 1080);
-    assert_eq!(settings.frame_rate, FrameRate::new(30, 1).unwrap());
-    assert_eq!(settings.background, [0, 0, 0, 255]);
-    let mut project = Project::new(FrameRate::new(60, 1).unwrap());
-    let original = project.clone();
-    let replacement =
-        ProjectSettings::new(320, 180, FrameRate::new(24, 1).unwrap(), [1, 2, 3, 255]).unwrap();
-    let inverse = Command::SetProjectSettings {
-        settings: replacement.clone(),
+fn project_settings_default_for_old_json_without_the_new_fields() {
+    // Older v1 project.json files predate the width/height/background/duration
+    // fields; serde defaults keep them loadable with an unset resolution.
+    let project = base();
+    let mut value = serde_json::to_value(&project).unwrap();
+    let object = value.as_object_mut().unwrap();
+    for key in ["width", "height", "background", "duration"] {
+        object.remove(key);
     }
-    .apply(&mut project)
-    .unwrap();
-    assert_eq!(project.settings(), &replacement);
-    assert_eq!(project.frame_rate(), FrameRate::new(24, 1).unwrap());
-    inverse.apply(&mut project).unwrap();
-    assert_eq!(project, original);
-    assert!(ProjectSettings::new(0, 180, FrameRate::default(), [0; 4]).is_err());
-    assert!(ProjectSettings::new(320, 0, FrameRate::default(), [0; 4]).is_err());
+    let decoded: Project = serde_json::from_value(value).unwrap();
+    assert_eq!(decoded.width(), 0);
+    assert_eq!(decoded.height(), 0);
+    assert_eq!(decoded.background(), [0, 0, 0, 0]);
+    assert_eq!(decoded.duration(), Time(0));
 }
 
 #[test]

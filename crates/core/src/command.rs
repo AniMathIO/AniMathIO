@@ -1,6 +1,7 @@
+use crate::builtin::Color;
 use crate::{
-    Animation, Asset, AssetId, Clip, ClipId, Error, Keyframe, Keyframes, Project, ProjectSettings,
-    Target, Time, TimeRange, Track, TrackId, Transform, invalid,
+    Animation, Asset, AssetId, Clip, ClipId, Error, Keyframe, Keyframes, Project, Target, Time,
+    TimeRange, Track, TrackId, Transform, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,11 +15,6 @@ pub enum Command {
         track: Track,
         /// Position in the layer stack.
         index: usize,
-    },
-    /// Replace the project's output and canvas settings.
-    SetProjectSettings {
-        /// New settings.
-        settings: ProjectSettings,
     },
     /// Change the linear audio gain of a layer.
     SetTrackGain {
@@ -43,6 +39,17 @@ pub enum Command {
     RemoveAsset {
         /// Asset identity.
         id: AssetId,
+    },
+    /// Set project-level output settings (resolution, background, duration).
+    SetSettings {
+        /// Output width in pixels, or `0` for no explicit resolution.
+        width: u32,
+        /// Output height in pixels, or `0` for no explicit resolution.
+        height: u32,
+        /// Straight-alpha sRGB canvas background.
+        background: Color,
+        /// Explicit project duration in ticks; `0` means derive from clips.
+        duration: Time,
     },
     /// Add a clip to a layer.
     AddClip {
@@ -150,13 +157,6 @@ impl Command {
                 project.tracks.insert(*index, track.clone());
                 Self::RemoveTrack { id: track.id }
             }
-            Self::SetProjectSettings { settings } => {
-                let inverse = Self::SetProjectSettings {
-                    settings: project.settings.clone(),
-                };
-                project.settings = settings.clone();
-                inverse
-            }
             Self::SetTrackGain { id, gain } => {
                 let index = track_index(project, *id)?;
                 let inverse = Self::SetTrackGain {
@@ -187,6 +187,24 @@ impl Command {
                     id: id.clone(),
                     asset,
                 }
+            }
+            Self::SetSettings {
+                width,
+                height,
+                background,
+                duration,
+            } => {
+                let inverse = Self::SetSettings {
+                    width: project.width,
+                    height: project.height,
+                    background: project.background,
+                    duration: project.duration,
+                };
+                project.width = *width;
+                project.height = *height;
+                project.background = *background;
+                project.duration = *duration;
+                inverse
             }
             Self::AddClip { track, clip } => {
                 let index = track_index(project, *track)?;

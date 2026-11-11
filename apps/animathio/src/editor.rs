@@ -221,12 +221,12 @@ impl Editor {
     fn request_render(&mut self, time: Time) {
         self.request_generation = self.request_generation.wrapping_add(1);
         self.last_requested = Some(time);
-        let settings = self.project.settings();
+        let size = project_size(&self.project);
         self.worker.request(RenderRequest {
             generation: self.request_generation,
             project: self.project.clone(),
             time,
-            size: (settings.width, settings.height),
+            size,
         });
     }
 
@@ -1443,6 +1443,8 @@ fn kind_label(kind: &ClipKind) -> String {
             animathio_core::builtin::Builtin::Shape { .. } => "shape".into(),
         },
         ClipKind::Plugin { plugin_id, .. } => format!("plugin {plugin_id}"),
+        ClipKind::Vector(_) => "vector".into(),
+        ClipKind::Error(_) => "error".into(),
     }
 }
 
@@ -1519,6 +1521,21 @@ fn media_type_for(path: &Path) -> &'static str {
         Some("webm") => "video/webm",
         _ => "application/octet-stream",
     }
+}
+
+fn project_size(project: &Project) -> (u32, u32) {
+    (
+        if project.width() == 0 {
+            1280
+        } else {
+            project.width()
+        },
+        if project.height() == 0 {
+            720
+        } else {
+            project.height()
+        },
+    )
 }
 
 fn next_id(project: &Project) -> u64 {

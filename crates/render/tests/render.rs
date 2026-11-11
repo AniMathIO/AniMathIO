@@ -241,3 +241,28 @@ proptest! {
         prop_assert_eq!(render(&scene(target),&mut reused,(64,36)).unwrap(),expected);
     }
 }
+#[test]
+fn vector_scenes_render_pixel_space_paths() {
+    let scene = Scene {
+        clips: vec![layer(
+            0,
+            ClipKind::Vector(VectorScene {
+                elements: vec![VectorElement::FillPath {
+                    path: vec![
+                        PathVerb::MoveTo(Point::new(10.0, 10.0)),
+                        PathVerb::LineTo(Point::new(30.0, 10.0)),
+                        PathVerb::LineTo(Point::new(30.0, 30.0)),
+                        PathVerb::LineTo(Point::new(10.0, 30.0)),
+                        PathVerb::Close,
+                    ],
+                    color: Color::rgb(255, 0, 0),
+                }],
+            }),
+            Transform::default(),
+        )],
+    };
+    let frame = render(&scene, &mut RenderCtx::default(), (64, 36)).unwrap();
+    // The default clip transform is the identity for pixel-space vector scenes.
+    assert_eq!(pixel(&frame, 20, 20), &[255, 0, 0, 255]);
+    assert_eq!(pixel(&frame, 0, 0), &[0, 0, 0, 0]);
+}

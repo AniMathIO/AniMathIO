@@ -10,7 +10,7 @@ use std::{
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 /// Current project schema. Future migrations advance one version at a time.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 1;
 
 /// Persistence errors, including malformed or unsupported project data.
 #[derive(Debug, thiserror::Error)]
@@ -79,9 +79,11 @@ pub fn write_json(writer: impl Write, project: &Project) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read the current schema, migrating the known historic schema (v1) first.
+/// Read the current schema. No historic production schema exists yet.
 pub fn read_json(reader: impl Read) -> Result<Project, Error> {
-    read_json_with_migration(reader, migrate)
+    read_json_with_migration(reader, |_, _| {
+        Err(invalid("no migration registered for this schema"))
+    })
 }
 
 /// Migration hook: transform version N JSON into version N+1 JSON, updating
@@ -122,36 +124,6 @@ fn decode_json(
     // Deserialize the project directly. serde's flattened buffering would lose
     // JSON's numeric-map-key adapter for ClipId keys inside Track::clips.
     Ok(serde_json::from_value(value)?)
-}
-
-/// Built-in schema migrations. v1 introduced the first production schema (a
-/// top-level `frameRate` and no project settings); v2 moved the frame rate into
-/// `ProjectSettings` and added output dimensions and a background colour.
-fn migrate(version: u32, mut value: Value) -> Result<Value, Error> {
-    match version {
-        1 => {
-            let object = value
-                .as_object_mut()
-                .ok_or_else(|| invalid("project must be an object"))?;
-            let frame_rate = object
-                .remove("frame_rate")
-                .unwrap_or_else(|| serde_json::json!({ "numerator": 30, "denominator": 1 }));
-            object.insert(
-                "settings".to_owned(),
-                serde_json::json!({
-                    "width": 1920,
-                    "height": 1080,
-                    "frame_rate": frame_rate,
-                    "background": [0, 0, 0, 255],
-                }),
-            );
-            object.insert("schemaVersion".to_owned(), serde_json::json!(2));
-            Ok(value)
-        }
-        other => Err(invalid(&format!(
-            "no migration registered for schema {other}"
-        ))),
-    }
 }
 
 /// Fully loaded archive. Runtime media resources are created elsewhere.
@@ -225,7 +197,9 @@ pub fn read_amio<R: Read + Seek>(reader: R, limits: Limits) -> Result<Bundle, Er
         }
     }
     let json = project_json.ok_or_else(|| invalid("project.json missing"))?;
-    let project = decode_json(serde_json::from_slice(&json)?, migrate)?;
+    let project = decode_json(serde_json::from_slice(&json)?, |_, _| {
+        Err(invalid("no migration registered for this schema"))
+    })?;
     check_assets(&project, &assets)?;
     Ok(Bundle { project, assets })
 }
