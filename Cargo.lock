@@ -130,6 +130,7 @@ version = "2.0.0"
 dependencies = [
  "animathio-core",
  "animathio-format",
+ "animathio-import-v1",
  "animathio-render",
  "clap",
  "tempfile",
@@ -156,6 +157,21 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "zip",
+]
+
+[[package]]
+name = "animathio-import-v1"
+version = "2.0.0"
+dependencies = [
+ "animathio-core",
+ "animathio-format",
+ "base64",
+ "blake3",
+ "flate2",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
