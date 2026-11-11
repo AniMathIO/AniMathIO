@@ -1,0 +1,75 @@
+{
+  "format": "animathio",
+  "schemaVersion": 1,
+  "frame_rate": {
+    "numerator": 30000,
+    "denominator": 1001
+  },
+  "tracks": [
+    {
+      "id": 1,
+      "name": "Video placeholder",
+      "clips": {
+        "1": {
+          "id": 1,
+          "kind": {
+            "Video": "cf074c583c6879b3f1aaa49885e540c1938a1a209f5690ef90e9f37fbea24cb1"
+          },
+          "range": {
+            "start": 0,
+            "end": 2116800000
+          },
+          "source_offset": 352800000,
+          "transform": {
+            "x": 0.28,
+            "y": 0.5,
+            "scale_x": 0.5,
+            "scale_y": 0.7,
+            "rotation": 0.1,
+            "opacity": 0.8
+          },
+          "params": {},
+          "animations": []
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Missing plugin",
+      "clips": {
+        "2": {
+          "id": 2,
+          "kind": {
+            "Plugin": {
+              "plugin_id": "org.example.missing@1",
+              "params": {
+                "preserve": true
+              }
+            }
+          },
+          "range": {
+            "start": 0,
+            "end": 2116800000
+          },
+          "source_offset": 352800000,
+          "transform": {
+            "x": 0.76,
+            "y": 0.5,
+            "scale_x": 0.35,
+            "scale_y": 0.5,
+            "rotation": -0.1,
+            "opacity": 1.0
+          },
+          "params": {},
+          "animations": []
+        }
+      }
+    }
+  ],
+  "assets": {
+    "cf074c583c6879b3f1aaa49885e540c1938a1a209f5690ef90e9f37fbea24cb1": {
+      "name": "placeholder.video",
+      "media_type": "video/x-animathio-placeholder"
+    }
+  }
+}
