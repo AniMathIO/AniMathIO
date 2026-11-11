@@ -34,4 +34,20 @@ Port behavior, not structure. The v1 store/component layout is exactly what 2.0 
 
 ## Commands
 
-No Cargo workspace exists yet (milestone M0 is spikes). Add the build/test/lint commands here as soon as the workspace lands.
+The workspace uses stable Rust, edition 2024. Standalone `spikes/` projects are excluded.
+Run from the repository root (the resource limits protect other work on shared machines):
+
+```bash
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo build --workspace --locked
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo fmt --all --check
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo clippy --workspace --all-targets --locked -- -D warnings
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo test --workspace --locked
+```
+
+`core` owns the plain project model and command-only mutation API; `format` owns
+versioned JSON and `.amio` containers. Neither the renderer nor media runtime is implemented yet.
+After a final push on disk-constrained machines, clean build artifacts with:
+
+```bash
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo clean
+```
