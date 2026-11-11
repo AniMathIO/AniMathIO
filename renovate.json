@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "baseBranchPatterns": ["v2"],
+  "extends": ["config:recommended"],
+  "automerge": false,
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 5am on monday"]
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Rust patch/minor updates"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "groupName": "GitHub Actions updates"
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["needs-human"]
+    }
+  ]
+}
