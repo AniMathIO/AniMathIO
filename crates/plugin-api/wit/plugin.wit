@@ -1,0 +1,206 @@
+package animathio:plugin@0.1.0;
+
+/// Shared data types for vector graphics, parameter schemas and plugin manifests.
+interface types {
+    /// 2D dimensions in integer pixels.
+    record size {
+        width: u32,
+        height: u32,
+    }
+
+    /// 2D coordinates in canvas or local coordinates.
+    record point {
+        x: f32,
+        y: f32,
+    }
+
+    /// Straight-alpha 8-bit RGBA color.
+    record color {
+        r: u8,
+        g: u8,
+        b: u8,
+        a: u8,
+    }
+
+    /// Path segment command.
+    variant path-verb {
+        move-to(point),
+        line-to(point),
+        quad-to(tuple<point, point>),
+        cubic-to(tuple<point, point, point>),
+        close,
+    }
+
+    /// Sequence of path commands forming one or more contours.
+    type path = list<path-verb>;
+
+    /// Line cap style at path endpoints.
+    enum stroke-cap {
+        butt,
+        round,
+        square,
+    }
+
+    /// Line join style at path vertices.
+    enum stroke-join {
+        miter,
+        round,
+        bevel,
+    }
+
+    /// Outline styling parameters.
+    record stroke-style {
+        width: f32,
+        color: color,
+        cap: stroke-cap,
+        join: stroke-join,
+    }
+
+    /// Text run layout element.
+    record text-element {
+        text: string,
+        font-size: f32,
+        x: f32,
+        y: f32,
+        color: color,
+    }
+
+    /// Vector drawing command.
+    variant draw-command {
+        fill-path(tuple<path, color>),
+        stroke-path(tuple<path, stroke-style>),
+        text-run(text-element),
+    }
+
+    /// Evaluated vector scene composed of ordered draw commands.
+    record scene {
+        elements: list<draw-command>,
+    }
+
+    /// Floating-point parameter range with step size and default.
+    record number-range {
+        min: f64,
+        max: f64,
+        default: f64,
+        step: f64,
+    }
+
+    /// Color parameter declaration.
+    record color-param {
+        default: color,
+    }
+
+    /// Text string parameter declaration.
+    record string-param {
+        default: string,
+    }
+
+    /// Multiple-choice enum parameter declaration.
+    record enum-param {
+        options: list<string>,
+        default: string,
+    }
+
+    /// Boolean toggle parameter declaration.
+    record bool-param {
+        default: bool,
+    }
+
+    /// 2D point parameter declaration.
+    record point-param {
+        default: point,
+    }
+
+    /// Asset reference parameter declaration.
+    record asset-ref-param {
+        media-type: string,
+        default-asset: option<string>,
+    }
+
+    /// Supported parameter types.
+    variant param-kind {
+        %number(number-range),
+        %color(color-param),
+        %string(string-param),
+        enum-choice(enum-param),
+        %bool(bool-param),
+        %point(point-param),
+        asset-ref(asset-ref-param),
+    }
+
+    /// Parameter specification declaring UI metadata and constraints.
+    record param-spec {
+        id: string,
+        label: string,
+        kind: param-kind,
+    }
+
+    /// Concrete value assigned to a parameter at evaluation time.
+    variant param-value {
+        %number(f64),
+        %color(color),
+        %string(string),
+        enum-choice(string),
+        %bool(bool),
+        %point(point),
+        asset-ref(string),
+    }
+
+    /// Key-value parameter entry.
+    record param-entry {
+        id: string,
+        value: param-value,
+    }
+
+    /// Map of parameter values passed to plugin invocations.
+    type param-map = list<param-entry>;
+
+    /// Plugin classification.
+    enum plugin-kind {
+        clip-source,
+        effect,
+        animation,
+    }
+
+    /// Plugin metadata and parameter schema.
+    record manifest {
+        name: string,
+        version: string,
+        description: string,
+        kinds: list<plugin-kind>,
+        params: list<param-spec>,
+    }
+}
+
+/// Host-provided services imported by plugins.
+interface host {
+    use types.{path};
+
+    /// Text shaping via host font engine. Returns glyph outline paths.
+    shape-text: func(text: string, font-size: f32) -> list<path>;
+
+    /// Parse SVG XML string into vector paths.
+    svg-to-paths: func(svg-xml: string) -> list<path>;
+
+    /// Host logging for diagnostic and debug output.
+    log: func(message: string);
+}
+
+/// WebAssembly Component interface exported by AniMathIO plugins.
+world plugin {
+    import host;
+
+    use types.{manifest, scene, param-map, size};
+
+    /// Describe the plugin, its kinds and its parameter schema.
+    export describe: func() -> manifest;
+
+    /// Render a vector scene for a clip-source plugin at a given time and canvas size.
+    export render-clip: func(params: param-map, time-ticks: s64, size: size) -> scene;
+
+    /// Apply a visual effect to an input scene.
+    export apply-effect: func(input: scene, params: param-map, time-ticks: s64, size: size) -> scene;
+
+    /// Evaluate an animation value curve at a given time.
+    export evaluate-curve: func(time-ticks: s64, duration-ticks: s64, params: param-map) -> f64;
+}
