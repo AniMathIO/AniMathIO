@@ -1,0 +1,37 @@
+# AGENTS.md
+
+Guidance for coding agents working on the `v2` branch. `CLAUDE.md` imports this file.
+
+## What this branch is
+
+AniMathIO 2.0 is a from-scratch Rust rewrite of AniMathIO, an editor for Manim-like math animation videos. The full plan, architecture and roadmap are in [issue #156](https://github.com/AniMathIO/AniMathIO/issues/156). Read it before proposing structure. The short version:
+
+- **The core is a simple video editor:** media clips, a multi-track timeline, transforms + keyframes, audio, preview and export. Nothing math-specific lives in the core.
+- **Everything else is a plugin:** sandboxed WebAssembly components (wasmtime, Component Model, WIT). This includes text, LaTeX, graphs, Manim import, effects, the v1 importer and MCP.
+- **Rendering is one pure function,** `render(&Project, Time) -> Frame`, shared by preview, export and tests.
+- **Every mutation is a serializable, invertible `Command`.** Undo/redo, the control protocol, MCP and plugins all go through it.
+- **Time is integer ticks + rational frame rates. Coordinates are resolution-independent.** No `f64` seconds and no absolute pixels in the model.
+- **The core owns its domain types.** Third-party crates (FilmCraft codecs, vello, GPUI) sit behind adapters.
+
+## Branch rules
+
+- 2.0 PRs target **`v2`**. Never target `main` or `staging`: those serve v1 until the 2.0 swap.
+- Don't merge `main`/`staging` into `v2`. The only planned merge is the one-time `git merge -s ours main` at the 2.0 swap (see #156, "Repository and branch plan").
+- Use Conventional Commits. release-plz will derive versions and the changelog from them.
+
+## Porting from v1
+
+The v1 implementation (Electron/TypeScript) is still on `main` and is a useful reference. Read it without checking it out:
+
+```bash
+git show origin/main:renderer/utils/manim/translator.ts    # Manim subset translator (to port to the manim-import plugin)
+git show origin/main:renderer/types.ts                     # v1 element/animation model (input to the import-v1 plugin)
+git show origin/main:renderer/states/stores/ProjectStore.ts # v1 .animathio (de)serialization
+git show origin/main:main/mcp/tool-schemas.ts              # v1 MCP tool surface (parity target)
+```
+
+Port behavior, not structure. The v1 store/component layout is exactly what 2.0 replaces.
+
+## Commands
+
+No Cargo workspace exists yet (milestone M0 is spikes). Add the build/test/lint commands here as soon as the workspace lands.
