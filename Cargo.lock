@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-audio"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "animathio-core",
  "cpal",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-cli"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "animathio-core",
  "animathio-format",
@@ -122,7 +122,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-core"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "blake3",
  "proptest",
@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-format"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "animathio-core",
  "proptest",
@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-render"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "animathio-core",
  "animathio-format",

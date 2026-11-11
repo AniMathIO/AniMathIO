@@ -1,10 +1,25 @@
-use crate::{AudioSource, Error, Pcm, source::sample_bounds};
+use crate::{
+    AudioSource, Error, Pcm,
+    source::{MAX_CHANNELS, MAX_INTERLEAVED_SAMPLES, MAX_SAMPLE_RATE, sample_bounds},
+};
 use animathio_core::{AssetId, Clip, ClipKind, Project, TICKS_PER_SECOND, Target, Time, TimeRange};
-use rubato::{FftFixedInOut, Resampler};
+use rubato::{
+    FftFixedInOut, Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters,
+    SincInterpolationType, WindowFunction,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+
+/// FFT resampling is used only while both FFT lengths stay at or below this bound.
+const MAX_FFT_FRAMES: usize = 16_384;
+/// Default chunk size (in frames) for the bounded windowed-sinc fallback.
+const SINC_CHUNK_FRAMES: usize = 4096;
+/// Windowed-sinc filter length used by the fallback resampler.
+const SINC_LEN: usize = 256;
+/// Largest input chunk the sinc fallback accepts before rejecting the ratio.
+const MAX_SINC_INPUT_FRAMES: usize = MAX_SAMPLE_RATE as usize + SINC_LEN + 1;
 
 /// Engine-owned native decoded resources, keyed by the project's asset identities.
 #[derive(Default)]
@@ -44,9 +59,9 @@ impl AudioPool {
     /// Resample whole assets once and compensate Rubato's startup delay. Whole-asset
     /// preparation gives arbitrary mix ranges the same filter history and sample phase.
     pub fn prepare(&self, rate: u32, channels: u16) -> Result<Mixer, Error> {
-        if rate == 0 || i64::from(rate) > TICKS_PER_SECOND || channels == 0 {
+        if rate == 0 || rate > MAX_SAMPLE_RATE || channels == 0 || channels > MAX_CHANNELS {
             return Err(Error::Invalid(
-                "output rate must be within the tick resolution and channels nonzero".into(),
+                "output rate must be within 1..=768000 Hz and channels within 1..=32".into(),
             ));
         }
         let sources = self
@@ -185,32 +200,21 @@ fn prepare(pcm: &Pcm, rate: u32, channels: u16) -> Result<Vec<f32>, Error> {
         })
         .collect();
     if rate != pcm.rate() && pcm.frames() != 0 {
-        // Rubato 0.16 centres its sinc at floor(input_fft_size / 2).
-        // An even number of rate periods makes both FFT sizes even, so its
-        // reported integer output_delay is the exact filter centre.
-        let mut a = pcm.rate();
-        let mut b = rate;
-        while b != 0 {
-            (a, b) = (b, a % b);
+        let wanted = output_frames(pcm.frames(), pcm.rate(), rate)?;
+        let (mut resampler, delay) = build_resampler(pcm.rate(), rate, native_channels)?;
+        let target = wanted
+            .checked_add(delay)
+            .ok_or_else(|| Error::Invalid("prepared audio too large".into()))?;
+        if target
+            .checked_mul(channels)
+            .is_none_or(|total| total > MAX_INTERLEAVED_SAMPLES)
+        {
+            return Err(Error::Invalid("prepared audio too large".into()));
         }
-        let period = (pcm.rate() / a) as usize;
-        let chunk_size = 1024_usize.div_ceil(2 * period) * 2 * period;
-        let mut resampler = FftFixedInOut::<f32>::new(
-            pcm.rate() as usize,
-            rate as usize,
-            chunk_size,
-            native_channels,
-        )
-        .map_err(|e| Error::Decode(e.to_string()))?;
-        let wanted = usize::try_from(
-            (pcm.frames() as u128 * u128::from(rate)).div_ceil(u128::from(pcm.rate())),
-        )
-        .map_err(|e| Error::Invalid(e.to_string()))?;
-        let delay = resampler.output_delay();
-        let chunk = resampler.input_frames_next();
         let mut result = vec![Vec::new(); native_channels];
         let mut offset = 0;
-        while result[0].len() < wanted + delay {
+        while result[0].len() < target {
+            let chunk = resampler.input_frames_next();
             let mut input = vec![vec![0.0; chunk]; native_channels];
             let count = pcm.frames().saturating_sub(offset).min(chunk);
             for (channel, input) in input.iter_mut().enumerate() {
@@ -218,9 +222,7 @@ fn prepare(pcm: &Pcm, rate: u32, channels: u16) -> Result<Vec<f32>, Error> {
                     input[..count].copy_from_slice(&planar[channel][offset..offset + count]);
                 }
             }
-            let block = resampler
-                .process(&input, None)
-                .map_err(|e| Error::Decode(e.to_string()))?;
+            let block = resampler.process(&input)?;
             for (out, data) in result.iter_mut().zip(block) {
                 out.extend(data);
             }
@@ -244,4 +246,107 @@ fn prepare(pcm: &Pcm, rate: u32, channels: u16) -> Result<Vec<f32>, Error> {
         }
     }
     Ok(output)
+}
+
+enum PreparedResampler {
+    Fft(FftFixedInOut<f32>),
+    SincIn(SincFixedIn<f32>),
+    SincOut(SincFixedOut<f32>),
+}
+impl PreparedResampler {
+    fn input_frames_next(&self) -> usize {
+        match self {
+            Self::Fft(resampler) => resampler.input_frames_next(),
+            Self::SincIn(resampler) => resampler.input_frames_next(),
+            Self::SincOut(resampler) => resampler.input_frames_next(),
+        }
+    }
+    fn process(&mut self, input: &[Vec<f32>]) -> Result<Vec<Vec<f32>>, Error> {
+        match self {
+            Self::Fft(resampler) => resampler
+                .process(input, None)
+                .map_err(|e| Error::Decode(e.to_string())),
+            Self::SincIn(resampler) => resampler
+                .process(input, None)
+                .map_err(|e| Error::Decode(e.to_string())),
+            Self::SincOut(resampler) => resampler
+                .process(input, None)
+                .map_err(|e| Error::Decode(e.to_string())),
+        }
+    }
+}
+
+fn build_resampler(
+    input_rate: u32,
+    output_rate: u32,
+    channels: usize,
+) -> Result<(PreparedResampler, usize), Error> {
+    let mut a = input_rate;
+    let mut b = output_rate;
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    let gcd = a;
+    let period = (input_rate / gcd) as usize;
+    let chunk_in = 1024_usize.div_ceil(2 * period) * 2 * period;
+    let fft_chunks = chunk_in.div_ceil(period);
+    let fft_in = fft_chunks * period;
+    let fft_out = fft_chunks * (output_rate / gcd) as usize;
+    if fft_in <= MAX_FFT_FRAMES && fft_out <= MAX_FFT_FRAMES {
+        let resampler = FftFixedInOut::<f32>::new(
+            input_rate as usize,
+            output_rate as usize,
+            chunk_in,
+            channels,
+        )
+        .map_err(|e| Error::Decode(e.to_string()))?;
+        let delay = resampler.output_delay();
+        Ok((PreparedResampler::Fft(resampler), delay))
+    } else if output_rate < input_rate {
+        let min_chunk = input_rate.div_ceil(output_rate) as usize + SINC_LEN + 1;
+        let chunk = SINC_CHUNK_FRAMES.max(min_chunk);
+        if chunk > MAX_SINC_INPUT_FRAMES {
+            return Err(Error::Unsupported(
+                "sample-rate ratio too extreme for resampling".into(),
+            ));
+        }
+        let resampler = SincFixedIn::<f32>::new(
+            f64::from(output_rate) / f64::from(input_rate),
+            1.0,
+            sinc_params(),
+            chunk,
+            channels,
+        )
+        .map_err(|e| Error::Decode(e.to_string()))?;
+        let delay = resampler.output_delay();
+        Ok((PreparedResampler::SincIn(resampler), delay))
+    } else {
+        let resampler = SincFixedOut::<f32>::new(
+            f64::from(output_rate) / f64::from(input_rate),
+            1.0,
+            sinc_params(),
+            SINC_CHUNK_FRAMES,
+            channels,
+        )
+        .map_err(|e| Error::Decode(e.to_string()))?;
+        let delay = resampler.output_delay();
+        Ok((PreparedResampler::SincOut(resampler), delay))
+    }
+}
+
+fn sinc_params() -> SincInterpolationParameters {
+    SincInterpolationParameters {
+        sinc_len: SINC_LEN,
+        f_cutoff: 0.95,
+        oversampling_factor: 256,
+        interpolation: SincInterpolationType::Linear,
+        window: WindowFunction::BlackmanHarris2,
+    }
+}
+
+fn output_frames(input_frames: usize, input_rate: u32, output_rate: u32) -> Result<usize, Error> {
+    usize::try_from(
+        (input_frames as u128 * u128::from(output_rate)).div_ceil(u128::from(input_rate)),
+    )
+    .map_err(|e| Error::Invalid(e.to_string()))
 }
