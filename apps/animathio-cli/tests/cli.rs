@@ -204,3 +204,40 @@ fn invalid_arguments_and_projects_fail_without_creating_output() {
     }
     assert!(!cli(&["validate", path(&invalid)]).status.success());
 }
+
+#[test]
+fn import_v1_writes_a_valid_archive() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("old.animathio");
+    let output = dir.path().join("out.amio");
+    // Uncompressed v1 JSON (the importer also accepts the pre-deflate format)
+    // with a single text element, which needs no embedded media.
+    fs::write(
+        &input,
+        br##"{
+            "backgroundColor": "#111111",
+            "editorElements": [{
+                "id": "text-1",
+                "type": "text",
+                "name": "Text 1",
+                "placement": { "x": 10, "y": 20, "width": 200, "height": 40, "rotation": 0, "scaleX": 1, "scaleY": 1 },
+                "timeFrame": { "start": 0, "end": 2000 },
+                "properties": { "text": "hello", "fontSize": 24, "fontWeight": 400, "color": "#ffffff" }
+            }],
+            "maxTime": 3000,
+            "animations": [],
+            "fps": 30,
+            "canvas_width": 800,
+            "canvas_height": 600,
+            "mediaFiles": []
+        }"##,
+    )
+    .unwrap();
+    ok(&["import-v1", path(&input), "-o", path(&output)]);
+    ok(&["validate", path(&output)]);
+    let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 1);
+    assert_eq!(bundle.project.width(), 800);
+    assert_eq!(bundle.project.height(), 600);
+    assert_eq!(bundle.project.background(), [17, 17, 17, 255]);
+}
