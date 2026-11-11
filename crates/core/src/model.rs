@@ -260,24 +260,72 @@ impl Track {
     }
 }
 
+/// Project-level output and canvas settings. Like everything else in the model,
+/// these change only through commands and survive the `project.json` round-trip.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProjectSettings {
+    /// Output width in pixels.
+    pub width: u32,
+    /// Output height in pixels.
+    pub height: u32,
+    /// Playback/export frame rate.
+    pub frame_rate: FrameRate,
+    /// Straight-alpha sRGB RGBA canvas background.
+    pub background: [u8; 4],
+}
+impl Default for ProjectSettings {
+    fn default() -> Self {
+        Self {
+            width: 1920,
+            height: 1080,
+            frame_rate: FrameRate::default(),
+            background: [0, 0, 0, 255],
+        }
+    }
+}
+impl ProjectSettings {
+    /// Construct settings, rejecting zero output dimensions.
+    pub fn new(
+        width: u32,
+        height: u32,
+        frame_rate: FrameRate,
+        background: [u8; 4],
+    ) -> Result<Self, Error> {
+        let settings = Self {
+            width,
+            height,
+            frame_rate,
+            background,
+        };
+        settings.validate()?;
+        Ok(settings)
+    }
+    fn validate(&self) -> Result<(), Error> {
+        if self.width == 0 || self.height == 0 {
+            return Err(invalid("project dimensions must be positive"));
+        }
+        Ok(())
+    }
+}
+
 /// Serializable, resource-free project. Mutations go through `Command::apply`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "ProjectData", into = "ProjectData")]
 pub struct Project {
-    pub(crate) frame_rate: FrameRate,
+    pub(crate) settings: ProjectSettings,
     pub(crate) tracks: Vec<Track>,
     pub(crate) assets: BTreeMap<AssetId, Asset>,
 }
 #[derive(Serialize, Deserialize)]
 struct ProjectData {
-    frame_rate: FrameRate,
+    settings: ProjectSettings,
     tracks: Vec<Track>,
     assets: BTreeMap<AssetId, Asset>,
 }
 impl From<Project> for ProjectData {
     fn from(p: Project) -> Self {
         Self {
-            frame_rate: p.frame_rate,
+            settings: p.settings,
             tracks: p.tracks,
             assets: p.assets,
         }
@@ -287,7 +335,7 @@ impl TryFrom<ProjectData> for Project {
     type Error = Error;
     fn try_from(p: ProjectData) -> Result<Self, Error> {
         let project = Self {
-            frame_rate: p.frame_rate,
+            settings: p.settings,
             tracks: p.tracks,
             assets: p.assets,
         };
@@ -300,14 +348,22 @@ impl Project {
     #[must_use]
     pub fn new(frame_rate: FrameRate) -> Self {
         Self {
-            frame_rate,
+            settings: ProjectSettings {
+                frame_rate,
+                ..ProjectSettings::default()
+            },
             ..Self::default()
         }
+    }
+    /// Output and canvas settings.
+    #[must_use]
+    pub fn settings(&self) -> &ProjectSettings {
+        &self.settings
     }
     /// Output frame rate.
     #[must_use]
     pub fn frame_rate(&self) -> FrameRate {
-        self.frame_rate
+        self.settings.frame_rate
     }
     /// Layers in back-to-front compositing order.
     #[must_use]
@@ -321,6 +377,7 @@ impl Project {
     }
     /// Check identities, references, finite values and nonoverlapping half-open ranges.
     pub fn validate(&self) -> Result<(), Error> {
+        self.settings.validate()?;
         let mut track_ids = BTreeSet::new();
         let mut clip_ids = BTreeSet::new();
         for track in &self.tracks {

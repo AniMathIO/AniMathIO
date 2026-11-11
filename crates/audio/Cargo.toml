@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 animathio-core.workspace = true
 thiserror.workspace = true
+arc-swap = "1"
 cpal = "0.16"
 rtrb = "0.3"
 rubato = "0.16"

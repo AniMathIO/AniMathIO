@@ -135,9 +135,31 @@ impl SymphoniaSource {
             Box::new(File::open(path)?),
             MediaSourceStreamOptions::default(),
         );
+        Self::decode(stream, limits, &hint)
+    }
+    /// Decode already-read asset bytes. The content is probed directly, so the
+    /// caller does not need to supply a filename or extension.
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+        Self::from_bytes_with_limits(bytes, DecodeLimits::default())
+    }
+    /// Decode in-memory bytes, enforcing `limits` on decoded duration and
+    /// interleaved sample count.
+    pub fn from_bytes_with_limits(bytes: Vec<u8>, limits: DecodeLimits) -> Result<Self, Error> {
+        let stream = MediaSourceStream::new(
+            Box::new(std::io::Cursor::new(bytes)),
+            MediaSourceStreamOptions::default(),
+        );
+        Self::decode(stream, limits, &Hint::new())
+    }
+    /// Borrow the decoded PCM without cloning it.
+    #[must_use]
+    pub fn pcm(&self) -> &Pcm {
+        &self.0
+    }
+    fn decode(stream: MediaSourceStream, limits: DecodeLimits, hint: &Hint) -> Result<Self, Error> {
         let mut format = symphonia::default::get_probe()
             .format(
-                &hint,
+                hint,
                 stream,
                 &FormatOptions {
                     enable_gapless: true,

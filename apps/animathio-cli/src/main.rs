@@ -60,14 +60,20 @@ enum Action {
 }
 #[derive(Args)]
 struct OutputSize {
-    #[arg(long, default_value_t = 640)]
-    width: u32,
-    #[arg(long, default_value_t = 360)]
-    height: u32,
+    /// Overrides the project's output width.
+    #[arg(long)]
+    width: Option<u32>,
+    /// Overrides the project's output height.
+    #[arg(long)]
+    height: Option<u32>,
 }
 impl OutputSize {
-    fn tuple(&self) -> (u32, u32) {
-        (self.width, self.height)
+    fn tuple(&self, project: &Project) -> (u32, u32) {
+        let settings = project.settings();
+        (
+            self.width.unwrap_or(settings.width),
+            self.height.unwrap_or(settings.height),
+        )
     }
 }
 
@@ -113,7 +119,12 @@ fn run(cli: Cli) -> Result<()> {
                 time.ok_or("--frame or --time is required")?
             };
             let mut ctx = context(bundle.assets)?;
-            render(&evaluate(&bundle.project, time), &mut ctx, size.tuple())?.save_png(output)?;
+            render(
+                &evaluate(&bundle.project, time),
+                &mut ctx,
+                size.tuple(&bundle.project),
+            )?
+            .save_png(output)?;
         }
         Action::RenderSeq {
             project,
@@ -136,14 +147,18 @@ fn run(cli: Cli) -> Result<()> {
                     rate.frame_to_time(from, Rounding::Nearest)?,
                 ),
                 &mut ctx,
-                size.tuple(),
+                size.tuple(&bundle.project),
             )?;
             fs::create_dir_all(&output)?;
             first.save_png(output.join(format!("frame_{from:06}.png")))?;
             for frame in from + 1..to {
                 let time = rate.frame_to_time(frame, Rounding::Nearest)?;
-                render(&evaluate(&bundle.project, time), &mut ctx, size.tuple())?
-                    .save_png(output.join(format!("frame_{frame:06}.png")))?;
+                render(
+                    &evaluate(&bundle.project, time),
+                    &mut ctx,
+                    size.tuple(&bundle.project),
+                )?
+                .save_png(output.join(format!("frame_{frame:06}.png")))?;
             }
         }
     }

@@ -582,6 +582,95 @@ proptest! {
 }
 
 #[test]
+fn project_settings_default_to_1080p30_and_change_only_through_commands() {
+    let project = Project::default();
+    let settings = project.settings();
+    assert_eq!(settings.width, 1920);
+    assert_eq!(settings.height, 1080);
+    assert_eq!(settings.frame_rate, FrameRate::new(30, 1).unwrap());
+    assert_eq!(settings.background, [0, 0, 0, 255]);
+    let mut project = Project::new(FrameRate::new(60, 1).unwrap());
+    let original = project.clone();
+    let replacement =
+        ProjectSettings::new(320, 180, FrameRate::new(24, 1).unwrap(), [1, 2, 3, 255]).unwrap();
+    let inverse = Command::SetProjectSettings {
+        settings: replacement.clone(),
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(project.settings(), &replacement);
+    assert_eq!(project.frame_rate(), FrameRate::new(24, 1).unwrap());
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+    assert!(ProjectSettings::new(0, 180, FrameRate::default(), [0; 4]).is_err());
+    assert!(ProjectSettings::new(320, 0, FrameRate::default(), [0; 4]).is_err());
+}
+
+#[test]
+fn split_and_merge_are_single_step_inverses() {
+    let mut project = base();
+    let original = project.clone();
+    let split = Command::SplitClip {
+        id: ClipId(0),
+        right_id: ClipId(7),
+        at: Time(40),
+    };
+    let inverse = split.apply(&mut project).unwrap();
+    assert_eq!(project.tracks()[0].clips()[&ClipId(0)].range, range(0, 40));
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(7)].range,
+        range(40, 100)
+    );
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(7)].source_offset,
+        Time(40)
+    );
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+    let inverse = split.apply(&mut project).unwrap();
+    assert!(matches!(inverse, Command::MergeClip { .. }));
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+}
+
+#[test]
+fn split_rejects_collisions_and_out_of_range_points() {
+    let mut project = base();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: plugin(1, 0, 100),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    for invalid in [
+        Command::SplitClip {
+            id: ClipId(0),
+            right_id: ClipId(0),
+            at: Time(50),
+        },
+        Command::SplitClip {
+            id: ClipId(0),
+            right_id: ClipId(1),
+            at: Time(50),
+        },
+        Command::SplitClip {
+            id: ClipId(0),
+            right_id: ClipId(9),
+            at: Time(0),
+        },
+        Command::SplitClip {
+            id: ClipId(0),
+            right_id: ClipId(9),
+            at: Time(100),
+        },
+    ] {
+        assert!(invalid.apply(&mut project).is_err(), "{invalid:?}");
+        assert_eq!(project, before);
+    }
+}
+
+#[test]
 fn track_gain_is_validated_reversible_and_defaults_for_old_projects() {
     let mut project = base();
     assert_eq!(project.tracks()[0].gain(), 1.0);

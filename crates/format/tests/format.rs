@@ -142,15 +142,29 @@ fn synthetic_legacy_fixture_exercises_forward_migration_hook() {
     assert!(read_json(legacy.as_slice()).is_err());
     let mut calls = 0;
     let project = read_json_with_migration(legacy.as_slice(), |version, mut value| {
-        assert_eq!(version, 0);
         calls += 1;
-        let fps = value.as_object_mut().unwrap().remove("fps").unwrap();
-        value["frame_rate"] = json!({"numerator": fps, "denominator": 1});
-        value["schemaVersion"] = json!(1);
+        match version {
+            0 => {
+                let fps = value.as_object_mut().unwrap().remove("fps").unwrap();
+                value["frame_rate"] = json!({"numerator": fps, "denominator": 1});
+                value["schemaVersion"] = json!(1);
+            }
+            1 => {
+                let fps = value.as_object_mut().unwrap().remove("frame_rate").unwrap();
+                value["settings"] = json!({
+                    "width": 1920,
+                    "height": 1080,
+                    "frame_rate": fps,
+                    "background": [0, 0, 0, 255],
+                });
+                value["schemaVersion"] = json!(2);
+            }
+            _ => panic!("unexpected schema version {version}"),
+        }
         Ok(value)
     })
     .unwrap();
-    assert_eq!(calls, 1);
+    assert_eq!(calls, 2);
     assert_eq!(project, Project::default());
     assert!(read_json_with_migration(legacy.as_slice(), |_, value| Ok(value)).is_err());
     assert!(
@@ -160,6 +174,33 @@ fn synthetic_legacy_fixture_exercises_forward_migration_hook() {
         })
         .is_err()
     );
+}
+
+#[test]
+fn v1_projects_migrate_to_v2_with_default_settings() {
+    // Build a current project and rewrite its JSON into the v1 shape: a top-level
+    // `frame_rate` and no `settings`. The built-in migration must move the frame
+    // rate into settings and fill the new fields with the documented defaults.
+    let mut project = Project::default();
+    Command::SetProjectSettings {
+        settings: ProjectSettings::new(320, 180, FrameRate::new(60, 1).unwrap(), [1, 2, 3, 255])
+            .unwrap(),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut value = serde_json::to_value(&project).unwrap();
+    let settings = value.as_object_mut().unwrap().remove("settings").unwrap();
+    value["format"] = json!("animathio");
+    value["frame_rate"] = settings["frame_rate"].clone();
+    value["schemaVersion"] = json!(1);
+    let migrated = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+    assert_eq!(
+        migrated.settings().frame_rate,
+        FrameRate::new(60, 1).unwrap()
+    );
+    assert_eq!(migrated.settings().width, 1920);
+    assert_eq!(migrated.settings().height, 1080);
+    assert_eq!(migrated.settings().background, [0, 0, 0, 255]);
 }
 
 #[test]
