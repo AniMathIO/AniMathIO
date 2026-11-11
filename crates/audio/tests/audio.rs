@@ -1,6 +1,6 @@
 //! Contracts shared by preview and export, independent of any audio device.
 #![allow(clippy::float_cmp, clippy::cast_precision_loss)]
-use animathio_audio::{AudioPool, AudioSource, Error, Pcm, Player, SymphoniaSource};
+use animathio_audio::{AudioPool, AudioSource, DecodeLimits, Error, Pcm, Player, SymphoniaSource};
 use animathio_core::*;
 use proptest::prelude::*;
 use std::{path::Path, sync::Arc, time::Duration};
@@ -247,6 +247,92 @@ fn pcm_ranges_pad_eof_and_validate_configuration() {
     assert!(Pcm::new(48_000, 1, vec![f32::NAN]).is_err());
     assert!(AudioPool::default().prepare(0, 2).is_err());
     assert!(AudioPool::default().prepare(48_000, 0).is_err());
+}
+fn pcm_wav(rate: u32, channels: u16, samples: &[u16]) -> Vec<u8> {
+    assert_ne!(samples.len(), 0);
+    assert!(samples.len().is_multiple_of(usize::from(channels)));
+    let bits = 16u16;
+    let block_align = channels * (bits / 8);
+    let data_len = u32::try_from(samples.len() * 2).unwrap();
+    let byte_rate = rate.saturating_mul(u32::from(block_align));
+    let mut wav = Vec::with_capacity(44 + samples.len() * 2);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36u32 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&channels.to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&byte_rate.to_le_bytes());
+    wav.extend_from_slice(&block_align.to_le_bytes());
+    wav.extend_from_slice(&bits.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        wav.extend_from_slice(&sample.to_le_bytes());
+    }
+    wav
+}
+#[test]
+fn absurd_sample_rate_and_channel_count_are_rejected_without_large_allocations() {
+    let path = std::env::temp_dir().join(format!(
+        "animathio-absurd-rate-{}.wav",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, pcm_wav(4_000_000_000, 1, &[0; 8])).unwrap();
+    let result = SymphoniaSource::open(&path);
+    let _ = std::fs::remove_file(&path);
+    assert!(result.is_err(), "absurd sample rate must be rejected");
+    assert!(Pcm::new(4_000_000_000, 1, vec![0.0]).is_err());
+    assert!(Pcm::new(48_000, 33, vec![0.0; 33]).is_err());
+    assert!(AudioPool::default().prepare(768_001, 1).is_err());
+    assert!(AudioPool::default().prepare(48_000, 33).is_err());
+}
+#[test]
+fn decode_limits_reject_oversized_files_cleanly() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tone.wav");
+    let tiny = DecodeLimits {
+        max_samples: 100,
+        max_duration: Duration::from_secs(1),
+    };
+    assert!(matches!(
+        SymphoniaSource::open_with_limits(&path, tiny),
+        Err(Error::Invalid(_))
+    ));
+    let no_time = DecodeLimits {
+        max_samples: usize::MAX,
+        max_duration: Duration::ZERO,
+    };
+    assert!(matches!(
+        SymphoniaSource::open_with_limits(&path, no_time),
+        Err(Error::Invalid(_))
+    ));
+}
+#[test]
+fn extreme_rate_ratios_resample_with_bounded_chunks() {
+    // Downsampling: an odd near-maximum rate falls back to the bounded sinc path.
+    let pcm = Pcm::new(767_999, 1, vec![0.0; 1024]).unwrap();
+    let (proj, pool) = project(&pcm, 0, 1024 * TICKS_PER_SECOND / 767_999);
+    let out = pool
+        .mix(
+            &proj,
+            range(0, 1024 * TICKS_PER_SECOND / 767_999),
+            48_000,
+            1,
+        )
+        .unwrap();
+    assert_ne!(out.len(), 0);
+    // Upsampling: a 1 Hz source falls back to the fixed-output sinc path.
+    let pcm = Pcm::new(1, 1, vec![0.0, 1.0, 0.0]).unwrap();
+    let (proj, pool) = project(&pcm, 0, 3 * TICKS_PER_SECOND);
+    let out = pool
+        .mix(&proj, range(0, 3 * TICKS_PER_SECOND), 48_000, 1)
+        .unwrap();
+    assert_eq!(out.len(), 3 * 48_000);
 }
 proptest! {
     #[test]

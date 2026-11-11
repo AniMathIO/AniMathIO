@@ -180,6 +180,11 @@ pub enum VectorElement {
     TextRun(TextElement),
 }
 
+/// Maximum number of draw elements accepted in a resolved vector scene.
+pub const MAX_VECTOR_ELEMENTS: usize = 10_000;
+/// Maximum number of path verbs accepted in a single vector path.
+pub const MAX_PATH_VERBS: usize = 100_000;
+
 /// Vector graphics scene composed of vector draw elements.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct VectorScene {
@@ -194,11 +199,17 @@ impl VectorScene {
         Self::default()
     }
 
-    /// Validate coordinates, stroke widths, and font sizes.
+    /// Validate element/verb counts, coordinates, stroke widths, and font sizes.
     pub fn validate(&self) -> Result<(), Error> {
+        if self.elements.len() > MAX_VECTOR_ELEMENTS {
+            return Err(invalid("too many vector elements"));
+        }
         for elem in &self.elements {
             match elem {
                 VectorElement::FillPath { path, .. } => {
+                    if path.len() > MAX_PATH_VERBS {
+                        return Err(invalid("too many path verbs"));
+                    }
                     for verb in path {
                         if !verb.is_finite() {
                             return Err(invalid("nonfinite path coordinate"));
@@ -206,6 +217,9 @@ impl VectorScene {
                     }
                 }
                 VectorElement::StrokePath { path, style } => {
+                    if path.len() > MAX_PATH_VERBS {
+                        return Err(invalid("too many path verbs"));
+                    }
                     if !style.width.is_finite() || style.width < 0.0 {
                         return Err(invalid("invalid stroke width"));
                     }
@@ -226,5 +240,40 @@ impl VectorScene {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_rejects_nonfinite_coordinates_and_caps() {
+        let scene = VectorScene {
+            elements: vec![VectorElement::FillPath {
+                path: vec![PathVerb::MoveTo(Point::new(f64::NAN, 0.0))],
+                color: Color::rgb(0, 0, 0),
+            }],
+        };
+        assert!(scene.validate().is_err());
+
+        let scene = VectorScene {
+            elements: vec![VectorElement::FillPath {
+                path: vec![PathVerb::Close; MAX_PATH_VERBS + 1],
+                color: Color::rgb(0, 0, 0),
+            }],
+        };
+        assert!(scene.validate().is_err());
+
+        let scene = VectorScene {
+            elements: vec![
+                VectorElement::FillPath {
+                    path: Vec::new(),
+                    color: Color::rgb(0, 0, 0),
+                };
+                MAX_VECTOR_ELEMENTS + 1
+            ],
+        };
+        assert!(scene.validate().is_err());
     }
 }

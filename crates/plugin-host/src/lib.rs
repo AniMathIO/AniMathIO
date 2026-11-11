@@ -4,14 +4,16 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use animathio_core::{ClipKind, Scene as CoreScene, VectorScene};
 use animathio_plugin_api::{InspectorSchema, PluginManifestToml, PluginPackage};
 use lru::LruCache;
 use thiserror::Error;
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
-use wasmtime::{Config, Engine, Store};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 wasmtime::component::bindgen!({
@@ -43,7 +45,28 @@ pub enum HostError {
     /// Plugin execution trapped or failed.
     #[error("plugin execution trapped: {0}")]
     Trapped(String),
+    /// A plugin with this id is already registered.
+    #[error("plugin id already registered: {0}")]
+    DuplicateId(String),
+    /// The plugin produced a scene that failed validation.
+    #[error("plugin produced an invalid scene: {0}")]
+    InvalidOutput(String),
 }
+
+/// Maximum characters accepted by the host `shape_text` import.
+const MAX_SHAPE_TEXT_CHARS: usize = 10_000;
+/// Maximum total path verbs returned by the host `shape_text` import.
+const MAX_SHAPE_TEXT_VERBS: usize = 200_000;
+/// Maximum UTF-8 bytes accepted by the host `svg_to_paths` import.
+const MAX_SVG_INPUT_BYTES: usize = 1024 * 1024;
+/// Maximum total path verbs returned by the host `svg_to_paths` import.
+const MAX_SVG_VERBS: usize = 100_000;
+/// Maximum UTF-8 bytes per `log` message.
+const MAX_LOG_MESSAGE_BYTES: usize = 4 * 1024;
+/// Maximum retained log messages per store.
+const MAX_LOG_ENTRIES: usize = 1_000;
+/// How often the epoch ticker advances the engine epoch.
+const EPOCH_TICK_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Resource limits applied to sandboxed plugin execution.
 #[derive(Clone, Copy, Debug)]
@@ -80,28 +103,51 @@ pub struct CapabilityGrants {
     pub environment_variables: Vec<(String, String)>,
 }
 
-struct AppLimiter {
-    max_memory_bytes: usize,
-    max_table_elements: usize,
+/// Build the [`StoreLimits`] applied to every plugin store. A single memory of at most
+/// `max_memory_bytes` makes the per-memory limit effectively the aggregate plugin allocation.
+/// Instances, memories and tables are capped far below wasmtime's defaults; wasmtime 50's
+/// component runtime needs at least three core instances per component, hence the eight here.
+fn sandbox_store_limits(limits: &SandboxLimits) -> StoreLimits {
+    StoreLimitsBuilder::new()
+        .memory_size(limits.max_memory_bytes)
+        .table_elements(limits.max_table_elements)
+        .instances(8)
+        .memories(1)
+        .tables(2)
+        .trap_on_grow_failure(true)
+        .build()
 }
 
-impl wasmtime::ResourceLimiter for AppLimiter {
-    fn memory_growing(
-        &mut self,
-        _current: usize,
-        desired: usize,
-        _maximum: Option<usize>,
-    ) -> Result<bool, wasmtime::Error> {
-        Ok(desired <= self.max_memory_bytes)
-    }
+/// Background thread that advances the engine epoch on a fixed interval. Without this the
+/// `epoch_deadline_ticks` configured on each store would never fire while a plugin runs.
+struct EpochTicker {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
 
-    fn table_growing(
-        &mut self,
-        _current: usize,
-        desired: usize,
-        _maximum: Option<usize>,
-    ) -> Result<bool, wasmtime::Error> {
-        Ok(desired <= self.max_table_elements)
+impl EpochTicker {
+    fn start(engine: Engine, interval: Duration) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&shutdown);
+        let handle = std::thread::spawn(move || {
+            while !flag.load(Ordering::Relaxed) {
+                std::thread::sleep(interval);
+                engine.increment_epoch();
+            }
+        });
+        Self {
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for EpochTicker {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -110,7 +156,7 @@ pub struct HostState {
     table: ResourceTable,
     wasi: WasiCtx,
     font_data: Vec<u8>,
-    limiter: AppLimiter,
+    limiter: StoreLimits,
     logs: Vec<String>,
 }
 
@@ -127,16 +173,33 @@ impl animathio::plugin::types::Host for HostState {}
 
 impl Host for HostState {
     fn shape_text(&mut self, text: String, font_size: f32) -> Vec<Vec<wit_types::PathVerb>> {
-        shape_text_skrifa(&self.font_data, &text, font_size)
+        let char_count = text.chars().count();
+        if char_count > MAX_SHAPE_TEXT_CHARS {
+            log::warn!(
+                "shape_text: rejecting {char_count} characters (max {MAX_SHAPE_TEXT_CHARS})"
+            );
+            return Vec::new();
+        }
+        shape_text_skrifa(&self.font_data, &text, font_size, MAX_SHAPE_TEXT_VERBS)
     }
 
     fn svg_to_paths(&mut self, svg_xml: String) -> Vec<Vec<wit_types::PathVerb>> {
-        parse_svg_to_paths(&svg_xml)
+        if svg_xml.len() > MAX_SVG_INPUT_BYTES {
+            log::warn!(
+                "svg_to_paths: rejecting {} input bytes (max {MAX_SVG_INPUT_BYTES})",
+                svg_xml.len()
+            );
+            return Vec::new();
+        }
+        parse_svg_to_paths(&svg_xml, MAX_SVG_VERBS)
     }
 
     fn log(&mut self, message: String) {
+        let message = truncate_utf8(&message, MAX_LOG_MESSAGE_BYTES);
         log::info!("[plugin log] {}", message);
-        self.logs.push(message);
+        if self.logs.len() < MAX_LOG_ENTRIES {
+            self.logs.push(message);
+        }
     }
 }
 
@@ -219,6 +282,8 @@ pub struct PluginHost {
     output_cache: LruCache<[u8; 32], VectorScene>,
     cache_hits: AtomicUsize,
     cache_misses: AtomicUsize,
+    /// Held only so its `Drop` stops and joins the epoch ticker thread.
+    _epoch_ticker: EpochTicker,
 }
 
 impl PluginHost {
@@ -246,6 +311,7 @@ impl PluginHost {
         let font_data = load_system_font_bytes();
         let disk_cache = ComponentDiskCache::new(cache_dir);
         let output_cache = LruCache::new(NonZeroUsize::new(512).unwrap());
+        let epoch_ticker = EpochTicker::start(engine.clone(), EPOCH_TICK_INTERVAL);
 
         Ok(Self {
             engine,
@@ -257,6 +323,7 @@ impl PluginHost {
             output_cache,
             cache_hits: AtomicUsize::new(0),
             cache_misses: AtomicUsize::new(0),
+            _epoch_ticker: epoch_ticker,
         })
     }
 
@@ -307,7 +374,15 @@ impl PluginHost {
     }
 
     /// Load a `PluginPackage` directly into the host.
+    ///
+    /// Plugin ids must be unique within a host. Signing is deferred: an untrusted package may
+    /// still claim any id, so callers must only load packages from trusted sources for now.
     pub fn load_plugin_package(&mut self, package: PluginPackage) -> Result<String, HostError> {
+        let id = package.manifest.id.clone();
+        if self.plugins.contains_key(&id) {
+            return Err(HostError::DuplicateId(id));
+        }
+
         let wasm_hash = *blake3::hash(&package.wasm_bytes).as_bytes();
         let component = self
             .disk_cache
@@ -319,7 +394,6 @@ impl PluginHost {
         let wit_manifest = instance.call_describe(&mut store)?;
 
         let inspector_schema = wit_manifest_to_inspector(&wit_manifest);
-        let id = package.manifest.id.clone();
 
         self.plugins.insert(
             id.clone(),
@@ -361,10 +435,7 @@ impl PluginHost {
             table: ResourceTable::new(),
             wasi,
             font_data: self.font_data.clone(),
-            limiter: AppLimiter {
-                max_memory_bytes: self.limits.max_memory_bytes,
-                max_table_elements: self.limits.max_table_elements,
-            },
+            limiter: sandbox_store_limits(&self.limits),
             logs: Vec::new(),
         };
 
@@ -423,6 +494,9 @@ impl PluginHost {
             .map_err(|e| HostError::Trapped(e.to_string()))?;
 
         let core_scene = wit_scene_to_core(wit_scene);
+        core_scene
+            .validate()
+            .map_err(|e| HostError::InvalidOutput(e.to_string()))?;
 
         // 4. Cache output
         self.output_cache.put(cache_key, core_scene.clone());
@@ -784,10 +858,23 @@ fn load_system_font_bytes() -> Vec<u8> {
     Vec::new()
 }
 
+/// Truncate a string to at most `max` bytes on a UTF-8 character boundary.
+fn truncate_utf8(value: &str, max: usize) -> String {
+    if value.len() <= max {
+        return value.to_owned();
+    }
+    let mut end = max;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_owned()
+}
+
 fn shape_text_skrifa(
     font_bytes: &[u8],
     text: &str,
     font_size: f32,
+    max_verbs: usize,
 ) -> Vec<Vec<wit_types::PathVerb>> {
     if font_bytes.is_empty() || text.is_empty() {
         return Vec::new();
@@ -897,10 +984,16 @@ fn shape_text_skrifa(
         collector.paths.push(collector.current);
     }
 
+    let total_verbs: usize = collector.paths.iter().map(Vec::len).sum();
+    if total_verbs > max_verbs {
+        log::warn!("shape_text: rejecting {total_verbs} path verbs (max {max_verbs})");
+        return Vec::new();
+    }
+
     collector.paths
 }
 
-fn parse_svg_to_paths(svg: &str) -> Vec<Vec<wit_types::PathVerb>> {
+fn parse_svg_to_paths(svg: &str, max_verbs: usize) -> Vec<Vec<wit_types::PathVerb>> {
     let mut results = Vec::new();
     let trimmed = svg.trim();
     if trimmed.is_empty() {
@@ -932,6 +1025,12 @@ fn parse_svg_to_paths(svg: &str) -> Vec<Vec<wit_types::PathVerb>> {
         } else {
             break;
         }
+    }
+
+    let total_verbs: usize = results.iter().map(Vec::len).sum();
+    if total_verbs > max_verbs {
+        log::warn!("svg_to_paths: rejecting {total_verbs} path verbs (max {max_verbs})");
+        return Vec::new();
     }
 
     results
@@ -977,4 +1076,87 @@ fn bez_to_wit_verbs(bez: &kurbo::BezPath) -> Vec<wit_types::PathVerb> {
         }
     }
     verbs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasmtime::{Instance, Module};
+
+    struct LimiterState {
+        limiter: StoreLimits,
+    }
+
+    #[test]
+    fn memory_growth_beyond_limit_traps() {
+        let engine = Engine::default();
+        let module = Module::new(
+            &engine,
+            r#"(module
+                (memory 1)
+                (func (export "grow") (param i32) (result i32)
+                    local.get 0
+                    memory.grow))"#,
+        )
+        .unwrap();
+        let limits = SandboxLimits {
+            max_memory_bytes: 64 * 1024,
+            ..SandboxLimits::default()
+        };
+        let mut store = Store::new(
+            &engine,
+            LimiterState {
+                limiter: sandbox_store_limits(&limits),
+            },
+        );
+        store.limiter(|s| &mut s.limiter);
+        let instance = Instance::new(&mut store, &module, &[]).unwrap();
+        let grow = instance
+            .get_typed_func::<i32, i32>(&mut store, "grow")
+            .unwrap();
+        assert!(grow.call(&mut store, 1024).is_err());
+    }
+
+    #[test]
+    fn multiple_memories_are_rejected() {
+        let engine = Engine::default();
+        let module = Module::new(&engine, r#"(module (memory 1) (memory 1))"#).unwrap();
+        let mut store = Store::new(
+            &engine,
+            LimiterState {
+                limiter: sandbox_store_limits(&SandboxLimits::default()),
+            },
+        );
+        store.limiter(|s| &mut s.limiter);
+        assert!(Instance::new(&mut store, &module, &[]).is_err());
+    }
+
+    #[test]
+    fn nan_vector_scene_fails_validation() {
+        let wit_scene = wit_types::Scene {
+            elements: vec![wit_types::DrawCommand::FillPath((
+                vec![wit_types::PathVerb::MoveTo(wit_types::Point {
+                    x: f32::NAN,
+                    y: 0.0,
+                })],
+                wit_types::Color {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            ))],
+        };
+        let core_scene = wit_scene_to_core(wit_scene);
+        assert!(core_scene.validate().is_err());
+    }
+
+    #[test]
+    fn oversized_log_messages_are_truncated() {
+        assert_eq!(truncate_utf8("hello", 10), "hello");
+        let long = "é".repeat(100);
+        let truncated = truncate_utf8(&long, 4);
+        assert!(truncated.len() <= 4);
+        assert!(truncated.is_char_boundary(truncated.len()));
+    }
 }

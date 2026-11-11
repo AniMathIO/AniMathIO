@@ -6,7 +6,10 @@ pub mod package;
 pub mod schema;
 
 pub use manifest::{ManifestError, PluginKind, PluginManifestToml};
-pub use package::{MANIFEST_FILENAME, PackageError, PluginPackage, WASM_FILENAME};
+pub use package::{
+    MANIFEST_FILENAME, MAX_ENTRIES, MAX_MANIFEST_BYTES, MAX_WASM_BYTES, PackageError,
+    PluginPackage, WASM_FILENAME,
+};
 pub use schema::{
     ColorValue, ControlWidget, InspectorParam, InspectorSchema, PointValue, SliderControl,
 };

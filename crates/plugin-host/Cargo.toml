@@ -26,3 +26,4 @@ tempfile = "3"
 animathio-core = { workspace = true }
 animathio-plugin-api = { path = "../plugin-api" }
 serde_json = { workspace = true }
+wat = "1"

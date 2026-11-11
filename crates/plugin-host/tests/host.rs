@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use animathio_core::{ClipId, ClipKind, Scene as CoreScene, SceneClip, Time, TrackId};
 use animathio_plugin_api::{InspectorSchema, PluginManifestToml, PluginPackage};
-use animathio_plugin_host::PluginHost;
+use animathio_plugin_host::{HostError, PluginHost};
 use serde_json::json;
 
 fn workspace_root() -> PathBuf {
@@ -247,6 +247,39 @@ fn output_cache_hits_on_identical_params() {
     assert_ne!(at_zero, at_one_second);
     assert_eq!(host.cache_misses(), 3);
     assert_eq!(host.cache_hits(), 1);
+}
+
+#[test]
+fn oversized_shape_text_returns_empty_scene() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let text = load_plugin(&mut host, "text");
+
+    let huge = "x".repeat(20_000);
+    let scene = host
+        .render_clip(
+            &text,
+            &BTreeMap::new(),
+            &json!({ "text": huge, "font_size": 48.0 }),
+            0,
+            (1280, 720),
+        )
+        .unwrap();
+    assert!(
+        scene.elements.is_empty(),
+        "oversized text must be rejected by the host shaper"
+    );
+}
+
+#[test]
+fn duplicate_plugin_id_is_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let package = PluginPackage::from_bytes(&amplugin_bytes("shapes")).unwrap();
+
+    host.load_plugin_package(package.clone()).unwrap();
+    let err = host.load_plugin_package(package).unwrap_err();
+    assert!(matches!(err, HostError::DuplicateId(_)));
 }
 
 #[test]

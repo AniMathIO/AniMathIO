@@ -1,4 +1,5 @@
 use animathio_plugin_api::*;
+use std::io::Write;
 
 #[test]
 fn manifest_toml_roundtrip_and_validation() {
@@ -111,4 +112,101 @@ fn guest_shape_helpers() {
 
     let arrow = Shapes::arrow(0.0, 0.0, 100.0, 0.0, 10.0, 8.0);
     assert_eq!(arrow.len(), 5);
+}
+
+fn zip_bytes(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, data) in entries {
+            zip.start_file(name.as_str(), options).unwrap();
+            zip.write_all(data).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    cursor.into_inner()
+}
+
+const MINIMAL_MANIFEST: &str = r#"
+api_version = "0.1.0"
+id = "org.animathio.ziptest"
+name = "Zip Test"
+version = "0.1.0"
+kinds = ["clip-source"]
+"#;
+
+#[test]
+fn oversized_manifest_entry_is_rejected() {
+    let mut manifest = MINIMAL_MANIFEST.to_string();
+    manifest.push_str("# ");
+    manifest.push_str(&"x".repeat(MAX_MANIFEST_BYTES as usize));
+    let bytes = zip_bytes(&[
+        ("plugin.toml".into(), manifest.into_bytes()),
+        ("plugin.wasm".into(), b"\x00asm\x01\x00\x00\x00".to_vec()),
+    ]);
+    assert!(matches!(
+        PluginPackage::from_bytes(&bytes),
+        Err(PackageError::EntryTooLarge(MANIFEST_FILENAME))
+    ));
+}
+
+#[test]
+fn oversized_wasm_entry_is_rejected_without_decompressing() {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file(MANIFEST_FILENAME, options).unwrap();
+        zip.write_all(MINIMAL_MANIFEST.as_bytes()).unwrap();
+        zip.start_file(WASM_FILENAME, options).unwrap();
+        let chunk = [0u8; 65_536];
+        let mut remaining = MAX_WASM_BYTES as usize + 1;
+        while remaining > 0 {
+            let n = remaining.min(chunk.len());
+            zip.write_all(&chunk[..n]).unwrap();
+            remaining -= n;
+        }
+        zip.finish().unwrap();
+    }
+    let bytes = cursor.into_inner();
+    assert!(matches!(
+        PluginPackage::from_bytes(&bytes),
+        Err(PackageError::EntryTooLarge(WASM_FILENAME))
+    ));
+}
+
+#[test]
+fn path_traversal_entry_is_rejected() {
+    let bytes = zip_bytes(&[
+        ("plugin.toml".into(), MINIMAL_MANIFEST.into()),
+        ("plugin.wasm".into(), b"\x00asm\x01\x00\x00\x00".to_vec()),
+        ("../evil.toml".into(), b"x".to_vec()),
+    ]);
+    assert!(matches!(
+        PluginPackage::from_bytes(&bytes),
+        Err(PackageError::UnsafeEntry(_))
+    ));
+}
+
+#[test]
+fn too_many_entries_is_rejected() {
+    let mut entries = vec![
+        (
+            "plugin.toml".to_string(),
+            MINIMAL_MANIFEST.as_bytes().to_vec(),
+        ),
+        (
+            "plugin.wasm".to_string(),
+            b"\x00asm\x01\x00\x00\x00".to_vec(),
+        ),
+    ];
+    for index in 0..(MAX_ENTRIES + 1) {
+        entries.push((format!("extra-{index}.bin"), b"x".to_vec()));
+    }
+    let bytes = zip_bytes(&entries);
+    assert!(matches!(
+        PluginPackage::from_bytes(&bytes),
+        Err(PackageError::TooManyEntries)
+    ));
 }
