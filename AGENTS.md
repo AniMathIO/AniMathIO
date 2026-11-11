@@ -45,7 +45,24 @@ CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c
 ```
 
 `core` owns the plain project model and command-only mutation API; `format` owns
-versioned JSON and `.amio` containers. Neither the renderer nor media runtime is implemented yet.
+versioned JSON and `.amio` containers. `audio` owns decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb playback;
+no audio resources live in `Project`. The renderer is not implemented yet.
+
+Audio clips use numeric `gain` (linear, default 1) and `muted` (nonzero means muted,
+default 0) parameters, including clip-local keyframes. Track gain is changed through
+`Command::SetTrackGain`. `AudioPool::prepare(rate, channels)` does decoding/resampling
+work outside playback; `Mixer::mix(project, range)` is shared by preview and export.
+The device callback only consumes the ring and updates the latency-corrected master
+clock; `Player::now()` is quantized to callbacks and freezes on underflow. Seek drops
+the old stream/ring and joins its worker before starting a new session.
+
+Linux builds need `libasound2-dev` (CI installs it). Normal tests need no device.
+The ignored device test can be run explicitly; `cargo run -p animathio-audio
+--example play` emits a 0.01-amplitude tone for at most 3 seconds and prints clock
+drift. Apply the same resource limits to these cargo invocations. Symphonia 0.5
+supports WAV/PCM, MP3, FLAC, AAC-LC/M4A and Vorbis; Opus returns an explicit
+unsupported-codec error. Full-asset decoding and equal-layout/mono channel mapping
+are prototype limits; streaming, surround layout matrices and waveform caches are deferred.
 After a final push on disk-constrained machines, clean build artifacts with:
 
 ```bash

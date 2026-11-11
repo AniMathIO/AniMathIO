@@ -15,6 +15,13 @@ pub enum Command {
         /// Position in the layer stack.
         index: usize,
     },
+    /// Change the linear audio gain of a layer.
+    SetTrackGain {
+        /// Layer identity.
+        id: TrackId,
+        /// Finite, nonnegative gain.
+        gain: f64,
+    },
     /// Remove a layer with all its clips.
     RemoveTrack {
         /// Layer identity.
@@ -121,6 +128,15 @@ impl Command {
                 }
                 project.tracks.insert(*index, track.clone());
                 Self::RemoveTrack { id: track.id }
+            }
+            Self::SetTrackGain { id, gain } => {
+                let index = track_index(project, *id)?;
+                let inverse = Self::SetTrackGain {
+                    id: *id,
+                    gain: project.tracks[index].gain,
+                };
+                project.tracks[index].gain = *gain;
+                inverse
             }
             Self::RemoveTrack { id } => {
                 let index = track_index(project, *id)?;

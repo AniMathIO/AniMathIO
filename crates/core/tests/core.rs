@@ -580,3 +580,38 @@ proptest! {
         prop_assert_eq!(fps.time_to_frame(time, Rounding::Nearest).unwrap(), frame);
     }
 }
+
+#[test]
+fn track_gain_is_validated_reversible_and_defaults_for_old_projects() {
+    let mut project = base();
+    assert_eq!(project.tracks()[0].gain(), 1.0);
+    let original = project.clone();
+    let inverse = Command::SetTrackGain {
+        id: TrackId(0),
+        gain: 0.25,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(project.tracks()[0].gain(), 0.25);
+    let decoded: Project = serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
+    assert_eq!(decoded, project);
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+    for gain in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            Command::SetTrackGain {
+                id: TrackId(0),
+                gain
+            }
+            .apply(&mut project)
+            .is_err()
+        );
+        assert_eq!(project, original);
+    }
+    let mut json = serde_json::to_value(&project).unwrap();
+    for track in json["tracks"].as_array_mut().unwrap() {
+        track.as_object_mut().unwrap().remove("gain");
+    }
+    let decoded: Project = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, original);
+}

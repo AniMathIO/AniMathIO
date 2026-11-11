@@ -222,6 +222,8 @@ pub struct Track {
     pub(crate) id: TrackId,
     pub(crate) name: String,
     pub(crate) clips: BTreeMap<ClipId, Clip>,
+    #[serde(default = "unity_gain")]
+    pub(crate) gain: f64,
 }
 impl Track {
     /// Construct an empty layer.
@@ -231,7 +233,13 @@ impl Track {
             id,
             name: name.into(),
             clips: BTreeMap::new(),
+            gain: 1.0,
         }
+    }
+    /// Linear audio gain (unity by default).
+    #[must_use]
+    pub fn gain(&self) -> f64 {
+        self.gain
     }
     /// Stable layer identity.
     #[must_use]
@@ -316,6 +324,9 @@ impl Project {
         for track in &self.tracks {
             if !track_ids.insert(track.id) {
                 return Err(invalid("duplicate track id"));
+            }
+            if !track.gain.is_finite() || track.gain < 0.0 {
+                return Err(invalid("invalid track gain"));
             }
             let mut ranges = Vec::new();
             for (id, clip) in &track.clips {
@@ -439,4 +450,8 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
         }
     }
     scene
+}
+
+fn unity_gain() -> f64 {
+    1.0
 }
