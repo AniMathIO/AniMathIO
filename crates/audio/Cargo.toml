@@ -1,0 +1,22 @@
+[package]
+name = "animathio-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+animathio-core.workspace = true
+thiserror.workspace = true
+cpal = "0.16"
+rtrb = "0.3"
+rubato = "0.16"
+symphonia = { version = "0.5.5", features = ["all"] }
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
