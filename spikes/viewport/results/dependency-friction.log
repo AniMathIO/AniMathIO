@@ -1,0 +1,6 @@
+Initial build failure (unpatched xattr 0.2.3 with libc 0.2.191):
+error[E0425]: cannot find value ENOATTR in crate libc
+  xattr-0.2.3/src/sys/mod.rs:12:56
+
+Resolution: vendor xattr 0.2.3, alias ENOATTR to ENODATA on Linux/Android.
+See vendor/README.md and FINDINGS.md.

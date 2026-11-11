@@ -1,0 +1,8 @@
+    Checking xattr v0.2.3 (/home/hunor/.t3/worktrees/AniMathIO/t3-c7b8f2f7-5a3145dcb3d94d10/spikes/viewport/vendor/xattr)
+    Checking zed-async-tar v0.5.0-zed
+    Checking gpui_http_client v0.2.2
+    Checking gpui v0.2.2
+    Checking animathio-viewport-spike v0.1.0 (/home/hunor/.t3/worktrees/AniMathIO/t3-c7b8f2f7-5a3145dcb3d94d10/spikes/viewport)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.47s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`

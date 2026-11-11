@@ -1,0 +1,29 @@
+[package]
+name = "animathio-viewport-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+gpui = "=0.2.2"
+image = { version = "0.25", default-features = false }
+pollster = "0.4"
+skrifa = "0.49"
+vello = "=0.12.0"
+wgpu = "30"
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.release]
+debug = false
+strip = "debuginfo"
+
+# GPUI 0.2.2 -> gpui_util -> xattr 0.2.3 refers to a removed libc alias.
+# Only the Linux/Android ENOATTR alias is patched to ENODATA; see FINDINGS.md.
+[patch.crates-io]
+xattr = { path = "vendor/xattr" }
