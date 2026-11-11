@@ -18,6 +18,8 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 zip = { version = "6", default-features = false, features = ["deflate"] }
 proptest = "1"
+gpui = "=0.2.2"
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -31,3 +33,9 @@ opt-level = 2
 pedantic = { level = "warn", priority = -1 }
 # Public fallible APIs share the crate's small error type.
 missing_errors_doc = "allow"
+
+# GPUI 0.2.2 pulls xattr 0.2.3, which refers to libc::ENOATTR (removed in
+# libc 0.2.191). The local copy aliases it to ENODATA on Linux/Android only;
+# see vendor/README.md.
+[patch.crates-io]
+xattr = { path = "vendor/xattr" }
