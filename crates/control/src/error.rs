@@ -21,6 +21,9 @@ pub enum ControlError {
     /// The method is known but not supported by this handler.
     #[error("not supported: {0}")]
     Unsupported(String),
+    /// A generic handler failure with a human-readable message.
+    #[error("{0}")]
+    Other(String),
     /// Socket or file failure.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -55,7 +58,8 @@ impl ControlError {
             | Self::Model(_)
             | Self::Format(_)
             | Self::Import(_)
-            | Self::Render(_) => -32_000,
+            | Self::Render(_)
+            | Self::Other(_) => -32_000,
         }
     }
 }

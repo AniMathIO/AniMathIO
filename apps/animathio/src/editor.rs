@@ -2,12 +2,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use animathio_control::{
+    AssetInfo, Call, ControlError, ProjectState, RenderFrameParams, RenderFrameResult,
+    media_type_of, read_bounded, timeline_of, validate_existing_file, validate_output_file,
+};
 use animathio_core::{
     AssetId, Clip, ClipId, ClipKind, Command, History, Project, TICKS_PER_SECOND, Time, TrackId,
     Transform, TransformProperty,
 };
+use base64::Engine as _;
 use gpui::{prelude::*, *};
+use serde_json::Value;
 
+use crate::control::{ControlMsg, ControlRuntime};
 use crate::playback::{Clock, due_frame, make_clock};
 use crate::render_worker::{RenderRequest, RenderWorker};
 use crate::timeline::{self, TimelineLayout};
@@ -84,6 +91,7 @@ pub(crate) struct Editor {
     editing: Option<NumberEdit>,
     error: Option<String>,
     focus_handle: FocusHandle,
+    control: Option<ControlRuntime>,
 }
 
 impl Editor {
@@ -93,6 +101,7 @@ impl Editor {
         project: Project,
         assets: BTreeMap<AssetId, Vec<u8>>,
         path: Option<PathBuf>,
+        control: Option<ControlRuntime>,
     ) -> Self {
         let clock = make_clock(&project);
         let worker = RenderWorker::spawn();
@@ -117,6 +126,7 @@ impl Editor {
             editing: None,
             error: None,
             focus_handle: cx.focus_handle(),
+            control,
         };
         this.request_render(Time(0));
         window.focus(&this.focus_handle);
@@ -143,6 +153,188 @@ impl Editor {
                 let _ = window.drop_image(old);
             }
         }
+    }
+
+    fn drain_control(&mut self, cx: &mut Context<Self>) {
+        loop {
+            let next = {
+                let Some(control) = self.control.as_mut() else {
+                    return;
+                };
+                control.rx.try_recv()
+            };
+            let Ok(ControlMsg::Invoke(call, reply)) = next else {
+                return;
+            };
+            let result = self.handle_control_call(call, cx);
+            let _ = reply.send(result);
+        }
+    }
+
+    fn handle_control_call(
+        &mut self,
+        call: Call,
+        cx: &mut Context<Self>,
+    ) -> Result<Value, ControlError> {
+        Ok(match call {
+            Call::ProjectGet => serde_json::to_value(ProjectState {
+                project: self.project.clone(),
+                path: self.path.as_ref().map(|p| p.display().to_string()),
+                playhead: self.position,
+                playing: self.playing,
+            })?,
+            Call::ProjectOpen { path } => {
+                self.open_path(path, cx);
+                if self.error.is_some() {
+                    return Err(ControlError::Other(
+                        self.error.take().unwrap_or_else(|| "open failed".to_owned()),
+                    ));
+                }
+                serde_json::to_value(())?
+            }
+            Call::ProjectSave { path } => {
+                let target = path
+                    .or_else(|| self.path.clone())
+                    .ok_or_else(|| {
+                        ControlError::Unsupported("project has never been saved".to_owned())
+                    })?;
+                let target = validate_output_file(&target)?;
+                write_project(&target, &self.project, &self.assets)
+                    .map_err(ControlError::Other)?;
+                self.path = Some(target.clone());
+                serde_json::to_value(target.display().to_string())?
+            }
+            Call::CommandApply { command } => {
+                self.history
+                    .execute(&mut self.project, &command)
+                    .map_err(|error| ControlError::Other(error.0))?;
+                self.after_edit(cx);
+                serde_json::to_value(())?
+            }
+            Call::HistoryUndo => {
+                let undone = self
+                    .history
+                    .undo(&mut self.project)
+                    .map_err(|error| ControlError::Other(error.0))?;
+                if undone {
+                    self.after_edit(cx);
+                }
+                serde_json::to_value(undone)?
+            }
+            Call::HistoryRedo => {
+                let redone = self
+                    .history
+                    .redo(&mut self.project)
+                    .map_err(|error| ControlError::Other(error.0))?;
+                if redone {
+                    self.after_edit(cx);
+                }
+                serde_json::to_value(redone)?
+            }
+            Call::RenderFrame { params } => {
+                serde_json::to_value(self.render_control_frame(params)?)?
+            }
+            Call::PlaybackSeek { time } => {
+                self.seek_to(time, cx);
+                serde_json::to_value(())?
+            }
+            Call::PlaybackPlay => {
+                self.playing = true;
+                if let Err(error) = self.clock.play() {
+                    self.error = Some(error);
+                }
+                cx.notify();
+                serde_json::to_value(())?
+            }
+            Call::PlaybackPause => {
+                self.playing = false;
+                if let Err(error) = self.clock.pause() {
+                    self.error = Some(error);
+                }
+                cx.notify();
+                serde_json::to_value(())?
+            }
+            Call::AssetsImport { path } => {
+                serde_json::to_value(self.import_control_asset(&path)?)?
+            }
+            Call::TimelineList => serde_json::to_value(timeline_of(&self.project))?,
+            Call::ProjectImportV1 { path } => {
+                self.import_control_v1(&path)?;
+                self.after_edit(cx);
+                serde_json::to_value(())?
+            }
+        })
+    }
+
+    fn render_control_frame(
+        &self,
+        params: RenderFrameParams,
+    ) -> Result<RenderFrameResult, ControlError> {
+        let mut ctx = animathio_render::RenderCtx::default();
+        for (id, bytes) in &self.assets {
+            ctx.resources.insert(id.clone(), bytes.clone())?;
+        }
+        let scene = animathio_core::evaluate(&self.project, params.time);
+        let frame =
+            animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
+        match params.output {
+            Some(output) => {
+                let canonical = validate_output_file(&output)?;
+                frame.save_png(&canonical)?;
+                Ok(RenderFrameResult {
+                    size: frame.size,
+                    base64: None,
+                    path: Some(canonical.display().to_string()),
+                })
+            }
+            None => {
+                let mut encoded = Vec::new();
+                frame.write_png(&mut encoded)?;
+                Ok(RenderFrameResult {
+                    size: frame.size,
+                    base64: Some(base64::engine::general_purpose::STANDARD.encode(encoded)),
+                    path: None,
+                })
+            }
+        }
+    }
+
+    fn import_control_asset(&mut self, path: &Path) -> Result<AssetInfo, ControlError> {
+        let canonical = validate_existing_file(path)?;
+        let bytes = read_bounded(&canonical, animathio_format::Limits::default().asset_bytes)?;
+        let id = AssetId::of(&bytes);
+        let name = canonical
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "asset".to_owned());
+        self.assets.insert(id.clone(), bytes);
+        self.worker.load(self.assets.clone());
+        Ok(AssetInfo {
+            id,
+            media_type: media_type_of(&name).to_owned(),
+            name,
+        })
+    }
+
+    fn import_control_v1(&mut self, path: &Path) -> Result<(), ControlError> {
+        let canonical = validate_existing_file(path)?;
+        let bytes = read_bounded(&canonical, animathio_import_v1::ImportLimits::default().inflated_bytes)?;
+        let (project, assets, report) = animathio_import_v1::import_v1_with_report(&bytes)
+            .map_err(ControlError::Import)?;
+        for warning in report.warnings() {
+            eprintln!("warning: {warning}");
+        }
+        self.project = project;
+        self.history = History::default();
+        self.assets = assets.into_iter().map(|a| (a.id, a.bytes)).collect();
+        self.path = None;
+        self.position = Time(0);
+        self.playing = false;
+        self.selected = None;
+        self.selected_field = None;
+        self.clock = make_clock(&self.project);
+        self.worker.load(self.assets.clone());
+        Ok(())
     }
 
     fn current_layout(&self) -> TimelineLayout {
@@ -794,6 +986,7 @@ impl Focusable for Editor {
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.pump_results(window);
+        self.drain_control(cx);
 
         if self.playing {
             let now = self.clock.now();

@@ -6,6 +6,7 @@
 //! the control surface at an unexpected location.
 
 use crate::ControlError;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Validate an existing regular file, returning its canonical path.
@@ -20,6 +21,21 @@ pub fn validate_existing_file(path: &Path) -> Result<PathBuf, ControlError> {
         )));
     }
     Ok(canonical)
+}
+
+/// Read a whole file without exceeding `limit` bytes.
+pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, ControlError> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
+        return Err(ControlError::InvalidPath(format!(
+            "file exceeds the {limit} byte limit: {}",
+            path.display()
+        )));
+    }
+    Ok(bytes)
 }
 
 /// Validate an output path: its parent must exist and any existing target

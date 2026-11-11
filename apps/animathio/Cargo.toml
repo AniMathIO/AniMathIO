@@ -8,12 +8,16 @@ publish.workspace = true
 
 [dependencies]
 animathio-core.workspace = true
+animathio-control = { path = "../../crates/control" }
 animathio-format = { path = "../../crates/format" }
+animathio-import-v1 = { path = "../../crates/import-v1" }
 animathio-render = { path = "../../crates/render" }
 animathio-audio = { path = "../../crates/audio" }
+base64 = "0.22"
 gpui.workspace = true
 image = { version = "0.25", default-features = false }
 rfd.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

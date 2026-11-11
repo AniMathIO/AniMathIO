@@ -1,4 +1,6 @@
 //! Headless project validation and deterministic PNG rendering.
+mod mcp;
+
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
 use animathio_format::{Bundle, Limits, read_amio, read_json, write_amio};
 use animathio_render::{RenderCtx, render, sample};
@@ -64,6 +66,13 @@ enum Action {
     NewSample {
         #[arg(short, long)]
         output: PathBuf,
+    },
+    /// Run an MCP stdio server: connects to a running editor, or drives a
+    /// project file headlessly when `--project` is given.
+    Mcp {
+        /// Project file to operate on headlessly (a `.amio` archive or `project.json`).
+        #[arg(long)]
+        project: Option<PathBuf>,
     },
 }
 #[derive(Args)]
@@ -141,6 +150,7 @@ fn run(cli: Cli) -> Result<()> {
             let mut ctx = context(bundle.assets)?;
             render(&evaluate(&bundle.project, time), &mut ctx, size.tuple())?.save_png(output)?;
         }
+        Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {
             project,
             from,
@@ -173,6 +183,20 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Run the MCP stdio server on a dedicated tokio runtime.
+#[tokio::main]
+async fn run_mcp(project: Option<PathBuf>) -> Result<()> {
+    use rmcp::{ServiceExt, transport::stdio};
+
+    let backend = mcp::build_backend(project)?;
+    let service = mcp::McpServer::new(backend)
+        .serve(stdio())
+        .await
+        .inspect_err(|error| eprintln!("mcp serve error: {error:?}"))?;
+    service.waiting().await?;
     Ok(())
 }
 

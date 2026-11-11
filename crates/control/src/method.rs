@@ -162,6 +162,61 @@ pub enum Call {
     },
 }
 
+/// Build a read-only timeline summary from a project.
+#[must_use]
+pub fn timeline_of(project: &Project) -> Timeline {
+    Timeline {
+        frame_rate: project.frame_rate(),
+        duration: project.duration(),
+        tracks: project
+            .tracks()
+            .iter()
+            .map(|track| TrackInfo {
+                id: track.id(),
+                name: track.name().to_owned(),
+                gain: track.gain(),
+                clips: track
+                    .clips()
+                    .values()
+                    .map(|clip| ClipInfo {
+                        id: clip.id,
+                        kind: clip_kind_label(&clip.kind),
+                        start: clip.range.start,
+                        end: clip.range.end,
+                        source_offset: clip.source_offset,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+/// Infer a declared media type from a filename extension; decoders probe the
+/// actual bytes regardless of this hint.
+#[must_use]
+pub fn media_type_of(name: &str) -> &'static str {
+    let Some(extension) = name.rsplit('.').next() else {
+        return "application/octet-stream";
+    };
+    match extension.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" | "m4v" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" | "aac" => "audio/aac",
+        "flac" => "audio/flac",
+        _ => "application/octet-stream",
+    }
+}
+
 /// Human-readable kind label for a clip source.
 #[must_use]
 pub fn clip_kind_label(kind: &animathio_core::ClipKind) -> String {

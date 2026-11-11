@@ -5,7 +5,7 @@
 use std::{
     collections::BTreeMap,
     fs,
-    io::{BufReader, Read},
+    io::BufReader,
     path::{Path, PathBuf},
 };
 
@@ -18,10 +18,10 @@ use serde_json::Value;
 use crate::{
     ControlError, ControlHandler, Call,
     method::{
-        AssetInfo, ClipInfo, ProjectState, RenderFrameParams, RenderFrameResult, Timeline,
-        TrackInfo, clip_kind_label,
+        AssetInfo, ProjectState, RenderFrameParams, RenderFrameResult, Timeline, media_type_of,
+        timeline_of,
     },
-    path::{validate_existing_file, validate_output_file},
+    path::{read_bounded, validate_existing_file, validate_output_file},
 };
 
 /// A headless [`ControlHandler`] over an in-memory project.
@@ -251,33 +251,6 @@ impl ControlHandler for HeadlessHandler {
     }
 }
 
-fn timeline_of(project: &Project) -> Timeline {
-    Timeline {
-        frame_rate: project.frame_rate(),
-        duration: project.duration(),
-        tracks: project
-            .tracks()
-            .iter()
-            .map(|track| TrackInfo {
-                id: track.id(),
-                name: track.name().to_owned(),
-                gain: track.gain(),
-                clips: track
-                    .clips()
-                    .values()
-                    .map(|clip| ClipInfo {
-                        id: clip.id,
-                        kind: clip_kind_label(&clip.kind),
-                        start: clip.range.start,
-                        end: clip.range.end,
-                        source_offset: clip.source_offset,
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }
-}
-
 /// Load a `.amio` archive or a `project.json` with `assets/<hash>` beside it.
 fn load_project(path: &Path) -> Result<(Project, BTreeMap<AssetId, Vec<u8>>), ControlError> {
     let canonical = validate_existing_file(path)?;
@@ -311,46 +284,6 @@ fn load_project(path: &Path) -> Result<(Project, BTreeMap<AssetId, Vec<u8>>), Co
         assets.insert(id.clone(), bytes);
     }
     Ok((project, assets))
-}
-
-fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, ControlError> {
-    let mut bytes = Vec::new();
-    fs::File::open(path)?
-        .take(limit.saturating_add(1))
-        .read_to_end(&mut bytes)?;
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
-        return Err(ControlError::InvalidPath(format!(
-            "file exceeds the {} byte limit: {}",
-            limit,
-            path.display()
-        )));
-    }
-    Ok(bytes)
-}
-
-/// Infer a declared media type from a filename extension; decoders probe the
-/// actual bytes regardless of this hint.
-fn media_type_of(name: &str) -> &'static str {
-    let Some(extension) = name.rsplit('.').next() else {
-        return "application/octet-stream";
-    };
-    match extension.to_ascii_lowercase().as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "gif" => "image/gif",
-        "bmp" => "image/bmp",
-        "mp4" => "video/mp4",
-        "webm" => "video/webm",
-        "mov" | "m4v" => "video/quicktime",
-        "mkv" => "video/x-matroska",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "ogg" => "audio/ogg",
-        "m4a" | "aac" => "audio/aac",
-        "flac" => "audio/flac",
-        _ => "application/octet-stream",
-    }
 }
 
 fn animathio_import_v1_limits() -> u64 {
