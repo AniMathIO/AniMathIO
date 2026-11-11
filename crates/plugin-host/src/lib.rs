@@ -1159,4 +1159,14 @@ mod tests {
         assert!(truncated.len() <= 4);
         assert!(truncated.is_char_boundary(truncated.len()));
     }
+
+    #[test]
+    fn oversized_svg_input_is_rejected() {
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0 {}\"/></svg>",
+            "L1 1 ".repeat(MAX_SVG_INPUT_BYTES / 5)
+        );
+        assert!(svg.len() > MAX_SVG_INPUT_BYTES);
+        assert!(parse_svg_to_paths(&svg, MAX_SVG_VERBS).is_empty());
+    }
 }
