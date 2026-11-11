@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 
 /// Validate an existing regular file, returning its canonical path.
 pub fn validate_existing_file(path: &Path) -> Result<PathBuf, ControlError> {
-    let canonical = path.canonicalize().map_err(|error| {
-        ControlError::InvalidPath(format!("{}: {error}", path.display()))
-    })?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| ControlError::InvalidPath(format!("{}: {error}", path.display())))?;
     if !canonical.is_file() {
         return Err(ControlError::InvalidPath(format!(
             "not a regular file: {}",
@@ -43,12 +43,11 @@ pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, ControlError> {
 pub fn validate_output_file(path: &Path) -> Result<PathBuf, ControlError> {
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
     let canonical_parent = match parent {
-        Some(parent) => parent.canonicalize().map_err(|error| {
-            ControlError::InvalidPath(format!("{}: {error}", parent.display()))
-        })?,
-        None => std::env::current_dir().map_err(|error| {
-            ControlError::InvalidPath(format!("current directory: {error}"))
-        })?,
+        Some(parent) => parent
+            .canonicalize()
+            .map_err(|error| ControlError::InvalidPath(format!("{}: {error}", parent.display())))?,
+        None => std::env::current_dir()
+            .map_err(|error| ControlError::InvalidPath(format!("current directory: {error}")))?,
     };
     let file_name = path.file_name().ok_or_else(|| {
         ControlError::InvalidPath(format!("path has no file name: {}", path.display()))
@@ -72,7 +71,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("a.txt");
         std::fs::write(&file, b"x").unwrap();
-        assert_eq!(validate_existing_file(&file).unwrap(), file.canonicalize().unwrap());
+        assert_eq!(
+            validate_existing_file(&file).unwrap(),
+            file.canonicalize().unwrap()
+        );
     }
 
     #[cfg(unix)]
@@ -83,7 +85,10 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         let link = dir.path().join("link.txt");
         std::os::unix::fs::symlink(&file, &link).unwrap();
-        assert_eq!(validate_existing_file(&link).unwrap(), file.canonicalize().unwrap());
+        assert_eq!(
+            validate_existing_file(&link).unwrap(),
+            file.canonicalize().unwrap()
+        );
     }
 
     #[test]

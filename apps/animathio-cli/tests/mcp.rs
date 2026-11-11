@@ -28,7 +28,7 @@ fn spawn_mcp(project: &Path) -> (Child, BufReader<ChildStdout>, ChildStdin) {
     (child, stdout, stdin)
 }
 
-fn send(stdin: &mut ChildStdin, id: u64, method: &str, params: Value) {
+fn send(stdin: &mut ChildStdin, id: u64, method: &str, params: impl serde::Serialize) {
     let request = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
     writeln!(stdin, "{request}").unwrap();
     stdin.flush().unwrap();
@@ -99,7 +99,10 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
         "redo",
         "import_v1",
     ] {
-        assert!(names.contains(&expected), "missing tool {expected}: {names:?}");
+        assert!(
+            names.contains(&expected),
+            "missing tool {expected}: {names:?}"
+        );
     }
 
     // add_text creates a clip through the control command path
@@ -123,12 +126,19 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
     assert_ne!(response["result"]["isError"], true, "{response}");
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
     let result: Value = serde_json::from_str(text).unwrap();
-    let base64 = result["base64"].as_str().expect("render_frame must return base64");
+    let base64 = result["base64"]
+        .as_str()
+        .expect("render_frame must return base64");
     let decoded = base64_decode(base64);
     assert_eq!(&decoded[..8], b"\x89PNG\r\n\x1a\n");
 
     // undo/redo round-trip through history
-    send(&mut stdin, 5, "tools/call", json!({"name": "undo", "arguments": {}}));
+    send(
+        &mut stdin,
+        5,
+        "tools/call",
+        json!({"name": "undo", "arguments": {}}),
+    );
     let response = recv(&mut stdout);
     assert_ne!(response["result"]["isError"], true, "{response}");
 
@@ -138,5 +148,7 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
 
 fn base64_decode(value: &str) -> Vec<u8> {
     use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.decode(value).unwrap()
+    base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .unwrap()
 }

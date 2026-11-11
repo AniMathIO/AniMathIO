@@ -18,7 +18,7 @@ use std::{
 };
 
 use interprocess::local_socket::{
-    ListenerNonblockingMode, ListenerOptions, Name, Listener as LocalSocketListener,
+    Listener as LocalSocketListener, ListenerNonblockingMode, ListenerOptions, Name,
     Stream as LocalSocketStream,
     traits::{Listener as _, Stream as _},
 };
@@ -43,7 +43,7 @@ pub struct SocketSpec {
 
 /// The well-known per-user socket location.
 pub fn default_socket_spec() -> io::Result<SocketSpec> {
-    let dir = runtime_dir()?;
+    let dir = runtime_dir();
     ensure_runtime_dir(&dir)?;
     Ok(SocketSpec {
         path: dir.join("animathio-control.sock"),
@@ -117,7 +117,10 @@ impl ControlServer {
     }
 
     /// Move the server onto a dedicated thread and return its handle.
-    pub fn spawn<H: ControlHandler + Send + 'static>(self, handler: H) -> io::Result<RunningServer> {
+    pub fn spawn<H: ControlHandler + Send + 'static>(
+        self,
+        handler: H,
+    ) -> io::Result<RunningServer> {
         let path = self.spec.path.clone();
         let token_file = self.spec.token_file.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -218,44 +221,37 @@ struct RawRequest {
 }
 
 fn respond<H: ControlHandler>(handler: &mut H, expected_token: &str, message: &[u8]) -> Vec<u8> {
-    let request = match serde_json::from_slice::<RawRequest>(message) {
-        Ok(request) => request,
-        Err(_) => {
-            return json!({
-                "jsonrpc": "2.0",
-                "id": Value::Null,
-                "error": {"code": -32_700, "message": "parse error"},
-            })
-            .to_string()
-            .into_bytes();
-        }
+    let Ok(request) = serde_json::from_slice::<RawRequest>(message) else {
+        return json!({
+            "jsonrpc": "2.0",
+            "id": Value::Null,
+            "error": {"code": -32_700, "message": "parse error"},
+        })
+        .to_string()
+        .into_bytes();
     };
     let id = request.id;
     if !token::matches(request.token.as_deref(), expected_token) {
-        return error_response(id, -32_001, "authentication failed");
+        return error_response(&id, -32_001, "authentication failed");
     }
     if request.jsonrpc.as_deref() != Some("2.0") {
-        return error_response(id, -32_600, "invalid JSON-RPC version");
+        return error_response(&id, -32_600, "invalid JSON-RPC version");
     }
-    let call = serde_json::from_value::<Call>(json!({
+    let Ok(call) = serde_json::from_value::<Call>(json!({
         "method": request.method,
         "params": request.params,
-    }));
-    let call = match call {
-        Ok(call) => call,
-        Err(error) => {
-            return error_response(id, -32_602, &format!("invalid params: {error}"));
-        }
+    })) else {
+        return error_response(&id, -32_602, "invalid params");
     };
     match handler.handle(call) {
         Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result})
             .to_string()
             .into_bytes(),
-        Err(error) => error_response(id, error.code(), &error.to_string()),
+        Err(error) => error_response(&id, error.code(), &error.to_string()),
     }
 }
 
-fn error_response(id: Value, code: i64, message: &str) -> Vec<u8> {
+fn error_response(id: &Value, code: i64, message: &str) -> Vec<u8> {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -266,10 +262,7 @@ fn error_response(id: Value, code: i64, message: &str) -> Vec<u8> {
 }
 
 /// Read one newline-delimited message without buffering more than `limit` bytes.
-pub(crate) fn read_message(
-    reader: &mut impl Read,
-    limit: usize,
-) -> io::Result<Option<Vec<u8>>> {
+pub(crate) fn read_message(reader: &mut impl Read, limit: usize) -> io::Result<Option<Vec<u8>>> {
     let mut message = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
@@ -353,17 +346,16 @@ fn remove_stale_socket(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn runtime_dir() -> io::Result<PathBuf> {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
+fn runtime_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
         .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    Ok(base.join("animathio"))
+        .map_or_else(std::env::temp_dir, PathBuf::from)
+        .join("animathio")
 }
 
 #[cfg(windows)]
-fn runtime_dir() -> io::Result<PathBuf> {
-    Ok(std::env::temp_dir().join("animathio"))
+fn runtime_dir() -> PathBuf {
+    std::env::temp_dir().join("animathio")
 }
 
 fn ensure_runtime_dir(dir: &Path) -> io::Result<()> {

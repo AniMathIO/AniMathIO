@@ -14,9 +14,8 @@ const TOKEN_BYTES: usize = 32;
 /// Generate a fresh hex-encoded token.
 pub(crate) fn generate() -> io::Result<String> {
     let mut bytes = [0_u8; TOKEN_BYTES];
-    getrandom::fill(&mut bytes).map_err(|error| {
-        io::Error::new(io::ErrorKind::Other, format!("token generation failed: {error}"))
-    })?;
+    getrandom::fill(&mut bytes)
+        .map_err(|error| io::Error::other(format!("token generation failed: {error}")))?;
     Ok(hex(&bytes))
 }
 

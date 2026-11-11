@@ -25,7 +25,10 @@ fn wrong_token_is_rejected_and_correct_token_round_trips() {
     // A wrong token is rejected with the auth error code.
     let mut bad = ControlClient::connect_with_token(&spec, "wrong-token").unwrap();
     let rejected = bad.call(Call::ProjectGet);
-    assert!(matches!(rejected, Err(ControlError::Unauthorized)), "{rejected:?}");
+    assert!(
+        matches!(rejected, Err(ControlError::Unauthorized)),
+        "{rejected:?}"
+    );
     drop(bad);
 
     // A correct token performs a command through history and reads it back.
@@ -66,5 +69,7 @@ fn wrong_token_is_rejected_and_correct_token_round_trips() {
 
 fn base64_decode(value: String) -> Vec<u8> {
     use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.decode(value).unwrap()
+    base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .unwrap()
 }

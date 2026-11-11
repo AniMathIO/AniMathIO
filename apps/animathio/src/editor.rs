@@ -184,23 +184,19 @@ impl Editor {
                 playing: self.playing,
             })?,
             Call::ProjectOpen { path } => {
+                self.error = None;
                 self.open_path(path, cx);
-                if self.error.is_some() {
-                    return Err(ControlError::Other(
-                        self.error.take().unwrap_or_else(|| "open failed".to_owned()),
-                    ));
+                if let Some(error) = self.error.take() {
+                    return Err(ControlError::Other(error));
                 }
                 serde_json::to_value(())?
             }
             Call::ProjectSave { path } => {
-                let target = path
-                    .or_else(|| self.path.clone())
-                    .ok_or_else(|| {
-                        ControlError::Unsupported("project has never been saved".to_owned())
-                    })?;
+                let target = path.or_else(|| self.path.clone()).ok_or_else(|| {
+                    ControlError::Unsupported("project has never been saved".to_owned())
+                })?;
                 let target = validate_output_file(&target)?;
-                write_project(&target, &self.project, &self.assets)
-                    .map_err(ControlError::Other)?;
+                write_project(&target, &self.project, &self.assets).map_err(ControlError::Other)?;
                 self.path = Some(target.clone());
                 serde_json::to_value(target.display().to_string())?
             }
@@ -254,9 +250,7 @@ impl Editor {
                 cx.notify();
                 serde_json::to_value(())?
             }
-            Call::AssetsImport { path } => {
-                serde_json::to_value(self.import_control_asset(&path)?)?
-            }
+            Call::AssetsImport { path } => serde_json::to_value(self.import_control_asset(&path)?)?,
             Call::TimelineList => serde_json::to_value(timeline_of(&self.project))?,
             Call::ProjectImportV1 { path } => {
                 self.import_control_v1(&path)?;
@@ -275,27 +269,23 @@ impl Editor {
             ctx.resources.insert(id.clone(), bytes.clone())?;
         }
         let scene = animathio_core::evaluate(&self.project, params.time);
-        let frame =
-            animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
-        match params.output {
-            Some(output) => {
-                let canonical = validate_output_file(&output)?;
-                frame.save_png(&canonical)?;
-                Ok(RenderFrameResult {
-                    size: frame.size,
-                    base64: None,
-                    path: Some(canonical.display().to_string()),
-                })
-            }
-            None => {
-                let mut encoded = Vec::new();
-                frame.write_png(&mut encoded)?;
-                Ok(RenderFrameResult {
-                    size: frame.size,
-                    base64: Some(base64::engine::general_purpose::STANDARD.encode(encoded)),
-                    path: None,
-                })
-            }
+        let frame = animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
+        if let Some(output) = params.output {
+            let canonical = validate_output_file(&output)?;
+            frame.save_png(&canonical)?;
+            Ok(RenderFrameResult {
+                size: frame.size,
+                base64: None,
+                path: Some(canonical.display().to_string()),
+            })
+        } else {
+            let mut encoded = Vec::new();
+            frame.write_png(&mut encoded)?;
+            Ok(RenderFrameResult {
+                size: frame.size,
+                base64: Some(base64::engine::general_purpose::STANDARD.encode(encoded)),
+                path: None,
+            })
         }
     }
 
@@ -305,8 +295,7 @@ impl Editor {
         let id = AssetId::of(&bytes);
         let name = canonical
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "asset".to_owned());
+            .map_or_else(|| "asset".to_owned(), |n| n.to_string_lossy().into_owned());
         self.assets.insert(id.clone(), bytes);
         self.worker.load(self.assets.clone());
         Ok(AssetInfo {
@@ -318,9 +307,12 @@ impl Editor {
 
     fn import_control_v1(&mut self, path: &Path) -> Result<(), ControlError> {
         let canonical = validate_existing_file(path)?;
-        let bytes = read_bounded(&canonical, animathio_import_v1::ImportLimits::default().inflated_bytes)?;
-        let (project, assets, report) = animathio_import_v1::import_v1_with_report(&bytes)
-            .map_err(ControlError::Import)?;
+        let bytes = read_bounded(
+            &canonical,
+            animathio_import_v1::ImportLimits::default().inflated_bytes,
+        )?;
+        let (project, assets, report) =
+            animathio_import_v1::import_v1_with_report(&bytes).map_err(ControlError::Import)?;
         for warning in report.warnings() {
             eprintln!("warning: {warning}");
         }

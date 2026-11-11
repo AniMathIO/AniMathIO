@@ -50,7 +50,10 @@ pub trait ControlHandler {
     }
 
     /// Render one frame.
-    fn render_frame(&mut self, params: RenderFrameParams) -> Result<RenderFrameResult, ControlError> {
+    fn render_frame(
+        &mut self,
+        params: RenderFrameParams,
+    ) -> Result<RenderFrameResult, ControlError> {
         from_value(self.handle(Call::RenderFrame { params })?)
     }
 

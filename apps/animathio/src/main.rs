@@ -27,10 +27,7 @@ fn main() {
     let (project, assets, path) = initial_project();
     let control = if control_enabled() {
         let (bridge, rx) = control::ControlBridge::new();
-        match control::start(bridge) {
-            Some(server) => Some(control::ControlRuntime { rx, server }),
-            None => None,
-        }
+        control::start(bridge).map(|server| control::ControlRuntime { rx, server })
     } else {
         None
     };
@@ -50,9 +47,7 @@ fn main() {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    cx.new(|cx| {
-                        editor::Editor::new(cx, window, project, assets, path, control)
-                    })
+                    cx.new(|cx| editor::Editor::new(cx, window, project, assets, path, control))
                 },
             )
             .expect("open editor window");

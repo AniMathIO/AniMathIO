@@ -27,8 +27,13 @@ use animathio_core::{
     builtin::Builtin,
 };
 use rmcp::{
-    ErrorData as McpError, ServerHandler, handler::server::wrapper::Parameters, model::*, tool,
-    tool_handler, tool_router,
+    ErrorData as McpError, ServerHandler,
+    handler::server::wrapper::Parameters,
+    model::{
+        CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities,
+        ServerConfig,
+    },
+    tool, tool_handler, tool_router,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -41,7 +46,9 @@ pub(crate) type Backend = Box<dyn ControlHandler + Send>;
 /// Build the backend: headless on `--project`, else connect to the editor.
 pub(crate) fn build_backend(project: Option<PathBuf>) -> Result<Backend, String> {
     if let Some(path) = project {
-        return Ok(Box::new(HeadlessHandler::load(&path).map_err(|e| e.to_string())?));
+        return Ok(Box::new(
+            HeadlessHandler::load(&path).map_err(|e| e.to_string())?,
+        ));
     }
     match ControlClient::connect(&default_socket_spec().map_err(|e| e.to_string())?) {
         Ok(client) => Ok(Box::new(client)),
@@ -204,6 +211,7 @@ fn default_duration_ms() -> f64 {
     3000.0
 }
 
+#[allow(clippy::needless_pass_by_value)] // map_err adapter: to_string() only borrows
 fn mcp_error(error: animathio_control::ControlError) -> McpError {
     McpError::internal_error(error.to_string(), None)
 }
@@ -218,7 +226,9 @@ fn invalid(message: &str) -> McpError {
 
 fn ms_to_ticks(ms: f64) -> Result<Time, McpError> {
     if !ms.is_finite() || ms < 0.0 {
-        return Err(invalid("time must be a nonnegative finite number of milliseconds"));
+        return Err(invalid(
+            "time must be a nonnegative finite number of milliseconds",
+        ));
     }
     let ticks = (ms * TICKS_PER_SECOND as f64 / 1000.0).round();
     if ticks > i64::MAX as f64 {
@@ -229,8 +239,16 @@ fn ms_to_ticks(ms: f64) -> Result<Time, McpError> {
 
 fn canvas(state: &ProjectState) -> (u32, u32) {
     (
-        if state.project.width() == 0 { 640 } else { state.project.width() },
-        if state.project.height() == 0 { 360 } else { state.project.height() },
+        if state.project.width() == 0 {
+            640
+        } else {
+            state.project.width()
+        },
+        if state.project.height() == 0 {
+            360
+        } else {
+            state.project.height()
+        },
     )
 }
 
@@ -306,14 +324,18 @@ fn tool_text(value: impl serde::Serialize) -> Result<CallToolResult, McpError> {
 
 #[tool_router]
 impl McpServer {
-    #[tool(description = "Inspect the open project: canvas, tracks, clips, playhead and whether the editor is active.")]
+    #[tool(
+        description = "Inspect the open project: canvas, tracks, clips, playhead and whether the editor is active."
+    )]
     async fn get_project_state(&self) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
         let state = backend.project_get().map_err(mcp_error)?;
-        tool_text(&state)
+        tool_text(state)
     }
 
-    #[tool(description = "Add one plain-text clip. Font size is in pixels; omitted x/y centres the clip; times are milliseconds.")]
+    #[tool(
+        description = "Add one plain-text clip. Font size is in pixels; omitted x/y centres the clip; times are milliseconds."
+    )]
     async fn add_text(
         &self,
         Parameters(p): Parameters<AddText>,
@@ -333,8 +355,8 @@ impl McpServer {
             .and_then(parse_color)
             .unwrap_or([255, 255, 255, 255]);
         let transform = Transform {
-            x: p.x.map(|x| x / f64::from(width)).unwrap_or(0.5),
-            y: p.y.map(|y| y / f64::from(height)).unwrap_or(0.5),
+            x: p.x.map_or(0.5, |x| x / f64::from(width)),
+            y: p.y.map_or(0.5, |y| y / f64::from(height)),
             ..Transform::default()
         };
         let base = next_id(&state.project);
@@ -362,15 +384,21 @@ impl McpServer {
                 clip,
             })
             .map_err(mcp_error)?;
-        tool_text(&json!({"track_id": track_id.0, "clip_id": clip_id.0}))
+        tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))
     }
 
-    #[tool(description = "Add a LaTeX fragment. The v2 latex plugin is not implemented yet, so this tool currently fails.")]
+    #[tool(
+        description = "Add a LaTeX fragment. The v2 latex plugin is not implemented yet, so this tool currently fails."
+    )]
     async fn add_math(&self, _: Parameters<AddMath>) -> Result<CallToolResult, McpError> {
-        Err(unsupported("add_math requires the latex plugin, which is not implemented yet"))
+        Err(unsupported(
+            "add_math requires the latex plugin, which is not implemented yet",
+        ))
     }
 
-    #[tool(description = "Import an image, video, or audio file by absolute path and add a clip for it.")]
+    #[tool(
+        description = "Import an image, video, or audio file by absolute path and add a clip for it."
+    )]
     async fn add_media(
         &self,
         Parameters(p): Parameters<AddMedia>,
@@ -385,10 +413,7 @@ impl McpServer {
             Some(MediaKind::Video) => ClipKind::Video(info.id.clone()),
             Some(MediaKind::Audio) => ClipKind::Audio(info.id.clone()),
             None => {
-                return Err(invalid(&format!(
-                    "unsupported media type for '{}'",
-                    p.path
-                )));
+                return Err(invalid(&format!("unsupported media type for '{}'", p.path)));
             }
         };
         let base = next_id(&state.project);
@@ -420,10 +445,12 @@ impl McpServer {
                 clip,
             })
             .map_err(mcp_error)?;
-        tool_text(&json!({"track_id": track_id.0, "clip_id": clip_id.0}))
+        tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))
     }
 
-    #[tool(description = "Attach an animation to a clip. Supported kinds: fadeIn, fadeOut, slideIn, slideOut.")]
+    #[tool(
+        description = "Attach an animation to a clip. Supported kinds: fadeIn, fadeOut, slideIn, slideOut."
+    )]
     async fn add_animation(
         &self,
         Parameters(p): Parameters<AddAnimation>,
@@ -431,50 +458,58 @@ impl McpServer {
         let mut backend = self.backend.lock().await;
         let state = backend.project_get().map_err(mcp_error)?;
         let clip_id = parse_clip_id(&p.target_id)?;
-        let clip = find_clip(&state.project, clip_id)
-            .ok_or_else(|| invalid("target clip not found"))?;
+        let clip =
+            find_clip(&state.project, clip_id).ok_or_else(|| invalid("target clip not found"))?;
         let duration = ms_to_ticks(p.duration_ms)?;
         let opacity = clip.transform.opacity;
         match p.kind.as_str() {
             "fadeIn" => {
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::Opacity),
-                    time: Time(0),
-                    keyframe: Keyframe {
-                        value: 0.0,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::Opacity),
-                    time: duration,
-                    keyframe: Keyframe {
-                        value: opacity,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::Opacity),
+                        time: Time(0),
+                        keyframe: Keyframe {
+                            value: 0.0,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::Opacity),
+                        time: duration,
+                        keyframe: Keyframe {
+                            value: opacity,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
             }
             "fadeOut" => {
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::Opacity),
-                    time: Time(0),
-                    keyframe: Keyframe {
-                        value: opacity,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::Opacity),
-                    time: duration,
-                    keyframe: Keyframe {
-                        value: 0.0,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::Opacity),
+                        time: Time(0),
+                        keyframe: Keyframe {
+                            value: opacity,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::Opacity),
+                        time: duration,
+                        keyframe: Keyframe {
+                            value: 0.0,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
             }
             "slideIn" | "slideOut" => {
                 let (x, y) = (clip.transform.x, clip.transform.y);
@@ -491,42 +526,50 @@ impl McpServer {
                 } else {
                     ((x, y), (x + offset.0, y + offset.1))
                 };
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::X),
-                    time: Time(0),
-                    keyframe: Keyframe {
-                        value: from.0,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::X),
-                    time: duration,
-                    keyframe: Keyframe {
-                        value: to.0,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::Y),
-                    time: Time(0),
-                    keyframe: Keyframe {
-                        value: from.1,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
-                backend.command_apply(Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Transform(TransformProperty::Y),
-                    time: duration,
-                    keyframe: Keyframe {
-                        value: to.1,
-                        interpolation: Interpolation::Linear,
-                    },
-                }).map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::X),
+                        time: Time(0),
+                        keyframe: Keyframe {
+                            value: from.0,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::X),
+                        time: duration,
+                        keyframe: Keyframe {
+                            value: to.0,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::Y),
+                        time: Time(0),
+                        keyframe: Keyframe {
+                            value: from.1,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
+                backend
+                    .command_apply(Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Transform(TransformProperty::Y),
+                        time: duration,
+                        keyframe: Keyframe {
+                            value: to.1,
+                            interpolation: Interpolation::Linear,
+                        },
+                    })
+                    .map_err(mcp_error)?;
             }
             other => {
                 return Err(unsupported(&format!(
@@ -534,10 +577,12 @@ impl McpServer {
                 )));
             }
         }
-        tool_text(&json!({"clip_id": clip_id.0}))
+        tool_text(json!({"clip_id": clip_id.0}))
     }
 
-    #[tool(description = "Update a clip's placement (pixels, origin top-left) and/or visible time frame (milliseconds).")]
+    #[tool(
+        description = "Update a clip's placement (pixels, origin top-left) and/or visible time frame (milliseconds)."
+    )]
     async fn update_element(
         &self,
         Parameters(p): Parameters<UpdateElement>,
@@ -545,8 +590,7 @@ impl McpServer {
         let mut backend = self.backend.lock().await;
         let state = backend.project_get().map_err(mcp_error)?;
         let clip_id = parse_clip_id(&p.id)?;
-        let clip = find_clip(&state.project, clip_id)
-            .ok_or_else(|| invalid("clip not found"))?;
+        let clip = find_clip(&state.project, clip_id).ok_or_else(|| invalid("clip not found"))?;
         let (width, height) = canvas(&state);
         if let Some(placement) = p.placement {
             let mut transform = clip.transform;
@@ -597,7 +641,7 @@ impl McpServer {
                 })
                 .map_err(mcp_error)?;
         }
-        tool_text(&json!({"clip_id": clip_id.0}))
+        tool_text(json!({"clip_id": clip_id.0}))
     }
 
     #[tool(description = "Remove a clip by id.")]
@@ -610,18 +654,20 @@ impl McpServer {
         backend
             .command_apply(Command::RemoveClip { id: clip_id })
             .map_err(mcp_error)?;
-        tool_text(&json!({"removed": true, "clip_id": clip_id.0}))
+        tool_text(json!({"removed": true, "clip_id": clip_id.0}))
     }
 
-    #[tool(description = "Set canvas width/height (pixels), background color (#RRGGBB or #RRGGBBAA) and duration (milliseconds).")]
+    #[tool(
+        description = "Set canvas width/height (pixels), background color (#RRGGBB or #RRGGBBAA) and duration (milliseconds)."
+    )]
     async fn set_canvas(
         &self,
         Parameters(p): Parameters<SetCanvas>,
     ) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
         let state = backend.project_get().map_err(mcp_error)?;
-        let width = p.width.map(|w| w as u32).unwrap_or(state.project.width());
-        let height = p.height.map(|h| h as u32).unwrap_or(state.project.height());
+        let width = p.width.map_or(state.project.width(), |w| w as u32);
+        let height = p.height.map_or(state.project.height(), |h| h as u32);
         let background = p
             .background_color
             .as_deref()
@@ -640,7 +686,7 @@ impl McpServer {
                 duration,
             })
             .map_err(mcp_error)?;
-        tool_text(&json!({"width": width, "height": height, "duration_ms": p.max_time_ms}))
+        tool_text(json!({"width": width, "height": height, "duration_ms": p.max_time_ms}))
     }
 
     #[tool(description = "Set or change a clip's named numeric parameter.")]
@@ -657,10 +703,12 @@ impl McpServer {
                 value: Some(p.value),
             })
             .map_err(mcp_error)?;
-        tool_text(&json!({"clip_id": clip_id.0}))
+        tool_text(json!({"clip_id": clip_id.0}))
     }
 
-    #[tool(description = "Add a keyframe to a clip. The target is a transform property (x, y, scale_x, scale_y, rotation, opacity) or a parameter name.")]
+    #[tool(
+        description = "Add a keyframe to a clip. The target is a transform property (x, y, scale_x, scale_y, rotation, opacity) or a parameter name."
+    )]
     async fn add_keyframe(
         &self,
         Parameters(p): Parameters<AddKeyframe>,
@@ -680,28 +728,30 @@ impl McpServer {
                 },
             })
             .map_err(mcp_error)?;
-        tool_text(&json!({"clip_id": clip_id.0}))
+        tool_text(json!({"clip_id": clip_id.0}))
     }
 
     #[tool(description = "Undo the last edit.")]
     async fn undo(&self) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
         let undone = backend.history_undo().map_err(mcp_error)?;
-        tool_text(&json!({"undone": undone}))
+        tool_text(json!({"undone": undone}))
     }
 
     #[tool(description = "Redo the last undone edit.")]
     async fn redo(&self) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
         let redone = backend.history_redo().map_err(mcp_error)?;
-        tool_text(&json!({"redone": redone}))
+        tool_text(json!({"redone": redone}))
     }
 
     #[tool(description = "Move the playhead to a timeline time in milliseconds.")]
     async fn seek(&self, Parameters(p): Parameters<Seek>) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
-        backend.playback_seek(ms_to_ticks(p.time_ms)?).map_err(mcp_error)?;
-        tool_text(&json!({"time_ms": p.time_ms}))
+        backend
+            .playback_seek(ms_to_ticks(p.time_ms)?)
+            .map_err(mcp_error)?;
+        tool_text(json!({"time_ms": p.time_ms}))
     }
 
     #[tool(description = "Start or pause timeline playback.")]
@@ -715,7 +765,7 @@ impl McpServer {
         } else {
             backend.playback_pause().map_err(mcp_error)?;
         }
-        tool_text(&json!({"playing": p.playing}))
+        tool_text(json!({"playing": p.playing}))
     }
 
     #[tool(description = "Save the project to a path, or overwrite the current file when omitted.")]
@@ -727,7 +777,7 @@ impl McpServer {
         let path = backend
             .project_save(p.path.map(PathBuf::from))
             .map_err(mcp_error)?;
-        tool_text(&json!({"path": path}))
+        tool_text(json!({"path": path}))
     }
 
     #[tool(description = "Render one frame to a PNG (returned as base64, or written to a path).")]
@@ -757,7 +807,7 @@ impl McpServer {
                 output: p.output.map(PathBuf::from),
             })
             .map_err(mcp_error)?;
-        tool_text(&json!({
+        tool_text(json!({
             "size": result.size,
             "base64": result.base64,
             "path": result.path,
@@ -765,10 +815,7 @@ impl McpServer {
     }
 
     #[tool(description = "Export the project to an .mp4/.webm file. Not implemented yet in v2.")]
-    async fn export_video(
-        &self,
-        _: Parameters<ExportVideo>,
-    ) -> Result<CallToolResult, McpError> {
+    async fn export_video(&self, _: Parameters<ExportVideo>) -> Result<CallToolResult, McpError> {
         Err(unsupported("export is not implemented yet in v2"))
     }
 
@@ -782,10 +829,12 @@ impl McpServer {
             .project_import_v1(PathBuf::from(&p.path))
             .map_err(mcp_error)?;
         let state = backend.project_get().map_err(mcp_error)?;
-        tool_text(&json!({"tracks": state.project.tracks().len()}))
+        tool_text(json!({"tracks": state.project.tracks().len()}))
     }
 
-    #[tool(description = "Build a whole scene from a Manim Community script. Not implemented yet in v2.")]
+    #[tool(
+        description = "Build a whole scene from a Manim Community script. Not implemented yet in v2."
+    )]
     async fn import_manim_scene(
         &self,
         _: Parameters<ManimScene>,
@@ -794,6 +843,7 @@ impl McpServer {
     }
 }
 
+#[allow(clippy::unused_async_trait_impl)]
 #[tool_handler]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerConfig {
@@ -803,7 +853,8 @@ impl ServerHandler for McpServer {
             .with_instructions(
                 "AniMathIO v2 control surface over MCP. Mutations are applied as commands with \
                  undo/redo; times are milliseconds and coordinates are canvas pixels (origin \
-                 top-left).".to_owned(),
+                 top-left)."
+                    .to_owned(),
             )
     }
 }

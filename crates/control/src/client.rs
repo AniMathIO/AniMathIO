@@ -51,8 +51,9 @@ impl ControlClient {
         bytes.push(b'\n');
         self.stream.write_all(&bytes)?;
         self.stream.flush()?;
-        let response = read_message(&mut self.stream, MAX_RESPONSE_BYTES)?
-            .ok_or_else(|| ControlError::Protocol("control server closed the connection".to_owned()))?;
+        let response = read_message(&mut self.stream, MAX_RESPONSE_BYTES)?.ok_or_else(|| {
+            ControlError::Protocol("control server closed the connection".to_owned())
+        })?;
         let response: Value = serde_json::from_slice(&response)?;
         if let Some(error) = response.get("error") {
             let message = error

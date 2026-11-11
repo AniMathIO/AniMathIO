@@ -16,7 +16,7 @@ use base64::Engine as _;
 use serde_json::Value;
 
 use crate::{
-    ControlError, ControlHandler, Call,
+    Call, ControlError, ControlHandler,
     method::{
         AssetInfo, ProjectState, RenderFrameParams, RenderFrameResult, Timeline, media_type_of,
         timeline_of,
@@ -112,8 +112,7 @@ impl HeadlessHandler {
         let id = AssetId::of(&bytes);
         let name = canonical
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "asset".to_owned());
+            .map_or_else(|| "asset".to_owned(), |n| n.to_string_lossy().into_owned());
         let media_type = media_type_of(&name).to_owned();
         self.assets.insert(id.clone(), bytes);
         Ok(AssetInfo {
@@ -123,32 +122,32 @@ impl HeadlessHandler {
         })
     }
 
-    fn render_frame_inner(&self, params: RenderFrameParams) -> Result<RenderFrameResult, ControlError> {
+    fn render_frame_inner(
+        &self,
+        params: RenderFrameParams,
+    ) -> Result<RenderFrameResult, ControlError> {
         let mut ctx = RenderCtx::default();
         for (id, bytes) in &self.assets {
             ctx.resources.insert(id.clone(), bytes.clone())?;
         }
         let scene = evaluate(&self.project, params.time);
         let frame = render(&scene, &mut ctx, (params.width, params.height))?;
-        match params.output {
-            Some(output) => {
-                let canonical = validate_output_file(&output)?;
-                frame.save_png(&canonical)?;
-                Ok(RenderFrameResult {
-                    size: frame.size,
-                    base64: None,
-                    path: Some(canonical.display().to_string()),
-                })
-            }
-            None => {
-                let mut encoded = Vec::new();
-                frame.write_png(&mut encoded)?;
-                Ok(RenderFrameResult {
-                    size: frame.size,
-                    base64: Some(base64::engine::general_purpose::STANDARD.encode(encoded)),
-                    path: None,
-                })
-            }
+        if let Some(output) = params.output {
+            let canonical = validate_output_file(&output)?;
+            frame.save_png(&canonical)?;
+            Ok(RenderFrameResult {
+                size: frame.size,
+                base64: None,
+                path: Some(canonical.display().to_string()),
+            })
+        } else {
+            let mut encoded = Vec::new();
+            frame.write_png(&mut encoded)?;
+            Ok(RenderFrameResult {
+                size: frame.size,
+                base64: Some(base64::engine::general_purpose::STANDARD.encode(encoded)),
+                path: None,
+            })
         }
     }
 
@@ -272,7 +271,10 @@ fn load_project(path: &Path) -> Result<(Project, BTreeMap<AssetId, Vec<u8>>), Co
             .unwrap_or(Path::new("."))
             .join("assets")
             .join(id.as_str());
-        let bytes = read_bounded(&asset_path, limits.asset_bytes.min(limits.total_bytes - total))?;
+        let bytes = read_bounded(
+            &asset_path,
+            limits.asset_bytes.min(limits.total_bytes - total),
+        )?;
         total += u64::try_from(bytes.len())
             .map_err(|_| ControlError::InvalidPath("asset size overflow".to_owned()))?;
         if AssetId::of(&bytes) != *id {
@@ -294,7 +296,7 @@ fn animathio_import_v1_limits() -> u64 {
 mod tests {
     use super::*;
     use animathio_core::{
-        Command, TimeRange, TICKS_PER_SECOND, Track, TrackId, builtin::Builtin, Clip, ClipId,
+        Clip, ClipId, Command, TICKS_PER_SECOND, TimeRange, Track, TrackId, builtin::Builtin,
     };
 
     #[test]
@@ -303,10 +305,7 @@ mod tests {
         let track = Track::new(TrackId(1), "Text");
         handler
             .handle(Call::CommandApply {
-                command: Command::AddTrack {
-                    track,
-                    index: 0,
-                },
+                command: Command::AddTrack { track, index: 0 },
             })
             .unwrap();
         let clip = Clip::new(
@@ -345,10 +344,7 @@ mod tests {
         let track = Track::new(TrackId(1), "Text");
         handler
             .handle(Call::CommandApply {
-                command: Command::AddTrack {
-                    track,
-                    index: 0,
-                },
+                command: Command::AddTrack { track, index: 0 },
             })
             .unwrap();
         let timeline: Timeline =
@@ -394,16 +390,15 @@ mod tests {
         let file = dir.path().join("image.png");
         // A minimal 1x1 transparent PNG.
         let png: &[u8] = &[
-            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, b'I', b'H', b'D',
-            b'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89, 0, 0, 0,
-            0x0a, b'I', b'D', b'A', b'T', 0x08, 0xd7, 0x63, 0x60, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0x0a, b'I', b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82,
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, b'I', b'H', b'D', b'R',
+            0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89, 0, 0, 0, 0x0a, b'I',
+            b'D', b'A', b'T', 0x08, 0xd7, 0x63, 0x60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0a, b'I',
+            b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82,
         ];
         std::fs::write(&file, png).unwrap();
-        let info: AssetInfo = serde_json::from_value(
-            handler_import(&mut HeadlessHandler::new(), &file).unwrap(),
-        )
-        .unwrap();
+        let info: AssetInfo =
+            serde_json::from_value(handler_import(&mut HeadlessHandler::new(), &file).unwrap())
+                .unwrap();
         assert_eq!(info.media_type, "image/png");
         assert_eq!(info.name, "image.png");
     }
