@@ -4,11 +4,13 @@ mod command;
 mod keyframes;
 mod model;
 mod time;
+mod vector;
 
 pub use command::*;
 pub use keyframes::*;
 pub use model::*;
 pub use time::*;
+pub use vector::*;
 
 /// Invalid data, an unavailable edit target or arithmetic outside the timeline domain.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

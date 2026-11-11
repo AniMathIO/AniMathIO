@@ -147,6 +147,10 @@ pub enum ClipKind {
         /// Preserved verbatim; numeric automation lives in `Clip::params`.
         params: serde_json::Value,
     },
+    /// Resolved vector scene, e.g. produced by a plugin or vector clip source.
+    Vector(crate::VectorScene),
+    /// Errored clip, containing an error message.
+    Error(String),
 }
 
 /// A transform component that can be animated.
@@ -344,7 +348,8 @@ impl Project {
                     ClipKind::Plugin { plugin_id, .. } if plugin_id.is_empty() => {
                         return Err(invalid("empty plugin id"));
                     }
-                    ClipKind::Plugin { .. } => {}
+                    ClipKind::Plugin { .. } | ClipKind::Error(_) => {}
+                    ClipKind::Vector(scene) => scene.validate()?,
                 }
                 if clip
                     .animations
