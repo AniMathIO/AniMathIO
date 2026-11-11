@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "host",
+    "plugins/shapes",
+]
+default-members = ["host"]
