@@ -77,7 +77,10 @@ pub struct SandboxLimits {
     pub max_table_elements: usize,
     /// Fuel units allocated per execution call (default: 50,000,000).
     pub fuel_per_call: u64,
-    /// Epoch deadline ticks (default: 1).
+    /// Epoch deadline ticks (default: 100). At a 10 ms tick interval this is a
+    /// ~1 s backstop; fuel metering catches most runaway plugins much sooner.
+    /// A low deadline races the epoch ticker and can spuriously trap fast
+    /// calls such as `describe` during plugin loading.
     pub epoch_deadline_ticks: u64,
 }
 
@@ -87,7 +90,7 @@ impl Default for SandboxLimits {
             max_memory_bytes: 64 * 1024 * 1024,
             max_table_elements: 50_000,
             fuel_per_call: 50_000_000,
-            epoch_deadline_ticks: 1,
+            epoch_deadline_ticks: 100,
         }
     }
 }
