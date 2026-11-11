@@ -1,0 +1,295 @@
+//! Contracts shared by preview and export, independent of any audio device.
+#![allow(clippy::float_cmp, clippy::cast_precision_loss)]
+use animathio_audio::{AudioPool, AudioSource, Error, Pcm, Player, SymphoniaSource};
+use animathio_core::*;
+use proptest::prelude::*;
+use std::{path::Path, sync::Arc, time::Duration};
+
+fn range(start: i64, end: i64) -> TimeRange {
+    TimeRange::new(Time(start), Time(end)).unwrap()
+}
+fn project(pcm: &Pcm, start: i64, end: i64) -> (Project, AudioPool) {
+    let id = AssetId::of(b"tone");
+    let mut project = Project::default();
+    Command::AddAsset {
+        id: id.clone(),
+        asset: Asset {
+            name: "tone".into(),
+            media_type: "audio/wav".into(),
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddTrack {
+        track: Track::new(TrackId(0), "audio"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(0),
+        clip: Clip::new(ClipId(0), ClipKind::Audio(id.clone()), range(start, end)),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut pool = AudioPool::default();
+    pool.insert(id, pcm).unwrap();
+    (project, pool)
+}
+fn sine(rate: u32) -> Pcm {
+    Pcm::new(
+        rate,
+        1,
+        (0..rate)
+            .map(|i| (i as f32 * std::f32::consts::TAU * 1000.0 / rate as f32).sin() * 0.1)
+            .collect(),
+    )
+    .unwrap()
+}
+#[test]
+fn sine_at_offset_lands_at_exact_sample_index_without_drift() {
+    for rate in [44_100, 48_000] {
+        let tick = TICKS_PER_SECOND / i64::from(rate);
+        let pcm = sine(rate);
+        // Include a long offset to catch accidental float timeline conversion.
+        let start = 10_000_000 * TICKS_PER_SECOND + 17 * tick;
+        let (project, pool) = project(&pcm, start, start + TICKS_PER_SECOND);
+        let output = pool
+            .mix(
+                &project,
+                range(start - 17 * tick, start + 100 * tick),
+                rate,
+                1,
+            )
+            .unwrap();
+        assert!(output[..17].iter().all(|s| *s == 0.0));
+        assert_eq!(&output[17..], &pcm.samples()[..100]);
+    }
+}
+#[test]
+fn sub_sample_source_offset_uses_ceil_source_frame() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let pcm = Pcm::new(rate, 1, (0..10).map(|i| i as f32 / 10.0).collect()).unwrap();
+    let (mut project, pool) = project(&pcm, 0, 9 * tick);
+    Command::TrimClip {
+        id: ClipId(0),
+        range: range(0, 9 * tick),
+        source_offset: Time(1),
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(
+        pool.mix(&project, range(0, 9 * tick), rate, 1).unwrap(),
+        (1..10).map(|i| i as f32 / 10.0).collect::<Vec<_>>()
+    );
+}
+#[test]
+fn overlapping_tracks_sum_trim_gain_and_mute_are_applied() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let pcm = Pcm::new(rate, 1, vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+    let (mut project, pool) = project(&pcm, tick, 4 * tick);
+    Command::TrimClip {
+        id: ClipId(0),
+        range: range(tick, 4 * tick),
+        source_offset: Time(tick),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetParam {
+        id: ClipId(0),
+        name: "gain".into(),
+        value: Some(0.5),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetTrackGain {
+        id: TrackId(0),
+        gain: 0.25,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mixer = pool.prepare(rate, 2).unwrap();
+    let single = mixer.mix(&project, range(0, 4 * tick)).unwrap();
+    assert_eq!(
+        single,
+        vec![0., 0., 0.025, 0.025, 0.0375, 0.0375, 0.05, 0.05]
+    );
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "second"),
+        index: 1,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut clip = project.tracks()[0].clips()[&ClipId(0)].clone();
+    clip.id = ClipId(1);
+    Command::AddClip {
+        track: TrackId(1),
+        clip,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let overlap = mixer.mix(&project, range(0, 4 * tick)).unwrap();
+    for (sum, one) in overlap.iter().zip(&single) {
+        assert_eq!(*sum, *one * 5.0);
+    }
+    Command::SetParam {
+        id: ClipId(1),
+        name: "muted".into(),
+        value: Some(1.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(mixer.mix(&project, range(0, 4 * tick)).unwrap(), single);
+}
+#[test]
+fn gain_and_mute_keyframes_use_clip_local_time() {
+    let tick = TICKS_PER_SECOND / 48_000;
+    let pcm = Pcm::new(48_000, 1, vec![1.; 10]).unwrap();
+    let (mut project, pool) = project(&pcm, 2 * tick, 8 * tick);
+    for (name, values) in [("gain", [0.0, 0.5]), ("muted", [0.0, 1.0])] {
+        Command::SetParam {
+            id: ClipId(0),
+            name: name.into(),
+            value: Some(1.0),
+        }
+        .apply(&mut project)
+        .unwrap();
+        for (time, value) in [0, 4 * tick].into_iter().zip(values) {
+            Command::AddKeyframe {
+                id: ClipId(0),
+                target: Target::Param(name.into()),
+                time: Time(time),
+                keyframe: Keyframe {
+                    value,
+                    interpolation: if name == "gain" {
+                        Interpolation::Linear
+                    } else {
+                        Interpolation::Hold
+                    },
+                },
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+    }
+    assert_eq!(
+        pool.mix(&project, range(0, 8 * tick), 48_000, 1).unwrap(),
+        vec![0., 0., 0., 0.125, 0.25, 0.375, 0., 0.]
+    );
+}
+#[test]
+fn pool_gc_and_missing_assets_are_explicit() {
+    let (mut project, mut pool) = project(&sine(48_000), 0, TICKS_PER_SECOND);
+    let empty = AudioPool::default().prepare(48_000, 1).unwrap();
+    assert!(matches!(
+        empty.mix(&project, range(0, 100_000)),
+        Err(Error::MissingAsset(_))
+    ));
+    Command::RemoveClip { id: ClipId(0) }
+        .apply(&mut project)
+        .unwrap();
+    pool.collect(&project);
+    assert!(pool.is_empty());
+}
+#[test]
+fn symphonia_decodes_supported_fixtures_and_reports_opus() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for extension in ["wav", "mp3", "flac", "aac", "m4a", "ogg"] {
+        let source = SymphoniaSource::open(root.join(format!("tone.{extension}"))).unwrap();
+        let pcm = source.decode_all().unwrap();
+        assert_eq!(pcm.rate(), 48_000, "{extension}");
+        assert_eq!(pcm.channels(), 1, "{extension}");
+        assert!(pcm.frames() >= 3000, "{extension}");
+        assert!(pcm.samples().iter().any(|s| s.abs() > 0.01), "{extension}");
+        let slice = source.decode(range(14700, 14700 * 11)).unwrap();
+        assert_eq!(slice.samples(), &pcm.samples()[1..11]);
+    }
+    assert!(matches!(
+        SymphoniaSource::open(root.join("tone.opus")),
+        Err(Error::Unsupported(_))
+    ));
+}
+#[test]
+fn resampling_compensates_delay_and_preserves_duration_and_channel_mapping() {
+    let mut samples = vec![0.; 4410];
+    samples[441] = 1.0;
+    let (project, pool) = project(
+        &Pcm::new(44_100, 1, samples).unwrap(),
+        0,
+        TICKS_PER_SECOND / 10,
+    );
+    let result = pool
+        .mix(&project, range(0, TICKS_PER_SECOND / 10), 48_000, 2)
+        .unwrap();
+    assert_eq!(result.len(), 9600);
+    let peak = result
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1[0].abs().total_cmp(&b.1[0].abs()))
+        .unwrap()
+        .0;
+    assert_eq!(peak, 480);
+    assert!(result.as_chunks::<2>().0.iter().all(|f| f[0] == f[1]));
+}
+#[test]
+fn pcm_ranges_pad_eof_and_validate_configuration() {
+    let pcm = Pcm::new(48_000, 2, vec![0.5, -0.5]).unwrap();
+    assert_eq!(
+        pcm.decode(range(0, 14700 * 3)).unwrap().samples(),
+        &[0.5, -0.5, 0., 0., 0., 0.]
+    );
+    assert!(Pcm::new(0, 1, vec![]).is_err());
+    assert!(Pcm::new(48_000, 2, vec![0.]).is_err());
+    assert!(Pcm::new(48_000, 1, vec![f32::NAN]).is_err());
+    assert!(AudioPool::default().prepare(0, 2).is_err());
+    assert!(AudioPool::default().prepare(48_000, 0).is_err());
+}
+proptest! {
+    #[test]
+    fn adjacent_ranges_are_identical_to_one_mix(a in 0_i64..300_000_000, width in 1_i64..100_000_000, tail in 1_i64..100_000_000, output_rate in prop_oneof![Just(44_100_u32), Just(48_000_u32), Just(47_999_u32)]) {
+        let pcm = sine(44_100);
+        let (mut project,pool) = project(&pcm, 17_321, TICKS_PER_SECOND);
+        Command::SetParam { id:ClipId(0), name:"gain".into(),value:Some(0.5) }.apply(&mut project).unwrap();
+        Command::AddKeyframe { id:ClipId(0), target:Target::Param("gain".into()),time:Time(0),keyframe:Keyframe {value:0.,interpolation:Interpolation::Linear} }.apply(&mut project).unwrap();
+        Command::AddKeyframe { id:ClipId(0), target:Target::Param("gain".into()),time:Time(TICKS_PER_SECOND),keyframe:Keyframe {value:1.,interpolation:Interpolation::Linear} }.apply(&mut project).unwrap();
+        let mixer = pool.prepare(output_rate,2).unwrap();
+        let b = a+width;
+        let c = b+tail;
+        let mut parts = mixer.mix(&project,range(a,b)).unwrap();
+        parts.extend(mixer.mix(&project,range(b,c)).unwrap());
+        prop_assert_eq!(parts,mixer.mix(&project,range(a,c)).unwrap());
+    }
+}
+#[test]
+#[ignore = "requires an audio device; emits a quiet 50 ms tone"]
+fn real_device_play_pause_and_seek() {
+    let (rate, channels) = Player::default_output_format().unwrap();
+    let (mut project, pool) = project(&sine(rate), 0, TICKS_PER_SECOND);
+    Command::SetParam {
+        id: ClipId(0),
+        name: "gain".into(),
+        value: Some(0.1),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut player = Player::new(
+        Arc::new(project),
+        Arc::new(pool.prepare(rate, channels).unwrap()),
+    )
+    .unwrap();
+    player.play().unwrap();
+    std::thread::sleep(Duration::from_millis(25));
+    player.seek(Time(TICKS_PER_SECOND / 2)).unwrap();
+    assert!(player.now() >= Time(TICKS_PER_SECOND / 2));
+    std::thread::sleep(Duration::from_millis(25));
+    player.pause().unwrap();
+    let frozen = player.now();
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(player.now(), frozen);
+    player.seek(Time(0)).unwrap();
+    assert_eq!(player.now(), Time(0));
+}
