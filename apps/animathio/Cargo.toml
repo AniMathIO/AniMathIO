@@ -1,0 +1,19 @@
+[package]
+name = "animathio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+animathio-core.workspace = true
+animathio-format = { path = "../../crates/format" }
+animathio-render = { path = "../../crates/render" }
+animathio-audio = { path = "../../crates/audio" }
+gpui.workspace = true
+image = { version = "0.25", default-features = false }
+rfd.workspace = true
+
+[lints]
+workspace = true
