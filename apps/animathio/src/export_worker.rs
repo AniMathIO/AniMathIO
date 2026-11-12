@@ -52,11 +52,16 @@ impl ExportTask {
                     let mut exporter =
                         Exporter::new(&project, &assets).map_err(|e| e.to_string())?;
                     let (mut host, _, _) = crate::editor::load_plugins();
-                    let bytes = exporter
-                        .export(
+                    let destination = animathio_export::Destination {
+                        path: output,
+                        overwrite: params.overwrite,
+                    };
+                    let written = exporter
+                        .export_to_file(
                             &project,
                             range,
                             params.settings,
+                            &destination,
                             |p: Progress| {
                                 task_completed.store(p.completed, Ordering::Relaxed);
                                 task_total.store(p.total, Ordering::Relaxed);
@@ -75,8 +80,7 @@ impl ExportTask {
                     if task_cancel.load(Ordering::Relaxed) {
                         return Err("export cancelled".into());
                     }
-                    std::fs::write(&output, bytes).map_err(|e| e.to_string())?;
-                    Ok(output)
+                    Ok(written)
                 })();
                 if let Some(reply) = reply {
                     let value = result

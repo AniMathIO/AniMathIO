@@ -248,20 +248,24 @@ impl ControlHandler for HeadlessHandler {
                 let plugins = &mut self.plugins;
                 let mut exporter = animathio_export::Exporter::new(project, assets)
                     .map_err(|e| ControlError::Other(e.to_string()))?;
-                let bytes = exporter
-                    .export(
+                let destination = animathio_export::Destination {
+                    path: output,
+                    overwrite: params.overwrite,
+                };
+                let written = exporter
+                    .export_to_file(
                         project,
                         range,
                         params.settings,
+                        &destination,
                         |_| true,
                         |scene| match plugins {
                             Some(host) => host.resolve(&scene, (width, height)),
                             None => scene,
                         },
                     )
-                    .map_err(|e| ControlError::Other(e.to_string()))?;
-                fs::write(&output, bytes)?;
-                serde_json::to_value(output.display().to_string())?
+                    .map_err(ControlError::from)?;
+                serde_json::to_value(written.display().to_string())?
             }
             Call::ProjectGet => serde_json::to_value(self.state())?,
             Call::ProjectOpen { path } => {
@@ -512,5 +516,89 @@ mod tests {
         handler.handle(Call::AssetsImport {
             path: path.to_owned(),
         })
+    }
+
+    fn text_project() -> HeadlessHandler {
+        let mut handler = HeadlessHandler::new();
+        let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 5)).unwrap();
+        for command in [
+            Command::SetSettings {
+                width: 64,
+                height: 36,
+                frame_rate: animathio_core::FrameRate::new(30, 1).unwrap(),
+                background: [0, 0, 0, 255],
+                duration: Time(TICKS_PER_SECOND / 5),
+            },
+            Command::AddTrack {
+                track: Track::new(TrackId(1), "Text"),
+                index: 0,
+            },
+            Command::AddClip {
+                track: TrackId(1),
+                clip: Clip::new(
+                    ClipId(1),
+                    animathio_core::ClipKind::Builtin(Builtin::Text {
+                        text: "export".to_owned(),
+                        font_size: 0.2,
+                        color: [255, 255, 255, 255],
+                    }),
+                    range,
+                ),
+            },
+        ] {
+            handler.handle(Call::CommandApply { command }).unwrap();
+        }
+        handler
+    }
+
+    fn export_params(output: PathBuf, overwrite: bool) -> crate::method::ExportParams {
+        crate::method::ExportParams {
+            output,
+            from: Time(0),
+            to: None,
+            settings: animathio_export::Settings::default(),
+            overwrite,
+        }
+    }
+
+    #[test]
+    fn export_creates_missing_parents_and_requires_overwrite() {
+        let mut handler = text_project();
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("missing/sub/clip.mp4");
+
+        let written: String = serde_json::from_value(
+            handler
+                .handle(Call::Export {
+                    params: export_params(output.clone(), false),
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(Path::new(&written), output);
+        assert!(output.is_file());
+        let entries: Vec<_> = fs::read_dir(output.parent().unwrap()).unwrap().collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "no temporary file survives a successful export"
+        );
+
+        let rejected = handler
+            .handle(Call::Export {
+                params: export_params(output.clone(), false),
+            })
+            .unwrap_err();
+        assert!(
+            matches!(rejected, ControlError::AlreadyExists(ref path) if *path == output),
+            "{rejected:?}"
+        );
+
+        handler
+            .handle(Call::Export {
+                params: export_params(output.clone(), true),
+            })
+            .unwrap();
+        assert!(output.is_file());
     }
 }

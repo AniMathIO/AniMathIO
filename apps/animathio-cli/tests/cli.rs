@@ -328,3 +328,32 @@ class S(Scene):
         "expected the embedded file name: {stderr}"
     );
 }
+
+#[test]
+fn export_creates_missing_parents_and_never_overwrites_silently() {
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    let output = dir.path().join("deep/nested/clip.mp4");
+    let base = ["export", path(&archive), "--to", "0.5"];
+
+    let mut args = base.to_vec();
+    args.extend(["-o", path(&output)]);
+    ok(&args);
+    assert!(output.is_file());
+    // Only the finished MP4 is in the generated directory: no temp file survives.
+    let entries: Vec<_> = fs::read_dir(output.parent().unwrap()).unwrap().collect();
+    assert_eq!(entries.len(), 1);
+    let original = fs::read(&output).unwrap();
+
+    let rejected = cli(&args);
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("already exists"), "{stderr}");
+    assert_eq!(fs::read(&output).unwrap(), original);
+
+    let mut args = base.to_vec();
+    args.extend(["-o", path(&output), "--overwrite"]);
+    ok(&args);
+    assert!(output.is_file());
+}

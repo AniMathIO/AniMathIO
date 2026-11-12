@@ -50,7 +50,7 @@ gets a JSON-RPC error instead of a result.
 | `command.apply` | `{ command }` | — (applied through the shared history) |
 | `history.undo` / `history.redo` | — | whether an edit was undone/redone |
 | `render.frame` | `{ params: { time, width, height, output? } }` | `{ size, base64?, path? }` |
-| `export` | `{ params: { output, from?, to?, settings? } }` | destination path (after completion) |
+| `export` | `{ params: { output, from?, to?, settings?, overwrite? } }` | destination path (after completion) |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
 | `assets.import` | `{ path }` | `AssetInfo` (id, name, media_type) |
@@ -63,11 +63,17 @@ gets a JSON-RPC error instead of a result.
 `command` is a serialized `animathio_core::Command` — the same enum undo/redo,
 MCP and the UI all use. `time` is integer ticks (705,600,000/s). Paths are
 canonicalized and must resolve to regular files; `script_dir` must resolve to a
-directory. Control math/graph positions are normalized canvas fractions and their
-colors are `[r, g, b, a]` bytes. Durations and animation durations are positive
-ticks; `start` defaults to zero. The default clip duration is the project's
-explicit duration, or three seconds when unset. Keyframes use clip-local ticks.
-The three authoring methods work in both the editor and headless handler.
+directory. Output paths may name parents that do not exist yet — the export
+writer creates them — but their nearest existing ancestor must be a directory.
+`export` refuses an existing destination with an `output already exists` error
+unless `overwrite` is `true`, and writes the MP4 through a temporary file in the
+destination directory that is renamed into place only on success, so a cancelled
+or failed export never leaves a partial file. Control math/graph positions are
+normalized canvas fractions and their colors are `[r, g, b, a]` bytes. Durations
+and animation durations are positive ticks; `start` defaults to zero. The default
+clip duration is the project's explicit duration, or three seconds when unset.
+Keyframes use clip-local ticks. The three authoring methods work in both the
+editor and headless handler.
 
 ## MCP
 
@@ -105,7 +111,7 @@ clears its undo history.
 | `set_playing` | Start / pause playback | |
 | `save_project` | Save to a path, or overwrite the current file | |
 | `render_frame` | Render one frame to PNG | base64 return, or written to a path |
-| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; returns the written path |
+| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; creates missing parent directories; requires `overwrite: true` to replace an existing file; returns the written path |
 | `import_v1` | Import a v1 `.animathio` project, replacing the current one | |
 | `import_manim_scene` | Import a supported Manim scene without executing Python | Exactly one of `path` or inline `source`; optional `script_dir`, `scene`, `replace` (default false) |
 

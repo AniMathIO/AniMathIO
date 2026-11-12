@@ -244,6 +244,7 @@ pub(crate) struct Editor {
     add_menu_open: bool,
     settings_open: bool,
     export_task: Option<crate::export_worker::ExportTask>,
+    confirm_overwrite: Option<PathBuf>,
     keyframe_drag: Option<KeyframeDrag>,
     selected_keyframe: Option<KeyframeSelection>,
     error: Option<String>,
@@ -307,6 +308,7 @@ impl Editor {
             add_menu_open: false,
             settings_open: false,
             export_task: None,
+            confirm_overwrite: None,
             keyframe_drag: None,
             selected_keyframe: None,
             error,
@@ -2536,11 +2538,25 @@ impl Editor {
         else {
             return;
         };
+        // Export never overwrites silently: ask before replacing an existing file.
+        if output.exists() {
+            self.confirm_overwrite = Some(output);
+            cx.notify();
+            return;
+        }
+        self.start_export(output, false, cx);
+    }
+
+    fn start_export(&mut self, output: PathBuf, overwrite: bool, cx: &mut Context<Self>) {
+        if self.export_task.is_some() {
+            return;
+        }
         let params = animathio_control::ExportParams {
             output,
             from: Time(0),
             to: None,
             settings: animathio_export::Settings::default(),
+            overwrite,
         };
         match crate::export_worker::ExportTask::spawn(
             self.project.clone(),
@@ -2557,7 +2573,49 @@ impl Editor {
     fn export_dialog(&self, cx: &mut Context<Self>) -> Div {
         use std::sync::atomic::Ordering;
         let Some(task) = &self.export_task else {
-            return div();
+            let Some(path) = &self.confirm_overwrite else {
+                return div();
+            };
+            return div()
+                .absolute()
+                .top(px(60.))
+                .left(px(30.))
+                .w(px(280.))
+                .p_3()
+                .bg(rgb(0x1f2430))
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child("Replace existing file?")
+                .child(
+                    div()
+                        .text_color(rgb(0x8a94a6))
+                        .child(path.display().to_string()),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap_2()
+                        .child(button(
+                            "confirm-overwrite",
+                            "Replace",
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                if let Some(path) = this.confirm_overwrite.take() {
+                                    this.start_export(path, true, cx);
+                                }
+                                cx.notify();
+                            }),
+                        ))
+                        .child(button(
+                            "cancel-overwrite",
+                            "Cancel",
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.confirm_overwrite = None;
+                                cx.notify();
+                            }),
+                        )),
+                );
         };
         let completed = task.completed.load(Ordering::Relaxed);
         let total = task.total.load(Ordering::Relaxed);
@@ -2819,7 +2877,7 @@ impl Render for Editor {
         if self.settings_open {
             root = root.child(self.settings_dialog(cx));
         }
-        if self.export_task.is_some() {
+        if self.export_task.is_some() || self.confirm_overwrite.is_some() {
             root = root.child(self.export_dialog(cx));
         }
         root
