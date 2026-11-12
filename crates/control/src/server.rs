@@ -207,7 +207,7 @@ impl InterruptibleStream {
         loop {
             if self.shutdown.load(Ordering::Relaxed) {
                 return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
+                    io::ErrorKind::ConnectionAborted,
                     "control server shut down",
                 ));
             }
