@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use animathio_core::{ClipKind, Scene as CoreScene, VectorScene};
 use animathio_plugin_api::{InspectorSchema, PluginManifestToml, PluginPackage};
+use animathio_typeset::{MathMode, TypesetEngine, TypesetResult, TypesetVerb};
 use lru::LruCache;
 use thiserror::Error;
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
@@ -61,6 +62,8 @@ const MAX_SHAPE_TEXT_VERBS: usize = 200_000;
 const MAX_SVG_INPUT_BYTES: usize = 1024 * 1024;
 /// Maximum total path verbs returned by the host `svg_to_paths` import.
 const MAX_SVG_VERBS: usize = 100_000;
+/// Maximum total path verbs returned by the host `typeset_math` import.
+const MAX_TYPESET_VERBS: usize = 200_000;
 /// Maximum UTF-8 bytes per `log` message.
 const MAX_LOG_MESSAGE_BYTES: usize = 4 * 1024;
 /// Maximum retained log messages per store.
@@ -159,6 +162,7 @@ pub struct HostState {
     table: ResourceTable,
     wasi: WasiCtx,
     font_data: Vec<u8>,
+    typeset: Arc<TypesetEngine>,
     limiter: StoreLimits,
     logs: Vec<String>,
 }
@@ -195,6 +199,33 @@ impl Host for HostState {
             return Vec::new();
         }
         parse_svg_to_paths(&svg_xml, MAX_SVG_VERBS)
+    }
+
+    fn typeset_math(
+        &mut self,
+        source: String,
+        mode: wit_types::MathMode,
+        font_size: f32,
+    ) -> wit_types::TypesetResult {
+        let mode = match mode {
+            wit_types::MathMode::Latex => MathMode::Latex,
+            wit_types::MathMode::Typst => MathMode::Typst,
+        };
+        match self.typeset.typeset(&source, mode, font_size) {
+            Ok(result) => typeset_to_wit(&result, MAX_TYPESET_VERBS),
+            Err(err) => {
+                log::warn!("typeset_math: {err}");
+                wit_types::TypesetResult {
+                    paths: Vec::new(),
+                    bbox: wit_types::Bbox {
+                        min_x: 0.0,
+                        min_y: 0.0,
+                        max_x: 0.0,
+                        max_y: 0.0,
+                    },
+                }
+            }
+        }
     }
 
     fn log(&mut self, message: String) {
@@ -282,6 +313,7 @@ pub struct PluginHost {
     plugins: BTreeMap<String, LoadedPlugin>,
     limits: SandboxLimits,
     font_data: Vec<u8>,
+    typeset: Arc<TypesetEngine>,
     output_cache: LruCache<[u8; 32], VectorScene>,
     cache_hits: AtomicUsize,
     cache_misses: AtomicUsize,
@@ -312,6 +344,9 @@ impl PluginHost {
         Plugin::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |s| s)?;
 
         let font_data = load_system_font_bytes();
+        let typeset = Arc::new(
+            TypesetEngine::new().map_err(|e| HostError::CompilationFailed(e.to_string()))?,
+        );
         let disk_cache = ComponentDiskCache::new(cache_dir);
         let output_cache = LruCache::new(NonZeroUsize::new(512).unwrap());
         let epoch_ticker = EpochTicker::start(engine.clone(), EPOCH_TICK_INTERVAL);
@@ -323,6 +358,7 @@ impl PluginHost {
             plugins: BTreeMap::new(),
             limits,
             font_data,
+            typeset,
             output_cache,
             cache_hits: AtomicUsize::new(0),
             cache_misses: AtomicUsize::new(0),
@@ -438,6 +474,7 @@ impl PluginHost {
             table: ResourceTable::new(),
             wasi,
             font_data: self.font_data.clone(),
+            typeset: Arc::clone(&self.typeset),
             limiter: sandbox_store_limits(&self.limits),
             logs: Vec::new(),
         };
@@ -1079,6 +1116,55 @@ fn bez_to_wit_verbs(bez: &kurbo::BezPath) -> Vec<wit_types::PathVerb> {
         }
     }
     verbs
+}
+
+/// Convert a host typesetting result into WIT types, enforcing the output cap.
+fn typeset_to_wit(result: &TypesetResult, max_verbs: usize) -> wit_types::TypesetResult {
+    let total_verbs: usize = result.paths.iter().map(Vec::len).sum();
+    if total_verbs > max_verbs {
+        log::warn!("typeset_math: rejecting {total_verbs} path verbs (max {max_verbs})");
+        return wit_types::TypesetResult {
+            paths: Vec::new(),
+            bbox: wit_types::Bbox {
+                min_x: 0.0,
+                min_y: 0.0,
+                max_x: 0.0,
+                max_y: 0.0,
+            },
+        };
+    }
+
+    let paths = result
+        .paths
+        .iter()
+        .map(|path| path.iter().map(typeset_verb_to_wit).collect())
+        .collect();
+
+    wit_types::TypesetResult {
+        paths,
+        bbox: wit_types::Bbox {
+            min_x: result.bbox.min_x as f32,
+            min_y: result.bbox.min_y as f32,
+            max_x: result.bbox.max_x as f32,
+            max_y: result.bbox.max_y as f32,
+        },
+    }
+}
+
+fn typeset_verb_to_wit(verb: &TypesetVerb) -> wit_types::PathVerb {
+    let point = |p: &animathio_typeset::TypesetPoint| wit_types::Point {
+        x: p.x as f32,
+        y: p.y as f32,
+    };
+    match *verb {
+        TypesetVerb::MoveTo(p) => wit_types::PathVerb::MoveTo(point(&p)),
+        TypesetVerb::LineTo(p) => wit_types::PathVerb::LineTo(point(&p)),
+        TypesetVerb::QuadTo(c, p) => wit_types::PathVerb::QuadTo((point(&c), point(&p))),
+        TypesetVerb::CubicTo(c1, c2, p) => {
+            wit_types::PathVerb::CubicTo((point(&c1), point(&c2), point(&p)))
+        }
+        TypesetVerb::Close => wit_types::PathVerb::Close,
+    }
 }
 
 #[cfg(test)]

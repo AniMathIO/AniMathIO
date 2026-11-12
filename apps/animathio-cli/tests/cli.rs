@@ -6,6 +6,16 @@ use std::{
     process::{Command, Output},
 };
 use tempfile::tempdir;
+
+/// A minimal valid 1x1 transparent PNG (67 bytes).
+const MINIMAL_PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+];
+
 fn cli(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
         .args(args)
@@ -240,4 +250,81 @@ fn import_v1_writes_a_valid_archive() {
     assert_eq!(bundle.project.width(), 800);
     assert_eq!(bundle.project.height(), 600);
     assert_eq!(bundle.project.background(), [17, 17, 17, 255]);
+}
+
+#[test]
+fn import_manim_writes_a_valid_archive_and_selects_scenes() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("scene.py");
+    let output = dir.path().join("out.amio");
+    fs::write(
+        &input,
+        r#"
+from manim import *
+
+class First(Scene):
+    def construct(self):
+        self.wait(1)
+
+class Second(Scene):
+    def construct(self):
+        title = Text("hello", color=WHITE)
+        self.play(Write(title), run_time=2)
+        self.wait(1)
+"#,
+    )
+    .unwrap();
+
+    ok(&[
+        "import-manim",
+        path(&input),
+        "--scene",
+        "Second",
+        "-o",
+        path(&output),
+    ]);
+    ok(&["validate", path(&output)]);
+    let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 1);
+    assert_eq!(bundle.project.width(), 1920);
+    assert_eq!(bundle.project.height(), 1080);
+    assert_eq!(bundle.project.background(), [0, 0, 0, 255]);
+    assert_eq!(
+        bundle.project.duration(),
+        animathio_core::Time(animathio_core::TICKS_PER_SECOND * 3)
+    );
+}
+
+#[test]
+fn import_manim_reports_embedded_images() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("scene.py");
+    let output = dir.path().join("out.amio");
+    fs::write(dir.path().join("photo.png"), MINIMAL_PNG).unwrap();
+    fs::write(
+        &input,
+        r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("photo.png")
+        self.add(img)
+        self.wait(1)
+"#,
+    )
+    .unwrap();
+
+    let out = cli(&["import-manim", path(&input), "-o", path(&output)]);
+    assert!(
+        out.status.success(),
+        "{}:
+{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("info:"), "expected an info line: {stderr}");
+    assert!(
+        stderr.contains("photo.png"),
+        "expected the embedded file name: {stderr}"
+    );
 }

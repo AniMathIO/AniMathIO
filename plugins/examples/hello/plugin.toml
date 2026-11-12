@@ -1,0 +1,7 @@
+api_version = "0.1.0"
+id = "com.example.hello"
+name = "Hello"
+version = "0.1.0"
+description = "Minimal example plugin: a filled circle"
+kinds = ["clip-source"]
+capabilities = []

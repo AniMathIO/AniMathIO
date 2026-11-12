@@ -77,6 +77,26 @@ interface types {
         elements: list<draw-command>,
     }
 
+    /// Axis-aligned bounding box in canvas coordinates.
+    record bbox {
+        min-x: f32,
+        min-y: f32,
+        max-x: f32,
+        max-y: f32,
+    }
+
+    /// Result of host-side math typesetting.
+    record typeset-result {
+        paths: list<path>,
+        bbox: bbox,
+    }
+
+    /// Input language for host-side math typesetting.
+    enum math-mode {
+        latex,
+        typst,
+    }
+
     /// Floating-point parameter range with step size and default.
     record number-range {
         min: f64,
@@ -174,10 +194,14 @@ interface types {
 
 /// Host-provided services imported by plugins.
 interface host {
-    use types.{path};
+    use types.{path, math-mode, typeset-result};
 
     /// Text shaping via host font engine. Returns glyph outline paths.
     shape-text: func(text: string, font-size: f32) -> list<path>;
+
+    /// Typeset math via the host typesetting engine. Returns glyph and rule
+    /// outline paths plus a tight bounding box.
+    typeset-math: func(source: string, mode: math-mode, font-size: f32) -> typeset-result;
 
     /// Parse SVG XML string into vector paths.
     svg-to-paths: func(svg-xml: string) -> list<path>;

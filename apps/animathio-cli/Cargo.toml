@@ -11,6 +11,7 @@ animathio-control = { path = "../../crates/control" }
 animathio-core.workspace = true
 animathio-format = { path = "../../crates/format" }
 animathio-import-v1 = { path = "../../crates/import-v1" }
+animathio-import-manim = { path = "../../crates/import-manim" }
 animathio-render = { path = "../../crates/render" }
 clap = { version = "4.5", features = ["derive"] }
 rmcp = { version = "3.9", default-features = false, features = ["server", "macros", "transport-io"] }
