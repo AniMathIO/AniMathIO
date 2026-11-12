@@ -96,3 +96,42 @@ fn manim_paths_and_script_directories_follow_filesystem_rules() {
     assert_eq!(handler.project().tracks().len(), 2);
     handler.handle(Call::HistoryUndo).unwrap();
 }
+
+#[test]
+fn replacing_with_manim_resets_session_and_embeds_relative_assets() {
+    let dir = tempfile::tempdir().unwrap();
+    // The importer probes magic bytes; the bundle preserves the original bytes.
+    let png = b"\x89PNG\r\n\x1a\nembedded image";
+    std::fs::write(dir.path().join("image.png"), png).unwrap();
+    let source = "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.add(ImageMobject(\"image.png\"))\n        self.wait(1)\n";
+    let mut handler = HeadlessHandler::new();
+    invoke(&mut handler, "graph.add", json!({})).unwrap();
+    handler
+        .project_save(Some(dir.path().join("old.amio")))
+        .unwrap();
+    handler.playback_seek(Time(TICKS_PER_SECOND)).unwrap();
+    handler.playback_play().unwrap();
+    let report = invoke(
+        &mut handler,
+        "import.manim",
+        json!({"source":source,"script_dir":dir.path(),"replace":true}),
+    )
+    .unwrap();
+    assert_eq!(report["assets"], 1);
+    assert!(report["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(report["infos"].as_array().unwrap().len(), 1);
+    let state = handler.project_get().unwrap();
+    assert!(state.path.is_none());
+    assert_eq!(state.playhead, Time(0));
+    assert!(!state.playing);
+    assert!(!handler.history_undo().unwrap());
+    assert_eq!(
+        handler.assets()[&animathio_core::AssetId::of(png)].as_slice(),
+        png
+    );
+    let archive = dir.path().join("imported.amio");
+    handler.project_save(Some(archive.clone())).unwrap();
+    let reopened = HeadlessHandler::load(&archive).unwrap();
+    assert_eq!(reopened.project(), handler.project());
+    assert_eq!(reopened.assets(), handler.assets());
+}

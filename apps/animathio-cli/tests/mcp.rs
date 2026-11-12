@@ -193,15 +193,8 @@ fn build_plugins() -> Option<std::path::PathBuf> {
         .unwrap()
         .parent()
         .unwrap();
-    let status = Command::new("nice")
-        .args([
-            "-n",
-            "19",
-            "ionice",
-            "-c3",
-            "bash",
-            "scripts/build-plugins.sh",
-        ])
+    let status = Command::new("bash")
+        .arg("scripts/build-plugins.sh")
         .current_dir(root)
         .env("CARGO_BUILD_JOBS", "3")
         .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
@@ -234,7 +227,7 @@ fn math_reveal_renders_visible_plugin_outlines_and_graph_is_added() {
         &mut stdin,
         &mut stdout,
         "set_canvas",
-        json!({"width":320,"height":180,"background_color":"#000000","duration_ms":2000}),
+        json!({"width":320,"height":180,"background_color":"#000000","max_time_ms":2000}),
     );
     call(
         &mut stdin,

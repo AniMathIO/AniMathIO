@@ -96,7 +96,7 @@ clears its undo history.
 | `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction` |
 | `update_element` | Update a clip's placement and/or visible time frame | |
 | `remove_element` | Remove a clip by id | |
-| `set_canvas` | Canvas width/height, background color, duration | `#RRGGBB`/`#RRGGBBAA`; ms |
+| `set_canvas` | Canvas width/height, background color, duration | `background_color`: `#RRGGBB`/`#RRGGBBAA`; `max_time_ms`: duration in ms |
 | `set_param` | Set/change a clip's named numeric parameter | |
 | `add_keyframe` | Add a keyframe to a clip | target: `x`, `y`, `scale_x`, `scale_y`, `rotation`, `opacity` or a param name |
 | `undo` / `redo` | Undo / redo the last edit | |
@@ -151,6 +151,11 @@ those ids in the user directory are skipped before compilation/instantiation.
 Missing plugins remain preserved in the project and render as placeholders.
 For an in-tree release build, set `ANIMATHIO_PLUGIN_DIR` to the absolute path of
 `target/plugins` produced by `scripts/build-plugins.sh`.
+
+The MCP integration suite builds these bundles with `scripts/build-plugins.sh`
+when `wasm32-wasip2` is installed, then checks a blank initial reveal and visible
+math outlines in the rendered PNG. If the target is unavailable, this render
+test prints a skip message; math validation and Manim round-trip tests still run.
 
 The server advertises protocol `2024-11-05` with tools enabled, and instructions
 noting the ms/pixel conventions.

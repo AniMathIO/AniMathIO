@@ -34,7 +34,14 @@ fn build_plugin(name: &str) -> BuiltPlugin {
     let crate_path = root.join("plugins").join(name).join("Cargo.toml");
     let target_dir = root.join("target").join("plugin-tests-math");
 
-    let status = Command::new("cargo")
+    let mut command = if cfg!(target_os = "linux") {
+        let mut command = Command::new("nice");
+        command.args(["-n", "19", "ionice", "-c3", "cargo"]);
+        command
+    } else {
+        Command::new("cargo")
+    };
+    let status = command
         .args([
             "build",
             "--manifest-path",
@@ -46,6 +53,7 @@ fn build_plugin(name: &str) -> BuiltPlugin {
         ])
         .env("CARGO_TARGET_DIR", &target_dir)
         .env("CARGO_BUILD_JOBS", "3")
+        .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
         .status()
         .expect("failed to spawn cargo build for plugin");
     assert!(status.success(), "failed to build plugin `{name}`");
@@ -109,6 +117,14 @@ fn discovery_rejects_user_packages_with_reserved_ids_but_loads_trusted_bundles()
         .is_empty()
     );
     assert!(host.loaded_plugin_ids().is_empty());
+    let compiled = cache.path().join(format!(
+        "{}.bin",
+        animathio_plugin_host::ComponentDiskCache::cache_key(&built.wasm)
+    ));
+    assert!(
+        !compiled.exists(),
+        "rejected first-party ids must not reach component compilation"
+    );
     assert_eq!(
         host.load_plugin_directory(&PluginDirectory {
             path: bundled.path().to_owned(),

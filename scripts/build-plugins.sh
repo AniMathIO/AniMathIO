@@ -9,10 +9,19 @@ rustup target add wasm32-wasip2
 
 mkdir -p target/plugins
 
+# Linux development machines are shared; keep builds at background priority.
+# Git Bash on Windows has no ionice, so retain the portable build path there.
+cargo_command=(cargo)
+if command -v ionice >/dev/null 2>&1; then
+    cargo_command=(nice -n 19 ionice -c3 cargo)
+elif command -v nice >/dev/null 2>&1; then
+    cargo_command=(nice -n 19 cargo)
+fi
+
 build_plugin() {
     local name="$1"
     echo ">> building plugin: ${name}"
-    CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo build \
+    CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only "${cargo_command[@]}" build \
         --manifest-path "plugins/${name}/Cargo.toml" \
         --target wasm32-wasip2 \
         --target-dir "$PWD/target" \
