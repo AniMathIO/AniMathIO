@@ -106,7 +106,7 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `AddTrack`, `RemoveTrack`, `SetTrackGain`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
-`SetEffectParam`, `AddKeyframe`, `RemoveKeyframe`.
+`SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`.
 
 `Command::apply(&mut Project) -> Result<Command>` validates the candidate project
 transactionally and returns the exact inverse, so undo/redo, the control protocol,
@@ -154,7 +154,7 @@ flowchart LR
   nothing evaluated is cached inside it.
 - **Evaluate.** `core::evaluate(&Project, Time)` selects the active clips
   (half-open ranges, back-to-front track order) and samples keyframes into a
-  `Scene` of `SceneClip`s — transforms and numeric params resolved at that instant,
+  `Scene` of `SceneClip`s — transforms and typed params resolved at that instant,
   independently of seek order.
 - **Resolve plugins.** The plugin host replaces `ClipKind::Plugin` clips with
   `ClipKind::Vector` scenes by running the sandboxed component; missing/trapped
@@ -170,3 +170,34 @@ flowchart LR
   quantized to callbacks and freezes on underflow.
 - **Export.** Export steps the render path frame by frame (`render-seq` today;
   MP4/WebM export is pending the `media` crate). It is never a recording of playback.
+
+## Typed parameter animation
+
+`ParamValue` owns numbers (`f64`), linear-light straight-alpha RGBA colours
+(`f32` channels in `[0, 1]`), resolution-independent 2D points, booleans, enum
+choices, strings, and optional content-addressed asset references. `Clip::params`
+and evaluated `SceneClip::params` contain typed values; each `Animation` stores
+`Keyframes<ParamValue>`. Transform and built-in effect targets still require
+numbers. Validation rejects nonfinite values, mixed-type curves, and curves whose
+type differs from their typed base parameter. Plugin curves may also target an
+implicit schema default without a stored base value.
+
+Numbers, points, and colours support linear, smoothstep ease-in/out, and hold
+interpolation. Colour RGB channels interpolate in linear light (not sRGB byte
+space), with alpha interpolated separately. Booleans, enum choices, strings, and
+asset references always hold, regardless of the outgoing interpolation setting.
+Exact key times return their stored values, and sampling outside a curve clamps
+to its endpoints.
+
+Serde accepts legacy bare numeric base values and keyframe values as
+`ParamValue::Number`; new saves use tagged variants. This is a compatible read
+extension to schema version 1. Opaque `ClipKind::Plugin::params` is preserved
+verbatim. `SetPluginParam` sets/removes typed overrides in `Clip::params`; removing
+an override exposes the original opaque value. The plugin host merges evaluated
+typed overrides over opaque defaults using the declared schema, converting
+linear-light colours to the plugin API's sRGB bytes. The cache hashes typed values
+including their variants.
+
+Every plugin inspector control has a keyframe diamond. Editing an animated
+parameter updates the key at the playhead or inserts one there, preserving an
+existing key's outgoing interpolation. Unanimated edits update base parameters.

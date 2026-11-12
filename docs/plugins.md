@@ -387,3 +387,13 @@ Notes for real plugins:
   `ellipse`, `circle`, `polygon`, `star`, `line` and `arrow` builders. The
   standalone plugins use the generated WIT types directly and write their own
   path helpers, as above.
+
+### Typed keyframes
+
+All inspector parameter kinds can be keyframed. Numbers, points, and colours
+support linear, ease-in/out, and hold interpolation; boolean, enum, string, and
+asset values always hold until the next key. Core colour values are linear-light
+straight-alpha RGBA floats. The host converts evaluated colours to sRGB RGBA
+bytes for the existing WIT API. Typed values override preserved opaque plugin
+JSON at evaluation time. Editing any animated parameter in the inspector creates
+or updates a keyframe at the playhead.

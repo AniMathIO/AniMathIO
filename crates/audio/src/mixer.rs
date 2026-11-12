@@ -182,7 +182,13 @@ fn param(clip: &Clip, name: &str, time: Time, fallback: f64) -> f64 {
         .iter()
         .find(|a| matches!(&a.target, Target::Param(n) if n == name))
         .and_then(|a| a.keys.sample(time))
-        .unwrap_or_else(|| clip.params.get(name).copied().unwrap_or(fallback))
+        .and_then(|v| v.as_number())
+        .unwrap_or_else(|| {
+            clip.params
+                .get(name)
+                .and_then(animathio_core::ParamValue::as_number)
+                .unwrap_or(fallback)
+        })
 }
 
 #[allow(clippy::cast_precision_loss)] // Channel count becomes an amplitude divisor only.

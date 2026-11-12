@@ -705,7 +705,7 @@ impl PluginHost {
     pub fn render_clip(
         &mut self,
         plugin_id: &str,
-        params: &BTreeMap<String, f64>,
+        params: &BTreeMap<String, animathio_core::ParamValue>,
         opaque_params: &serde_json::Value,
         time_ticks: i64,
         canvas_size: (u32, u32),
@@ -803,7 +803,7 @@ fn compute_cache_key(
     plugin_hash: &[u8; 32],
     time_ticks: i64,
     size: (u32, u32),
-    params: &BTreeMap<String, f64>,
+    params: &BTreeMap<String, animathio_core::ParamValue>,
     opaque_params: &serde_json::Value,
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
@@ -812,10 +812,8 @@ fn compute_cache_key(
     hasher.update(&size.0.to_le_bytes());
     hasher.update(&size.1.to_le_bytes());
 
-    for (k, v) in params {
-        hasher.update(k.as_bytes());
-        hasher.update(&v.to_le_bytes());
-    }
+    // Length-delimited structured encoding includes the variant and avoids ambiguous strings.
+    hasher.update(&serde_json::to_vec(params).expect("serializable parameter values"));
 
     if !opaque_params.is_null()
         && let Ok(s) = serde_json::to_string(opaque_params)
@@ -828,7 +826,7 @@ fn compute_cache_key(
 
 fn build_wit_params(
     manifest: &wit_types::Manifest,
-    numeric_params: &BTreeMap<String, f64>,
+    typed_params: &BTreeMap<String, animathio_core::ParamValue>,
     opaque: &serde_json::Value,
 ) -> Vec<wit_types::ParamEntry> {
     let mut entries = Vec::new();
@@ -839,8 +837,8 @@ fn build_wit_params(
 
     if let serde_json::Value::Object(map) = opaque {
         for (k, v) in map {
-            if numeric_params.contains_key(k) {
-                continue; // animated numeric param overrides static base param
+            if typed_params.contains_key(k) {
+                continue; // evaluated typed param overrides opaque base data
             }
             if let Some(value) = json_to_param_value(v, schema.get(k.as_str()).copied()) {
                 entries.push(wit_types::ParamEntry {
@@ -851,11 +849,19 @@ fn build_wit_params(
         }
     }
 
-    for (k, v) in numeric_params {
-        entries.push(wit_types::ParamEntry {
-            id: k.clone(),
-            value: wit_types::ParamValue::Number(*v),
-        });
+    for (k, v) in typed_params {
+        let json = v.to_plugin_json();
+        let value = if matches!(v, animathio_core::ParamValue::AssetRef(None)) {
+            Some(wit_types::ParamValue::AssetRef(String::new()))
+        } else {
+            json_to_param_value(&json, schema.get(k.as_str()).copied())
+        };
+        if let Some(value) = value {
+            entries.push(wit_types::ParamEntry {
+                id: k.clone(),
+                value,
+            });
+        }
     }
 
     entries
@@ -1385,6 +1391,111 @@ fn typeset_verb_to_wit(verb: &TypesetVerb) -> wit_types::PathVerb {
 mod tests {
     use super::*;
     use wasmtime::{Instance, Module};
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn typed_parameters_map_through_every_schema_kind() {
+        use animathio_core::ParamValue as CoreValue;
+        use wit_types::*;
+        let cases = vec![
+            (
+                "n",
+                ParamKind::Number(NumberRange {
+                    min: 0.0,
+                    max: 10.0,
+                    default: 0.0,
+                    step: 1.0,
+                }),
+                CoreValue::Number(2.5),
+            ),
+            (
+                "c",
+                ParamKind::Color(ColorParam {
+                    default: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                }),
+                CoreValue::Color([0.5, 0.5, 0.5, 1.0]),
+            ),
+            (
+                "p",
+                ParamKind::Point(PointParam {
+                    default: Point { x: 0.0, y: 0.0 },
+                }),
+                CoreValue::Point([0.25, 0.75]),
+            ),
+            (
+                "b",
+                ParamKind::Bool(BoolParam { default: false }),
+                CoreValue::Bool(true),
+            ),
+            (
+                "s",
+                ParamKind::String(StringParam {
+                    default: String::new(),
+                }),
+                CoreValue::String("hello".into()),
+            ),
+            (
+                "e",
+                ParamKind::EnumChoice(EnumParam {
+                    options: vec!["a".into(), "b".into()],
+                    default: "a".into(),
+                }),
+                CoreValue::Enum("b".into()),
+            ),
+            (
+                "a",
+                ParamKind::AssetRef(AssetRefParam {
+                    media_type: "image/*".into(),
+                    default_asset: None,
+                }),
+                CoreValue::AssetRef(Some(animathio_core::AssetId::of(b"image"))),
+            ),
+        ];
+        let manifest = Manifest {
+            name: "test".into(),
+            version: "1".into(),
+            description: String::new(),
+            kinds: vec![],
+            params: cases
+                .iter()
+                .map(|(id, kind, _)| ParamSpec {
+                    id: (*id).into(),
+                    label: (*id).into(),
+                    kind: kind.clone(),
+                })
+                .collect(),
+        };
+        let params = cases
+            .into_iter()
+            .map(|(id, _, value)| (id.to_owned(), value))
+            .collect();
+        let entries = build_wit_params(
+            &manifest,
+            &params,
+            &serde_json::json!({"c":[255,0,0,255], "e":"a", "legacy": true}),
+        );
+        assert_eq!(entries.len(), 8);
+        let get = |id: &str| &entries.iter().find(|e| e.id == id).unwrap().value;
+        assert!(matches!(get("n"), ParamValue::Number(v) if *v == 2.5));
+        assert!(matches!(get("c"), ParamValue::Color(v) if (v.r,v.g,v.b,v.a) == (188,188,188,255)));
+        assert!(matches!(get("p"), ParamValue::Point(v) if v.x == 0.25 && v.y == 0.75));
+        assert!(matches!(get("b"), ParamValue::Bool(true)));
+        assert!(matches!(get("s"), ParamValue::String(v) if v == "hello"));
+        assert!(matches!(get("e"), ParamValue::EnumChoice(v) if v == "b"));
+        assert!(
+            matches!(get("a"), ParamValue::AssetRef(v) if v == animathio_core::AssetId::of(b"image").as_str())
+        );
+        assert!(matches!(get("legacy"), ParamValue::Bool(true)));
+        let cleared = BTreeMap::from([("a".to_owned(), CoreValue::AssetRef(None))]);
+        assert!(
+            matches!(&build_wit_params(&manifest, &cleared, &serde_json::Value::Null)[0].value, ParamValue::AssetRef(v) if v.is_empty())
+        );
+    }
 
     struct LimiterState {
         limiter: StoreLimits,

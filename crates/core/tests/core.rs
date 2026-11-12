@@ -35,9 +35,9 @@ fn base() -> Project {
     .unwrap();
     project
 }
-fn key(value: f64, interpolation: Interpolation) -> Keyframe<f64> {
+fn key(value: f64, interpolation: Interpolation) -> Keyframe<ParamValue> {
     Keyframe {
-        value,
+        value: value.into(),
         interpolation,
     }
 }
@@ -186,7 +186,10 @@ fn evaluation_uses_half_open_ranges_local_ticks_and_layer_order() {
     );
     assert_eq!(scene.clips[0].source_time, Time(550));
     assert_eq!(scene.clips[0].transform.x, 0.5);
-    assert_eq!(scene.clips[0].params["gain"], 0.5);
+    assert_eq!(
+        scene.clips[0].params["gain"],
+        animathio_core::ParamValue::Number(0.5)
+    );
     assert_eq!(evaluate(&project, Time(120)).clips, Vec::<SceneClip>::new());
     assert_eq!(
         evaluate(&project, Time(i64::MIN)).clips,
@@ -368,7 +371,10 @@ fn invalid_edits_are_atomic_and_adjacent_ranges_are_valid() {
         },
         Command::AddKeyframe {
             id: ClipId(0),
-            target: Target::Param("absent".into()),
+            target: Target::Effect {
+                effect: EffectId(999),
+                param: "absent".into(),
+            },
             time: Time(0),
             keyframe: key(1.0, Interpolation::Linear),
         },
@@ -748,10 +754,10 @@ fn move_keyframe_is_reversible_and_rejects_occupied_destinations() {
 }
 
 #[test]
-fn set_plugin_param_updates_opaque_json_and_is_reversible() {
+fn set_plugin_param_preserves_opaque_json_and_is_reversible() {
     let mut project = base();
     let original = project.clone();
-    let value = json!({ "text": "hello", "align": "center" });
+    let value = ParamValue::String("hello".into());
 
     let inverse = Command::SetPluginParam {
         id: ClipId(0),
@@ -762,7 +768,10 @@ fn set_plugin_param_updates_opaque_json_and_is_reversible() {
     .unwrap();
     let clip = project.tracks()[0].clips()[&ClipId(0)].clone();
     match &clip.kind {
-        ClipKind::Plugin { params, .. } => assert_eq!(params["opaque"], value),
+        ClipKind::Plugin { params, .. } => {
+            assert!(params.get("opaque").is_none());
+            assert_eq!(clip.params["opaque"], value);
+        }
         other => panic!("expected plugin clip, got {other:?}"),
     }
     inverse.apply(&mut project).unwrap();
