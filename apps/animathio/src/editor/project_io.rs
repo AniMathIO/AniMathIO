@@ -33,17 +33,20 @@ impl Editor {
         cx.notify();
     }
 
-    pub(super) fn save(&self) {
-        let Some(path) = Self::config_path() else {
-            return;
+    pub(super) fn save(&mut self, cx: &mut Context<Self>) {
+        let path = if let Some(path) = &self.path {
+            path.clone()
+        } else {
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("AniMathIO project", &["amio"])
+                .set_file_name("project.amio")
+                .save_file()
+            else {
+                return;
+            };
+            path
         };
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let Ok(bytes) = serde_json::to_vec_pretty(&self.paths) else {
-            return;
-        };
-        let _ = std::fs::write(path, bytes);
+        self.save_background(path, false, cx);
     }
 
     pub(super) fn save_background(
