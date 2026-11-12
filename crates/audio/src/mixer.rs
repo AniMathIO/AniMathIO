@@ -2,7 +2,10 @@ use crate::{
     AudioSource, Error, Pcm,
     source::{MAX_CHANNELS, MAX_INTERLEAVED_SAMPLES, MAX_SAMPLE_RATE, sample_bounds},
 };
-use animathio_core::{AssetId, Clip, ClipKind, Project, TICKS_PER_SECOND, Target, Time, TimeRange};
+use animathio_core::{
+    AssetId, Clip, ClipKind, Project, TICKS_PER_SECOND, Target, Time, TimeRange, Transition,
+    TransitionKind, equal_power,
+};
 use rubato::{
     FftFixedInOut, Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters,
     SincInterpolationType, WindowFunction,
@@ -132,14 +135,22 @@ impl Mixer {
                 let ClipKind::Audio(id) = &clip.kind else {
                     continue;
                 };
-                if clip.range.end <= range.start || clip.range.start >= range.end {
+                // Cross-dissolves extend both clips across the cut with equal-power
+                // gains; other transition kinds keep a hard audio cut.
+                let span = track.clip_span(clip);
+                let (fade_in, fade_out) = (dissolve(span.incoming), dissolve(span.outgoing));
+                let play = TimeRange {
+                    start: fade_in.map_or(clip.range.start, |t| t.window(clip.range.start).start),
+                    end: fade_out.map_or(clip.range.end, |t| t.window(clip.range.end).end),
+                };
+                if play.end <= range.start || play.start >= range.end {
                     continue;
                 }
                 let source = self
                     .sources
                     .get(id)
                     .ok_or_else(|| Error::MissingAsset(id.as_str().into()))?;
-                let (clip_start, clip_end) = sample_bounds(clip.range, self.rate)?;
+                let (clip_start, clip_end) = sample_bounds(play, self.rate)?;
                 for frame in first.max(clip_start)..end.min(clip_end) {
                     let timeline = frame as i128 * i128::from(TICKS_PER_SECOND);
                     let local = timeline - i128::from(clip.range.start.0) * i128::from(self.rate);
@@ -150,17 +161,26 @@ impl Mixer {
                     if param(clip, "muted", time, 0.0) != 0.0 {
                         continue;
                     }
-                    let gain = param(clip, "gain", time, 1.0) * track.gain();
+                    let now = Time(
+                        i64::try_from(timeline / i128::from(self.rate))
+                            .map_err(|e| Error::Invalid(e.to_string()))?,
+                    );
+                    let gain = param(clip, "gain", time, 1.0)
+                        * track.gain()
+                        * crossfade(fade_in, clip.range.start, now, |(_, gain)| gain)
+                        * crossfade(fade_out, clip.range.end, now, |(gain, _)| gain);
                     if !gain.is_finite() || gain < 0.0 {
                         return Err(Error::Invalid("nonfinite/negative gain".into()));
                     }
                     let ticks = i128::from(TICKS_PER_SECOND);
-                    let source_frame = usize::try_from(
-                        (local + i128::from(clip.source_offset.0) * i128::from(self.rate) + ticks
-                            - 1)
-                            / ticks,
-                    )
-                    .map_err(|e| Error::Invalid(e.to_string()))?;
+                    let source_ticks =
+                        local + i128::from(clip.source_offset.0) * i128::from(self.rate);
+                    if source_ticks < 0 {
+                        // Before the source start (a dissolve without a handle): silence.
+                        continue;
+                    }
+                    let source_frame = usize::try_from((source_ticks + ticks - 1) / ticks)
+                        .map_err(|e| Error::Invalid(e.to_string()))?;
                     if source_frame >= source.len() / channels {
                         continue;
                     }
@@ -176,6 +196,25 @@ impl Mixer {
         }
         Ok(output)
     }
+}
+fn dissolve(transition: Option<&Transition>) -> Option<&Transition> {
+    transition.filter(|t| t.kind == TransitionKind::CrossDissolve)
+}
+/// Equal-power gain for one side of a dissolve at `cut`, or 1 outside its window.
+fn crossfade(
+    transition: Option<&Transition>,
+    cut: Time,
+    now: Time,
+    side: impl Fn((f64, f64)) -> f64,
+) -> f64 {
+    transition.map_or(1.0, |t| {
+        let window = t.window(cut);
+        if now < window.start || now >= window.end {
+            1.0
+        } else {
+            side(equal_power(t.progress(window, now)))
+        }
+    })
 }
 fn param(clip: &Clip, name: &str, time: Time, fallback: f64) -> f64 {
     clip.animations

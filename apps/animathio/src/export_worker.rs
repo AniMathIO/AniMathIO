@@ -66,7 +66,7 @@ impl ExportTask {
                                 host.as_mut().map_or_else(
                                     || scene.clone(),
                                     |host| {
-                                        host.resolve(&scene, (project.width(), project.height()))
+                                        host.resolve(&scene, animathio_export::resolution(&project))
                                     },
                                 )
                             },

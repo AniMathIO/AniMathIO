@@ -414,6 +414,11 @@ impl Backend for GpuBackend {
         size: Size,
     ) -> Result<Frame, Error> {
         check_size(size)?;
+        // Transitions composite on the CPU path for now (GPU port is a follow-up),
+        // so frames inside a transition stay identical to export.
+        if scene.clips.iter().any(|clip| clip.transition.is_some()) {
+            return self.cpu.render(scene, pool, video, size);
+        }
         self.target(size)?;
         self.encode(scene, pool, video, size)?;
         let target = self.target.as_ref().expect("target prepared above");

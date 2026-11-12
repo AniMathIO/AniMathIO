@@ -1,7 +1,8 @@
 use crate::builtin::Color;
 use crate::{
     Animation, Asset, AssetId, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error, FrameRate,
-    Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform, invalid,
+    Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform, Transition,
+    TransitionId, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -92,6 +93,15 @@ pub enum Command {
         /// Split point in timeline ticks.
         at: Time,
     },
+    /// Restore exact clip data after a split or merge.
+    RestoreClips {
+        /// Track containing the clips.
+        track: TrackId,
+        /// Identities to replace.
+        ids: Vec<ClipId>,
+        /// Original clip snapshots.
+        clips: Vec<Clip>,
+    },
     /// Merge two adjacent clips back into one (the inverse of `SplitClip`).
     MergeClip {
         /// Left clip identity.
@@ -181,6 +191,25 @@ pub enum Command {
         from: Time,
         /// Destination clip-local ticks; must be free.
         to: Time,
+    },
+    /// Add a transition on the edit point between two adjacent clips of a track.
+    AddTransition {
+        /// Layer owning both clips.
+        track: TrackId,
+        /// Transition (with a project-unique id).
+        transition: Transition,
+    },
+    /// Remove a transition.
+    RemoveTransition {
+        /// Transition identity.
+        id: TransitionId,
+    },
+    /// Change a transition's total (cut-centered) duration.
+    SetTransitionDuration {
+        /// Transition identity.
+        id: TransitionId,
+        /// New positive duration in ticks.
+        duration: Time,
     },
 }
 
@@ -323,6 +352,32 @@ impl Command {
                 clip.source_offset = *source_offset;
                 inverse
             }
+            Self::RestoreClips { track, ids, clips } => {
+                let unique: std::collections::BTreeSet<_> = ids.iter().collect();
+                let clip_ids: std::collections::BTreeSet<_> =
+                    clips.iter().map(|clip| &clip.id).collect();
+                if unique.len() != ids.len()
+                    || clip_ids.len() != clips.len()
+                    || !clip_ids.is_subset(&unique)
+                {
+                    return Err(invalid(
+                        "restored clips must have unique replacement identities",
+                    ));
+                }
+                let index = track_index(project, *track)?;
+                let previous = ids
+                    .iter()
+                    .filter_map(|id| project.tracks[index].clips.remove(id))
+                    .collect();
+                for clip in clips {
+                    project.tracks[index].clips.insert(clip.id, clip.clone());
+                }
+                Self::RestoreClips {
+                    track: *track,
+                    ids: ids.clone(),
+                    clips: previous,
+                }
+            }
             Self::SplitClip { id, right_id, at } => {
                 if id == right_id {
                     return Err(invalid("split clip ids must differ"));
@@ -348,15 +403,41 @@ impl Command {
                 right.id = *right_id;
                 right.range = TimeRange::new(*at, left.range.end)?;
                 right.source_offset = Time(left.source_offset.0 + duration);
+                for animation in &mut right.animations {
+                    let boundary = animation.keys.sample(Time(duration));
+                    let interpolation = animation
+                        .keys
+                        .0
+                        .range(..=Time(duration))
+                        .next_back()
+                        .or_else(|| animation.keys.0.first_key_value())
+                        .map(|(_, key)| key.interpolation)
+                        .unwrap_or_default();
+                    animation.keys.0 = animation
+                        .keys
+                        .0
+                        .iter()
+                        .filter(|(time, _)| time.0 >= duration)
+                        .map(|(time, key)| (Time(time.0 - duration), key.clone()))
+                        .collect();
+                    if let Some(value) = boundary {
+                        animation.keys.0.entry(Time(0)).or_insert(Keyframe {
+                            value,
+                            interpolation,
+                        });
+                    }
+                }
+
                 project.tracks[index]
                     .clips
                     .get_mut(id)
                     .expect("clip checked above")
                     .range = TimeRange::new(left.range.start, *at)?;
                 project.tracks[index].clips.insert(*right_id, right);
-                Self::MergeClip {
-                    left: *id,
-                    right: *right_id,
+                Self::RestoreClips {
+                    track: project.tracks[index].id,
+                    ids: vec![*id, *right_id],
+                    clips: vec![left],
                 }
             }
             Self::MergeClip { left, right } => {
@@ -381,22 +462,17 @@ impl Command {
                 if left_clip.kind != right_clip.kind {
                     return Err(invalid("merge clips must share a kind"));
                 }
-                let at = left_clip.range.end;
-                let original_source = right_clip.source_offset.0 - (at.0 - left_clip.range.start.0);
-                if original_source < 0 {
-                    return Err(invalid("merge would produce a negative source offset"));
-                }
                 let restored = project.tracks[left_index]
                     .clips
                     .get_mut(left)
                     .ok_or_else(|| invalid("clip missing"))?;
                 restored.range = TimeRange::new(left_clip.range.start, right_clip.range.end)?;
-                restored.source_offset = Time(original_source);
+                restored.source_offset = left_clip.source_offset;
                 project.tracks[right_index].clips.remove(right);
-                Self::SplitClip {
-                    id: *left,
-                    right_id: *right,
-                    at,
+                Self::RestoreClips {
+                    track: project.tracks[left_index].id,
+                    ids: vec![*left, *right],
+                    clips: vec![left_clip, right_clip],
                 }
             }
             Self::SetTransform { id, transform } => {
@@ -592,8 +668,53 @@ impl Command {
                     to: *from,
                 }
             }
+            Self::AddTransition { track, transition } => {
+                if project
+                    .tracks
+                    .iter()
+                    .any(|t| t.transitions.iter().any(|x| x.id == transition.id))
+                {
+                    return Err(invalid("transition already exists"));
+                }
+                let index = track_index(project, *track)?;
+                let transitions = &mut project.tracks[index].transitions;
+                let position = transitions.partition_point(|x| x.id < transition.id);
+                transitions.insert(position, transition.clone());
+                Self::RemoveTransition { id: transition.id }
+            }
+            Self::RemoveTransition { id } => {
+                let (track, position) = transition_index(project, *id)?;
+                let transition = project.tracks[track].transitions.remove(position);
+                Self::AddTransition {
+                    track: project.tracks[track].id,
+                    transition,
+                }
+            }
+            Self::SetTransitionDuration { id, duration } => {
+                let (track, position) = transition_index(project, *id)?;
+                let transition = &mut project.tracks[track].transitions[position];
+                let previous = transition.duration;
+                transition.duration = *duration;
+                Self::SetTransitionDuration {
+                    id: *id,
+                    duration: previous,
+                }
+            }
         })
     }
+}
+fn transition_index(project: &Project, id: TransitionId) -> Result<(usize, usize), Error> {
+    project
+        .tracks
+        .iter()
+        .enumerate()
+        .find_map(|(track, t)| {
+            t.transitions
+                .iter()
+                .position(|x| x.id == id)
+                .map(|position| (track, position))
+        })
+        .ok_or_else(|| invalid("transition missing"))
 }
 fn track_index(project: &Project, id: TrackId) -> Result<usize, Error> {
     project

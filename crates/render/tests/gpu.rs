@@ -136,6 +136,7 @@ fn gpu_composites_cpu_effect_layers() {
             },
             params: BTreeMap::new(),
             effects: vec![effect],
+            transition: None,
         }],
     };
     let assets = BTreeMap::from([(id, bytes)]);

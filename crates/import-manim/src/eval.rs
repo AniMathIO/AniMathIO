@@ -25,6 +25,13 @@ pub(crate) enum Value {
 
 /// Evaluate an expression node to a [`Value`].
 pub(crate) fn eval(node: &Node<'_>, source: &str) -> Value {
+    eval_at_depth(node, source, 0)
+}
+
+fn eval_at_depth(node: &Node<'_>, source: &str, depth: usize) -> Value {
+    if depth > 64 {
+        return Value::Unknown;
+    }
     match node.kind() {
         "string" => Value::Str(unquote(node, source)),
         "concatenated_string" => {
@@ -37,13 +44,13 @@ pub(crate) fn eval(node: &Node<'_>, source: &str) -> Value {
         }
         "integer" | "float" => number_literal(node, source).map_or(Value::Unknown, Value::Num),
         "identifier" => eval_identifier(node, source),
-        "list" | "tuple" => eval_sequence(node, source),
-        "parenthesized_expression" => node
-            .named_child(0)
-            .map_or(Value::Unknown, |inner| eval(&inner, source)),
-        "unary_operator" => eval_unary(node, source),
-        "binary_operator" => eval_binary(node, source),
-        "call" => eval_call(node, source),
+        "list" | "tuple" => eval_sequence(node, source, depth),
+        "parenthesized_expression" => node.named_child(0).map_or(Value::Unknown, |inner| {
+            eval_at_depth(&inner, source, depth + 1)
+        }),
+        "unary_operator" => eval_unary(node, source, depth),
+        "binary_operator" => eval_binary(node, source, depth),
+        "call" => eval_call(node, source, depth),
         "attribute" => eval_attribute(node, source),
         "none" => Value::PythonNone,
         _ => Value::Unknown,
@@ -233,11 +240,11 @@ fn direction(name: &str) -> Option<(f64, f64)> {
     }
 }
 
-fn eval_sequence(node: &Node<'_>, source: &str) -> Value {
+fn eval_sequence(node: &Node<'_>, source: &str, depth: usize) -> Value {
     let mut nums = Vec::new();
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        match eval(&child, source) {
+        match eval_at_depth(&child, source, depth + 1) {
             Value::Num(n) => nums.push(n),
             _ => return Value::Unknown,
         }
@@ -249,13 +256,13 @@ fn eval_sequence(node: &Node<'_>, source: &str) -> Value {
     }
 }
 
-fn eval_unary(node: &Node<'_>, source: &str) -> Value {
+fn eval_unary(node: &Node<'_>, source: &str, depth: usize) -> Value {
     let op = operator_text(node, source);
     let argument = node.child_by_field_name("argument");
     let (Some(op), Some(argument)) = (op, argument) else {
         return Value::Unknown;
     };
-    match (op.as_str(), eval(&argument, source)) {
+    match (op.as_str(), eval_at_depth(&argument, source, depth + 1)) {
         ("-", Value::Num(n)) => Value::Num(-n),
         ("-", Value::Vec2 { x, y }) => Value::Vec2 { x: -x, y: -y },
         ("+", value) => value,
@@ -263,14 +270,18 @@ fn eval_unary(node: &Node<'_>, source: &str) -> Value {
     }
 }
 
-fn eval_binary(node: &Node<'_>, source: &str) -> Value {
+fn eval_binary(node: &Node<'_>, source: &str, depth: usize) -> Value {
     let op = operator_text(node, source);
     let left = node.child_by_field_name("left");
     let right = node.child_by_field_name("right");
     let (Some(op), Some(left), Some(right)) = (op, left, right) else {
         return Value::Unknown;
     };
-    apply_binary(&op, &eval(&left, source), &eval(&right, source))
+    apply_binary(
+        &op,
+        &eval_at_depth(&left, source, depth + 1),
+        &eval_at_depth(&right, source, depth + 1),
+    )
 }
 
 fn apply_binary(op: &str, left: &Value, right: &Value) -> Value {
@@ -310,7 +321,7 @@ fn apply_binary(op: &str, left: &Value, right: &Value) -> Value {
     }
 }
 
-fn eval_call(node: &Node<'_>, source: &str) -> Value {
+fn eval_call(node: &Node<'_>, source: &str, depth: usize) -> Value {
     let Some(function) = node.child_by_field_name("function") else {
         return Value::Unknown;
     };
@@ -328,7 +339,7 @@ fn eval_call(node: &Node<'_>, source: &str) -> Value {
             && let Some(arguments) = node.child_by_field_name("arguments")
             && let Some(first) = arguments.named_child(0)
         {
-            return eval(&first, source);
+            return eval_at_depth(&first, source, depth + 1);
         }
     }
     Value::Unknown

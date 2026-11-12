@@ -88,6 +88,8 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
         "undo",
         "redo",
         "import_v1",
+        "add_transition",
+        "list_transitions",
     ] {
         assert!(
             names.contains(&expected),

@@ -7,6 +7,7 @@ pub mod effects;
 #[cfg(feature = "gpu")]
 mod gpu;
 pub mod sample;
+mod transition;
 
 use animathio_core::{AssetId, ClipKind, Project, Scene, Time};
 use std::{
