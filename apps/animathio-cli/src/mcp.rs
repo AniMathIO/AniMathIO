@@ -234,6 +234,8 @@ pub(crate) struct RenderFrame {
 pub(crate) struct ExportVideo {
     pub(crate) path: String,
     pub(crate) format: Option<String>,
+    #[serde(default)]
+    pub(crate) overwrite: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1374,7 +1376,9 @@ impl McpServer {
         )
     }
 
-    #[tool(description = "Export an offline H.264 + AAC MP4 snapshot of the project.")]
+    #[tool(
+        description = "Export an offline H.264 + AAC MP4 snapshot of the project. Missing parent directories are created; an existing file is only replaced when overwrite is true."
+    )]
     async fn export_video(
         &self,
         Parameters(p): Parameters<ExportVideo>,
@@ -1394,6 +1398,7 @@ impl McpServer {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .map(ExportPreset::export_settings)
                     .unwrap_or_default(),
+                overwrite: p.overwrite,
             })
             .map_err(mcp_error)?;
         tool_text(json!({ "path": path }))

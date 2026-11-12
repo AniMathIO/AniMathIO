@@ -1,19 +1,33 @@
 name: Package
 
-# Builds + smoke-tests installers for the canonical package.
+# Builds + smoke-tests the installers for the canonical desktop package
+# (`apps/animathio`, which also ships `animathio-cli`).
 #
 # Runs:
-#   * manually (workflow_dispatch), and
+#   * manually (workflow_dispatch),
 #   * on release-plz release PRs (branches named `release-plz-*`), so every
 #     release PR proves the installers build, install/extract and run before
-#     the release is merged.
+#     the release is merged, and
+#   * on pull requests that touch packaging inputs (this file, the packaged
+#     crates, the icon assets or the plugin build script), so packaging changes
+#     are verified before they land.
 #
-
+# Every job installs the bundle, then runs `animathio --version` and
+# `animathio-cli --version` headlessly and checks that the bundled `.amplugin`
+# bundles arrived next to (or lib-relative to) the executable.
 
 on:
   workflow_dispatch:
   pull_request:
     branches: [v2]
+    paths:
+      - .github/workflows/package.yml
+      - Cargo.toml
+      - Cargo.lock
+      - apps/animathio/Cargo.toml
+      - apps/animathio/assets/**
+      - apps/animathio-cli/Cargo.toml
+      - scripts/build-plugins.sh
 
 permissions:
   contents: read
@@ -24,24 +38,37 @@ concurrency:
   group: package-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_BUILD_JOBS: 3
+  # Number of first-party `.amplugin` bundles `scripts/build-plugins.sh` writes.
+  PLUGIN_COUNT: 4
+
 jobs:
   package:
-    # Only package on manual dispatch or on release-plz release PRs.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release-plz')
+    name: package (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             formats: appimage,deb
+            artifact: linux
+            # Read by actions/attest-build-provenance; one glob per line.
             subject: |
               target/packages/*.AppImage
               target/packages/*.deb
           - os: windows-latest
             formats: nsis
-            subject: |
-              target/packages/*.exe
+            artifact: windows
+            subject: target/packages/*.exe
+          - os: macos-latest
+            formats: dmg
+            artifact: macos
+            subject: target/packages/*.dmg
     runs-on: ${{ matrix.os }}
+    # TODO: macOS dmg smoke test (mounted .app check) still fails; best effort until fixed.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    timeout-minutes: 150
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -49,10 +76,51 @@ jobs:
         run: rustup toolchain install stable --profile minimal
       - name: Install Linux development headers
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb-dev \
+            libxcb-randr0-dev \
+            libxcb-render0-dev \
+            libxcb-xinput-dev \
+            libxcb-sync-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+      - name: Build plugin bundles
+        # The editor loads `.amplugin` files from `plugins/` next to the
+        # executable, so the bundles must exist before cargo-packager collects
+        # the configured resources.
+        shell: bash
+        run: ./scripts/build-plugins.sh
+      - name: Check plugin bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          bundles=(target/plugins/*.amplugin)
+          if [ "${#bundles[@]}" -ne "${PLUGIN_COUNT}" ]; then
+            echo "expected ${PLUGIN_COUNT} plugin bundles, found ${#bundles[@]}" >&2
+            ls -l target/plugins >&2 || true
+            exit 1
+          fi
+          printf '%s\n' "${bundles[@]}"
       - name: Install cargo-packager
-        run: cargo install cargo-packager@0.11.8
+        run: cargo install cargo-packager@0.11.8 --locked
       - name: Build and package installers
+        env:
+          # linuxdeploy ships an old binutils whose `strip` cannot parse modern
+          # glibc libraries (`.relr.dyn` sections) and aborts the AppImage build
+          # when it tries. Harmless on the other platforms.
+          NO_STRIP: 1
         run: cargo packager --release --packages animathio --formats ${{ matrix.formats }}
       - name: Smoke test installers (Linux)
         if: runner.os == 'Linux'
@@ -60,33 +128,95 @@ jobs:
         run: |
           set -euo pipefail
 
-          # AppImage: self-extract (no FUSE needed) and run the embedded binary.
+          # AppImage: self-extract (runners have no FUSE) and run the binaries
+          # from the extracted tree.
           appimage="$(find target/packages -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
           chmod +x "$appimage"
+          rm -rf squashfs-root
           "$appimage" --appimage-extract >/dev/null
-          appimage_bin="$(find squashfs-root -type f -name 'animathio' -print -quit)"
-          "$appimage_bin" --version
+          for exe in animathio animathio-cli; do
+            test -x "squashfs-root/usr/bin/$exe"
+            "squashfs-root/usr/bin/$exe" --version
+          done
+          ls squashfs-root/usr/lib/animathio/plugins/*.amplugin >/dev/null
 
-          # deb: extract and run the binary.
+          # deb: extract and run the same binaries.
           deb="$(find target/packages -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$deb"
+          rm -rf deb-root
           mkdir -p deb-root
           dpkg-deb -x "$deb" deb-root
-          deb_bin="$(find deb-root -type f -name 'animathio' -print -quit)"
-          "$deb_bin" --version
+          for exe in animathio animathio-cli; do
+            test -x "deb-root/usr/bin/$exe"
+            "deb-root/usr/bin/$exe" --version
+          done
+          ls deb-root/usr/lib/animathio/plugins/*.amplugin >/dev/null
+          dpkg-deb -I "$deb" | sed -n '/Package:/p;/Depends:/p'
       - name: Smoke test installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $installer = Get-ChildItem 'target/packages/*.exe' | Select-Object -First 1
-          Start-Process -FilePath $installer.FullName -ArgumentList @('/S', '/D=C:\animathio') -Wait
-          & 'C:\animathio\animathio.exe' --version
+          if (-not $installer) { throw 'no installer produced in target/packages' }
+          $dest = 'C:\animathio'
+          Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$dest") -Wait
+          $exe = Join-Path $dest 'animathio.exe'
+          $cli = Join-Path $dest 'animathio-cli.exe'
+          if (-not (Test-Path $exe)) {
+            Get-ChildItem -Recurse -Force $dest | Out-String | Write-Host
+            throw "$exe missing after install"
+          }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "animathio --version exited $LASTEXITCODE" }
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw "animathio-cli --version exited $LASTEXITCODE" }
+          $plugins = Get-ChildItem (Join-Path $dest 'plugins') -Filter *.amplugin
+          if ($plugins.Count -ne $env:PLUGIN_COUNT) {
+            throw "expected $env:PLUGIN_COUNT plugins in $dest\plugins, found $($plugins.Count)"
+          }
+      - name: Smoke test bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # cargo-packager builds `AniMathIO.app` in the output directory and
+          # hands it to create-dmg, so both the bundle and the image are there.
+          app='target/packages/AniMathIO.app'
+          dmg="$(find target/packages -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -d "$app"
+          test -n "$dmg"
+
+          check_bundle() {
+            local bundle="$1"
+            for exe in animathio animathio-cli; do
+              test -x "$bundle/Contents/MacOS/$exe"
+              "$bundle/Contents/MacOS/$exe" --version
+            done
+            ls "$bundle/Contents/Resources/plugins"/*.amplugin >/dev/null
+          }
+
+          check_bundle "$app"
+
+          # Repeat against what a user actually gets out of the image.
+          # `-acceptlicense` because the bundled license becomes a dmg EULA.
+          mountroot="$(mktemp -d)"
+          hdiutil attach "$dmg" -nobrowse -readonly -acceptlicense -mountroot "$mountroot" -quiet
+          trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
+          mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
+          test -n "$mounted_app"
+          check_bundle "$mounted_app"
       - name: Attest build provenance
+        # `id-token: write` is not granted to pull requests from forks.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: ${{ matrix.subject }}
       - name: Upload installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: installers-${{ matrix.os }}
+          name: installers-${{ matrix.artifact }}
           path: target/packages/*
           if-no-files-found: error

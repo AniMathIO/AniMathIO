@@ -385,3 +385,64 @@ fn base64_decode(value: &str) -> Vec<u8> {
         .decode(value)
         .unwrap()
 }
+
+#[test]
+fn export_video_creates_parents_and_requires_overwrite() {
+    let dir = tempdir().unwrap();
+    let project = empty_project(dir.path());
+    let (mut child, mut stdout, mut stdin) = spawn_mcp(&project);
+    initialize(&mut stdin, &mut stdout);
+    call(
+        &mut stdin,
+        &mut stdout,
+        "add_text",
+        json!({"text": "export", "duration_ms": 200}),
+    );
+
+    let output = dir.path().join("mcp/nested/clip.mp4");
+    let path = output.to_str().unwrap();
+    let exported = call(
+        &mut stdin,
+        &mut stdout,
+        "export_video",
+        json!({"path": path}),
+    );
+    // The tool reports the canonical path it wrote.
+    let canonical = std::fs::canonicalize(&output).unwrap();
+    assert_eq!(exported["path"], canonical.to_str().unwrap());
+    assert!(output.is_file());
+    let entries: Vec<_> = std::fs::read_dir(output.parent().unwrap())
+        .unwrap()
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "no temporary file survives a successful export"
+    );
+
+    // Without `overwrite` an existing destination is an MCP tool error.
+    send(
+        &mut stdin,
+        21,
+        "tools/call",
+        json!({"name": "export_video", "arguments": {"path": path}}),
+    );
+    let response = recv(&mut stdout);
+    let message = response["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("already exists"),
+        "expected an already-exists error: {response}"
+    );
+
+    let exported = call(
+        &mut stdin,
+        &mut stdout,
+        "export_video",
+        json!({"path": path, "overwrite": true}),
+    );
+    assert_eq!(exported["path"], path);
+    assert!(output.is_file());
+
+    drop(stdin);
+    let _ = child.wait();
+}

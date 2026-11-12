@@ -42,6 +42,19 @@ fn search_dirs(
             path: bin.join("plugins"),
             allow_reserved_ids: true,
         });
+        // Installed packages keep their bundled resources next to, not inside,
+        // the binary directory: `usr/lib/<bin>/plugins` in deb and AppImage
+        // layouts, `Contents/Resources/plugins` inside a macOS `.app`.
+        if let Some(name) = exe.and_then(Path::file_stem) {
+            dirs.push(PluginDirectory {
+                path: bin.join("..").join("lib").join(name).join("plugins"),
+                allow_reserved_ids: true,
+            });
+        }
+        dirs.push(PluginDirectory {
+            path: bin.join("..").join("Resources").join("plugins"),
+            allow_reserved_ids: true,
+        });
         // Development bundles are built into target/plugins. Never search
         // upward from the CWD, even in development builds.
         #[cfg(debug_assertions)]
@@ -86,8 +99,18 @@ mod tests {
                 allow_reserved_ids: false
             }
         );
-        assert_eq!(dirs.len(), if cfg!(debug_assertions) { 4 } else { 3 });
+        assert_eq!(dirs.len(), if cfg!(debug_assertions) { 6 } else { 5 });
         assert!(search_dirs(None, None, None).is_empty());
+    }
+
+    #[test]
+    fn installed_layouts_are_searched_relative_to_the_executable() {
+        let dirs = search_dirs(None, Some(Path::new("/opt/app/bin/animathio")), None);
+        let paths: Vec<PathBuf> = dirs.into_iter().map(|dir| dir.path).collect();
+        // deb/AppImage resources live in `usr/lib/<binary>/`, macOS bundle
+        // resources in `Contents/Resources/`.
+        assert!(paths.contains(&PathBuf::from("/opt/app/bin/../lib/animathio/plugins")));
+        assert!(paths.contains(&PathBuf::from("/opt/app/bin/../Resources/plugins")));
     }
 
     #[test]

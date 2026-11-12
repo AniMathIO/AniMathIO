@@ -1,0 +1,4 @@
+# Content-addressed fixture assets are byte-exact: their file name is their
+# BLAKE3 hash, so git must never normalize line endings (Windows checkouts
+# would otherwise turn LF into CRLF and break the content address).
+crates/render/tests/fixtures/assets/** -text

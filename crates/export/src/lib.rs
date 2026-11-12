@@ -1,5 +1,6 @@
 //! Offline frame-stepped H.264/AAC export using the preview renderer and audio mixer.
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use animathio_audio::{AudioPool, Mixer, Pcm};
@@ -13,12 +14,47 @@ use animathio_media::{
 use animathio_render::{Frame, RenderCtx, render};
 use serde::{Deserialize, Serialize};
 
+mod output;
+
+pub use output::AtomicOutput;
+
+/// Where an offline export writes its MP4.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Destination {
+    /// Final MP4 path; missing parent directories are created.
+    pub path: PathBuf,
+    /// Replace an existing file instead of failing with [`Error::AlreadyExists`].
+    pub overwrite: bool,
+}
+impl Destination {
+    /// Destination that refuses to replace an existing file.
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            overwrite: false,
+        }
+    }
+
+    /// Same destination, replacing an existing file.
+    #[must_use]
+    pub fn overwriting(mut self) -> Self {
+        self.overwrite = true;
+        self
+    }
+}
+
 /// Offline export failure.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Invalid range or settings.
     #[error("invalid export: {0}")]
     Invalid(String),
+    /// The output exists and overwriting was not requested.
+    #[error("output already exists (pass --overwrite to replace it): {0}")]
+    AlreadyExists(PathBuf),
+    /// The output file could not be created or written.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
     /// The progress callback requested cancellation.
     #[error("export cancelled")]
     Cancelled,
@@ -169,6 +205,28 @@ impl Exporter {
         encoder.finish().map_err(Error::from)
     }
 
+    /// Render, mix and encode into `destination` atomically.
+    ///
+    /// Missing parent directories are created and an existing file is only
+    /// replaced when `destination.overwrite` is set; otherwise the job fails
+    /// with [`Error::AlreadyExists`]. The MP4 is written to a temporary file
+    /// next to the destination and renamed into place on success, so a failed
+    /// or cancelled export leaves no partial output (and no temp file) behind.
+    pub fn export_to_file(
+        &mut self,
+        project: &Project,
+        range: TimeRange,
+        settings: Settings,
+        destination: &Destination,
+        progress: impl FnMut(Progress) -> bool,
+        resolve: impl FnMut(Scene) -> Scene,
+    ) -> Result<PathBuf, Error> {
+        let mut output = AtomicOutput::create(&destination.path, destination.overwrite)?;
+        let bytes = self.export(project, range, settings, progress, resolve)?;
+        output.write_all(&bytes)?;
+        output.commit()
+    }
+
     fn encode_frames(
         &mut self,
         project: &Project,
@@ -277,6 +335,31 @@ pub fn export(
         settings.frame_rate.unwrap_or(project.frame_rate()),
     )?;
     Exporter::new(project, assets)?.export(project, range, settings, progress, |scene| scene)
+}
+
+/// Convenience atomic export with unresolved plugins displayed as in headless preview.
+/// The returned path is the destination, which is only created on success.
+pub fn export_to_file(
+    project: &Project,
+    assets: &BTreeMap<AssetId, Vec<u8>>,
+    range: TimeRange,
+    settings: Settings,
+    destination: &Destination,
+    progress: impl FnMut(Progress) -> bool,
+) -> Result<PathBuf, Error> {
+    frame_count(
+        project,
+        range,
+        settings.frame_rate.unwrap_or(project.frame_rate()),
+    )?;
+    Exporter::new(project, assets)?.export_to_file(
+        project,
+        range,
+        settings,
+        destination,
+        progress,
+        |scene| scene,
+    )
 }
 
 #[cfg(test)]

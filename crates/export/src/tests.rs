@@ -256,3 +256,107 @@ fn rational_frame_steps_and_audio_blocks_are_deterministic() {
         "audio uses one global sample lattice across video boundaries"
     );
 }
+
+/// Entries in `dir`, sorted; used to prove no temp file survives an export.
+fn entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn export_to_file_creates_missing_parents_and_never_overwrites_silently() {
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 3)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("nested/deeper/clip.mp4");
+    let path = export_to_file(
+        &project,
+        &assets,
+        range,
+        Settings::default(),
+        &Destination::new(&output),
+        |_| true,
+    )
+    .unwrap();
+    assert_eq!(path, output);
+    assert!(output.is_file());
+    // Only the finished MP4 is left behind; no temporary file survives.
+    assert_eq!(entries(output.parent().unwrap()), vec![output.clone()]);
+
+    let original = std::fs::read(&output).unwrap();
+    let rejected = export_to_file(
+        &project,
+        &assets,
+        range,
+        Settings::default(),
+        &Destination::new(&output),
+        |_| true,
+    );
+    assert!(
+        matches!(rejected, Err(Error::AlreadyExists(ref path)) if *path == output),
+        "{rejected:?}"
+    );
+    assert_eq!(
+        std::fs::read(&output).unwrap(),
+        original,
+        "a rejected export must not touch the existing file"
+    );
+    assert_eq!(entries(output.parent().unwrap()), vec![output.clone()]);
+
+    std::fs::write(&output, b"not an mp4").unwrap();
+    export_to_file(
+        &project,
+        &assets,
+        range,
+        Settings::default(),
+        &Destination::new(&output).overwriting(),
+        |_| true,
+    )
+    .unwrap();
+    let video = FilmCraftBackend::new()
+        .probe(&output)
+        .unwrap()
+        .video
+        .unwrap();
+    assert_eq!((video.width, video.height), (160, 90));
+    assert_eq!(entries(output.parent().unwrap()), vec![output.clone()]);
+}
+
+#[test]
+fn failed_export_leaves_no_partial_file_and_no_temp_file() {
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 3)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("fresh/clip.mp4");
+    let error = export_to_file(
+        &project,
+        &assets,
+        range,
+        Settings::default(),
+        &Destination::new(&output),
+        |progress| progress.completed < 2,
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Cancelled), "{error:?}");
+    assert!(!output.exists());
+    assert_eq!(entries(&dir.path().join("fresh")).len(), 0);
+
+    // A cancelled overwrite keeps the previous file and drops its temp file.
+    std::fs::write(&output, b"previous").unwrap();
+    let error = export_to_file(
+        &project,
+        &assets,
+        range,
+        Settings::default(),
+        &Destination::new(&output).overwriting(),
+        |_| false,
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Cancelled), "{error:?}");
+    assert_eq!(std::fs::read(&output).unwrap(), b"previous");
+    assert_eq!(entries(&dir.path().join("fresh")), vec![output.clone()]);
+}

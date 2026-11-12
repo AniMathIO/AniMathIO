@@ -18,6 +18,9 @@ pub enum ControlError {
     /// A path argument failed validation.
     #[error("invalid path: {0}")]
     InvalidPath(String),
+    /// The requested output exists and overwriting was not requested.
+    #[error("output already exists: {}", .0.display())]
+    AlreadyExists(std::path::PathBuf),
     /// The method is known but not supported by this handler.
     #[error("not supported: {0}")]
     Unsupported(String),
@@ -53,6 +56,15 @@ pub enum ControlError {
     Render(#[from] animathio_render::Error),
 }
 
+impl From<animathio_export::Error> for ControlError {
+    fn from(error: animathio_export::Error) -> Self {
+        match error {
+            animathio_export::Error::AlreadyExists(path) => Self::AlreadyExists(path),
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
 impl ControlError {
     /// JSON-RPC 2.0 error code for this failure.
     #[must_use]
@@ -71,6 +83,7 @@ impl ControlError {
             | Self::Plugin(_)
             | Self::Typeset(_)
             | Self::Render(_)
+            | Self::AlreadyExists(_)
             | Self::Other(_) => -32_000,
         }
     }

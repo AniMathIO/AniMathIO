@@ -96,6 +96,12 @@ as `render --time`; the end is exclusive and defaults to the project duration.
 `--fps` overrides the project frame rate (e.g. `30` or `30000/1001`); `--crf` is
 the H.264 constant-quality target (0–51, lower is better).
 
+Missing parent directories of `--output` are created. An existing file is never
+replaced silently: without `--overwrite` the command fails with an
+`already exists` error and leaves the file untouched. The MP4 is written to a
+temporary file in the destination directory and renamed into place only after a
+successful export, so a failed or interrupted run leaves no partial output.
+
 ```text
 Usage: animathio-cli export [OPTIONS] --output <OUTPUT> <PROJECT>
 
@@ -108,12 +114,14 @@ Options:
       --to <TO>      Exclusive end in decimal seconds or Nticks; defaults to project duration
       --fps <FPS>    Output rate, e.g. 30 or 30000/1001
       --crf <CRF>    Constant quality, 0..=51; lower is better [default: 23]
+      --overwrite    Replace an existing output file instead of failing
   -h, --help         Print help
 ```
 
 ```bash
 animathio-cli export sample.amio -o out.mp4
 animathio-cli export sample.amio -o clip.mp4 --from 1.0 --to 3.0 --fps 30000/1001 --crf 18
+animathio-cli export sample.amio -o renders/out.mp4 --overwrite
 ```
 
 ## `validate`
