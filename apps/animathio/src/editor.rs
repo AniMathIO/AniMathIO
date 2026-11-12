@@ -778,22 +778,15 @@ impl Editor {
             }
             EditTarget::PluginText { id, name } => {
                 let value = edit.buffer;
-                self.execute(
-                    &Command::SetPluginParam {
-                        id,
-                        name,
-                        value: Some(json!(value)),
-                    },
-                    cx,
-                );
+                self.execute(&self.plugin_param_command(id, name, json!(value)), cx);
             }
             EditTarget::PluginColor { id, name } => match parse_hex_color(edit.buffer.trim()) {
                 Some(color) => self.execute(
-                    &Command::SetPluginParam {
+                    &self.plugin_param_command(
                         id,
                         name,
-                        value: Some(json!([color[0], color[1], color[2], color[3]])),
-                    },
+                        json!([color[0], color[1], color[2], color[3]]),
+                    ),
                     cx,
                 ),
                 None => self.error = Some("invalid color (use #RRGGBB or #RRGGBBAA)".into()),
@@ -807,11 +800,7 @@ impl Editor {
                 let mut point = self.plugin_point_value(id, &name);
                 point[axis] = value as f32;
                 self.execute(
-                    &Command::SetPluginParam {
-                        id,
-                        name,
-                        value: Some(json!([point[0], point[1]])),
-                    },
+                    &self.plugin_param_command(id, name, json!([point[0], point[1]])),
                     cx,
                 );
             }
@@ -849,12 +838,9 @@ impl Editor {
     }
 
     fn plugin_number_value(&self, id: ClipId, name: &str) -> f64 {
-        let Some(clip) = self.find_clip(id) else {
-            return 0.0;
-        };
-        let target = Target::Param(name.to_owned());
-        let base = inspector::numeric_base(clip, &target);
-        inspector::sampled_numeric(clip, &target, self.position, base)
+        self.plugin_opaque(id, name)
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0)
     }
 
     fn editing_display(&self, target: &EditTarget) -> Option<String> {
@@ -877,12 +863,27 @@ impl Editor {
             .find(|model| model.id() == name)
     }
 
+    fn plugin_param_command(&self, id: ClipId, name: String, json: Value) -> Command {
+        let model = self
+            .plugin_model(id, &name)
+            .expect("plugin schema parameter");
+        let value = inspector::model_value(&model, Some(&json));
+        inspector::param_edit_command(
+            self.find_clip(id).expect("selected clip"),
+            name,
+            value,
+            self.position,
+        )
+    }
+
     fn plugin_opaque(&self, id: ClipId, name: &str) -> Option<Value> {
         let clip = self.find_clip(id)?;
         let ClipKind::Plugin { params, .. } = &clip.kind else {
             return None;
         };
-        params.get(name).cloned()
+        let model = self.plugin_model(id, name)?;
+        let base = inspector::model_value(&model, params.get(name));
+        Some(inspector::sampled_param(clip, name, self.position, base).to_plugin_json())
     }
 
     fn plugin_text_value(&self, id: ClipId, name: &str, default: &str) -> String {
@@ -1803,7 +1804,9 @@ impl Editor {
         let mut rows = Vec::new();
         for (name, value) in &clip.params {
             let field = Field::Param(name.clone());
-            rows.push(self.field_row(id, &field, name, *value, cx));
+            if let Some(value) = value.as_number() {
+                rows.push(self.field_row(id, &field, name, value, cx));
+            }
         }
         rows
     }
@@ -1828,11 +1831,7 @@ impl Editor {
 
     fn plugin_row(&self, id: ClipId, model: &ParamModel, cx: &mut Context<Self>) -> Div {
         let name = model.id().to_owned();
-        let diamond = if model.is_keyframeable() {
-            self.keyframe_diamond(id, Target::Param(name.clone()), cx)
-        } else {
-            div().w(px(14.)).h(px(14.)).id("no-keyframe")
-        };
+        let diamond = self.keyframe_diamond(id, Target::Param(name.clone()), cx);
         let control = match model {
             ParamModel::Number { .. } => self.plugin_number_control(id, name.clone(), cx),
             ParamModel::Color { default, .. } => self.plugin_color_control(
@@ -1853,11 +1852,9 @@ impl Editor {
             ParamModel::Point { default, .. } => {
                 self.plugin_point_control(id, name.clone(), *default, cx)
             }
-            ParamModel::Asset {
-                media_type,
-                default,
-                ..
-            } => self.plugin_asset_control(id, name.clone(), media_type, default, cx),
+            ParamModel::Asset { media_type, .. } => {
+                self.plugin_asset_control(id, name.clone(), media_type, cx)
+            }
         };
         div()
             .flex()
@@ -1896,7 +1893,23 @@ impl Editor {
         let Some(clip) = self.find_clip(id) else {
             return;
         };
-        let command = inspector::keyframe_toggle_command(clip, target, self.position);
+        let command = if let Target::Param(name) = &target
+            && let Some(model) = self.plugin_model(id, name)
+        {
+            let raw = if let ClipKind::Plugin { params, .. } = &clip.kind {
+                params.get(name)
+            } else {
+                None
+            };
+            inspector::param_toggle_command(
+                clip,
+                name.clone(),
+                self.position,
+                inspector::model_value(&model, raw),
+            )
+        } else {
+            inspector::keyframe_toggle_command(clip, target, self.position)
+        };
         self.execute(&command, cx);
     }
 
@@ -2125,11 +2138,7 @@ impl Editor {
             .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
                 let next = cycle_option(&options_for_click, &current);
                 this.execute(
-                    &Command::SetPluginParam {
-                        id,
-                        name: name.clone(),
-                        value: Some(json!(next)),
-                    },
+                    &this.plugin_param_command(id, name.clone(), json!(next)),
                     cx,
                 );
             }))
@@ -2150,11 +2159,7 @@ impl Editor {
             .id("plugin-bool")
             .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
                 this.execute(
-                    &Command::SetPluginParam {
-                        id,
-                        name: name.clone(),
-                        value: Some(json!(!value)),
-                    },
+                    &this.plugin_param_command(id, name.clone(), json!(!value)),
                     cx,
                 );
             }))
@@ -2210,11 +2215,11 @@ impl Editor {
                     .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
                         let next = cycle_color(color);
                         this.execute(
-                            &Command::SetPluginParam {
+                            &this.plugin_param_command(
                                 id,
-                                name: name_for_click.clone(),
-                                value: Some(json!([next[0], next[1], next[2], next[3]])),
-                            },
+                                name_for_click.clone(),
+                                json!([next[0], next[1], next[2], next[3]]),
+                            ),
                             cx,
                         );
                     })),
@@ -2279,12 +2284,9 @@ impl Editor {
         id: ClipId,
         name: String,
         media_type: &str,
-        default: &Option<String>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let current = self
-            .plugin_asset_value(id, &name)
-            .or_else(|| default.clone());
+        let current = self.plugin_asset_value(id, &name);
         let label = current.as_ref().map_or_else(
             || "none".to_owned(),
             |asset| {
@@ -2310,11 +2312,11 @@ impl Editor {
                     .or_else(|| ids.first())
                     .cloned();
                 this.execute(
-                    &Command::SetPluginParam {
+                    &this.plugin_param_command(
                         id,
-                        name: name.clone(),
-                        value: Some(next.map_or(Value::Null, |asset| json!(asset.as_str()))),
-                    },
+                        name.clone(),
+                        next.map_or(Value::Null, |asset| json!(asset.as_str())),
+                    ),
                     cx,
                 );
             }))
@@ -2822,7 +2824,11 @@ fn field_value(clip: &Clip, field: &Field) -> f64 {
             TransformProperty::Rotation => clip.transform.rotation,
             TransformProperty::Opacity => clip.transform.opacity,
         },
-        Field::Param(name) => clip.params.get(name).copied().unwrap_or(0.0),
+        Field::Param(name) => clip
+            .params
+            .get(name)
+            .and_then(animathio_core::ParamValue::as_number)
+            .unwrap_or(0.0),
     }
 }
 
@@ -3031,7 +3037,7 @@ fn parse_fps(value: &str) -> Result<FrameRate, String> {
     FrameRate::new(numerator.max(1), denominator).map_err(|e| e.0)
 }
 
-fn color_from_json(value: &Value) -> Option<[u8; 4]> {
+pub(crate) fn color_from_json(value: &Value) -> Option<[u8; 4]> {
     if let Some(array) = value.as_array()
         && array.len() >= 3
     {
@@ -3053,7 +3059,7 @@ fn color_from_json(value: &Value) -> Option<[u8; 4]> {
     None
 }
 
-fn point_from_json(value: &Value) -> Option<[f32; 2]> {
+pub(crate) fn point_from_json(value: &Value) -> Option<[f32; 2]> {
     if let Some(array) = value.as_array()
         && array.len() >= 2
     {

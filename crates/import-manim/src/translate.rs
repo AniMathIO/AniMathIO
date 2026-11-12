@@ -1103,7 +1103,7 @@ fn build_project(
             range: TimeRange::new(start_ticks, end_ticks)?,
             source_offset: Time(0),
             transform: mob_transform(mob),
-            params,
+            params: params.into_iter().map(|(k, v)| (k, v.into())).collect(),
             effects: Vec::new(),
             animations: Vec::new(),
         };
@@ -1120,7 +1120,7 @@ fn build_project(
                 target: event.target.clone(),
                 time: secs_to_ticks(local_seconds),
                 keyframe: Keyframe {
-                    value: event.value,
+                    value: event.value.into(),
                     interpolation: event.interp,
                 },
             }

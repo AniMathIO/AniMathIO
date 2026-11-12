@@ -257,3 +257,19 @@ proptest! {
         prop_assert_eq!(bundle.assets, assets);
     }
 }
+
+#[test]
+fn legacy_numeric_parameters_and_keyframes_load_as_typed_numbers() {
+    let project =
+        read_json(include_bytes!("fixtures/legacy-numeric-keyframes.json").as_slice()).unwrap();
+    let clip = &project.tracks()[0].clips()[&ClipId(1)];
+    assert_eq!(clip.params["gain"], ParamValue::Number(0.25));
+    let scene = evaluate(&project, Time(40));
+    assert_eq!(scene.clips[0].params["gain"], ParamValue::Number(0.5));
+    assert!((scene.clips[0].transform.x - 0.5).abs() < f64::EPSILON);
+    assert_eq!(read_json(json_bytes(&project).as_slice()).unwrap(), project);
+    let ClipKind::Plugin { params, .. } = &clip.kind else {
+        panic!("plugin preserved")
+    };
+    assert_eq!(params["unknown"], json!(["preserve", true]));
+}

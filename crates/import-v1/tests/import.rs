@@ -223,7 +223,10 @@ fn imports_every_element_type_and_maps_values() {
     // Video: media type from the data URL, mute + effect, fade-in keys.
     let video_clip = &clips[0].1;
     assert_eq!(video_clip.kind, ClipKind::Video(video_asset.clone()));
-    assert_eq!(video_clip.params["muted"], 1.0);
+    assert_eq!(
+        video_clip.params["muted"],
+        animathio_core::ParamValue::Number(1.0)
+    );
     assert_eq!(
         video_clip.effects,
         vec![EffectInstance::new(EffectId(1), EffectKind::Sepia)]
@@ -247,8 +250,14 @@ fn imports_every_element_type_and_maps_values() {
     // Audio: gain/mute params and track gain from masterVolume.
     let audio_clip = &clips[1].1;
     assert_eq!(audio_clip.kind, ClipKind::Audio(wav_asset.clone()));
-    assert_eq!(audio_clip.params["gain"], 0.5);
-    assert_eq!(audio_clip.params["muted"], 0.0);
+    assert_eq!(
+        audio_clip.params["gain"],
+        animathio_core::ParamValue::Number(0.5)
+    );
+    assert_eq!(
+        audio_clip.params["muted"],
+        animathio_core::ParamValue::Number(0.0)
+    );
     let audio_track = project
         .tracks()
         .iter()
@@ -285,7 +294,10 @@ fn imports_every_element_type_and_maps_values() {
     // Mafs: static PNG image with the mafs marker and effect.
     let mafs_clip = &clips[4].1;
     assert_eq!(mafs_clip.kind, ClipKind::Image(png_asset.clone()));
-    assert_eq!(mafs_clip.params["v1.mafs"], 1.0);
+    assert_eq!(
+        mafs_clip.params["v1.mafs"],
+        animathio_core::ParamValue::Number(1.0)
+    );
     assert_eq!(
         mafs_clip.effects,
         vec![EffectInstance::new(EffectId(1), EffectKind::Invert)]
