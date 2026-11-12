@@ -2,16 +2,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use animathio_core::{AssetId, Project, Time, evaluate};
+use animathio_core::{AssetId, Scene};
 use animathio_render::{CpuBackend, PlaceholderFrameSource, RenderCtx, render};
 use gpui::RenderImage;
 
-/// One immutable frame job. Sending the project snapshot keeps the worker free of
-/// any shared mutable state with the UI thread.
+/// One immutable frame job. The UI thread evaluates and resolves the scene (running
+/// plugin clips through the plugin host) so the worker stays free of any mutable
+/// runtime state beyond its render resources.
 pub(crate) struct RenderRequest {
     pub(crate) generation: u64,
-    pub(crate) project: Project,
-    pub(crate) time: Time,
+    pub(crate) scene: Scene,
     pub(crate) size: (u32, u32),
 }
 
@@ -94,8 +94,7 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
 }
 
 fn render_image(ctx: &mut RenderCtx, request: &RenderRequest) -> Option<Arc<RenderImage>> {
-    let scene = evaluate(&request.project, request.time);
-    let frame = render(&scene, ctx, request.size).ok()?;
+    let frame = render(&request.scene, ctx, request.size).ok()?;
     let mut pixels = frame.pixels;
     // GPUI's RenderImage path expects BGRA bytes despite image::RgbaImage's name.
     for pixel in pixels.as_chunks_mut::<4>().0 {

@@ -696,3 +696,87 @@ fn track_gain_is_validated_reversible_and_defaults_for_old_projects() {
     let decoded: Project = serde_json::from_value(json).unwrap();
     assert_eq!(decoded, original);
 }
+
+#[test]
+fn move_keyframe_is_reversible_and_rejects_occupied_destinations() {
+    let mut project = animated();
+    let original = project.clone();
+    let target = Target::Param("gain".into());
+
+    let inverse = Command::MoveKeyframe {
+        id: ClipId(0),
+        target: target.clone(),
+        from: Time(0),
+        to: Time(50),
+    }
+    .apply(&mut project)
+    .unwrap();
+    // The keyframe moved and the old slot is free.
+    let clip = project.tracks()[0].clips()[&ClipId(0)].clone();
+    let animation = clip.animations.iter().find(|a| a.target == target).unwrap();
+    assert!(!animation.keys.keys().contains_key(&Time(0)));
+    assert!(animation.keys.keys().contains_key(&Time(50)));
+
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+
+    // Destination collision and same-time moves are rejected atomically.
+    for command in [
+        Command::MoveKeyframe {
+            id: ClipId(0),
+            target: target.clone(),
+            from: Time(0),
+            to: Time(100),
+        },
+        Command::MoveKeyframe {
+            id: ClipId(0),
+            target: target.clone(),
+            from: Time(0),
+            to: Time(0),
+        },
+        Command::MoveKeyframe {
+            id: ClipId(0),
+            target: target.clone(),
+            from: Time(0),
+            to: Time(-1),
+        },
+    ] {
+        let before = project.clone();
+        assert!(command.apply(&mut project).is_err(), "{command:?}");
+        assert_eq!(project, before);
+    }
+}
+
+#[test]
+fn set_plugin_param_updates_opaque_json_and_is_reversible() {
+    let mut project = base();
+    let original = project.clone();
+    let value = json!({ "text": "hello", "align": "center" });
+
+    let inverse = Command::SetPluginParam {
+        id: ClipId(0),
+        name: "opaque".into(),
+        value: Some(value.clone()),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let clip = project.tracks()[0].clips()[&ClipId(0)].clone();
+    match &clip.kind {
+        ClipKind::Plugin { params, .. } => assert_eq!(params["opaque"], value),
+        other => panic!("expected plugin clip, got {other:?}"),
+    }
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+
+    // Removing an absent key is a reversible no-op, matching `SetParam`.
+    let inverse = Command::SetPluginParam {
+        id: ClipId(0),
+        name: "missing".into(),
+        value: None,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(project, original);
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+}

@@ -115,6 +115,8 @@ dependencies = [
  "animathio-core",
  "animathio-format",
  "animathio-import-v1",
+ "animathio-plugin-api",
+ "animathio-plugin-host",
  "animathio-render",
  "base64",
  "directories",
