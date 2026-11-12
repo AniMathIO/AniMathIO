@@ -306,6 +306,9 @@ fn bind_listener(path: &Path) -> io::Result<LocalSocketListener> {
                     "another editor already owns the control socket",
                 ));
             }
+            // Windows named pipes have no filesystem entry to clean up, so
+            // stale-socket removal is a Unix-only concept.
+            #[cfg(unix)]
             remove_stale_socket(path)?;
             ListenerOptions::new().name(name).create_sync()
         }
@@ -329,19 +332,12 @@ pub(crate) fn local_name(path: &Path) -> io::Result<Name<'static>> {
     }
 }
 
+#[cfg(unix)]
 fn remove_stale_socket(path: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
-    }
-    #[cfg(windows)]
-    {
-        let _ = path;
-        Ok(())
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 

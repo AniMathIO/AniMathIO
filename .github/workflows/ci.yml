@@ -9,6 +9,8 @@ permissions:
 jobs:
   check:
     strategy:
+      # Run both OSes to completion so a failure on one never hides the other.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -19,14 +21,37 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install Linux development headers
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb-dev \
+            libxcb-randr0-dev \
+            libxcb-render0-dev \
+            libxcb-xinput-dev \
+            libxcb-sync-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Install wasm32-wasip2 target
         run: rustup target add wasm32-wasip2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: .
       - name: Build plugins
         if: runner.os == 'Linux'
         run: ./scripts/build-plugins.sh
+      - name: Build plugin authoring example
+        run: cargo build --manifest-path plugins/examples/hello/Cargo.toml --target wasm32-wasip2 --release --locked
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Clippy
