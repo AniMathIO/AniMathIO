@@ -43,7 +43,7 @@ pub struct SocketSpec {
 
 /// The well-known per-user socket location.
 pub fn default_socket_spec() -> io::Result<SocketSpec> {
-    let dir = runtime_dir();
+    let dir = runtime_dir()?;
     ensure_runtime_dir(&dir)?;
     Ok(SocketSpec {
         path: dir.join("animathio-control.sock"),
@@ -346,28 +346,81 @@ fn remove_stale_socket(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|value| !value.is_empty())
-        .map_or_else(std::env::temp_dir, PathBuf::from)
-        .join("animathio")
+fn runtime_dir() -> io::Result<PathBuf> {
+    let base = directories::BaseDirs::new().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no per-user home directory available for the control socket",
+        )
+    })?;
+    // Prefer the per-user runtime directory; never fall back to a shared
+    // world-writable /tmp. `ensure_runtime_dir` verifies the result is private.
+    if let Some(runtime) = base.runtime_dir() {
+        return Ok(runtime.join("animathio"));
+    }
+    Ok(base.cache_dir().join("animathio").join("run"))
 }
 
 #[cfg(windows)]
-fn runtime_dir() -> PathBuf {
-    std::env::temp_dir().join("animathio")
+fn runtime_dir() -> io::Result<PathBuf> {
+    let base = directories::BaseDirs::new().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no local app data directory available for the control socket",
+        )
+    })?;
+    Ok(base.data_local_dir().join("animathio"))
 }
 
+#[cfg(unix)]
 fn ensure_runtime_dir(dir: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        let mut builder = fs::DirBuilder::new();
-        builder.recursive(true).mode(0o700);
-        builder.create(dir)
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true).mode(0o700);
+    builder.create(dir)?;
+
+    let meta = fs::symlink_metadata(dir)?;
+    if meta.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "control socket directory {} is a symlink; refusing to use it",
+                dir.display()
+            ),
+        ));
     }
-    #[cfg(windows)]
-    {
-        fs::create_dir_all(dir)
+    if !meta.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("control socket path {} is not a directory", dir.display()),
+        ));
     }
+    let uid = rustix::process::getuid().as_raw();
+    if meta.uid() != uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "control socket directory {} is owned by uid {}, not {uid}",
+                dir.display(),
+                meta.uid()
+            ),
+        ));
+    }
+    if meta.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "control socket directory {} has mode {:o}; it must be private (0700)",
+                dir.display(),
+                meta.mode() & 0o7777
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn ensure_runtime_dir(dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)
 }

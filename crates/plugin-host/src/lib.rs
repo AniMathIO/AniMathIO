@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -252,16 +253,55 @@ pub struct LoadedPlugin {
 }
 
 /// Disk cache for compiled WebAssembly components.
+///
+/// A compiled component contains native machine code, so an entry is only
+/// deserialized after its BLAKE3 keyed MAC is verified against a per-install
+/// 32-byte secret stored in the cache directory. On Unix the cache directory
+/// itself must be a private (`0700`, current-uid, non-symlink) directory; if
+/// it is not, the disk cache is disabled and components are compiled fresh on
+/// every load.
 pub struct ComponentDiskCache {
     cache_dir: PathBuf,
+    /// `None` disables the disk cache (unsafe directory or unavailable key).
+    secret: Option<[u8; 32]>,
 }
 
 impl ComponentDiskCache {
-    /// Initialize or create a cache directory.
+    /// Initialize or create a cache directory, loading or generating the MAC key.
+    ///
+    /// If the cache directory cannot be made private (Unix) or the key cannot
+    /// be loaded or created, the cache is disabled and every lookup recompiles.
     pub fn new(cache_dir: impl Into<PathBuf>) -> Self {
         let dir = cache_dir.into();
-        let _ = fs::create_dir_all(&dir);
-        Self { cache_dir: dir }
+        if let Err(error) = prepare_cache_dir(&dir) {
+            log::warn!("disabling plugin disk cache {}: {error}", dir.display());
+            return Self {
+                cache_dir: dir,
+                secret: None,
+            };
+        }
+        match load_or_create_secret(&dir) {
+            Some(secret) => Self {
+                cache_dir: dir,
+                secret: Some(secret),
+            },
+            None => {
+                log::warn!(
+                    "disabling plugin disk cache {}: could not load or create MAC key",
+                    dir.display()
+                );
+                Self {
+                    cache_dir: dir,
+                    secret: None,
+                }
+            }
+        }
+    }
+
+    /// Whether the disk cache is usable.
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        self.secret.is_some()
     }
 
     /// Compute disk cache key from wasm hash and wasmtime engine version.
@@ -282,27 +322,201 @@ impl ComponentDiskCache {
         let key = Self::cache_key(wasm_bytes);
         let cache_file = self.cache_dir.join(format!("{key}.bin"));
 
-        if cache_file.exists()
-            && let Ok(bytes) = fs::read(&cache_file)
-            && let Ok(comp) = unsafe { Component::deserialize(engine, &bytes) }
+        if let Some(secret) = &self.secret
+            && let Some(bytes) = read_verified_entry(secret, &cache_file)
         {
-            return Ok(comp);
+            // SAFETY: `bytes` is a serialized component whose 32-byte keyed
+            // BLAKE3 MAC was verified in constant time against our per-install
+            // secret. On Unix the cache directory was also verified to be
+            // private, so an attacker cannot have forged the entry.
+            if let Ok(component) = unsafe { Component::deserialize(engine, &bytes) } {
+                return Ok(component);
+            }
+            let _ = fs::remove_file(&cache_file);
         }
 
         let component = Component::from_binary(engine, wasm_bytes)
             .map_err(|e| HostError::CompilationFailed(e.to_string()))?;
 
-        if let Ok(serialized) = component.serialize() {
-            let tmp_file = self
-                .cache_dir
-                .join(format!(".tmp_{key}_{}", std::process::id()));
-            if fs::write(&tmp_file, &serialized).is_ok() {
-                let _ = fs::rename(&tmp_file, &cache_file);
-            }
+        if let Some(secret) = &self.secret
+            && let Ok(serialized) = component.serialize()
+            && let Err(error) =
+                write_verified_entry(&self.cache_dir, &cache_file, secret, &serialized)
+        {
+            log::warn!(
+                "failed to write plugin cache entry {}: {error}",
+                cache_file.display()
+            );
         }
 
         Ok(component)
     }
+}
+
+#[cfg(unix)]
+fn current_uid() -> u32 {
+    rustix::process::getuid().as_raw()
+}
+
+#[cfg(unix)]
+fn prepare_cache_dir(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true).mode(0o700);
+    builder.create(dir)?;
+    verify_private_cache_dir(dir)
+}
+
+#[cfg(windows)]
+fn prepare_cache_dir(dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)
+}
+
+#[cfg(unix)]
+fn verify_private_cache_dir(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::symlink_metadata(dir)?;
+    if meta.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "cache directory is a symlink",
+        ));
+    }
+    if !meta.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cache path is not a directory",
+        ));
+    }
+    let uid = current_uid();
+    if meta.uid() != uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("cache directory is owned by uid {}, not {uid}", meta.uid()),
+        ));
+    }
+    if meta.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "cache directory permissions {:o} allow group or other access",
+                meta.mode() & 0o7777
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn load_or_create_secret(dir: &Path) -> Option<[u8; 32]> {
+    let key_path = dir.join("key");
+    if let Some(secret) = read_secret(&key_path) {
+        return Some(secret);
+    }
+    remove_key_file(&key_path);
+    write_secret(&key_path)
+}
+
+fn remove_key_file(path: &Path) {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() || meta.file_type().is_symlink() => {
+            let _ = fs::remove_file(path);
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => {}
+    }
+}
+
+fn read_secret(path: &Path) -> Option<[u8; 32]> {
+    let file = open_secret(path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if meta.uid() != current_uid() || meta.mode() & 0o077 != 0 {
+            return None;
+        }
+    }
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    file.take(33).read_to_end(&mut bytes).ok()?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut secret = [0_u8; 32];
+    secret.copy_from_slice(&bytes);
+    Some(secret)
+}
+
+fn open_secret(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed());
+    }
+    options.open(path)
+}
+
+fn write_secret(path: &Path) -> Option<[u8; 32]> {
+    let mut secret = [0_u8; 32];
+    getrandom::fill(&mut secret).ok()?;
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed());
+    }
+    let mut file = options.open(path).ok()?;
+    use std::io::Write;
+    file.write_all(&secret).ok()?;
+    file.flush().ok()?;
+    Some(secret)
+}
+
+fn read_verified_entry(secret: &[u8; 32], path: &Path) -> Option<Vec<u8>> {
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() <= 32 {
+        let _ = fs::remove_file(path);
+        return None;
+    }
+    let (mac, serialized) = bytes.split_at(32);
+    let Ok(stored) = blake3::Hash::from_slice(mac) else {
+        let _ = fs::remove_file(path);
+        return None;
+    };
+    let expected = blake3::keyed_hash(secret, serialized);
+    if stored == expected {
+        Some(serialized.to_vec())
+    } else {
+        let _ = fs::remove_file(path);
+        None
+    }
+}
+
+fn write_verified_entry(
+    dir: &Path,
+    path: &Path,
+    secret: &[u8; 32],
+    serialized: &[u8],
+) -> io::Result<()> {
+    use std::io::Write;
+    let mac = blake3::keyed_hash(secret, serialized);
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(mac.as_bytes())?;
+    tmp.write_all(serialized)?;
+    tmp.flush()?;
+    // Atomic rename; replaces any existing entry (including a symlink) without
+    // following it.
+    tmp.persist(path).map_err(|error| error.error)?;
+    Ok(())
 }
 
 /// Central registry managing plugin loading, sandboxing, output caching and scene resolution.
@@ -1257,5 +1471,120 @@ mod tests {
         );
         assert!(svg.len() > MAX_SVG_INPUT_BYTES);
         assert!(parse_svg_to_paths(&svg, MAX_SVG_VERBS).is_empty());
+    }
+
+    fn component_engine() -> Engine {
+        let mut config = Config::new();
+        config.wasm_component_model(true);
+        Engine::new(&config).unwrap()
+    }
+
+    fn empty_component() -> Vec<u8> {
+        wat::parse_str("(component)").unwrap()
+    }
+
+    fn private_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn tampered_cache_entry_is_rejected_and_recompiled() {
+        let tmp = private_dir();
+        let cache = ComponentDiskCache::new(tmp.path());
+        assert!(cache.is_enabled());
+
+        let engine = component_engine();
+        let wasm = empty_component();
+        let entry = tmp
+            .path()
+            .join(format!("{}.bin", ComponentDiskCache::cache_key(&wasm)));
+
+        cache.get_or_compile(&engine, &wasm).unwrap();
+        assert!(entry.exists());
+
+        // Flip one byte of the serialized payload without updating the MAC.
+        let mut tampered = fs::read(&entry).unwrap();
+        *tampered.last_mut().unwrap() ^= 0xff;
+        fs::write(&entry, &tampered).unwrap();
+
+        // The tampered entry must not be deserialized; it is recompiled and
+        // replaced with a freshly MAC'd entry.
+        cache.get_or_compile(&engine, &wasm).unwrap();
+        let rewritten = fs::read(&entry).unwrap();
+        assert_ne!(rewritten, tampered);
+
+        let secret = read_secret(&tmp.path().join("key")).unwrap();
+        assert!(read_verified_entry(&secret, &entry).is_some());
+    }
+
+    #[test]
+    fn missing_or_invalid_key_is_regenerated() {
+        let tmp = private_dir();
+        let key_path = tmp.path().join("key");
+
+        // A missing key is generated on first use.
+        let cache = ComponentDiskCache::new(tmp.path());
+        assert!(cache.is_enabled());
+        let first = read_secret(&key_path).unwrap();
+        assert_eq!(first.len(), 32);
+
+        // An invalid (truncated) key is replaced with a fresh 32-byte key.
+        fs::write(&key_path, b"short").unwrap();
+        let cache = ComponentDiskCache::new(tmp.path());
+        assert!(cache.is_enabled());
+        let regenerated = read_secret(&key_path).unwrap();
+        assert_eq!(regenerated.len(), 32);
+        assert_ne!(regenerated, first);
+
+        // The regenerated key still protects entries end-to-end.
+        let engine = component_engine();
+        let wasm = empty_component();
+        cache.get_or_compile(&engine, &wasm).unwrap();
+        let entry = tmp
+            .path()
+            .join(format!("{}.bin", ComponentDiskCache::cache_key(&wasm)));
+        assert!(read_verified_entry(&regenerated, &entry).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn group_or_world_writable_cache_dir_disables_cache() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o777)).unwrap();
+
+        let cache = ComponentDiskCache::new(tmp.path());
+        assert!(!cache.is_enabled());
+
+        // The unsafe directory is never written to; components still compile.
+        let engine = component_engine();
+        let wasm = empty_component();
+        cache.get_or_compile(&engine, &wasm).unwrap();
+        let entry = tmp
+            .path()
+            .join(format!("{}.bin", ComponentDiskCache::cache_key(&wasm)));
+        assert!(!entry.exists());
+        assert!(!tmp.path().join("key").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_cache_dir_is_refused() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real");
+        fs::create_dir(&real).unwrap();
+        let link = base.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let cache = ComponentDiskCache::new(&link);
+        assert!(!cache.is_enabled());
+        assert!(!real.join("key").exists());
     }
 }
