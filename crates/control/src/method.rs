@@ -81,6 +81,117 @@ pub struct TrackInfo {
     pub clips: Vec<ClipInfo>,
 }
 
+/// Arguments for `math.add`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MathAddParams {
+    /// LaTeX source, validated up front when a typeset engine is available.
+    pub latex: String,
+    /// Typeset mode: `latex` or `typst`.
+    #[serde(default = "default_math_mode")]
+    pub mode: String,
+    /// Font size in canvas pixels.
+    #[serde(default = "default_math_size")]
+    pub size: f64,
+    /// Straight-alpha sRGB color; defaults to opaque white.
+    pub color: Option<[u8; 4]>,
+    /// Horizontal position as a canvas fraction; defaults to centred.
+    pub x: Option<f64>,
+    /// Vertical position as a canvas fraction; defaults to centred.
+    pub y: Option<f64>,
+    /// Inclusive timeline start in ticks.
+    #[serde(default)]
+    pub start: Time,
+    /// Clip duration in ticks; `None` derives from the project.
+    pub duration: Option<Time>,
+    /// Write-style reveal: animate `reveal` from 0 to 1 over this many ticks.
+    pub reveal_duration: Option<Time>,
+}
+
+fn default_math_mode() -> String {
+    "latex".to_owned()
+}
+
+fn default_math_size() -> f64 {
+    48.0
+}
+
+/// Arguments for `graph.add`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GraphAddParams {
+    /// Lower x bound.
+    pub x_min: Option<f64>,
+    /// Upper x bound.
+    pub x_max: Option<f64>,
+    /// Lower y bound.
+    pub y_min: Option<f64>,
+    /// Upper y bound.
+    pub y_max: Option<f64>,
+    /// Newline-separated graph items, e.g. `plot y=x^2`.
+    #[serde(default = "default_graph_items")]
+    pub items: String,
+    /// Draw the coordinate grid.
+    pub show_grid: Option<bool>,
+    /// Draw the axes.
+    pub show_axes: Option<bool>,
+    /// Draw numeric labels.
+    pub show_labels: Option<bool>,
+    /// Straight-alpha sRGB color; defaults to the plugin's blue.
+    pub color: Option<[u8; 4]>,
+    /// Horizontal position as a canvas fraction; defaults to centred.
+    pub x: Option<f64>,
+    /// Vertical position as a canvas fraction; defaults to centred.
+    pub y: Option<f64>,
+    /// Inclusive timeline start in ticks.
+    #[serde(default)]
+    pub start: Time,
+    /// Clip duration in ticks; `None` derives from the project.
+    pub duration: Option<Time>,
+    /// Draw animation: animate `draw` from 0 to 1 over this many ticks.
+    pub draw_duration: Option<Time>,
+}
+
+fn default_graph_items() -> String {
+    "plot y=x^2".to_owned()
+}
+
+/// Identity of a newly added plugin clip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClipAdded {
+    /// Destination layer identity.
+    pub track_id: TrackId,
+    /// New clip identity.
+    pub clip_id: ClipId,
+}
+
+/// Arguments for `import.manim`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportManimParams {
+    /// Script file path; exclusive with `source`.
+    pub path: Option<PathBuf>,
+    /// Inline script source; exclusive with `path`.
+    pub source: Option<String>,
+    /// Directory used to resolve embedded files; defaults to the script's parent.
+    pub script_dir: Option<PathBuf>,
+    /// Scene class name; defaults to the first `Scene` subclass.
+    pub scene: Option<String>,
+    /// Replace the current project instead of appending to it.
+    #[serde(default)]
+    pub replace: bool,
+}
+
+/// Result of `import.manim`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportManimResult {
+    /// Number of imported layers.
+    pub tracks: usize,
+    /// Number of embedded assets.
+    pub assets: usize,
+    /// Non-fatal warnings, each formatted as `line:column: message (snippet)`.
+    pub warnings: Vec<String>,
+    /// Embedded-file and other informational entries.
+    pub infos: Vec<String>,
+}
+
 /// One clip of the timeline summary.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClipInfo {
@@ -162,6 +273,24 @@ pub enum Call {
     ProjectImportV1 {
         /// v1 project path.
         path: PathBuf,
+    },
+    /// Add a LaTeX plugin clip.
+    #[serde(rename = "math.add")]
+    MathAdd {
+        /// Clip parameters.
+        params: MathAddParams,
+    },
+    /// Add a graph plugin clip.
+    #[serde(rename = "graph.add")]
+    GraphAdd {
+        /// Clip parameters.
+        params: GraphAddParams,
+    },
+    /// Import a Manim scene, appending to or replacing the current project.
+    #[serde(rename = "import.manim")]
+    ImportManim {
+        /// Import parameters.
+        params: ImportManimParams,
     },
 }
 

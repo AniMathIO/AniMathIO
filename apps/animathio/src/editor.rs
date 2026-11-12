@@ -475,6 +475,16 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(())?
             }
+            Call::MathAdd { .. } | Call::GraphAdd { .. } => {
+                return Err(ControlError::Unsupported(
+                    "math/graph clips are only available in headless mode".to_owned(),
+                ));
+            }
+            Call::ImportManim { .. } => {
+                return Err(ControlError::Unsupported(
+                    "manim import is only available in headless mode".to_owned(),
+                ));
+            }
         })
     }
 
