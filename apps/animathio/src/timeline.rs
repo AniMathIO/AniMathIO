@@ -113,6 +113,42 @@ pub(crate) fn snap_start(
     best
 }
 
+/// Map a drop onto a track to a clip start time: the canvas x is converted to
+/// a tick, then optionally snapped to the playhead and every existing clip
+/// edge. Unlike [`snap_start`] there is no clip to exclude, since the dropped
+/// clip is new.
+#[allow(dead_code)] // Exercised by tests; media-pool drag wiring is deferred.
+pub(crate) fn drop_start(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    playhead: Time,
+    snap: bool,
+) -> Time {
+    let candidate = x_to_time(layout, x);
+    if !snap {
+        return candidate;
+    }
+    let threshold = snap_threshold_ticks(layout);
+    let mut best = candidate;
+    let mut best_distance = i64::MAX;
+    let mut consider = |edge: Time| {
+        let distance = (edge.0 - candidate.0).abs();
+        if distance <= threshold && distance < best_distance {
+            best = edge;
+            best_distance = distance;
+        }
+    };
+    consider(playhead);
+    for track in project.tracks() {
+        for clip in track.clips().values() {
+            consider(clip.range.start);
+            consider(clip.range.end);
+        }
+    }
+    best
+}
+
 /// A trim handle at a clip's left or right edge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TrimEdge {
@@ -317,6 +353,38 @@ mod tests {
         assert_eq!(
             snap_start(&layout, &project, ClipId(10), playhead, far),
             far
+        );
+    }
+
+    #[test]
+    fn drop_start_snaps_to_playhead_and_clip_edges_or_keeps_candidate() {
+        let mut project = sample_project();
+        Command::TrimClip {
+            id: ClipId(10),
+            range: TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+            source_offset: Time(0),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let layout = TimelineLayout::zoomed(1000.0, 24.0, 40.0, TICKS_PER_SECOND * 3, 1.0, 0.0);
+        let playhead = Time(TICKS_PER_SECOND / 2);
+        // A drop near the clip's end edge (1s) snaps to it.
+        let edge_x = time_to_x(&layout, Time(TICKS_PER_SECOND - snap_tick(&layout) / 2));
+        assert_eq!(
+            drop_start(&layout, &project, edge_x, playhead, true),
+            Time(TICKS_PER_SECOND)
+        );
+        // A drop near the playhead snaps there.
+        let head_x = time_to_x(&layout, Time(playhead.0 - snap_tick(&layout) / 2));
+        assert_eq!(
+            drop_start(&layout, &project, head_x, playhead, true),
+            playhead
+        );
+        // With snapping off the raw tick under the pointer is used.
+        let raw_x = 250.0;
+        assert_eq!(
+            drop_start(&layout, &project, raw_x, playhead, false),
+            x_to_time(&layout, raw_x)
         );
     }
 }

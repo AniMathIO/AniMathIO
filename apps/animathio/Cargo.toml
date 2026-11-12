@@ -19,8 +19,11 @@ animathio-plugin-host = { path = "../../crates/plugin-host" }
 base64 = "0.22"
 directories = "6"
 gpui.workspace = true
+gpui-component.workspace = true
+gpui-platform.workspace = true
 image = { version = "0.25", default-features = false }
 rfd.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [lints]
