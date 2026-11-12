@@ -1,7 +1,11 @@
-//! Deterministic, GPU-free rendering of evaluated scenes.
+//! Rendering of evaluated scenes. The deterministic, GPU-free CPU backend is the
+//! reference for tests and export; the optional `gpu` feature adds a Vello/wgpu
+//! backend for interactive preview.
 //! Media bytes and decoded images live in `RenderCtx`, never in the project.
 mod cpu;
 pub mod effects;
+#[cfg(feature = "gpu")]
+mod gpu;
 pub mod sample;
 mod transition;
 
@@ -14,6 +18,8 @@ use std::{
 };
 
 pub use cpu::CpuBackend;
+#[cfg(feature = "gpu")]
+pub use gpu::GpuBackend;
 
 /// Output dimensions in pixels. The prototype limits frames to 32 megapixels.
 pub type Size = (u32, u32);
@@ -84,6 +90,9 @@ pub enum Error {
     /// A clip effect could not be applied.
     #[error("effect error: {0}")]
     Effect(String),
+    /// No usable GPU adapter/device, or a GPU render failed. Callers fall back to CPU.
+    #[error("GPU backend unavailable: {0}")]
+    Gpu(String),
 }
 
 pub(crate) fn check_size(size: Size) -> Result<(u16, u16), Error> {
@@ -219,7 +228,7 @@ impl FrameSource for AssetFrameSource {
     }
 }
 
-/// Small domain-only seam for a future wgpu/vello backend.
+/// Small domain-only seam shared by the CPU reference and GPU preview backends.
 pub trait Backend {
     /// Render back-to-front clips, resolving resources through the engine pool.
     fn render(
@@ -269,6 +278,12 @@ impl RenderCtx {
         Ok(ctx)
     }
 
+    /// Swap the rendering backend, keeping resources and video decoders.
+    /// Returns the previous backend.
+    pub fn set_backend(&mut self, backend: Box<dyn Backend>) -> Box<dyn Backend> {
+        std::mem::replace(&mut self.backend, backend)
+    }
+
     /// Select an adapter and video source without changing project data.
     #[must_use]
     pub fn new(backend: impl Backend + 'static, video: impl FrameSource + 'static) -> Self {
@@ -286,4 +301,112 @@ pub fn render(scene: &Scene, ctx: &mut RenderCtx, size: Size) -> Result<Frame, E
     check_size(size)?;
     ctx.backend
         .render(scene, &mut ctx.resources, ctx.video.as_mut(), size)
+}
+
+/// Which backend renders frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackendKind {
+    /// Deterministic Vello CPU reference.
+    Cpu,
+    /// Vello on wgpu; preview only.
+    Gpu,
+}
+impl BackendKind {
+    /// Parse an `ANIMATHIO_RENDER` value (`cpu` or `gpu`, case-insensitive).
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "cpu" => Some(Self::Cpu),
+            "gpu" => Some(Self::Gpu),
+            _ => None,
+        }
+    }
+}
+
+/// Outcome of backend selection.
+pub struct SelectedBackend {
+    /// The backend to render with.
+    pub backend: Box<dyn Backend>,
+    /// What was actually selected.
+    pub kind: BackendKind,
+    /// Why a GPU request fell back to CPU, if it did.
+    pub fallback: Option<Error>,
+}
+
+/// Use the GPU when requested and `make_gpu` succeeds; otherwise fall back to CPU and
+/// report why.
+pub fn select_backend<B: Backend + 'static>(
+    requested: BackendKind,
+    make_gpu: impl FnOnce() -> Result<B, Error>,
+) -> SelectedBackend {
+    let cpu = |fallback| SelectedBackend {
+        backend: Box::new(CpuBackend::default()),
+        kind: BackendKind::Cpu,
+        fallback,
+    };
+    match requested {
+        BackendKind::Cpu => cpu(None),
+        BackendKind::Gpu => match make_gpu() {
+            Ok(gpu) => SelectedBackend {
+                backend: Box::new(gpu),
+                kind: BackendKind::Gpu,
+                fallback: None,
+            },
+            Err(error) => cpu(Some(error)),
+        },
+    }
+}
+
+/// Preview backend selection with the real [`GpuBackend`].
+#[cfg(feature = "gpu")]
+#[must_use]
+pub fn preview_backend(requested: BackendKind) -> SelectedBackend {
+    select_backend(requested, GpuBackend::new)
+}
+
+/// Without the `gpu` feature, GPU requests always fall back to CPU.
+#[cfg(not(feature = "gpu"))]
+#[must_use]
+pub fn preview_backend(requested: BackendKind) -> SelectedBackend {
+    select_backend(requested, || -> Result<CpuBackend, Error> {
+        Err(Error::Gpu("built without the `gpu` feature".into()))
+    })
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    #[test]
+    fn parses_env_values() {
+        assert_eq!(BackendKind::parse("GPU"), Some(BackendKind::Gpu));
+        assert_eq!(BackendKind::parse(" cpu "), Some(BackendKind::Cpu));
+        assert_eq!(BackendKind::parse("vulkan"), None);
+    }
+
+    #[test]
+    fn cpu_request_never_builds_gpu() {
+        let selected = select_backend(BackendKind::Cpu, || -> Result<CpuBackend, Error> {
+            panic!("GPU factory must not run for a CPU request")
+        });
+        assert_eq!(selected.kind, BackendKind::Cpu);
+        assert!(selected.fallback.is_none());
+    }
+
+    #[test]
+    fn gpu_failure_falls_back_to_cpu_with_reason() {
+        let selected = select_backend(BackendKind::Gpu, || -> Result<CpuBackend, Error> {
+            Err(Error::Gpu("no GPU adapter".into()))
+        });
+        assert_eq!(selected.kind, BackendKind::Cpu);
+        assert!(matches!(selected.fallback, Some(Error::Gpu(ref m)) if m == "no GPU adapter"));
+    }
+
+    #[test]
+    fn gpu_success_is_used() {
+        // Any backend stands in for a working GPU here.
+        let selected = select_backend(BackendKind::Gpu, || Ok(CpuBackend::default()));
+        assert_eq!(selected.kind, BackendKind::Gpu);
+        assert!(selected.fallback.is_none());
+    }
 }

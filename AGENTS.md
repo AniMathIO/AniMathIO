@@ -91,7 +91,10 @@ CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c
 versioned JSON and `.amio` containers. `audio` owns decoded PCM pools, immutable
 resampled mixer snapshots, and cpal/rtrb playback; no audio resources live in
 `Project`. `render` owns the deterministic Vello CPU backend, embedded font shaping
-and engine resource pool; `animathio-cli` provides headless PNG rendering.
+and engine resource pool; its optional `gpu` feature adds the Vello/wgpu
+`GpuBackend` used only for editor preview (CPU stays the reference for tests and
+export; `tests/gpu.rs` compares the two and skips without an adapter).
+`animathio-cli` provides headless PNG rendering.
 Text/shapes under `core::builtin` are temporary plugin stand-ins. Video uses a
 labelled checkerboard until a media decoder is integrated. Do not add runtime
 resources to `Project` or store evaluated animation state in the renderer.

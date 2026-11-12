@@ -126,11 +126,34 @@ impl Backend for CpuBackend {
     }
 }
 
+/// One shaped glyph run: font, pixel size and `(glyph id, x, y)` positions.
+pub(crate) struct ShapedRun {
+    pub(crate) font: parley::FontData,
+    pub(crate) font_size: f32,
+    pub(crate) glyphs: Vec<(u32, f32, f32)>,
+}
+
+/// Convert a builtin text clip's canvas-relative font size into pixels.
+pub(crate) fn text_pixel_size(font_size: f64, size: Size) -> Result<f64, Error> {
+    let font_size = font_size * f64::from(size.1);
+    if !font_size.is_finite() || font_size <= 0.0 || font_size > 1_048_560.0 {
+        return Err(Error::Invalid("invalid scene font size"));
+    }
+    Ok(font_size)
+}
+
+pub(crate) fn check_vector_font_size(font_size: f64) -> Result<(), Error> {
+    if !font_size.is_finite() || font_size <= 0.0 || font_size > 1_048_560.0 {
+        return Err(Error::Invalid("invalid scene font size"));
+    }
+    Ok(())
+}
+
 fn color(value: Color) -> AlphaColor<Srgb> {
     AlphaColor::from_rgba8(value[0], value[1], value[2], value[3])
 }
 
-fn unit_transform(t: Transform, size: Size) -> Result<Affine, Error> {
+pub(crate) fn unit_transform(t: Transform, size: Size) -> Result<Affine, Error> {
     if !transform_valid(t) {
         return Err(Error::Invalid("invalid scene transform"));
     }
@@ -146,7 +169,7 @@ fn unit_transform(t: Transform, size: Size) -> Result<Affine, Error> {
 /// Transform for resolved vector scenes, whose coordinates are already canvas pixels.
 /// The default transform (x/y = 0.5, scale 1) is the identity: content is anchored at the
 /// canvas center. Position, rotation and scale otherwise behave like other clip kinds.
-fn pixel_transform(t: Transform, size: Size) -> Result<Affine, Error> {
+pub(crate) fn pixel_transform(t: Transform, size: Size) -> Result<Affine, Error> {
     if !transform_valid(t) {
         return Err(Error::Invalid("invalid scene transform"));
     }
@@ -177,7 +200,7 @@ fn color_core(value: CoreColor) -> AlphaColor<Srgb> {
     color([value.r, value.g, value.b, value.a])
 }
 
-fn vector_path(path: &[PathVerb]) -> BezPath {
+pub(crate) fn vector_path(path: &[PathVerb]) -> BezPath {
     let mut bez = BezPath::new();
     for verb in path {
         match *verb {
@@ -193,7 +216,7 @@ fn vector_path(path: &[PathVerb]) -> BezPath {
     bez
 }
 
-fn vector_stroke(style: &StrokeStyle) -> Stroke {
+pub(crate) fn vector_stroke(style: &StrokeStyle) -> Stroke {
     let cap = match style.cap {
         StrokeCap::Butt => Cap::Butt,
         StrokeCap::Round => Cap::Round,
@@ -207,7 +230,7 @@ fn vector_stroke(style: &StrokeStyle) -> Stroke {
     Stroke::new(style.width).with_join(join).with_caps(cap)
 }
 
-fn path(shape: &Shape) -> BezPath {
+pub(crate) fn path(shape: &Shape) -> BezPath {
     match shape {
         Shape::Rect => Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.001),
         Shape::Ellipse => Ellipse::new((0.5, 0.5), (0.5, 0.5), 0.0).to_path(0.001),
@@ -429,7 +452,7 @@ impl CpuBackend {
         Ok(())
     }
 
-    fn render_effect_layer(
+    pub(crate) fn render_effect_layer(
         &mut self,
         clip: &SceneClip,
         pool: &mut ResourcePool,
@@ -488,6 +511,52 @@ impl CpuBackend {
             pixels: target.take_rgba8(ImageAlphaType::Alpha),
         })
     }
+    /// Shape `text` with the embedded font. Shared by the CPU and GPU backends so both
+    /// position identical glyphs.
+    pub(crate) fn shape(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        size: Size,
+    ) -> Result<Vec<ShapedRun>, Error> {
+        let mut builder = self
+            .layout
+            .ranged_builder(&mut self.fonts, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily("DejaVu Sans".into()));
+        builder.push_default(StyleProperty::FontSize(font_size));
+        let mut layout: Layout<()> = builder.build(text);
+        layout.break_all_lines(Some(f32::from(check_size(size)?.0)));
+        layout.align(Alignment::Start, AlignmentOptions::default());
+        let mut runs = Vec::new();
+        for line in layout.lines() {
+            for item in line.items() {
+                if let PositionedLayoutItem::GlyphRun(run) = item {
+                    runs.push(ShapedRun {
+                        font: run.run().font().clone(),
+                        font_size: run.run().font_size(),
+                        glyphs: run.positioned_glyphs().map(|g| (g.id, g.x, g.y)).collect(),
+                    });
+                }
+            }
+        }
+        Ok(runs)
+    }
+
+    fn fill_runs(
+        ctx: &mut RenderContext,
+        resources: &mut Resources,
+        runs: &[ShapedRun],
+    ) -> Result<(), Error> {
+        for run in runs {
+            ctx.glyph_run(resources, &run.font)
+                .font_size(run.font_size)
+                .hint(false)
+                .fill_glyphs(run.glyphs.iter().map(|&(id, x, y)| Glyph { id, x, y }))
+                .map_err(|e| Error::Glyph(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     #[allow(clippy::cast_possible_truncation)] // Pixel-space font dimensions are bounded below.
     fn text(
         &mut self,
@@ -498,38 +567,14 @@ impl CpuBackend {
         font_size: f64,
         fill: Color,
     ) -> Result<(), Error> {
-        let font_size = font_size * f64::from(size.1);
-        if !font_size.is_finite() || font_size <= 0.0 || font_size > 1_048_560.0 {
-            return Err(Error::Invalid("invalid scene font size"));
-        }
-        let mut builder = self
-            .layout
-            .ranged_builder(&mut self.fonts, text, 1.0, false);
-        builder.push_default(StyleProperty::FontFamily("DejaVu Sans".into()));
-        builder.push_default(StyleProperty::FontSize(font_size as f32));
-        let mut layout: Layout<()> = builder.build(text);
-        layout.break_all_lines(Some(f32::from(check_size(size)?.0)));
-        layout.align(Alignment::Start, AlignmentOptions::default());
+        let font_size = text_pixel_size(font_size, size)?;
+        let runs = self.shape(text, font_size as f32, size)?;
         let unit = *ctx.transform();
         ctx.set_transform(
             unit * Affine::scale_non_uniform(1.0 / f64::from(size.0), 1.0 / f64::from(size.1)),
         );
         ctx.set_paint(color(fill));
-        for line in layout.lines() {
-            for item in line.items() {
-                if let PositionedLayoutItem::GlyphRun(run) = item {
-                    ctx.glyph_run(resources, run.run().font())
-                        .font_size(run.run().font_size())
-                        .hint(false)
-                        .fill_glyphs(run.positioned_glyphs().map(|g| Glyph {
-                            id: g.id,
-                            x: g.x,
-                            y: g.y,
-                        }))
-                        .map_err(|e| Error::Glyph(e.to_string()))?;
-                }
-            }
-        }
+        Self::fill_runs(ctx, resources, &runs)?;
         ctx.set_transform(unit);
         Ok(())
     }
@@ -568,35 +613,12 @@ impl CpuBackend {
         size: Size,
         text: &TextElement,
     ) -> Result<(), Error> {
-        if !text.font_size.is_finite() || text.font_size <= 0.0 || text.font_size > 1_048_560.0 {
-            return Err(Error::Invalid("invalid scene font size"));
-        }
-        let mut builder = self
-            .layout
-            .ranged_builder(&mut self.fonts, &text.text, 1.0, false);
-        builder.push_default(StyleProperty::FontFamily("DejaVu Sans".into()));
-        builder.push_default(StyleProperty::FontSize(text.font_size as f32));
-        let mut layout: Layout<()> = builder.build(&text.text);
-        layout.break_all_lines(Some(f32::from(check_size(size)?.0)));
-        layout.align(Alignment::Start, AlignmentOptions::default());
+        check_vector_font_size(text.font_size)?;
+        let runs = self.shape(&text.text, text.font_size as f32, size)?;
         let unit = *ctx.transform();
         ctx.set_transform(unit * Affine::translate((text.x, text.y)));
         ctx.set_paint(color_core(text.color));
-        for line in layout.lines() {
-            for item in line.items() {
-                if let PositionedLayoutItem::GlyphRun(run) = item {
-                    ctx.glyph_run(resources, run.run().font())
-                        .font_size(run.run().font_size())
-                        .hint(false)
-                        .fill_glyphs(run.positioned_glyphs().map(|g| Glyph {
-                            id: g.id,
-                            x: g.x,
-                            y: g.y,
-                        }))
-                        .map_err(|e| Error::Glyph(e.to_string()))?;
-                }
-            }
-        }
+        Self::fill_runs(ctx, resources, &runs)?;
         ctx.set_transform(unit);
         Ok(())
     }
