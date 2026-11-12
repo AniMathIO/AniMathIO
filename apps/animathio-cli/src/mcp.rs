@@ -323,10 +323,12 @@ pub(crate) struct Batch {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ExportPresetParam {
     /// 1920x1080, 30 fps.
+    #[serde(rename = "youtube_1080p")]
     Youtube1080p,
     /// 3840x2160, 30 fps.
+    #[serde(rename = "youtube_4k")]
     Youtube4k,
-    /// 1080x1920 vertical, 30 fps (Shorts, Reels, TikTok).
+    /// 1080x1920 vertical, 30 fps (Shorts, Reels, `TikTok`).
     ShortsVertical,
     /// 1080x1080, 30 fps.
     Square,

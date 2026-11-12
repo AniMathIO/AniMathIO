@@ -155,7 +155,7 @@ pub fn detect_silence(
     // Range starts are nonnegative, so this is a ceiling division.
     let first_tick = (start.0 + TICKS_PER_SAMPLE - 1) / TICKS_PER_SAMPLE * TICKS_PER_SAMPLE;
     let threshold = 10_f64.powf(params.threshold_db / 20.0);
-    let window_ticks = TICKS_PER_SAMPLE * WINDOW_FRAMES as i64;
+    let window_ticks = TICKS_PER_SAMPLE * i64::try_from(WINDOW_FRAMES).unwrap_or(i64::MAX);
 
     let mut ranges = Vec::new();
     let mut run_start: Option<i64> = None;
@@ -165,7 +165,7 @@ pub fn detect_silence(
         let energy: f64 = window.iter().map(|s| f64::from(*s).powi(2)).sum();
         #[allow(clippy::cast_precision_loss)]
         let rms = (energy / window.len() as f64).sqrt();
-        let tick = first_tick + index as i64 * window_ticks;
+        let tick = first_tick + i64::try_from(index).unwrap_or(i64::MAX) * window_ticks;
         if rms < threshold {
             run_start.get_or_insert(tick);
         }
@@ -209,6 +209,36 @@ pub fn timecode(time: Time) -> String {
         ms / 1000 % 60,
         ms % 1000
     )
+}
+
+/// Longest user-controlled name (in characters) echoed into agent-facing text.
+const MAX_NAME_CHARS: usize = 80;
+
+/// Make a user-controlled name (asset, track or clip text) safe to interpolate into
+/// text an LLM reads: first line only, control and bidi/zero-width characters
+/// stripped, capped at [`MAX_NAME_CHARS`], then quoted and escaped with `{:?}` so it
+/// can never be mistaken for surrounding structure or instructions.
+fn quote_name(name: &str) -> String {
+    let line = name.lines().next().unwrap_or_default();
+    let cleaned: String = line
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(
+                    c,
+                    '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}'
+                        | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+                )
+        })
+        .collect();
+    let capped = if cleaned.chars().count() > MAX_NAME_CHARS {
+        let mut cut: String = cleaned.chars().take(MAX_NAME_CHARS - 3).collect();
+        cut.push_str("...");
+        cut
+    } else {
+        cleaned
+    };
+    format!("{capped:?}")
 }
 
 fn clip_name(project: &Project, clip: &Clip) -> String {
@@ -278,9 +308,9 @@ pub fn describe_timeline(project: &Project) -> String {
     for (index, track) in project.tracks().iter().enumerate() {
         let _ = writeln!(
             out,
-            "Track {} \"{}\" (id {}, layer {index}, gain {:.2}): {} clip(s)",
+            "Track {} {} (id {}, layer {index}, gain {:.2}): {} clip(s)",
             index + 1,
-            track.name(),
+            quote_name(track.name()),
             track.id().0,
             track.gain(),
             track.clips().len()
@@ -307,7 +337,7 @@ pub fn describe_timeline(project: &Project) -> String {
                 clip_kind_label(&clip.kind),
             );
             if !name.is_empty() {
-                let _ = write!(out, " \"{name}\"");
+                let _ = write!(out, " {}", quote_name(&name));
             }
             if clip.source_offset.0 != 0 {
                 let _ = write!(out, " (source from {})", timecode(clip.source_offset));
@@ -433,8 +463,10 @@ pub fn title_command(
 #[serde(rename_all = "snake_case")]
 pub enum ExportPreset {
     /// 1920x1080 at 30 fps.
+    #[serde(rename = "youtube_1080p")]
     Youtube1080p,
     /// 3840x2160 at 30 fps.
+    #[serde(rename = "youtube_4k")]
     Youtube4k,
     /// 1080x1920 vertical at 30 fps (`YouTube` Shorts, Reels, `TikTok`).
     ShortsVertical,

@@ -17,6 +17,7 @@ struct Session {
 }
 
 impl Session {
+    #[allow(clippy::needless_pass_by_value)]
     fn request(&mut self, method: &str, params: Value) -> Value {
         self.next += 1;
         let request =
@@ -32,6 +33,7 @@ impl Session {
     }
 
     /// Call a tool and return its first text block.
+    #[allow(clippy::needless_pass_by_value)]
     fn tool(&mut self, name: &str, arguments: Value) -> String {
         let response = self.request("tools/call", json!({"name": name, "arguments": arguments}));
         assert!(response.get("error").is_none(), "{response}");
