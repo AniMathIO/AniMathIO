@@ -30,9 +30,80 @@ serde_json.workspace = true
 workspace = true
 
 # The canonical desktop package. Installers are built and smoke-tested by
-# .github/workflows/package.yml (Linux: AppImage + deb; Windows: NSIS).
+# .github/workflows/package.yml (Linux: AppImage + deb; Windows: NSIS; macOS:
+# dmg). It ships the editor and the headless `animathio-cli` so one install
+# provides both the GUI and the control/MCP entry points.
+#
+# Paths are relative to this crate's directory: cargo-packager changes into it
+# before resolving config and packaging-command paths. `binaries` paths, in
+# contrast, are resolved from cargo's workspace `target/<profile>` directory.
 [package.metadata.packager]
-before-packaging-command = "cargo build --release --locked -p animathio"
+before-packaging-command = "cargo build --release --locked -p animathio -p animathio-cli"
 product-name = "AniMathIO"
 identifier = "org.animathio.animathio"
-out-dir = "target/packages"
+out-dir = "../../target/packages"
+binaries = [
+    { path = "animathio", main = true },
+    { path = "animathio-cli" },
+]
+icons = [
+    "assets/icons/32x32.png",
+    "assets/icons/64x64.png",
+    "assets/icons/128x128.png",
+    "assets/icons/256x256.png",
+    "assets/icons/512x512.png",
+    "assets/icons/1024x1024.png",
+    "assets/icons/icon.ico",
+    "assets/icons/icon.icns",
+]
+# `scripts/build-plugins.sh` writes the first-party `.amplugin` bundles to
+# `target/plugins`. The editor loads them from `plugins/` next to the
+# executable, and `crates/plugin-host/src/discovery.rs` also checks the
+# installed layouts these targets end up in (`usr/lib/<binary>/plugins` for deb
+# and AppImage, `Contents/Resources/plugins` for the macOS app bundle).
+resources = [{ src = "../../target/plugins", target = "plugins" }]
+category = "GraphicsAndDesign"
+description = "An editor for Manim-like math animation videos."
+long-description = """\
+AniMathIO is an editor for Manim-like math animation videos. The core is a small
+video editor (media clips, a multi-track timeline, transforms and keyframes,
+audio, preview and export); text, LaTeX, graphs, Manim import, effects and the
+MCP server are sandboxed WebAssembly plugins. This package ships the desktop
+editor (`animathio`), the headless renderer/control CLI (`animathio-cli`) and
+the first-party plugin bundles.
+"""
+homepage = "https://github.com/AniMathIO/AniMathIO"
+authors = ["Kov\u00e1cs B\u00e1lint Hunor <kovacsbalinthunor53@gmail.com>"]
+publisher = "AniMathIO"
+license-file = "../../LICENSE"
+copyright = "Copyright (c) AniMathIO contributors"
+
+[package.metadata.packager.deb]
+# `product-name` would kebab-case to `ani-math-io`; keep the package name equal
+# to the binary name so `usr/lib/animathio/` (and therefore plugin discovery)
+# lines up.
+package-name = "animathio"
+section = "graphics"
+priority = "optional"
+# The editor links these dynamically. The AppImage relies on the host providing
+# them for now.
+depends = [
+    "libasound2",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-render0",
+    "libxcb-shape0",
+    "libxcb-xfixes0",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libfontconfig1",
+    "libfreetype6",
+    "libwayland-client0",
+    "libvulkan1",
+]
+
+[package.metadata.packager.nsis]
+installer-icon = "assets/icons/icon.ico"
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"

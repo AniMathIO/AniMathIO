@@ -29,22 +29,7 @@ tempfile = "3"
 [lints]
 workspace = true
 
-# cargo-packager configuration. Installers are built and smoke-tested by
-# .github/workflows/package.yml (Linux: AppImage + deb; Windows: NSIS).
-#
-# TODO(animathio): when `apps/animathio` (the GPUI desktop app) lands, move a
-# copy of this table to apps/animathio/Cargo.toml so the installer ships the
-# desktop app (and update package.yml to package + smoke-test `animathio`):
-#
-#   [package.metadata.packager]
-#   before-packaging-command = "cargo build --release --locked -p animathio"
-#   product-name = "AniMathIO"
-#   identifier = "org.animathio.animathio"
-#   out-dir = "target/packages"
-#   icons = ["../../assets/icons/icon.png"]  # add an icon asset first
-#
-[package.metadata.packager]
-before-packaging-command = "cargo build --release --locked -p animathio-cli"
-product-name = "animathio-cli"
-identifier = "org.animathio.cli"
-out-dir = "target/packages"
+# Packaging lives in `apps/animathio` (see its `[package.metadata.packager]`):
+# the single AniMathIO installer ships both the editor and this CLI, and
+# .github/workflows/package.yml smoke-tests `animathio-cli --version` from the
+# installed package.

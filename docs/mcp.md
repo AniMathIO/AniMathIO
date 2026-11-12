@@ -173,7 +173,9 @@ Plugin clips are rendered through `crates/plugin-host`, with the same sandbox
 and typesetting imports as editor preview. Both applications search, in order:
 
 1. `ANIMATHIO_PLUGIN_DIR`, when explicitly set;
-2. `plugins` next to the executable;
+2. `plugins` next to the executable, plus the installed resource layouts
+   relative to it: `../lib/<binary>/plugins` (deb and AppImage) and
+   `../Resources/plugins` (macOS app bundle);
 3. the per-user `directories::BaseDirs::data_dir()/animathio/plugins` directory.
 
 Debug builds also look for `plugins` next to the executable's parent directory
