@@ -21,6 +21,15 @@ use std::fs;
 const FRAME_WIDTH: f64 = 14.22;
 const FRAME_HEIGHT: f64 = 8.0;
 
+/// A minimal valid 1x1 transparent PNG (67 bytes).
+const MINIMAL_PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+];
+
 fn ticks(seconds: f64) -> i64 {
     (seconds * TICKS_PER_SECOND as f64).round() as i64
 }
@@ -61,6 +70,21 @@ fn assert_close(actual: f64, expected: f64) {
         (actual - expected).abs() < 1e-9,
         "expected {expected}, got {actual}"
     );
+}
+
+fn import_image_scene(
+    source: &str,
+    dir: &std::path::Path,
+) -> (
+    Project,
+    Vec<animathio_import_manim::Asset>,
+    animathio_import_manim::Report,
+) {
+    let options = ManimOptions {
+        scene: None,
+        script_dir: Some(dir.to_path_buf()),
+    };
+    import_manim_with_options(source, &options).unwrap()
 }
 
 #[test]
@@ -280,7 +304,7 @@ class S(Scene):
 fn resolves_image_mobjects_and_places_placeholders_when_missing() {
     let dir = tempfile::tempdir().unwrap();
     let png = dir.path().join("photo.png");
-    fs::write(&png, b"tiny-png-bytes").unwrap();
+    fs::write(&png, MINIMAL_PNG).unwrap();
 
     let source = r#"
 class S(Scene):
@@ -290,13 +314,9 @@ class S(Scene):
         self.add(img, gone)
         self.wait(1)
 "#;
-    let options = ManimOptions {
-        scene: None,
-        script_dir: Some(dir.path().to_path_buf()),
-    };
-    let (project, assets, report) = import_manim_with_options(source, &options).unwrap();
+    let (project, assets, report) = import_image_scene(source, dir.path());
 
-    let id = AssetId::of(b"tiny-png-bytes");
+    let id = AssetId::of(MINIMAL_PNG);
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0].id, id);
     assert_eq!(assets[0].media_type, "image/png");
@@ -320,6 +340,14 @@ class S(Scene):
             .any(|w| w.message.contains("missing.png")),
         "expected a missing-image warning: {:?}",
         report.warnings()
+    );
+    assert!(
+        report
+            .infos()
+            .iter()
+            .any(|i| i.message.contains("photo.png") && i.message.contains("image/png")),
+        "expected an embedded-image info entry: {:?}",
+        report.infos()
     );
 }
 
@@ -378,4 +406,177 @@ class S(Scene):
         panic!("expected builtin shape");
     };
     assert!(matches!(shape, animathio_core::builtin::Shape::Ellipse));
+}
+
+#[test]
+fn rejects_absolute_image_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("/etc/passwd")
+        self.add(img)
+        self.wait(1)
+"#;
+    let (project, assets, report) = import_image_scene(source, dir.path());
+    assert!(assets.is_empty());
+    let clips = tracks(&project);
+    assert_eq!(clips.len(), 1);
+    assert!(
+        matches!(&clips[0].1.kind, ClipKind::Error(message) if message.contains("/etc/passwd"))
+    );
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.message.contains("absolute path")),
+        "expected an absolute-path warning: {:?}",
+        report.warnings()
+    );
+    assert!(report.infos().is_empty());
+}
+
+#[test]
+fn requires_a_script_directory_for_images() {
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("photo.png")
+        self.add(img)
+        self.wait(1)
+"#;
+    let (project, assets, report) =
+        import_manim_with_options(source, &ManimOptions::default()).unwrap();
+    assert!(assets.is_empty());
+    let clips = tracks(&project);
+    assert_eq!(clips.len(), 1);
+    assert!(matches!(&clips[0].1.kind, ClipKind::Error(message) if message.contains("photo.png")));
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.message.contains("no script directory")),
+        "expected a no-script-directory warning: {:?}",
+        report.warnings()
+    );
+}
+
+#[test]
+fn rejects_parent_directory_traversal() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("../secret.png")
+        self.add(img)
+        self.wait(1)
+"#;
+    let (_, assets, report) = import_image_scene(source, dir.path());
+    assert!(assets.is_empty());
+    assert!(
+        report.warnings().iter().any(|w| w.message.contains("`..`")),
+        "expected a parent-directory warning: {:?}",
+        report.warnings()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symlinks_escaping_the_script_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let secret = outside.path().join("secret.png");
+    fs::write(&secret, MINIMAL_PNG).unwrap();
+    std::os::unix::fs::symlink(&secret, dir.path().join("escape.png")).unwrap();
+
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("escape.png")
+        self.add(img)
+        self.wait(1)
+"#;
+    let (_, assets, report) = import_image_scene(source, dir.path());
+    assert!(assets.is_empty());
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.message.contains("outside the script directory")),
+        "expected an escaping-symlink warning: {:?}",
+        report.warnings()
+    );
+}
+
+#[test]
+fn rejects_non_image_extensions() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("notes.txt"), b"not an image").unwrap();
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("notes.txt")
+        self.add(img)
+        self.wait(1)
+"#;
+    let (_, assets, report) = import_image_scene(source, dir.path());
+    assert!(assets.is_empty());
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.message.contains("unsupported extension")),
+        "expected an unsupported-extension warning: {:?}",
+        report.warnings()
+    );
+}
+
+#[test]
+fn rejects_files_whose_magic_bytes_do_not_match_the_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("fake.png"), b"this is not a png").unwrap();
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("fake.png")
+        self.add(img)
+        self.wait(1)
+"#;
+    let (_, assets, report) = import_image_scene(source, dir.path());
+    assert!(assets.is_empty());
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.message.contains("does not match")),
+        "expected a magic-byte warning: {:?}",
+        report.warnings()
+    );
+}
+
+#[test]
+fn rejects_images_exceeding_the_size_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let big = dir.path().join("big.png");
+    fs::File::create(&big)
+        .unwrap()
+        .set_len(64 * 1024 * 1024 + 1)
+        .unwrap();
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("big.png")
+        self.add(img)
+        self.wait(1)
+"#;
+    let (_, assets, report) = import_image_scene(source, dir.path());
+    assert!(assets.is_empty());
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.message.contains("size limit")),
+        "expected a size-limit warning: {:?}",
+        report.warnings()
+    );
 }

@@ -88,16 +88,44 @@ impl std::fmt::Display for Warning {
     }
 }
 
+/// A non-fatal, informational observation (e.g. an embedded external file).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Info {
+    /// One-based line number.
+    pub line: usize,
+    /// One-based column number.
+    pub column: usize,
+    /// Human-readable description.
+    pub message: String,
+    /// The offending source line, trimmed.
+    pub snippet: String,
+}
+impl std::fmt::Display for Info {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}:{}: {} ({})",
+            self.line, self.column, self.message, self.snippet
+        )
+    }
+}
+
 /// Non-fatal observations produced while importing.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
     pub(crate) warnings: Vec<Warning>,
+    pub(crate) infos: Vec<Info>,
 }
 impl Report {
     /// Warnings, in the order they were produced.
     #[must_use]
     pub fn warnings(&self) -> &[Warning] {
         &self.warnings
+    }
+    /// Informational entries, in the order they were produced.
+    #[must_use]
+    pub fn infos(&self) -> &[Info] {
+        &self.infos
     }
     /// Whether the import produced no warnings.
     #[must_use]
@@ -117,6 +145,20 @@ impl Report {
         snippet: impl Into<String>,
     ) {
         self.warnings.push(Warning {
+            line,
+            column,
+            message: message.into(),
+            snippet: snippet.into(),
+        });
+    }
+    pub(crate) fn info(
+        &mut self,
+        line: usize,
+        column: usize,
+        message: impl Into<String>,
+        snippet: impl Into<String>,
+    ) {
+        self.infos.push(Info {
             line,
             column,
             message: message.into(),
