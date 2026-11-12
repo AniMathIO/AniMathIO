@@ -850,21 +850,36 @@ fn build_wit_params(
     }
 
     for (k, v) in typed_params {
-        let json = v.to_plugin_json();
-        let value = if matches!(v, animathio_core::ParamValue::AssetRef(None)) {
-            Some(wit_types::ParamValue::AssetRef(String::new()))
-        } else {
-            json_to_param_value(&json, schema.get(k.as_str()).copied())
-        };
-        if let Some(value) = value {
-            entries.push(wit_types::ParamEntry {
-                id: k.clone(),
-                value,
-            });
-        }
+        entries.push(wit_types::ParamEntry {
+            id: k.clone(),
+            value: typed_to_param_value(v),
+        });
     }
 
     entries
+}
+
+// Typed values already carry their identity; only legacy JSON needs schema inference.
+fn typed_to_param_value(value: &animathio_core::ParamValue) -> wit_types::ParamValue {
+    use animathio_core::ParamValue as CoreValue;
+    use wit_types::ParamValue as WitValue;
+    match value {
+        CoreValue::Number(v) => WitValue::Number(*v),
+        CoreValue::Color(_) => {
+            WitValue::Color(json_to_color(&value.to_plugin_json()).expect("RGBA bytes"))
+        }
+        CoreValue::Point(v) => WitValue::Point(wit_types::Point {
+            x: v[0] as f32,
+            y: v[1] as f32,
+        }),
+        CoreValue::Bool(v) => WitValue::Bool(*v),
+        CoreValue::Enum(v) => WitValue::EnumChoice(v.clone()),
+        CoreValue::String(v) => WitValue::String(v.clone()),
+        CoreValue::AssetRef(v) => WitValue::AssetRef(
+            v.as_ref()
+                .map_or_else(String::new, |id| id.as_str().to_owned()),
+        ),
+    }
 }
 
 fn json_to_param_value(
@@ -1495,6 +1510,18 @@ mod tests {
         assert!(
             matches!(&build_wit_params(&manifest, &cleared, &serde_json::Value::Null)[0].value, ParamValue::AssetRef(v) if v.is_empty())
         );
+
+        // A schema can change or omit a parameter; typed values keep their identity.
+        let mut without_schema = manifest;
+        without_schema.params.clear();
+        let entries = build_wit_params(&without_schema, &params, &serde_json::Value::Null);
+        assert_eq!(entries.len(), 7);
+        let get = |id: &str| &entries.iter().find(|e| e.id == id).unwrap().value;
+        assert!(matches!(get("e"), ParamValue::EnumChoice(v) if v == "b"));
+        assert!(
+            matches!(get("a"), ParamValue::AssetRef(v) if v == animathio_core::AssetId::of(b"image").as_str())
+        );
+        assert!(matches!(get("s"), ParamValue::String(v) if v == "hello"));
     }
 
     struct LimiterState {

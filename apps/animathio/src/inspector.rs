@@ -387,9 +387,8 @@ pub(crate) fn keyframe_toggle_command(clip: &Clip, target: Target, playhead: Tim
     }
 }
 
-/// Build the command for editing a numeric value. When the target is keyframed at
-/// the playhead the edit updates or creates that keyframe; otherwise it sets the
-/// base value.
+/// Build the command for editing a numeric value. When the target has an animation,
+/// the edit updates or creates a keyframe at the playhead; otherwise it sets the base.
 pub(crate) fn numeric_edit_command(
     clip: &Clip,
     target: Target,
@@ -691,12 +690,24 @@ mod typed_tests {
                 .apply(&mut project)
                 .unwrap();
             let clip = &project.tracks()[0].clips()[&ClipId(0)];
-            let command = param_edit_command(clip, model.id().to_owned(), base.clone(), Time(150));
+            let edited = match &base {
+                ParamValue::Number(_) => ParamValue::Number(0.75),
+                ParamValue::Color(_) => ParamValue::Color([0.25, 0.5, 0.75, 1.0]),
+                ParamValue::Point(_) => ParamValue::Point([0.5, 0.25]),
+                ParamValue::Bool(v) => ParamValue::Bool(!v),
+                ParamValue::String(_) => ParamValue::String("edited".into()),
+                ParamValue::Enum(_) => ParamValue::Enum("b".into()),
+                ParamValue::AssetRef(_) => {
+                    ParamValue::AssetRef(Some(animathio_core::AssetId::of(b"edited")))
+                }
+            };
+            let command =
+                param_edit_command(clip, model.id().to_owned(), edited.clone(), Time(150));
             let Command::AddKeyframe { time, keyframe, .. } = &command else {
                 panic!("animated edit must insert a key")
             };
             assert_eq!(*time, Time(50));
-            assert_eq!(keyframe.value, base);
+            assert_eq!(keyframe.value, edited);
             command.apply(&mut project).unwrap();
             let clip = &project.tracks()[0].clips()[&ClipId(0)];
             assert!(keyframed(
@@ -706,7 +717,7 @@ mod typed_tests {
             ));
             assert_eq!(
                 sampled_param(clip, model.id(), Time(150), base.clone()),
-                base
+                edited
             );
         }
     }

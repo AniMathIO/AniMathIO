@@ -194,7 +194,8 @@ Serde accepts legacy bare numeric base values and keyframe values as
 extension to schema version 1. Opaque `ClipKind::Plugin::params` is preserved
 verbatim. `SetPluginParam` sets/removes typed overrides in `Clip::params`; removing
 an override exposes the original opaque value. The plugin host merges evaluated
-typed overrides over opaque defaults using the declared schema, converting
+typed overrides over opaque defaults, inferring legacy JSON types from the declared
+schema and preserving the variants of typed values, converting
 linear-light colours to the plugin API's sRGB bytes. The cache hashes typed values
 including their variants.
 

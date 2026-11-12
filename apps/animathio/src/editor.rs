@@ -838,12 +838,9 @@ impl Editor {
     }
 
     fn plugin_number_value(&self, id: ClipId, name: &str) -> f64 {
-        let Some(clip) = self.find_clip(id) else {
-            return 0.0;
-        };
-        let target = Target::Param(name.to_owned());
-        let base = inspector::numeric_base(clip, &target);
-        inspector::sampled_numeric(clip, &target, self.position, base)
+        self.plugin_opaque(id, name)
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0)
     }
 
     fn editing_display(&self, target: &EditTarget) -> Option<String> {
@@ -1855,11 +1852,9 @@ impl Editor {
             ParamModel::Point { default, .. } => {
                 self.plugin_point_control(id, name.clone(), *default, cx)
             }
-            ParamModel::Asset {
-                media_type,
-                default,
-                ..
-            } => self.plugin_asset_control(id, name.clone(), media_type, default, cx),
+            ParamModel::Asset { media_type, .. } => {
+                self.plugin_asset_control(id, name.clone(), media_type, cx)
+            }
         };
         div()
             .flex()
@@ -2289,12 +2284,9 @@ impl Editor {
         id: ClipId,
         name: String,
         media_type: &str,
-        default: &Option<String>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let current = self
-            .plugin_asset_value(id, &name)
-            .or_else(|| default.clone());
+        let current = self.plugin_asset_value(id, &name);
         let label = current.as_ref().map_or_else(
             || "none".to_owned(),
             |asset| {

@@ -78,8 +78,8 @@ and `DrawCommand::TextRun(element)`.
 ## Param schema types
 
 `describe()` returns a `manifest` that declares the plugin's parameters. The host
-uses it to build the inspector UI and to validate keyframes, so the schema is the
-single source of truth.
+uses it to build the inspector UI and interpret preserved legacy JSON values.
+The core validates that each keyframe track has one consistent value type.
 
 ```wit
 record manifest {
@@ -126,11 +126,17 @@ fn get_number(params: &[ParamEntry], id: &str, default: f64) -> f64 {
 
 Keyframes are **not** part of the WIT world — they live in the core model
 (`Clip::animations` with `Target::Param(name)`). By the time the host calls a
-plugin, it has already sampled the clip's keyframes: the animated value is passed
-in the `param-map` as `ParamValue::Number`, overriding the clip's static base
-parameter. A plugin therefore just reads its parameters every call and animation
-"just works" for `%number` params. Non-numeric params (color, string, enum, bool,
-point, asset-ref) are passed through from the clip's base JSON values.
+plugin, it has already sampled the clip's keyframes: each animated value is passed
+in the `param-map` with its WIT parameter type, overriding the clip's static base
+parameter. Every parameter kind supports keyframes. Numbers and points support
+linear, smoothstep ease-in/out, and hold interpolation. Colours interpolate in
+linear-light RGBA and convert to sRGB bytes at the WIT boundary. Booleans, enum
+choices, strings, and asset references hold until the next key. Plugins read the
+evaluated parameters on every call; they do not need to sample curves themselves.
+
+Every inspector parameter has a keyframe diamond. Editing an animated parameter
+creates or updates a key at the playhead. Typed values override preserved opaque
+plugin JSON when the host prepares the `param-map`.
 
 Time arrives as `time-ticks: s64` (Rust `i64`) in the same integer tick unit as the
 core: **705,600,000 ticks/second**. To convert to seconds in a plugin:
@@ -387,13 +393,3 @@ Notes for real plugins:
   `ellipse`, `circle`, `polygon`, `star`, `line` and `arrow` builders. The
   standalone plugins use the generated WIT types directly and write their own
   path helpers, as above.
-
-### Typed keyframes
-
-All inspector parameter kinds can be keyframed. Numbers, points, and colours
-support linear, ease-in/out, and hold interpolation; boolean, enum, string, and
-asset values always hold until the next key. Core colour values are linear-light
-straight-alpha RGBA floats. The host converts evaluated colours to sRGB RGBA
-bytes for the existing WIT API. Typed values override preserved opaque plugin
-JSON at evaluation time. Editing any animated parameter in the inspector creates
-or updates a keyframe at the playhead.

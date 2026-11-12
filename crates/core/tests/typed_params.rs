@@ -72,6 +72,7 @@ proptest! {
         prop_assert_eq!(sample(&p, 10), left);
         prop_assert_eq!(sample(&p, 900), right.clone());
         prop_assert_eq!(sample(&p, 999), right);
+        prop_assert_eq!(serde_json::from_str::<Project>(&serde_json::to_string(&p).unwrap()).unwrap(), p);
     }
     #[test]
     fn explicit_hold_and_discrete_values_never_blend((left, right) in pairs(), t in 11_i64..900, mode in 0_u8..3) {
@@ -81,6 +82,67 @@ proptest! {
         add(right.clone(), 900, mode).apply(&mut p).unwrap();
         prop_assert_eq!(sample(&p, t), left);
         prop_assert_eq!(sample(&p, 900), right);
+    }
+    #[test]
+    fn typed_evaluation_is_independent_of_seek_order(
+        (left, right) in pairs(),
+        times in prop::collection::vec(0_i64..1000, 0..30),
+        target in 0_i64..1000,
+    ) {
+        let mut p = project(left.clone());
+        add(left, 10, Interpolation::EaseInOut).apply(&mut p).unwrap();
+        add(right, 900, Interpolation::Linear).apply(&mut p).unwrap();
+        let before = p.clone();
+        let expected = sample(&p, target);
+        for time in times { let _ = evaluate(&p, Time(time)); }
+        prop_assert_eq!(sample(&p, target), expected);
+        prop_assert_eq!(p, before);
+    }
+    #[test]
+    fn mixed_types_are_rejected_even_without_a_typed_base((left, _) in pairs()) {
+        let wrong = if matches!(left, ParamValue::Number(_)) {
+            ParamValue::Bool(false)
+        } else {
+            ParamValue::Number(1.0)
+        };
+        let mut p = project(left.clone());
+        Command::SetPluginParam { id: ClipId(0), name: "p".into(), value: None }
+            .apply(&mut p).unwrap();
+        add(left, 10, Interpolation::Linear).apply(&mut p).unwrap();
+        let before = p.clone();
+        prop_assert!(add(wrong.clone(), 20, Interpolation::Hold).apply(&mut p).is_err());
+        prop_assert_eq!(&p, &before);
+        let mut json = serde_json::to_value(&p).unwrap();
+        json["tracks"][0]["clips"]["0"]["animations"][0]["keys"]["20"] =
+            serde_json::to_value(Keyframe { value: wrong, interpolation: Interpolation::Hold }).unwrap();
+        // Deserialization validates the same invariant as command application.
+        prop_assert!(serde_json::from_value::<Project>(json).is_err());
+    }
+    #[test]
+    fn continuous_interpolation_matches_the_eased_fraction(
+        a in -1.0e6_f64..1.0e6,
+        b in -1.0e6_f64..1.0e6,
+        t in 1_i32..100,
+        ease in any::<bool>(),
+    ) {
+        let mode = if ease { Interpolation::EaseInOut } else { Interpolation::Linear };
+        let f = f64::from(t) / 100.0;
+        let f = if ease { f * f * (3.0 - 2.0 * f) } else { f };
+        let expected = a * (1.0 - f) + b * f;
+        for (left, right) in [
+            (ParamValue::Number(a), ParamValue::Number(b)),
+            (ParamValue::Point([a, b]), ParamValue::Point([b, a])),
+        ] {
+            let mut p = project(left.clone());
+            add(left, 0, mode).apply(&mut p).unwrap();
+            add(right, 100, mode).apply(&mut p).unwrap();
+            let actual = match sample(&p, i64::from(t)) {
+                ParamValue::Number(v) => v,
+                ParamValue::Point(v) => v[0],
+                _ => unreachable!(),
+            };
+            prop_assert!((actual - expected).abs() <= 1.0e-9);
+        }
     }
     #[test]
     fn typed_commands_undo_redo_and_serde_are_exact((left, right) in pairs()) {
