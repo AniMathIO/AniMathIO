@@ -500,11 +500,23 @@ impl Editor {
         }
         this.request_render(Time(0));
         window.focus(&this.panel_focus[0], cx);
-        cx.spawn(async move |this, cx| {
+        // Drain worker/control mailboxes even when there are no pointer events.
+        // Only completed work invalidates the view; an idle editor need not redraw.
+        cx.spawn_in(window, async move |this, cx| {
             loop {
-                let timer = cx.background_executor().timer(Duration::from_secs(1));
-                timer.await;
-                if this.update(cx, Editor::autosave_tick).is_err() {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                if this
+                    .update_in(cx, |this, window, cx| {
+                        if this.pump_results(window) {
+                            cx.notify();
+                        }
+                        this.drain_control(cx);
+                        this.autosave_tick(cx);
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }

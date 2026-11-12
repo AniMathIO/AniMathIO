@@ -167,6 +167,7 @@ pub(super) fn paint_clip(
                 clip.label.clone(),
                 point(x0 + px(20.0), y0 + px(3.0)),
                 x1 - px(4.0),
+                font(cx.theme().font_family.clone()),
                 window,
                 cx,
             );
@@ -347,6 +348,7 @@ pub(super) fn paint_ruler(
                 label.into(),
                 point(x + px(3.0), bounds.origin.y + px(12.0)),
                 x + px(width),
+                font(snapshot.theme.mono_font_family.clone()),
                 window,
                 cx,
             );
@@ -410,6 +412,7 @@ pub(super) fn paint_clip_label(
     label: SharedString,
     origin: Point<Pixels>,
     right_edge: Pixels,
+    label_font: Font,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -418,7 +421,7 @@ pub(super) fn paint_clip_label(
     }
     let run = TextRun {
         len: label.len(),
-        font: font(".SystemUIFont"),
+        font: label_font,
         color: cx.theme().foreground,
         background_color: None,
         underline: None,
@@ -426,7 +429,7 @@ pub(super) fn paint_clip_label(
     };
     let line = window
         .text_system()
-        .shape_line(label, px(11.0), &[run], None);
+        .shape_line(label, cx.theme().font_size, &[run], None);
     let line_height = px(14.0);
     // Clip the text to the block so long labels never spill into the next clip.
     let mask = ContentMask {

@@ -81,9 +81,21 @@ impl Editor {
                 .items_center()
                 .gap_2()
                 .w_full()
-                .child(div().w(px(300.)).h_full().child(self.app_menu.clone()))
+                .child(
+                    div()
+                        .w(px(300.))
+                        .flex_shrink_0()
+                        .h_full()
+                        .child(self.app_menu.clone()),
+                )
                 .child(div().flex_1())
-                .child(div().text_color(cx.theme().foreground).child(title))
+                .child(
+                    div()
+                        .max_w(px(260.))
+                        .truncate()
+                        .text_color(cx.theme().foreground)
+                        .child(title),
+                )
                 .when(self.dirty, |row| {
                     row.child(
                         icons::icon(IconName::CircleDot)

@@ -33,9 +33,11 @@ impl Editor {
         }
     }
 
-    pub(super) fn pump_results(&mut self, window: &mut Window) {
+    pub(super) fn pump_results(&mut self, window: &mut Window) -> bool {
+        let mut changed = false;
         while let Some(result) = self.worker.try_result() {
             if result.generation == self.request_generation {
+                changed = true;
                 if let Some(bench) = &mut self.bench {
                     let now = Instant::now();
                     if let Some(last) = bench.last_delivery.replace(now) {
@@ -47,6 +49,7 @@ impl Editor {
                 }
             }
         }
+        changed
     }
 
     /// Drive the viewport benchmark when `--bench-viewport` is set: warm up,

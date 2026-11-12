@@ -7,6 +7,12 @@ impl Editor {
         self.finish_color_edit(cx);
         let _ = self.clock.pause();
         self.project = Project::new(self.project.frame_rate());
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Video 1"),
+            index: 0,
+        }
+        .apply(&mut self.project)
+        .expect("new project's first track");
         self.history = History::default();
         self.assets.clear();
         self.pool = AudioPool::default();

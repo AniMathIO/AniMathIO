@@ -687,6 +687,10 @@ impl Editor {
             let locked = track.is_locked();
             let controls = div()
                 .w_full()
+                .when(
+                    self.dock.track_height == crate::layout::TrackHeight::Small,
+                    |row| row.w(px(148.)).flex_shrink_0(),
+                )
                 .h(px(24.))
                 .flex()
                 .flex_row()

@@ -49,12 +49,11 @@ pub fn init(cx: &mut App) {
     let bindings: Vec<_> = keymap()
         .into_iter()
         .map(|(keys, action, context)| {
+            let predicate = binding_context(action.as_ref(), context);
             KeyBinding::load(
                 keys,
                 action,
-                Some(std::rc::Rc::new(
-                    KeyBindingContextPredicate::parse(context).expect("valid context"),
-                )),
+                Some(std::rc::Rc::new(predicate)),
                 false,
                 None,
                 cx,
@@ -63,6 +62,19 @@ pub fn init(cx: &mut App) {
         })
         .collect();
     cx.bind_keys(bindings);
+}
+
+fn binding_context(action: &dyn Action, panel: &str) -> KeyBindingContextPredicate {
+    let context = if panel != "Editor"
+        || action.partial_eq(&Undo)
+        || action.partial_eq(&Redo)
+        || action.partial_eq(&KeyboardShortcuts)
+    {
+        format!("{panel} && !Input")
+    } else {
+        panel.to_owned()
+    };
+    KeyBindingContextPredicate::parse(&context).expect("valid context")
 }
 
 fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
@@ -360,6 +372,24 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[core::prelude::v1::test]
+    fn panel_shortcuts_leave_text_entry_to_the_input() {
+        for (_, action, panel) in keymap()
+            .into_iter()
+            .filter(|(_, _, panel)| *panel != "Editor")
+        {
+            let predicate = binding_context(action.as_ref(), panel);
+            let contexts = [
+                KeyContext::parse("Editor").unwrap(),
+                KeyContext::parse(panel).unwrap(),
+            ];
+            assert!(predicate.depth_of(&contexts).is_some());
+            let mut typing = contexts.to_vec();
+            typing.push(KeyContext::parse("Input").unwrap());
+            assert!(predicate.depth_of(&typing).is_none());
+        }
+    }
+
     #[core::prelude::v1::test]
     fn shortcuts_parse_for_mac_linux_and_windows() {
         for os in [
