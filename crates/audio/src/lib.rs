@@ -3,10 +3,12 @@
 mod mixer;
 mod player;
 mod source;
+mod waveform;
 
 pub use mixer::*;
 pub use player::*;
 pub use source::*;
+pub use waveform::*;
 
 /// Audio decoding, configuration or playback failure.
 #[derive(Debug, thiserror::Error)]

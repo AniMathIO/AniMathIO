@@ -38,6 +38,31 @@ impl TimelineLayout {
     }
 }
 
+/// Ruler tick positions (multiples of `minor`) inside the visible range only.
+/// The walk is bounded by `width / 4` iterations and uses `checked_add`, so a
+/// huge duration, a tiny zoom or a degenerate step can never stall the UI.
+pub(crate) fn ruler_ticks(layout: &TimelineLayout, minor: i64) -> Vec<i64> {
+    let minor = minor.max(1);
+    let ppt = layout.pixels_per_tick;
+    if !(ppt.is_finite() && ppt > 0.0) {
+        return Vec::new();
+    }
+    let first = (layout.scroll_x / ppt).floor().max(0.0) as i64;
+    let last = (((layout.scroll_x + f64::from(layout.width)) / ppt).ceil())
+        .min(layout.duration_ticks as f64) as i64;
+    let max_iterations = (layout.width / 4.0).ceil().max(1.0) as usize + 2;
+    let mut ticks = Vec::new();
+    let mut tick = first.div_euclid(minor).saturating_mul(minor).max(0);
+    while ticks.len() < max_iterations && tick <= last {
+        ticks.push(tick);
+        let Some(next) = tick.checked_add(minor) else {
+            break;
+        };
+        tick = next;
+    }
+    ticks
+}
+
 /// A clip under the pointer, in back-to-front track order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ClipHit {
@@ -117,7 +142,6 @@ pub(crate) fn snap_start(
 /// a tick, then optionally snapped to the playhead and every existing clip
 /// edge. Unlike [`snap_start`] there is no clip to exclude, since the dropped
 /// clip is new.
-#[allow(dead_code)] // Exercised by tests; media-pool drag wiring is deferred.
 pub(crate) fn drop_start(
     layout: &TimelineLayout,
     project: &Project,
@@ -268,6 +292,26 @@ mod tests {
 
     fn snap_tick(layout: &TimelineLayout) -> i64 {
         (8.0 / layout.pixels_per_tick) as i64
+    }
+
+    #[test]
+    fn ruler_walks_only_the_visible_range_even_for_absurd_durations() {
+        // Fully zoomed-out over a near-i64::MAX project: still bounded.
+        let huge = TimelineLayout::zoomed(1200.0, 24.0, 40.0, i64::MAX / 2, 1.0, 0.0);
+        let ticks = ruler_ticks(&huge, 1);
+        assert!(ticks.len() <= 1200 / 4 + 2, "{}", ticks.len());
+        // Degenerate steps and overflow-prone starts terminate too.
+        assert!(ruler_ticks(&huge, 0).len() <= 1200 / 4 + 2);
+        assert!(ruler_ticks(&huge, i64::MAX).len() <= 2);
+        // A zoomed-in view starts at the scroll position, not at tick zero.
+        let zoomed =
+            TimelineLayout::zoomed(1000.0, 24.0, 40.0, TICKS_PER_SECOND * 600, 64.0, 5000.0);
+        let step = TICKS_PER_SECOND;
+        let ticks = ruler_ticks(&zoomed, step);
+        assert!(ticks.first().copied().unwrap() > 0);
+        assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] == step));
+        let first_x = time_to_x(&zoomed, Time(ticks[0]));
+        assert!(first_x <= 1.0 && first_x > -(step as f64 * zoomed.pixels_per_tick) as f32 - 1.0);
     }
 
     #[test]

@@ -222,6 +222,7 @@ dependencies = [
  "base64 0.22.1",
  "directories",
  "gpui-component",
+ "gpui-kit-assets",
  "gpui-pre",
  "gpui-pre-platform",
  "image",

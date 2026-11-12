@@ -6,6 +6,9 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Largest number of edits in one [`Command::Batch`].
+const MAX_BATCH: usize = 1024;
+
 /// Exhaustive serializable edits. Applying one returns the exact inverse.
 /// A failed edit leaves the project unchanged. IDs are supplied by callers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -23,6 +26,28 @@ pub enum Command {
         id: TrackId,
         /// Finite, nonnegative gain.
         gain: f64,
+    },
+    /// Mute or unmute a layer (silent in the mix, hidden from rendering).
+    SetTrackMuted {
+        /// Layer identity.
+        id: TrackId,
+        /// New mute state.
+        muted: bool,
+    },
+    /// Solo or unsolo a layer. While any layer is soloed, only soloed layers
+    /// are audible and visible.
+    SetTrackSolo {
+        /// Layer identity.
+        id: TrackId,
+        /// New solo state.
+        solo: bool,
+    },
+    /// Lock or unlock a layer against clip edits.
+    SetTrackLocked {
+        /// Layer identity.
+        id: TrackId,
+        /// New lock state.
+        locked: bool,
     },
     /// Remove a layer with all its clips.
     RemoveTrack {
@@ -247,6 +272,9 @@ impl Command {
     /// Apply transactionally, validating the resulting project and returning its inverse.
     /// Cloning for rollback is deliberately simple for the initial prototype.
     pub fn apply(&self, project: &mut Project) -> Result<Self, Error> {
+        if let Some(track) = self.locked_track(project) {
+            return Err(Error(format!("track {} is locked", track.0)));
+        }
         let mut candidate = project.clone();
         let inverse = self.apply_inner(&mut candidate)?;
         candidate.validate()?;
@@ -254,22 +282,66 @@ impl Command {
         Ok(inverse)
     }
 
+    /// The locked layer this command would edit, if any. Layer-level commands
+    /// (gain, mute, solo, lock, add/remove layer) and project-level commands are
+    /// never blocked, so a locked layer can always be unlocked.
+    #[must_use]
+    pub fn locked_track(&self, project: &Project) -> Option<TrackId> {
+        let of_clip = |id: ClipId| {
+            project
+                .tracks
+                .iter()
+                .find(|t| t.locked && t.clips.contains_key(&id))
+                .map(|t| t.id)
+        };
+        match self {
+            Self::AddClip { track, .. } => project
+                .tracks
+                .iter()
+                .find(|t| t.id == *track && t.locked)
+                .map(|t| t.id),
+            Self::RemoveClip { id }
+            | Self::MoveClip { id, .. }
+            | Self::TrimClip { id, .. }
+            | Self::SplitClip { id, .. }
+            | Self::SetTransform { id, .. }
+            | Self::SetParam { id, .. }
+            | Self::AddEffect { id, .. }
+            | Self::RemoveEffect { id, .. }
+            | Self::SetEffectParam { id, .. }
+            | Self::SetPluginParam { id, .. }
+            | Self::AddKeyframe { id, .. }
+            | Self::RemoveKeyframe { id, .. }
+            | Self::MoveKeyframe { id, .. } => of_clip(*id),
+            Self::MergeClip { left, right } => of_clip(*left).or_else(|| of_clip(*right)),
+            Self::Batch { commands } => commands
+                .iter()
+                .find_map(|command| command.locked_track(project)),
+            _ => None,
+        }
+    }
+
     // Keep the exhaustive command/inverse pairs together for review.
     #[allow(clippy::too_many_lines)]
     fn apply_inner(&self, project: &mut Project) -> Result<Self, Error> {
         Ok(match self {
-            Self::Batch { commands } => apply_all(project, commands)?,
+            Self::Batch { commands } => {
+                if commands.len() > MAX_BATCH {
+                    return Err(invalid("batch too large"));
+                }
+                apply_all(project, commands)?
+            }
             Self::SplitAt { times } => {
                 let commands = split_at_commands(project, times)?;
-                apply_all(project, &commands)?
+                apply_generated(project, &commands)?
             }
             Self::RemoveRange { range, ripple } => {
                 let commands = remove_range_commands(project, *range, *ripple)?;
-                apply_all(project, &commands)?
+                apply_generated(project, &commands)?
             }
             Self::RippleDelete { clip } => {
                 let commands = ripple_delete_commands(project, *clip)?;
-                apply_all(project, &commands)?
+                apply_generated(project, &commands)?
             }
             Self::AddTrack { track, index } => {
                 if *index > project.tracks.len() {
@@ -285,6 +357,33 @@ impl Command {
                     gain: project.tracks[index].gain,
                 };
                 project.tracks[index].gain = *gain;
+                inverse
+            }
+            Self::SetTrackMuted { id, muted } => {
+                let index = track_index(project, *id)?;
+                let inverse = Self::SetTrackMuted {
+                    id: *id,
+                    muted: project.tracks[index].muted,
+                };
+                project.tracks[index].muted = *muted;
+                inverse
+            }
+            Self::SetTrackSolo { id, solo } => {
+                let index = track_index(project, *id)?;
+                let inverse = Self::SetTrackSolo {
+                    id: *id,
+                    solo: project.tracks[index].solo,
+                };
+                project.tracks[index].solo = *solo;
+                inverse
+            }
+            Self::SetTrackLocked { id, locked } => {
+                let index = track_index(project, *id)?;
+                let inverse = Self::SetTrackLocked {
+                    id: *id,
+                    locked: project.tracks[index].locked,
+                };
+                project.tracks[index].locked = *locked;
                 inverse
             }
             Self::RemoveTrack { id } => {
@@ -755,6 +854,14 @@ fn apply_all(project: &mut Project, commands: &[Command]) -> Result<Command, Err
     }
     inverses.reverse();
     Ok(Command::Batch { commands: inverses })
+}
+
+/// Apply commands generated by a compound edit, rejecting any that touch a locked track.
+fn apply_generated(project: &mut Project, commands: &[Command]) -> Result<Command, Error> {
+    if let Some(track) = commands.iter().find_map(|c| c.locked_track(project)) {
+        return Err(Error(format!("track {} is locked", track.0)));
+    }
+    apply_all(project, commands)
 }
 
 /// First clip id strictly greater than every existing clip id.

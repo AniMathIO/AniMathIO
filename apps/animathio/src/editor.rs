@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use animathio_audio::{AudioPool, Pcm, SymphoniaSource};
+use animathio_audio::{AudioPool, Pcm, SymphoniaSource, Waveform};
 use animathio_control::{
     AssetInfo, Call, ControlError, ProjectState, RenderFrameParams, RenderFrameResult,
     media_type_of, read_bounded, timeline_of, validate_existing_file, validate_output_file,
@@ -18,9 +18,12 @@ use animathio_plugin_host::PluginHost;
 use base64::Engine as _;
 use gpui::{prelude::*, *};
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::{ActiveTheme, Selectable, Sizable};
 use serde_json::{Value, json};
 
 use crate::control::{ControlMsg, ControlRuntime};
+use crate::fades::{self, FadeEdge};
+use crate::icons::{self, IconName};
 use crate::inspector::{self, ParamModel, PluginDescriptor};
 use crate::layout::DockLayout;
 use crate::playback::{Clock, due_frame, make_clock};
@@ -28,13 +31,19 @@ use crate::render_worker::{RenderRequest, RenderWorker};
 use crate::timecode;
 use crate::timeline::{self, TimelineLayout, TrimEdge};
 
+mod fields;
+
 const RULER_H: f32 = 28.0;
 const ROW_H: f32 = 44.0;
-const TIMELINE_H: f32 = 260.0;
-const HEADER_W: f32 = 150.0;
+const TIMELINE_H: f32 = 340.0;
+const HEADER_W: f32 = 240.0;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
 const DEFAULT_MEDIA_TICKS: i64 = TICKS_PER_SECOND * 2;
+/// Peaks kept per decoded audio asset for timeline waveforms.
+const WAVEFORM_BUCKETS: usize = 4096;
+/// Distance of a fade handle's centre from its clip edge and top, in pixels.
+const FADE_HANDLE_INSET: f32 = 7.0;
 
 /// Viewport benchmark: warm up for two seconds, then scrub to a deterministic
 /// random tick at a 60 Hz request cadence for ten seconds and report the p50/p95
@@ -97,6 +106,8 @@ type LoadedProject = (Project, BTreeMap<AssetId, Vec<u8>>, bool);
 
 /// A menu-bar action: a closure mutating the editor in its window context.
 type MenuAction = Box<dyn Fn(&mut Editor, &mut Context<Editor>)>;
+/// A context-menu action on one clip.
+type ClipAction = fn(&mut Editor, ClipId, &mut Context<Editor>);
 
 /// Tabs in the left media-pool panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -104,6 +115,14 @@ enum LeftTab {
     Assets,
     Plugins,
     Effects,
+}
+
+/// Viewer zoom modes for the preview image.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ViewerFit {
+    Contain,
+    Fill,
+    Actual,
 }
 
 /// Top menu-bar menus.
@@ -147,11 +166,6 @@ enum EditTarget {
         id: ClipId,
         name: String,
     },
-    /// Plugin color parameter, edited as `#RRGGBB` / `#RRGGBBAA`.
-    PluginColor {
-        id: ClipId,
-        name: String,
-    },
     /// One axis of a plugin point parameter.
     PluginPoint {
         id: ClipId,
@@ -184,21 +198,6 @@ enum SettingsField {
     Height,
     Fps,
     Background,
-}
-
-struct Scrub {
-    field: Field,
-    start_x: f32,
-    start_value: f64,
-    current: f64,
-}
-
-struct PluginScrub {
-    id: ClipId,
-    name: String,
-    start_x: f32,
-    start_value: f64,
-    current: f64,
 }
 
 struct TextEdit {
@@ -240,10 +239,33 @@ struct TrimDrag {
     current: Time,
 }
 
+/// Dragging a fade handle: `current` is the fade length in ticks.
+struct FadeDrag {
+    clip_id: ClipId,
+    edge: FadeEdge,
+    current: i64,
+}
+
 enum TimelineGesture {
     Scrub,
     Drag(ClipDrag),
     Trim(TrimDrag),
+    Fade(FadeDrag),
+}
+
+/// A right-click context menu target on the timeline.
+#[derive(Clone, PartialEq)]
+enum ContextMenu {
+    Clip { id: ClipId },
+    Keyframe(KeyframeSelection),
+}
+
+/// An item being dragged from the media pool onto the timeline.
+#[derive(Clone, PartialEq)]
+enum PoolDrag {
+    Asset(AssetId),
+    Plugin(String),
+    Effect(animathio_core::EffectKind),
 }
 
 struct KeyframePaint {
@@ -256,9 +278,20 @@ struct ClipPaint {
     start: Time,
     end: Time,
     selected: bool,
+    hovered: bool,
     label: SharedString,
-    error: bool,
+    kind: animathio_core::ClipKind,
+    icon: IconName,
     keyframes: Vec<KeyframePaint>,
+    /// Downsampled peaks for audio clips, once the asset is decoded.
+    waveform: Option<Arc<Waveform>>,
+    source_offset: i64,
+    fade_in: i64,
+    fade_out: i64,
+    /// The clip's track is locked.
+    locked: bool,
+    /// The clip's track is muted or silenced by another track's solo.
+    silenced: bool,
 }
 
 struct TimelineSnapshot {
@@ -266,6 +299,7 @@ struct TimelineSnapshot {
     rows: usize,
     clips: Vec<ClipPaint>,
     position: Time,
+    frame_rate: FrameRate,
 }
 
 /// A small on-disk list of recently opened projects, kept in the XDG config dir.
@@ -324,8 +358,6 @@ pub(crate) struct Editor {
     timeline_zoom: f32,
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
-    scrub: Option<Scrub>,
-    plugin_scrub: Option<PluginScrub>,
     editing: Option<TextEdit>,
     plugin_host: Option<PluginHost>,
     plugins: Vec<PluginDescriptor>,
@@ -350,6 +382,17 @@ pub(crate) struct Editor {
     loop_playback: bool,
     snapping: bool,
     timecode_buffer: Option<String>,
+    hovered_clip: Option<ClipId>,
+    viewer_fit: ViewerFit,
+    safe_areas: bool,
+    viewer_menu_open: bool,
+    closed_sections: BTreeSet<String>,
+    context_menu: Option<ContextMenu>,
+    context_menu_pos: Option<Point<Pixels>>,
+    pool_drag: Option<PoolDrag>,
+    pool_drag_pos: Point<Pixels>,
+    fields: fields::FieldPool,
+    waveforms: std::cell::RefCell<BTreeMap<AssetId, Arc<Waveform>>>,
 }
 
 impl Editor {
@@ -399,8 +442,6 @@ impl Editor {
             timeline_zoom: 1.0,
             timeline_scroll: 0.0,
             gesture: None,
-            scrub: None,
-            plugin_scrub: None,
             editing: None,
             plugin_host,
             plugins,
@@ -424,6 +465,17 @@ impl Editor {
             loop_playback: false,
             snapping: true,
             timecode_buffer: None,
+            hovered_clip: None,
+            viewer_fit: ViewerFit::Contain,
+            safe_areas: false,
+            viewer_menu_open: false,
+            closed_sections: BTreeSet::new(),
+            context_menu: None,
+            context_menu_pos: None,
+            pool_drag: None,
+            pool_drag_pos: Point::default(),
+            fields: fields::FieldPool::default(),
+            waveforms: std::cell::RefCell::default(),
         };
         if recovered {
             this.error = Some("recovered from autosave".into());
@@ -855,6 +907,9 @@ impl Editor {
     fn sync_audio(&mut self) {
         self.pool.collect(&self.project);
         let live = audio_asset_ids(&self.project);
+        self.waveforms
+            .borrow_mut()
+            .retain(|id, _| live.contains(id));
         let Some((rate, channels)) = self.clock.mixer_format() else {
             self.clock.set_project(Arc::new(self.project.clone()));
             return;
@@ -893,7 +948,17 @@ impl Editor {
         cx.notify();
     }
 
-    pub(crate) fn handle_keystroke(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
+    pub(crate) fn handle_keystroke(
+        &mut self,
+        event: &KeystrokeEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A focused inspector input owns the keyboard: shortcuts such as Delete
+        // or Space must edit its text, not the timeline.
+        if self.fields.any_focused(window, cx) {
+            return;
+        }
         if self.timecode_buffer.is_some() {
             self.handle_timecode_key(event, cx);
             cx.stop_propagation();
@@ -1049,17 +1114,6 @@ impl Editor {
                 let value = edit.buffer;
                 self.execute(&self.plugin_param_command(id, name, json!(value)), cx);
             }
-            EditTarget::PluginColor { id, name } => match parse_hex_color(edit.buffer.trim()) {
-                Some(color) => self.execute(
-                    &self.plugin_param_command(
-                        id,
-                        name,
-                        json!([color[0], color[1], color[2], color[3]]),
-                    ),
-                    cx,
-                ),
-                None => self.error = Some("invalid color (use #RRGGBB or #RRGGBBAA)".into()),
-            },
             EditTarget::PluginPoint { id, name, axis } => {
                 let Ok(value) = edit.buffer.trim().parse::<f64>() else {
                     self.error = Some("invalid number".into());
@@ -1110,13 +1164,6 @@ impl Editor {
         self.plugin_opaque(id, name)
             .and_then(|value| value.as_f64())
             .unwrap_or(0.0)
-    }
-
-    fn editing_display(&self, target: &EditTarget) -> Option<String> {
-        self.editing
-            .as_ref()
-            .filter(|edit| &edit.target == target)
-            .map(|edit| edit.buffer.clone())
     }
 
     fn plugin_model(&self, id: ClipId, name: &str) -> Option<ParamModel> {
@@ -1390,6 +1437,29 @@ impl Editor {
         cx.notify();
     }
 
+    fn toggle_viewer_menu(&mut self, cx: &mut Context<Self>) {
+        self.viewer_menu_open = !self.viewer_menu_open;
+        cx.notify();
+    }
+
+    fn select_viewer_fit(&mut self, fit: ViewerFit, cx: &mut Context<Self>) {
+        self.viewer_fit = fit;
+        self.viewer_menu_open = false;
+        cx.notify();
+    }
+
+    fn toggle_safe_areas(&mut self, cx: &mut Context<Self>) {
+        self.safe_areas = !self.safe_areas;
+        cx.notify();
+    }
+
+    fn toggle_section(&mut self, name: &str, cx: &mut Context<Self>) {
+        if !self.closed_sections.remove(name) {
+            self.closed_sections.insert(name.to_owned());
+        }
+        cx.notify();
+    }
+
     fn begin_timecode_edit(&mut self, cx: &mut Context<Self>) {
         self.timecode_buffer = Some(timecode::format_timecode(
             self.position,
@@ -1456,6 +1526,116 @@ impl Editor {
         self.execute(&Command::AddClip { track, clip }, cx);
     }
 
+    /// Start dragging an item from the media pool.
+    fn arm_pool_drag(&mut self, drag: PoolDrag, cx: &mut Context<Self>) {
+        self.pool_drag = Some(drag);
+        cx.notify();
+    }
+
+    /// Finish a media-pool drag at a window position over the timeline.
+    fn drop_on_timeline(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(drag) = self.pool_drag.take() else {
+            return;
+        };
+        let (x, y) = self.timeline_relative(position);
+        let layout = self.current_layout();
+        // Releasing outside the track area cancels the drag.
+        if y < layout.ruler_height || !self.timeline_bounds.contains(&position) {
+            cx.notify();
+            return;
+        }
+        let time = timeline::drop_start(&layout, &self.project, x, self.position, self.snapping);
+        let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+        let track = self
+            .project
+            .tracks()
+            .get(row)
+            .map(Track::id)
+            .or_else(|| self.project.tracks().first().map(Track::id));
+        let Some(track) = track else {
+            self.error = Some("no track to place the clip".into());
+            cx.notify();
+            return;
+        };
+        match drag {
+            PoolDrag::Asset(asset_id) => self.drop_asset(asset_id, track, time, cx),
+            PoolDrag::Plugin(plugin_id) => self.drop_plugin(plugin_id, track, time, cx),
+            PoolDrag::Effect(kind) => {
+                let hit = timeline::hit_test(&layout, &self.project, x, y);
+                if let Some(clip) = hit.map(|hit| hit.clip).or(self.selected) {
+                    self.add_effect_to_clip(clip, kind, cx);
+                } else {
+                    self.error = Some("drop an effect on a clip".into());
+                    cx.notify();
+                }
+            }
+        }
+    }
+
+    /// Place an asset clip at an explicit timeline position and track.
+    fn drop_asset(
+        &mut self,
+        asset_id: AssetId,
+        track: TrackId,
+        time: Time,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(asset) = self.project.assets().get(&asset_id).cloned() else {
+            return;
+        };
+        let kind = if asset.media_type.starts_with("video/") {
+            ClipKind::Video(asset_id.clone())
+        } else if asset.media_type.starts_with("image/") {
+            ClipKind::Image(asset_id.clone())
+        } else if asset.media_type.starts_with("audio/") {
+            ClipKind::Audio(asset_id.clone())
+        } else {
+            self.error = Some(format!("cannot place {}", asset.media_type));
+            cx.notify();
+            return;
+        };
+        let Some(end) = time.0.checked_add(DEFAULT_MEDIA_TICKS) else {
+            return;
+        };
+        let Ok(range) = TimeRange::new(time, Time(end)) else {
+            return;
+        };
+        let clip = Clip::new(self.next_clip_id(), kind, range);
+        self.execute(&Command::AddClip { track, clip }, cx);
+    }
+
+    /// Place a plugin clip at an explicit timeline position and track.
+    fn drop_plugin(
+        &mut self,
+        plugin_id: String,
+        track: TrackId,
+        time: Time,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(descriptor) = self.plugins.iter().find(|plugin| plugin.id == plugin_id) else {
+            return;
+        };
+        let models = descriptor.models();
+        let (numeric, opaque) = inspector::default_params(&models);
+        let plugin_id = descriptor.id.clone();
+        let Some(end) = time.0.checked_add(DEFAULT_MEDIA_TICKS) else {
+            return;
+        };
+        let Ok(range) = TimeRange::new(time, Time(end)) else {
+            return;
+        };
+        let mut clip = Clip::new(
+            self.next_clip_id(),
+            ClipKind::Plugin {
+                plugin_id,
+                params: opaque,
+            },
+            range,
+        );
+        clip.params = numeric;
+        self.execute(&Command::AddClip { track, clip }, cx);
+    }
+
     /// Add a built-in effect to the selected clip's chain.
     fn add_effect_to_selected(&mut self, kind: animathio_core::EffectKind, cx: &mut Context<Self>) {
         let Some(id) = self.selected else {
@@ -1463,11 +1643,102 @@ impl Editor {
             cx.notify();
             return;
         };
+        self.add_effect_to_clip(id, kind, cx);
+    }
+
+    /// Add a built-in effect to a specific clip's chain.
+    fn add_effect_to_clip(
+        &mut self,
+        id: ClipId,
+        kind: animathio_core::EffectKind,
+        cx: &mut Context<Self>,
+    ) {
         let index = self.find_clip(id).map_or(0, |clip| clip.effects.len());
         let effect =
             animathio_core::EffectInstance::new(animathio_core::EffectId(self.next_id), kind);
         self.next_id = self.next_id.saturating_add(1);
         self.execute(&Command::AddEffect { id, index, effect }, cx);
+    }
+
+    /// Split a specific clip at the playhead.
+    fn split_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        let Some(clip) = self.find_clip(id).cloned() else {
+            return;
+        };
+        let position = self.position;
+        if position <= clip.range.start || position >= clip.range.end {
+            self.error = Some("playhead is outside the clip".into());
+            cx.notify();
+            return;
+        }
+        let right_id = self.next_clip_id();
+        self.execute(
+            &Command::SplitClip {
+                id,
+                right_id,
+                at: position,
+            },
+            cx,
+        );
+    }
+
+    /// Set one fade of a clip to `ticks` (0 clears it) as a single undo step.
+    fn set_fade(&mut self, id: ClipId, edge: FadeEdge, ticks: i64, cx: &mut Context<Self>) {
+        if let Some(command) = self
+            .find_clip(id)
+            .and_then(|clip| fades::fade_command(clip, edge, ticks))
+        {
+            self.execute(&command, cx);
+        }
+    }
+
+    fn fade_in_one_second(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_fade(id, FadeEdge::In, TICKS_PER_SECOND, cx);
+    }
+
+    fn fade_out_one_second(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_fade(id, FadeEdge::Out, TICKS_PER_SECOND, cx);
+    }
+
+    fn clear_fades(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_fade(id, FadeEdge::In, 0, cx);
+        self.set_fade(id, FadeEdge::Out, 0, cx);
+    }
+
+    /// Delete a specific clip.
+    fn delete_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.execute(&Command::RemoveClip { id }, cx);
+        if self.selected == Some(id) {
+            self.selected = None;
+            self.selected_field = None;
+        }
+    }
+
+    /// Duplicate a clip immediately after itself on the same track.
+    fn duplicate_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        let Some(clip) = self.find_clip(id).cloned() else {
+            return;
+        };
+        let Some(track) = self
+            .project
+            .tracks()
+            .iter()
+            .find(|t| t.clips().contains_key(&id))
+            .map(Track::id)
+        else {
+            return;
+        };
+        let duration = clip.range.end.0 - clip.range.start.0;
+        let Some(end) = clip.range.end.0.checked_add(duration) else {
+            return;
+        };
+        let Ok(range) = TimeRange::new(clip.range.end, Time(end)) else {
+            return;
+        };
+        let mut copy = clip;
+        copy.id = self.next_clip_id();
+        copy.range = range;
+        self.execute(&Command::AddClip { track, clip: copy }, cx);
     }
 
     fn undo(&mut self, cx: &mut Context<Self>) {
@@ -1687,12 +1958,28 @@ impl Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.context_menu = None;
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
         if y < layout.ruler_height {
             self.selected_keyframe = None;
             self.gesture = Some(TimelineGesture::Scrub);
             self.scrub_to(x, cx);
+            return;
+        }
+        if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
+            self.selected = Some(clip_id);
+            self.selected_field = None;
+            self.selected_keyframe = None;
+            let current = self
+                .find_clip(clip_id)
+                .map_or(0, |clip| fades::fade_len(clip, edge));
+            self.gesture = Some(TimelineGesture::Fade(FadeDrag {
+                clip_id,
+                edge,
+                current,
+            }));
+            cx.notify();
             return;
         }
         if let Some(selection) = self.hit_keyframe(&layout, x, y) {
@@ -1756,6 +2043,44 @@ impl Editor {
         cx.notify();
     }
 
+    /// The fade handle under a canvas-relative point, for the selected or hovered
+    /// clip only (the same clips that draw handles).
+    fn hit_fade_handle(
+        &self,
+        layout: &TimelineLayout,
+        x: f32,
+        y: f32,
+    ) -> Option<(ClipId, FadeEdge)> {
+        for (row, track) in self.project.tracks().iter().enumerate() {
+            let top = layout.ruler_height + row as f32 * layout.row_height + 3.0;
+            if (y - (top + FADE_HANDLE_INSET)).abs() > 7.0 {
+                continue;
+            }
+            for clip in track.clips().values() {
+                if self.selected != Some(clip.id) && self.hovered_clip != Some(clip.id) {
+                    continue;
+                }
+                let x0 = timeline::time_to_x(layout, clip.range.start);
+                let x1 = timeline::time_to_x(layout, clip.range.end);
+                if x1 - x0 < 40.0 {
+                    continue;
+                }
+                let ppt = layout.pixels_per_tick as f32;
+                let in_x =
+                    x0 + fades::fade_len(clip, FadeEdge::In) as f32 * ppt + FADE_HANDLE_INSET;
+                let out_x =
+                    x1 - fades::fade_len(clip, FadeEdge::Out) as f32 * ppt - FADE_HANDLE_INSET;
+                if (x - in_x).abs() <= 7.0 {
+                    return Some((clip.id, FadeEdge::In));
+                }
+                if (x - out_x).abs() <= 7.0 {
+                    return Some((clip.id, FadeEdge::Out));
+                }
+            }
+        }
+        None
+    }
+
     fn hit_keyframe(&self, layout: &TimelineLayout, x: f32, y: f32) -> Option<KeyframeSelection> {
         let selected = self.selected?;
         if y < layout.ruler_height {
@@ -1799,11 +2124,16 @@ impl Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let (x, y) = self.timeline_relative(event.position);
+        let layout = self.current_layout();
+        let hovered = timeline::hit_test(&layout, &self.project, x, y).map(|hit| hit.clip);
+        if hovered != self.hovered_clip {
+            self.hovered_clip = hovered;
+            cx.notify();
+        }
         if !event.dragging() {
             return;
         }
-        let (x, y) = self.timeline_relative(event.position);
-        let layout = self.current_layout();
         if let Some(drag) = &mut self.keyframe_drag {
             let raw = timeline::x_to_time(&layout, x);
             drag.current = Time((raw.0 - drag.clip_start.0).max(0));
@@ -1838,6 +2168,24 @@ impl Editor {
                             .clamp(trim.origin_start.0.saturating_add(1), i64::MAX),
                     ),
                 };
+                cx.notify();
+            }
+            Some(TimelineGesture::Fade(fade)) => {
+                let Some(clip) = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .find_map(|track| track.clips().get(&fade.clip_id))
+                else {
+                    return;
+                };
+                let pointer = timeline::x_to_time(&layout, x).0;
+                let inset = (f64::from(FADE_HANDLE_INSET) / layout.pixels_per_tick) as i64;
+                let raw = match fade.edge {
+                    FadeEdge::In => pointer - clip.range.start.0 - inset,
+                    FadeEdge::Out => clip.range.end.0 - pointer - inset,
+                };
+                fade.current = raw.clamp(0, fades::max_fade(clip, fade.edge));
                 cx.notify();
             }
             Some(TimelineGesture::Scrub) => self.scrub_to(x, cx),
@@ -1909,8 +2257,40 @@ impl Editor {
                     Err(error) => self.error = Some(error.0),
                 }
             }
+            Some(TimelineGesture::Fade(fade)) => {
+                if let Some(command) = self
+                    .find_clip(fade.clip_id)
+                    .and_then(|clip| fades::fade_command(clip, fade.edge, fade.current))
+                {
+                    self.execute(&command, cx);
+                }
+                cx.notify();
+            }
             _ => {}
         }
+    }
+
+    fn on_timeline_context_menu(
+        &mut self,
+        event: &MouseDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (x, y) = self.timeline_relative(event.position);
+        let layout = self.current_layout();
+        if let Some(selection) = self.hit_keyframe(&layout, x, y) {
+            self.selected = Some(selection.clip_id);
+            self.selected_keyframe = Some(selection.clone());
+            self.context_menu = Some(ContextMenu::Keyframe(selection));
+        } else if let Some(hit) = timeline::hit_test(&layout, &self.project, x, y) {
+            self.selected = Some(hit.clip);
+            self.selected_keyframe = None;
+            self.context_menu = Some(ContextMenu::Clip { id: hit.clip });
+        } else {
+            self.context_menu = None;
+        }
+        self.context_menu_pos = Some(event.position);
+        cx.notify();
     }
 
     fn on_timeline_scroll_wheel(
@@ -1942,69 +2322,6 @@ impl Editor {
         self.timeline_scroll = self
             .timeline_scroll
             .clamp(0.0, timeline::max_scroll(&layout));
-        cx.notify();
-    }
-
-    fn on_field_mouse_down(
-        &mut self,
-        id: ClipId,
-        field: &Field,
-        event: &MouseDownEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let value = self.find_clip(id).map_or(0.0, |c| field_value(c, field));
-        self.selected = Some(id);
-        self.selected_field = Some(field.clone());
-        if event.click_count >= 2 {
-            self.editing = Some(TextEdit {
-                target: EditTarget::Field(field.clone()),
-                buffer: format!("{value}"),
-            });
-            self.scrub = None;
-        } else {
-            self.scrub = Some(Scrub {
-                field: field.clone(),
-                start_x: f32::from(event.position.x),
-                start_value: value,
-                current: value,
-            });
-            self.editing = None;
-        }
-        cx.notify();
-    }
-
-    fn on_field_mouse_move(
-        &mut self,
-        _id: ClipId,
-        field: &Field,
-        event: &MouseMoveEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if !event.dragging() {
-            return;
-        }
-        if let Some(scrub) = &mut self.scrub
-            && &scrub.field == field
-        {
-            let delta = f32::from(event.position.x) - scrub.start_x;
-            scrub.current = scrub.start_value + f64::from(delta) * field_scrub_scale(field);
-            cx.notify();
-        }
-    }
-
-    fn on_field_mouse_up(
-        &mut self,
-        _id: ClipId,
-        field: &Field,
-        _event: &MouseUpEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(scrub) = self.scrub.take()
-            && &scrub.field == field
-            && let Some(id) = self.selected
-        {
-            self.commit_field(id, field, scrub.current, cx);
-        }
         cx.notify();
     }
 
@@ -2053,10 +2370,22 @@ impl Editor {
         self.toggle_play(cx);
     }
 
+    /// Cached downsampled peaks for a decoded audio asset.
+    fn waveform_for(&self, id: &AssetId) -> Option<Arc<Waveform>> {
+        if let Some(wave) = self.waveforms.borrow().get(id) {
+            return Some(wave.clone());
+        }
+        let wave = Arc::new(self.pool.waveform(id, WAVEFORM_BUCKETS)?);
+        self.waveforms.borrow_mut().insert(id.clone(), wave.clone());
+        Some(wave)
+    }
+
     fn build_timeline_snapshot(&self) -> TimelineSnapshot {
         let duration = timeline::project_duration(&self.project);
         let mut clips = Vec::new();
+        let any_solo = self.project.tracks().iter().any(Track::is_solo);
         for (row, track) in self.project.tracks().iter().enumerate() {
+            let silenced = track.is_muted() || (any_solo && !track.is_solo());
             for clip in track.clips().values() {
                 let (start, end) = if let Some(TimelineGesture::Drag(drag)) = &self.gesture
                     && drag.clip_id == clip.id
@@ -2101,14 +2430,38 @@ impl Editor {
                         }
                     }
                 }
+                let (mut fade_in, mut fade_out) = (
+                    fades::fade_len(clip, FadeEdge::In),
+                    fades::fade_len(clip, FadeEdge::Out),
+                );
+                if let Some(TimelineGesture::Fade(drag)) = &self.gesture
+                    && drag.clip_id == clip.id
+                {
+                    match drag.edge {
+                        FadeEdge::In => fade_in = drag.current,
+                        FadeEdge::Out => fade_out = drag.current,
+                    }
+                }
+                let waveform = match &clip.kind {
+                    ClipKind::Audio(asset) => self.waveform_for(asset),
+                    _ => None,
+                };
                 clips.push(ClipPaint {
                     row,
                     start,
                     end,
                     selected: self.selected == Some(clip.id),
+                    hovered: self.hovered_clip == Some(clip.id),
                     label: clip_label(&self.project, clip).into(),
-                    error: matches!(clip.kind, ClipKind::Error(_)),
+                    kind: clip.kind.clone(),
+                    icon: icons::kind_icon(&clip.kind),
                     keyframes,
+                    waveform,
+                    source_offset: clip.source_offset.0,
+                    fade_in,
+                    fade_out,
+                    locked: track.is_locked(),
+                    silenced,
                 });
             }
         }
@@ -2117,119 +2470,8 @@ impl Editor {
             rows: self.project.tracks().len(),
             clips,
             position: self.position,
+            frame_rate: self.project.frame_rate(),
         }
-    }
-
-    fn transform_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id) else {
-            return Vec::new();
-        };
-        let transform = [
-            (Field::Transform(TransformProperty::X), "x"),
-            (Field::Transform(TransformProperty::Y), "y"),
-            (Field::Transform(TransformProperty::ScaleX), "scale x"),
-            (Field::Transform(TransformProperty::ScaleY), "scale y"),
-            (Field::Transform(TransformProperty::Rotation), "rotation"),
-            (Field::Transform(TransformProperty::Opacity), "opacity"),
-        ];
-        let mut rows = Vec::new();
-        for (field, label) in transform {
-            let value = field_value(clip, &field);
-            rows.push(self.field_row(id, &field, label, value, cx));
-        }
-        rows
-    }
-
-    fn numeric_param_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id) else {
-            return Vec::new();
-        };
-        let mut rows = Vec::new();
-        for (name, value) in &clip.params {
-            let field = Field::Param(name.clone());
-            if let Some(value) = value.as_number() {
-                rows.push(self.field_row(id, &field, name, value, cx));
-            }
-        }
-        rows
-    }
-
-    fn plugin_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id) else {
-            return Vec::new();
-        };
-        let ClipKind::Plugin { plugin_id, .. } = &clip.kind else {
-            return Vec::new();
-        };
-        let Some(descriptor) = self.plugins.iter().find(|plugin| &plugin.id == plugin_id) else {
-            return vec![div().px_2().child("plugin not loaded")];
-        };
-        let models = descriptor.models();
-        let mut rows = Vec::new();
-        for model in &models {
-            rows.push(self.plugin_row(id, model, cx));
-        }
-        rows
-    }
-
-    fn plugin_row(&self, id: ClipId, model: &ParamModel, cx: &mut Context<Self>) -> Div {
-        let name = model.id().to_owned();
-        let diamond = self.keyframe_diamond(id, Target::Param(name.clone()), cx);
-        let control = match model {
-            ParamModel::Number { .. } => self.plugin_number_control(id, name.clone(), cx),
-            ParamModel::Color { default, .. } => self.plugin_color_control(
-                id,
-                name.clone(),
-                [default.r, default.g, default.b, default.a],
-                cx,
-            ),
-            ParamModel::Text { default, .. } => {
-                self.plugin_text_control(id, name.clone(), default, cx)
-            }
-            ParamModel::Enum {
-                options, default, ..
-            } => self.plugin_enum_control(id, name.clone(), options.clone(), default, cx),
-            ParamModel::Bool { default, .. } => {
-                self.plugin_bool_control(id, name.clone(), *default, cx)
-            }
-            ParamModel::Point { default, .. } => {
-                self.plugin_point_control(id, name.clone(), *default, cx)
-            }
-            ParamModel::Asset { media_type, .. } => {
-                self.plugin_asset_control(id, name.clone(), media_type, cx)
-            }
-        };
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .child(diamond)
-            .child(div().flex_1().child(model.label().to_owned()))
-            .child(control)
-    }
-
-    fn keyframe_diamond(
-        &self,
-        id: ClipId,
-        target: Target,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let active = self
-            .find_clip(id)
-            .is_some_and(|clip| inspector::keyframed(clip, &target, self.position));
-        let label = if active { "◆" } else { "◇" };
-        div()
-            .w(px(14.))
-            .h(px(14.))
-            .cursor_pointer()
-            .child(label)
-            .id("keyframe-diamond")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                this.toggle_keyframe(id, target.clone(), cx);
-            }))
     }
 
     fn toggle_keyframe(&mut self, id: ClipId, target: Target, cx: &mut Context<Self>) {
@@ -2295,7 +2537,11 @@ impl Editor {
                 div()
                     .px_2()
                     .cursor_pointer()
-                    .bg(if active { rgb(0x2a3342) } else { rgb(0x151a22) })
+                    .bg(if active {
+                        cx.theme().list_active
+                    } else {
+                        cx.theme().popover
+                    })
                     .child(label)
                     .id("keyframe-interp")
                     .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
@@ -2307,319 +2553,6 @@ impl Editor {
             );
         }
         rows
-    }
-
-    fn plugin_number_control(
-        &self,
-        id: ClipId,
-        name: String,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let value = self.plugin_number_value(id, &name);
-        let target = EditTarget::PluginNumber {
-            id,
-            name: name.clone(),
-        };
-        let display = if let Some(buffer) = self.editing_display(&target) {
-            buffer
-        } else if let Some(scrub) = &self.plugin_scrub
-            && scrub.id == id
-            && scrub.name == name
-        {
-            format!("{:.4}", scrub.current)
-        } else {
-            format!("{value:.4}")
-        };
-
-        let down = name.clone();
-        let move_name = name.clone();
-        let up = name.clone();
-        div()
-            .cursor(CursorStyle::ResizeLeftRight)
-            .child(display)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    this.on_plugin_number_down(id, &down, event, cx);
-                }),
-            )
-            .on_mouse_move(
-                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.on_plugin_number_move(id, &move_name, event, cx);
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
-                    this.on_plugin_number_up(id, &up, event, cx);
-                }),
-            )
-            .id("plugin-number")
-    }
-
-    fn on_plugin_number_down(
-        &mut self,
-        id: ClipId,
-        name: &str,
-        event: &MouseDownEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let value = self.plugin_number_value(id, name);
-        if event.click_count >= 2 {
-            self.editing = Some(TextEdit {
-                target: EditTarget::PluginNumber {
-                    id,
-                    name: name.to_owned(),
-                },
-                buffer: format!("{value}"),
-            });
-            self.plugin_scrub = None;
-        } else {
-            self.plugin_scrub = Some(PluginScrub {
-                id,
-                name: name.to_owned(),
-                start_x: f32::from(event.position.x),
-                start_value: value,
-                current: value,
-            });
-            self.editing = None;
-        }
-        cx.notify();
-    }
-
-    fn on_plugin_number_move(
-        &mut self,
-        id: ClipId,
-        name: &str,
-        event: &MouseMoveEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if !event.dragging() {
-            return;
-        }
-        let step = self
-            .plugin_model(id, name)
-            .and_then(|model| match model {
-                ParamModel::Number { step, .. } => Some(step),
-                _ => None,
-            })
-            .unwrap_or(0.1);
-        let Some(scrub) = &mut self.plugin_scrub else {
-            return;
-        };
-        if scrub.id != id || scrub.name != name {
-            return;
-        }
-        let delta = f64::from(f32::from(event.position.x) - scrub.start_x);
-        scrub.current = scrub.start_value + delta * step * 0.05;
-        cx.notify();
-    }
-
-    fn on_plugin_number_up(
-        &mut self,
-        id: ClipId,
-        name: &str,
-        _event: &MouseUpEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(scrub) = self.plugin_scrub.take()
-            && scrub.id == id
-            && scrub.name == name
-            && let Some(command) = self.plugin_number_command(id, name, scrub.current)
-        {
-            self.execute(&command, cx);
-        }
-        cx.notify();
-    }
-
-    fn plugin_text_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: &str,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let value = self.plugin_text_value(id, &name, default);
-        let target = EditTarget::PluginText {
-            id,
-            name: name.clone(),
-        };
-        let display = self
-            .editing_display(&target)
-            .unwrap_or_else(|| value.clone());
-        let current = value.clone();
-        div()
-            .cursor_pointer()
-            .child(display)
-            .id("plugin-text")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                this.editing = Some(TextEdit {
-                    target: EditTarget::PluginText {
-                        id,
-                        name: name.clone(),
-                    },
-                    buffer: current.clone(),
-                });
-                cx.notify();
-            }))
-    }
-
-    fn plugin_enum_control(
-        &self,
-        id: ClipId,
-        name: String,
-        options: Vec<String>,
-        default: &str,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let current = self.plugin_text_value(id, &name, default);
-        let options_for_click = options.clone();
-        div()
-            .cursor_pointer()
-            .child(current.clone())
-            .id("plugin-enum")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                let next = cycle_option(&options_for_click, &current);
-                this.execute(
-                    &this.plugin_param_command(id, name.clone(), json!(next)),
-                    cx,
-                );
-            }))
-    }
-
-    fn plugin_bool_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: bool,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let value = self.plugin_bool_value(id, &name, default);
-        let label = if value { "on" } else { "off" };
-        div()
-            .cursor_pointer()
-            .child(label)
-            .id("plugin-bool")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                this.execute(
-                    &this.plugin_param_command(id, name.clone(), json!(!value)),
-                    cx,
-                );
-            }))
-    }
-
-    fn plugin_color_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: [u8; 4],
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let color = self.plugin_color_value(id, &name, default);
-        let hex = format!(
-            "#{:02x}{:02x}{:02x}{:02x}",
-            color[0], color[1], color[2], color[3]
-        );
-        let target = EditTarget::PluginColor {
-            id,
-            name: name.clone(),
-        };
-        let display = self.editing_display(&target).unwrap_or_else(|| hex.clone());
-        let swatch =
-            rgb(u32::from(color[0]) << 16 | u32::from(color[1]) << 8 | u32::from(color[2]));
-        let name_for_click = name.clone();
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_1()
-            .child(div().w(px(16.)).h(px(12.)).bg(swatch))
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child(display)
-                    .id("plugin-color")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.editing = Some(TextEdit {
-                            target: EditTarget::PluginColor {
-                                id,
-                                name: name.clone(),
-                            },
-                            buffer: hex.clone(),
-                        });
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child("↻")
-                    .id("plugin-color-cycle")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        let next = cycle_color(color);
-                        this.execute(
-                            &this.plugin_param_command(
-                                id,
-                                name_for_click.clone(),
-                                json!([next[0], next[1], next[2], next[3]]),
-                            ),
-                            cx,
-                        );
-                    })),
-            )
-            .id("plugin-color-row")
-    }
-
-    fn plugin_point_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: animathio_plugin_api::PointValue,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let point = self.plugin_point_value(id, &name);
-        let x_name = name.clone();
-        let y_name = name.clone();
-        div()
-            .flex()
-            .flex_row()
-            .gap_1()
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child(format!("x {:.2}", point[0]))
-                    .id("plugin-point-x")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.editing = Some(TextEdit {
-                            target: EditTarget::PluginPoint {
-                                id,
-                                name: x_name.clone(),
-                                axis: 0,
-                            },
-                            buffer: format!("{:.2}", point[0]),
-                        });
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child(format!("y {:.2}", point[1]))
-                    .id("plugin-point-y")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.editing = Some(TextEdit {
-                            target: EditTarget::PluginPoint {
-                                id,
-                                name: y_name.clone(),
-                                axis: 1,
-                            },
-                            buffer: format!("{:.2}", point[1]),
-                        });
-                        cx.notify();
-                    })),
-            )
-            .child(div().px_1().child(format!("({} {})", default.x, default.y)))
-            .id("plugin-point-row")
     }
 
     fn plugin_asset_control(
@@ -2674,15 +2607,15 @@ impl Editor {
             "#{:02x}{:02x}{:02x}{:02x}",
             background[0], background[1], background[2], background[3]
         );
-        let swatch = rgb(u32::from(background[0]) << 16
-            | u32::from(background[1]) << 8
-            | u32::from(background[2]));
+        let swatch = fields::to_hsla(background);
         div()
             .absolute()
             .top(px(52.))
             .right(px(12.))
             .w(px(280.))
-            .bg(rgb(0x1f2430))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
             .p_3()
             .flex()
             .flex_col()
@@ -2769,58 +2702,6 @@ impl Editor {
             .collect();
         ids.sort();
         ids
-    }
-
-    fn field_row(
-        &self,
-        id: ClipId,
-        field: &Field,
-        label: &str,
-        value: f64,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let display = if let Some(edit) = &self.editing
-            && edit.target == EditTarget::Field(field.clone())
-        {
-            edit.buffer.clone()
-        } else if let Some(scrub) = &self.scrub
-            && &scrub.field == field
-        {
-            format!("{:.4}", scrub.current)
-        } else {
-            format!("{value:.4}")
-        };
-
-        let down = field.clone();
-        let move_field = field.clone();
-        let up = field.clone();
-        div()
-            .flex()
-            .flex_row()
-            .justify_between()
-            .px_2()
-            .py_1()
-            .child(label.to_owned())
-            .child(
-                div()
-                    .cursor(CursorStyle::ResizeLeftRight)
-                    .child(display)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.on_field_mouse_down(id, &down, event, cx);
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                        this.on_field_mouse_move(id, &move_field, event, cx);
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseUpEvent, _, cx| {
-                            this.on_field_mouse_up(id, &up, event, cx);
-                        }),
-                    ),
-            )
     }
 
     fn open_export_dialog(&mut self, cx: &mut Context<Self>) {
@@ -2933,7 +2814,9 @@ impl Editor {
             .left(px(30.))
             .w(px(280.))
             .p_3()
-            .bg(rgb(0x1f2430))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
             .flex()
             .flex_col()
             .gap_2()
@@ -2943,8 +2826,8 @@ impl Editor {
                 div()
                     .w(px(240.))
                     .h(px(8.))
-                    .bg(rgb(0x394354))
-                    .child(div().w(px(width)).h(px(8.)).bg(rgb(0x5eabff))),
+                    .bg(cx.theme().muted)
+                    .child(div().w(px(width)).h(px(8.)).bg(cx.theme().progress_bar)),
             )
             .child(button(
                 "cancel-export",
@@ -2959,7 +2842,6 @@ impl Editor {
     }
 
     fn menu_bar(&self, cx: &mut Context<Self>) -> Div {
-        let dirty = if self.dirty { " ●" } else { "" };
         let title = self.path.as_ref().map_or_else(
             || "Untitled".to_owned(),
             |p| {
@@ -2969,6 +2851,24 @@ impl Editor {
                 )
             },
         );
+        let mut title_row = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .text_color(cx.theme().foreground)
+            .child(title);
+        if self.dirty {
+            title_row = title_row.child(
+                div()
+                    .id("dirty-indicator")
+                    .text_color(cx.theme().warning)
+                    .child(icons::icon(IconName::CircleDot).small())
+                    .tooltip(|window, cx| {
+                        gpui_component::tooltip::Tooltip::new("Unsaved changes").build(window, cx)
+                    }),
+            );
+        }
         div()
             .h(px(34.))
             .w_full()
@@ -2976,7 +2876,7 @@ impl Editor {
             .flex_row()
             .items_center()
             .px_1()
-            .bg(rgb(0x171c26))
+            .bg(cx.theme().background)
             .child(
                 Button::new("menu-file")
                     .ghost()
@@ -3013,16 +2913,20 @@ impl Editor {
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::Help, cx))),
             )
             .child(div().flex_1())
-            .child(
-                div()
-                    .text_color(rgb(0xc6cedb))
-                    .child(format!("{title}{dirty}")),
-            )
+            .child(title_row)
     }
 
     /// A dropdown listing the actions of the open menu, or `None` when closed.
     fn menu_dropdown(&self, cx: &mut Context<Self>) -> Option<Div> {
         let menu = self.menu_open?;
+        // Anchor the list under its own menu-bar button.
+        let menu_index = match menu {
+            MenuId::File => 0.0,
+            MenuId::Edit => 1.0,
+            MenuId::View => 2.0,
+            MenuId::Clip => 3.0,
+            MenuId::Help => 4.0,
+        };
         let items: Vec<(&str, MenuAction)> = match menu {
             MenuId::File => vec![
                 ("Open… Ctrl+O", Box::new(Self::open)),
@@ -3070,9 +2974,11 @@ impl Editor {
         let mut dropdown = div()
             .absolute()
             .top(px(34.))
-            .left(px(2.))
+            .left(px(4. + 50. * menu_index))
             .w(px(220.))
-            .bg(rgb(0x1f2633))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
             .p_1()
             .flex()
             .flex_col()
@@ -3083,7 +2989,7 @@ impl Editor {
                     .px_2()
                     .py_1()
                     .cursor_pointer()
-                    .hover(|this| this.bg(rgb(0x2a3446)))
+                    .hover(|this| this.bg(cx.theme().list_hover))
                     .child(label)
                     .id("menu-item")
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -3097,30 +3003,21 @@ impl Editor {
 
     fn media_pool(&self, cx: &mut Context<Self>) -> Div {
         let tabs = [
-            (LeftTab::Assets, "Assets"),
-            (LeftTab::Plugins, "Plugins"),
-            (LeftTab::Effects, "Effects"),
+            (LeftTab::Assets, "Assets", IconName::Images),
+            (LeftTab::Plugins, "Plugins", IconName::Puzzle),
+            (LeftTab::Effects, "Effects", IconName::Sparkles),
         ];
-        let mut tab_row = div().flex().flex_row().w_full().bg(rgb(0x12161e));
-        for (tab, label) in tabs {
+        let mut tab_row = div().flex().flex_row().w_full().bg(cx.theme().background);
+        for (tab, label, icon) in tabs {
             let selected = self.left_tab == tab;
             tab_row = tab_row.child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .cursor_pointer()
-                    .text_color(if selected {
-                        rgb(0xffffff)
-                    } else {
-                        rgb(0x8a94a6)
-                    })
-                    .bg(if selected {
-                        rgb(0x232c3a)
-                    } else {
-                        rgb(0x12161e)
-                    })
-                    .child(label)
-                    .id("media-tab")
+                Button::new(SharedString::from(format!("media-tab-{label}")))
+                    .ghost()
+                    .compact()
+                    .icon(icons::icon(icon))
+                    .label(label)
+                    .selected(selected)
+                    .toggled(selected)
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.select_left_tab(tab, cx);
                     })),
@@ -3136,48 +3033,85 @@ impl Editor {
         match self.left_tab {
             LeftTab::Assets => {
                 if self.project.assets().is_empty() {
-                    body = body.child(empty_state("Drop media here"));
+                    body = body.child(empty_state("Drop media here", cx));
                 }
                 for (id, asset) in self.project.assets() {
                     let asset_id = id.clone();
+                    let drop_id = id.clone();
                     let name = asset.name.clone();
                     let kind = asset_kind_label(&asset.media_type);
+                    let icon = if asset.media_type.starts_with("video/") {
+                        IconName::Video
+                    } else if asset.media_type.starts_with("image/") {
+                        IconName::Image
+                    } else if asset.media_type.starts_with("audio/") {
+                        IconName::AudioWaveform
+                    } else {
+                        IconName::File
+                    };
                     body = body.child(
                         div()
                             .px_2()
                             .py_1()
                             .cursor_pointer()
-                            .hover(|this| this.bg(rgb(0x232c3a)))
+                            .hover(|this| this.bg(cx.theme().muted))
                             .flex()
                             .flex_row()
-                            .justify_between()
-                            .child(name)
-                            .child(div().text_color(rgb(0x8a94a6)).child(kind))
+                            .items_center()
+                            .gap_2()
+                            .child(icons::icon(icon).small())
+                            .child(div().flex_1().child(name))
+                            .child(div().text_color(cx.theme().muted_foreground).child(kind))
                             .id("asset-item")
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.add_asset_at_playhead(asset_id.clone(), cx);
-                            })),
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                                    this.arm_pool_drag(PoolDrag::Asset(drop_id.clone()), cx);
+                                }),
+                            ),
                     );
                 }
             }
             LeftTab::Plugins => {
                 if self.plugins.is_empty() {
-                    body = body.child(empty_state("No clip plugins loaded"));
+                    body = body.child(empty_state("No clip plugins loaded", cx));
                 }
                 for descriptor in &self.plugins {
                     let id = descriptor.id.clone();
+                    let drop_id = id.clone();
                     let name = descriptor.name.clone();
+                    let icon = if id.contains("latex") || id.contains("math") {
+                        IconName::Sigma
+                    } else if id.contains("graph") {
+                        IconName::ChartNoAxesColumn
+                    } else {
+                        IconName::Sparkles
+                    };
                     body = body.child(
                         div()
                             .px_2()
                             .py_1()
                             .cursor_pointer()
-                            .hover(|this| this.bg(rgb(0x232c3a)))
+                            .hover(|this| this.bg(cx.theme().muted))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(icons::icon(icon).small())
                             .child(name)
                             .id("plugin-item")
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.add_plugin_clip_by_id(&id, cx);
-                            })),
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                                    this.arm_pool_drag(PoolDrag::Plugin(drop_id.clone()), cx);
+                                }),
+                            ),
                     );
                 }
             }
@@ -3198,12 +3132,23 @@ impl Editor {
                             .px_2()
                             .py_1()
                             .cursor_pointer()
-                            .hover(|this| this.bg(rgb(0x232c3a)))
+                            .hover(|this| this.bg(cx.theme().muted))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(icons::icon(IconName::Sparkles).small())
                             .child(effect_label(kind))
                             .id("effect-item")
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.add_effect_to_selected(kind, cx);
-                            })),
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                                    this.arm_pool_drag(PoolDrag::Effect(kind), cx);
+                                }),
+                            ),
                     );
                 }
             }
@@ -3213,48 +3158,301 @@ impl Editor {
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x151a22))
+            .bg(cx.theme().popover)
             .child(tab_row)
             .child(body)
     }
 
     fn viewer(&self, cx: &mut Context<Self>) -> Div {
         let image = self.image.clone();
+        let fit = match self.viewer_fit {
+            ViewerFit::Contain => ObjectFit::Contain,
+            ViewerFit::Fill => ObjectFit::Fill,
+            ViewerFit::Actual => ObjectFit::None,
+        };
+        let safe_areas = self.safe_areas;
+        let fit_label = match self.viewer_fit {
+            ViewerFit::Contain => "Fit",
+            ViewerFit::Fill => "Fill",
+            ViewerFit::Actual => "Actual size",
+        };
         let viewport = div()
             .flex_1()
             .w_full()
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgb(0x0b0e13))
-            .relative();
+            .relative()
+            .bg(cx.theme().background)
+            .child(canvas(
+                move |_bounds, _window, _cx| {},
+                move |bounds, (), window, cx| paint_checkerboard(bounds, window, cx),
+            ));
         let viewport = if let Some(image) = image {
             viewport
-                .child(img(image).w_full().h_full().object_fit(ObjectFit::Contain))
+                .child(img(image).w_full().h_full().object_fit(fit))
                 .child(canvas(
                     move |_bounds, _window, _cx| {},
-                    move |bounds, (), window, cx| paint_safe_areas(bounds, window, cx),
+                    move |bounds, (), window, cx| {
+                        if safe_areas {
+                            paint_safe_areas(bounds, window, cx);
+                        }
+                    },
                 ))
         } else {
-            viewport.child(empty_state("rendering…"))
+            viewport.child(empty_state("rendering…", cx))
         };
-        div()
+        let viewer_root = div()
             .flex_1()
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x0b0e13))
+            .bg(cx.theme().background)
+            .relative();
+        let viewer_root = viewer_root
+            .child(
+                div()
+                    .h(px(30.))
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .px_1()
+                    .bg(cx.theme().background)
+                    .child(
+                        Button::new("viewer-fit")
+                            .ghost()
+                            .compact()
+                            .label(fit_label)
+                            .dropdown_caret(true)
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.toggle_viewer_menu(cx);
+                            })),
+                    )
+                    .child(
+                        icon_button(
+                            "safe-areas",
+                            icons::icon(IconName::SquareDashed),
+                            "Toggle safe areas",
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.toggle_safe_areas(cx);
+                            }),
+                        )
+                        .selected(safe_areas)
+                        .toggled(safe_areas),
+                    ),
+            )
             .child(viewport)
-            .child(self.transport_controls(cx))
+            .child(self.transport_controls(cx));
+        if self.viewer_menu_open {
+            viewer_root.child(self.viewer_menu(cx))
+        } else {
+            viewer_root
+        }
+    }
+
+    /// Right-click context menu over the timeline, or `None` when closed.
+    fn context_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let target = self.context_menu.clone()?;
+        let pos = self.context_menu_pos?;
+        let mut menu = div()
+            .absolute()
+            .left(pos.x)
+            .top(pos.y)
+            .w(px(200.))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
+            .p_1()
+            .flex()
+            .flex_col()
+            .shadow_lg();
+        let close = cx.listener(|this: &mut Self, _: &ClickEvent, _, cx| {
+            this.context_menu = None;
+            cx.notify();
+        });
+        match target {
+            ContextMenu::Clip { id } => {
+                let actions: Vec<(IconName, &str, ClipAction)> = vec![
+                    (IconName::Scissors, "Split at playhead", Self::split_clip),
+                    (IconName::Copy, "Duplicate", Self::duplicate_clip),
+                    (IconName::Trash, "Delete", Self::delete_clip),
+                    (
+                        IconName::TrendingUp,
+                        "Fade in 1 s",
+                        Self::fade_in_one_second,
+                    ),
+                    (
+                        IconName::TrendingDown,
+                        "Fade out 1 s",
+                        Self::fade_out_one_second,
+                    ),
+                    (IconName::Eraser, "Clear fades", Self::clear_fades),
+                ];
+                for (icon, label, action) in actions {
+                    menu = menu.child(context_item(
+                        icon,
+                        label,
+                        cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
+                            action(this, id, cx);
+                            this.context_menu = None;
+                            cx.notify();
+                        }),
+                        cx,
+                    ));
+                }
+                menu = menu.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Add effect"),
+                );
+                for kind in effect_kinds() {
+                    menu = menu.child(context_item(
+                        IconName::Sparkles,
+                        effect_label(kind),
+                        cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
+                            this.add_effect_to_clip(id, kind, cx);
+                            this.context_menu = None;
+                            cx.notify();
+                        }),
+                        cx,
+                    ));
+                }
+            }
+            ContextMenu::Keyframe(selection) => {
+                let remove = selection.clone();
+                menu = menu
+                    .child(context_item(
+                        IconName::DiamondMinus,
+                        "Remove keyframe",
+                        cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
+                            this.execute(
+                                &Command::RemoveKeyframe {
+                                    id: remove.clip_id,
+                                    target: remove.target.clone(),
+                                    time: remove.time,
+                                },
+                                cx,
+                            );
+                            this.selected_keyframe = None;
+                            this.context_menu = None;
+                            cx.notify();
+                        }),
+                        cx,
+                    ))
+                    .children(self.keyframe_menu(&selection, cx));
+            }
+        }
+        menu = menu.child(
+            div()
+                .px_2()
+                .py_1()
+                .cursor_pointer()
+                .hover(|this| this.bg(cx.theme().muted))
+                .text_color(cx.theme().muted_foreground)
+                .child("Close")
+                .id("context-close")
+                .on_click(close),
+        );
+        Some(menu)
+    }
+
+    /// A small chip that follows the pointer while an item is dragged from the
+    /// media pool toward the timeline.
+    fn pool_drag_ghost(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let drag = self.pool_drag.as_ref()?;
+        let (icon, label) = match drag {
+            PoolDrag::Asset(id) => (
+                IconName::Film,
+                self.project
+                    .assets()
+                    .get(id)
+                    .map_or_else(|| "media".to_owned(), |asset| asset.name.clone()),
+            ),
+            PoolDrag::Plugin(id) => (
+                IconName::Sparkles,
+                self.plugins
+                    .iter()
+                    .find(|plugin| &plugin.id == id)
+                    .map_or_else(|| id.clone(), |plugin| plugin.name.clone()),
+            ),
+            PoolDrag::Effect(kind) => (IconName::Sparkles, effect_label(*kind).to_owned()),
+        };
+        let over_timeline = self.timeline_bounds.contains(&self.pool_drag_pos);
+        Some(
+            div()
+                .absolute()
+                .left(self.pool_drag_pos.x + px(12.))
+                .top(self.pool_drag_pos.y + px(12.))
+                .px_2()
+                .py_1()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_1()
+                .bg(cx.theme().popover)
+                .border_1()
+                .border_color(if over_timeline {
+                    cx.theme().drag_border
+                } else {
+                    cx.theme().border
+                })
+                .child(icons::icon(icon).small())
+                .child(label),
+        )
+    }
+
+    /// Fit/zoom options shown under the viewer's fit button.
+    fn viewer_menu(&self, cx: &mut Context<Self>) -> Div {
+        let mut menu = div()
+            .absolute()
+            .top(px(30.))
+            .left(px(4.))
+            .w(px(140.))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
+            .p_1()
+            .flex()
+            .flex_col()
+            .shadow_lg();
+        for (fit, label) in [
+            (ViewerFit::Contain, "Fit"),
+            (ViewerFit::Fill, "Fill"),
+            (ViewerFit::Actual, "Actual size"),
+        ] {
+            let active = self.viewer_fit == fit;
+            menu = menu.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().muted))
+                    .bg(if active {
+                        cx.theme().muted
+                    } else {
+                        cx.theme().popover
+                    })
+                    .child(label)
+                    .id("viewer-fit-item")
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.select_viewer_fit(fit, cx);
+                    })),
+            );
+        }
+        menu
     }
 
     fn transport_controls(&self, cx: &mut Context<Self>) -> Div {
-        let play_label = if self.playing { "⏸" } else { "▶" };
-        let loop_label = if self.loop_playback {
-            "🔁 on"
+        let play_icon = if self.playing {
+            icons::icon(IconName::Pause)
         } else {
-            "🔁 off"
+            icons::icon(IconName::Play)
         };
+        let play_tooltip = if self.playing { "Pause" } else { "Play" };
         let timecode_text = self
             .timecode_buffer
             .clone()
@@ -3268,43 +3466,61 @@ impl Editor {
             .items_center()
             .gap_1()
             .px_1()
-            .bg(rgb(0x151a22))
-            .child(button(
+            .bg(cx.theme().background)
+            .child(icon_button(
                 "jump-start",
-                "⏮",
+                icons::icon(IconName::SkipBack),
+                "Go to start",
                 cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_start(cx)),
             ))
-            .child(button(
+            .child(icon_button(
                 "step-back",
-                "◀",
+                icons::icon(IconName::StepBack),
+                "Step back one frame",
                 cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(-1, cx)),
             ))
-            .child(button("play", play_label, cx.listener(Self::on_play_click)))
-            .child(button(
+            .child(icon_button(
+                "play",
+                play_icon,
+                play_tooltip,
+                cx.listener(Self::on_play_click),
+            ))
+            .child(icon_button(
                 "step-fwd",
-                "▶",
+                icons::icon(IconName::StepForward),
+                "Step forward one frame",
                 cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(1, cx)),
             ))
-            .child(button(
+            .child(icon_button(
                 "jump-end",
-                "⏭",
+                icons::icon(IconName::SkipForward),
+                "Go to end",
                 cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_end(cx)),
             ))
-            .child(button(
-                "loop",
-                loop_label,
-                cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_loop(cx)),
-            ))
+            .child(
+                icon_button(
+                    "loop",
+                    icons::icon(IconName::Repeat),
+                    if self.loop_playback {
+                        "Loop: on"
+                    } else {
+                        "Loop: off"
+                    },
+                    cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_loop(cx)),
+                )
+                .selected(self.loop_playback)
+                .toggled(self.loop_playback),
+            )
             .child(
                 div()
                     .px_2()
                     .py_1()
                     .cursor_text()
-                    .bg(rgb(0x232c3a))
+                    .bg(cx.theme().popover)
                     .text_color(if timecode_editing {
-                        rgb(0xffd166)
+                        cx.theme().warning
                     } else {
-                        rgb(0xffffff)
+                        cx.theme().foreground
                     })
                     .child(timecode_text)
                     .id("timecode")
@@ -3319,15 +3535,16 @@ impl Editor {
         let zoom = self.timeline_zoom;
         let scroll = self.timeline_scroll;
         let weak = cx.entity().downgrade();
+        let weak_paint = weak.clone();
         let snapping = self.snapping;
-        let snap_label = if snapping { "Snap: on" } else { "Snap: off" };
+        let pool_dragging = self.pool_drag.is_some();
 
         div()
             .h(px(TIMELINE_H))
             .w_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x12161e))
+            .bg(cx.theme().background)
             .child(
                 div()
                     .h(px(30.))
@@ -3337,24 +3554,39 @@ impl Editor {
                     .items_center()
                     .gap_2()
                     .px_2()
-                    .bg(rgb(0x171c26))
-                    .child(button(
-                        "snap",
-                        snap_label,
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_snapping(cx)),
-                    ))
-                    .child(button(
+                    .bg(cx.theme().background)
+                    .child(
+                        icon_button(
+                            "snap",
+                            icons::icon(IconName::Magnet),
+                            if snapping {
+                                "Snapping: on"
+                            } else {
+                                "Snapping: off"
+                            },
+                            cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_snapping(cx)),
+                        )
+                        .selected(snapping)
+                        .toggled(snapping),
+                    )
+                    .child(icon_button(
                         "zoom-out",
-                        "−",
+                        icons::icon(IconName::ZoomOut),
+                        "Zoom out",
                         cx.listener(|this, _: &ClickEvent, _, cx| {
                             this.timeline_zoom = (this.timeline_zoom / 1.25).clamp(1.0, 64.0);
                             cx.notify();
                         }),
                     ))
-                    .child(div().text_color(rgb(0x8a94a6)).child(format!("{zoom:.1}×")))
-                    .child(button(
+                    .child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("{zoom:.1}x")),
+                    )
+                    .child(icon_button(
                         "zoom-in",
-                        "+",
+                        icons::icon(IconName::ZoomIn),
+                        "Zoom in",
                         cx.listener(|this, _: &ClickEvent, _, cx| {
                             this.timeline_zoom = (this.timeline_zoom * 1.25).clamp(1.0, 64.0);
                             cx.notify();
@@ -3376,6 +3608,10 @@ impl Editor {
                                 MouseButton::Left,
                                 cx.listener(Self::on_timeline_mouse_down),
                             )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(Self::on_timeline_context_menu),
+                            )
                             .on_mouse_move(cx.listener(Self::on_timeline_mouse_move))
                             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
                             .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
@@ -3385,8 +3621,31 @@ impl Editor {
                                         let _ = weak
                                             .update(cx, |this, _| this.timeline_bounds = bounds);
                                     },
-                                    move |bounds, (), window, cx| {
-                                        paint_timeline(bounds, &snapshot, zoom, scroll, window, cx);
+                                    {
+                                        let weak = weak_paint.clone();
+                                        move |bounds, (), window, cx| {
+                                            paint_timeline(
+                                                bounds, &snapshot, zoom, scroll, window, cx,
+                                            );
+                                            if pool_dragging {
+                                                let weak = weak.clone();
+                                                window.on_mouse_event(
+                                                move |event: &MouseUpEvent,
+                                                      phase: DispatchPhase,
+                                                      window,
+                                                      cx| {
+                                                    if phase == DispatchPhase::Bubble {
+                                                        let position = event.position;
+                                                        let _ = weak.update(cx, |this, cx| {
+                                                            this.drop_on_timeline(position, cx);
+                                                        });
+                                                    }
+                                                    window.refresh();
+                                                },
+                                            );
+                                                window.request_animation_frame();
+                                            }
+                                        }
                                     },
                                 )
                                 .size_full(),
@@ -3401,104 +3660,200 @@ impl Editor {
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x151a22));
+            .bg(cx.theme().popover);
         header = header.child(
             div()
                 .h(px(RULER_H))
                 .w_full()
                 .border_b_1()
-                .border_color(rgb(0x2a3342)),
+                .border_color(cx.theme().border),
         );
         for track in self.project.tracks() {
             let id = track.id();
             let name = track.name().to_owned();
             let gain = track.gain();
+            let muted = track.is_muted();
+            let solo = track.is_solo();
+            let locked = track.is_locked();
+            let controls = div()
+                .w_full()
+                .h(px(24.))
+                .flex()
+                .flex_row()
+                .items_center()
+                .child(
+                    div()
+                        .w(px(28.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("{gain:.1}")),
+                )
+                .child(header_button(
+                    "gain-",
+                    icons::icon(IconName::Minus),
+                    "Lower track gain",
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.nudge_track_gain(id, -0.1, cx);
+                    }),
+                ))
+                .child(header_button(
+                    "gain+",
+                    icons::icon(IconName::Plus),
+                    "Raise track gain",
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.nudge_track_gain(id, 0.1, cx);
+                    }),
+                ))
+                .child(div().flex_1())
+                .child(
+                    header_button(
+                        "track-mute",
+                        icons::icon(if muted {
+                            IconName::VolumeX
+                        } else {
+                            IconName::Volume2
+                        }),
+                        if muted { "Unmute track" } else { "Mute track" },
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
+                        }),
+                    )
+                    .selected(muted)
+                    .toggled(muted),
+                )
+                .child(
+                    header_button(
+                        "track-solo",
+                        icons::icon(IconName::Headphones),
+                        if solo { "Unsolo track" } else { "Solo track" },
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
+                        }),
+                    )
+                    .selected(solo)
+                    .toggled(solo),
+                )
+                .child(
+                    header_button(
+                        "track-lock",
+                        icons::icon(if locked {
+                            IconName::Lock
+                        } else {
+                            IconName::LockOpen
+                        }),
+                        if locked { "Unlock track" } else { "Lock track" },
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(
+                                &Command::SetTrackLocked {
+                                    id,
+                                    locked: !locked,
+                                },
+                                cx,
+                            );
+                        }),
+                    )
+                    .selected(locked)
+                    .toggled(locked),
+                );
             header = header.child(
                 div()
+                    // A per-track id scopes the buttons' hover/tooltip state.
+                    .id(("track-header", id.0))
                     .h(px(ROW_H))
                     .w_full()
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_1()
-                    .px_1()
+                    .flex_col()
+                    .justify_center()
+                    .px_2()
                     .border_b_1()
-                    .border_color(rgb(0x2a3342))
-                    .child(div().flex_1().child(name))
-                    .child(div().text_color(rgb(0x8a94a6)).child(format!("{gain:.1}")))
-                    .child(button(
-                        "gain-",
-                        "−",
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.nudge_track_gain(id, -0.1, cx);
-                        }),
-                    ))
-                    .child(button(
-                        "gain+",
-                        "+",
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.nudge_track_gain(id, 0.1, cx);
-                        }),
-                    )),
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(14.))
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().foreground)
+                            .child(name),
+                    )
+                    .child(controls),
             );
         }
         header
     }
 
-    fn inspector(&self, cx: &mut Context<Self>) -> Div {
-        let mut pane = div()
-            .w(px(self.dock.right_width))
-            .h_full()
-            .flex()
-            .flex_col()
-            .p_2()
-            .gap_2()
-            .bg(rgb(0x151a22));
-        let Some(id) = self.selected else {
-            pane = pane.child("No clip selected");
-            if !self.recent.paths.is_empty() {
-                pane = pane.child("Recent projects:");
-                for path in self.recent.paths.clone() {
-                    let open = path.clone();
-                    pane = pane.child(button(
-                        "recent",
-                        path.display().to_string(),
-                        cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                            this.open_path(&open, cx);
-                        }),
-                    ));
-                }
-            }
-            return pane;
-        };
-        let Some(clip) = self.find_clip(id) else {
-            return pane.child("No clip selected");
-        };
-        let kind = kind_label(&clip.kind);
-        pane = pane.child(format!("Clip {}", id.0)).child(kind);
-        if let ClipKind::Error(message) = &clip.kind {
-            pane = pane.child(
-                div()
-                    .text_color(rgb(0xff6b6b))
-                    .child(format!("⚠ {message}")),
-            );
-        }
-        pane = pane.children(self.transform_rows(id, cx));
-        if matches!(clip.kind, ClipKind::Plugin { .. }) {
-            pane = pane.children(self.plugin_rows(id, cx));
+    /// A collapsible inspector group with a themed header and chevron.
+    fn section(
+        &self,
+        name: &'static str,
+        title: &str,
+        content: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let open = !self.closed_sections.contains(name);
+        let chevron = if open {
+            icons::icon(IconName::ChevronDown)
         } else {
-            pane = pane.children(self.numeric_param_rows(id, cx));
-        }
-        if let Some(selection) = &self.selected_keyframe
-            && selection.clip_id == id
-        {
-            pane = pane.children(self.keyframe_menu(selection, cx));
-        }
-        pane
+            icons::icon(IconName::ChevronRight)
+        };
+        div()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new(format!("section-{name}"))
+                    .ghost()
+                    .compact()
+                    .icon(chevron)
+                    .label(title)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.toggle_section(name, cx);
+                    })),
+            )
+            .child(
+                gpui_component::collapsible::Collapsible::new()
+                    .open(open)
+                    .content(content),
+            )
     }
 
-    fn status_line(&self) -> Div {
+    /// Read-only summary of the selected clip's effect chain.
+    fn effect_rows(&self, id: ClipId, _cx: &mut Context<Self>) -> Vec<Div> {
+        let Some(clip) = self.find_clip(id) else {
+            return Vec::new();
+        };
+        clip.effects
+            .iter()
+            .map(|instance| {
+                let params: Vec<String> = instance
+                    .params
+                    .iter()
+                    .map(|(name, value)| format!("{name} {value:.3}"))
+                    .collect();
+                let summary = if params.is_empty() {
+                    effect_label(instance.kind).to_owned()
+                } else {
+                    format!("{} ({})", effect_label(instance.kind), params.join(", "))
+                };
+                div()
+                    .px_2()
+                    .py_1()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(icons::icon(IconName::Sparkles).small())
+                    .child(summary)
+            })
+            .collect()
+    }
+
+    fn status_line(&self, cx: &App) -> Div {
         let error = self.error.clone().unwrap_or_default();
+        // Completed-work notices are not errors, so they never use the danger colour.
+        let (notice_color, notice_icon) = if error.starts_with("Exported") {
+            (cx.theme().success, IconName::CircleCheck)
+        } else {
+            (cx.theme().danger, IconName::TriangleAlert)
+        };
         let path = self
             .path
             .as_ref()
@@ -3510,7 +3865,11 @@ impl Editor {
             .flex_row()
             .justify_between()
             .px_2()
-            .bg(rgb(0x1f2430))
+            .bg(cx.theme().status_bar)
+            .border_t_1()
+            .border_color(cx.theme().status_bar_border)
+            .text_color(cx.theme().muted_foreground)
+            .items_center()
             .child(format!(
                 "{path} | tracks {} | clips {}",
                 self.project.tracks().len(),
@@ -3520,7 +3879,18 @@ impl Editor {
                     .map(|t| t.clips().len())
                     .sum::<usize>()
             ))
-            .child(div().text_color(rgb(0xff6b6b)).child(error))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .text_color(notice_color)
+                    .when(!error.is_empty(), |this| {
+                        this.child(icons::icon(notice_icon).small())
+                    })
+                    .child(error),
+            )
     }
 }
 
@@ -3566,31 +3936,43 @@ impl Render for Editor {
             window.request_animation_frame();
         }
 
-        let mut middle = div().flex_1().flex().flex_row();
+        let mut middle = div().flex_1().min_h_0().flex().flex_row();
         if self.dock.left_open {
             middle = middle.child(self.media_pool(cx));
         }
         middle = middle.child(self.viewer(cx));
         if self.dock.right_open {
-            middle = middle.child(self.inspector(cx));
+            middle = middle.child(self.inspector(window, cx));
         }
 
         let mut root = div()
             .size_full()
             .relative()
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                if this.pool_drag.is_some() {
+                    this.pool_drag_pos = event.position;
+                    cx.notify();
+                }
+            }))
             .flex()
             .flex_col()
-            .bg(rgb(0x0b0e13))
-            .text_color(rgb(0xffffff))
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .track_focus(&self.focus_handle)
             .child(self.menu_bar(cx))
             .child(middle);
         if self.dock.bottom_open {
             root = root.child(self.timeline_panel(cx));
         }
-        root = root.child(self.status_line());
+        root = root.child(self.status_line(cx));
         if let Some(dropdown) = self.menu_dropdown(cx) {
             root = root.child(dropdown);
+        }
+        if let Some(menu) = self.context_menu_dropdown(cx) {
+            root = root.child(menu);
+        }
+        if let Some(ghost) = self.pool_drag_ghost(cx) {
+            root = root.child(ghost);
         }
         if self.settings_open {
             root = root.child(self.settings_dialog(cx));
@@ -3606,15 +3988,37 @@ fn button(
     id: &'static str,
     label: impl Into<SharedString>,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    div()
-        .px_2()
-        .py_1()
-        .cursor_pointer()
-        .bg(rgb(0x2a3342))
-        .child(label.into())
-        .id(id)
+) -> Button {
+    Button::new(id)
+        .secondary()
+        .compact()
+        .label(label)
         .on_click(listener)
+}
+
+/// An icon-only button with a tooltip, using a Lucide (or bundled) SVG.
+fn icon_button(
+    id: &'static str,
+    icon: gpui_component::Icon,
+    tooltip: impl Into<SharedString>,
+    listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Button {
+    Button::new(id)
+        .ghost()
+        .compact()
+        .icon(icon)
+        .tooltip(tooltip)
+        .on_click(listener)
+}
+
+/// A track-header icon button: the extra-small size keeps two lines in a row.
+fn header_button(
+    id: &'static str,
+    icon: gpui_component::Icon,
+    tooltip: impl Into<SharedString>,
+    listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Button {
+    icon_button(id, icon, tooltip, listener).xsmall()
 }
 
 fn paint_timeline(
@@ -3627,13 +4031,18 @@ fn paint_timeline(
 ) {
     let width = f32::from(bounds.size.width).max(1.0);
     let layout = TimelineLayout::zoomed(width, RULER_H, ROW_H, snapshot.duration, zoom, scroll);
-    window.paint_quad(fill(bounds, rgb(0x12161e)));
+    let background = cx.theme().background;
+    let ruler_bg = cx.theme().popover;
+    let border = cx.theme().border;
+    let muted = cx.theme().muted_foreground;
+    window.paint_quad(fill(bounds, background));
     let height = f32::from(bounds.size.height);
     let ruler = Bounds::from_corners(
         bounds.origin,
         point(bounds.origin.x + px(width), bounds.origin.y + px(RULER_H)),
     );
-    window.paint_quad(fill(ruler, rgb(0x232c3a)));
+    window.paint_quad(fill(ruler, ruler_bg));
+    paint_ruler(bounds, &layout, snapshot, width, muted, border, window, cx);
     for row in 0..snapshot.rows {
         let top = bounds.origin.y + px(RULER_H + row as f32 * ROW_H);
         let row_bounds = Bounds::from_corners(
@@ -3643,106 +4052,350 @@ fn paint_timeline(
         window.paint_quad(fill(
             row_bounds,
             if row % 2 == 0 {
-                rgb(0x1b2230)
+                background
             } else {
-                rgb(0x202838)
+                cx.theme().muted
             },
         ));
     }
     for clip in &snapshot.clips {
-        let x0 = bounds.origin.x + px(timeline::time_to_x(&layout, clip.start));
-        let x1 = bounds.origin.x + px(timeline::time_to_x(&layout, clip.end));
-        let y0 = bounds.origin.y + px(RULER_H + clip.row as f32 * ROW_H + 3.0);
-        let y1 = bounds.origin.y + px(RULER_H + (clip.row as f32 + 1.0) * ROW_H - 3.0);
-        let block = Bounds::from_corners(point(x0, y0), point(x1, y1));
-        window.paint_quad(fill(
-            block,
-            if clip.selected {
-                rgb(0x37cbbb)
-            } else {
-                rgb(0x2f6f8f)
-            },
-        ));
-        // Trim handles at the two edges.
-        let handle_w = px(3.0);
-        for edge_x in [x0, x1] {
-            let handle =
-                Bounds::from_corners(point(edge_x - handle_w, y0), point(edge_x + handle_w, y1));
-            window.paint_quad(fill(handle, rgb(0xe8e8e8)));
-        }
-        // Clip label, only when the block is wide enough to hold it.
-        if x1 - x0 > px(24.0) && !clip.label.is_empty() {
-            let run = TextRun {
-                len: clip.label.len(),
-                font: font(".SystemUIFont"),
-                color: rgb(0xffffff).into(),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            let line = window
-                .text_system()
-                .shape_line(clip.label.clone(), px(11.0), &[run], None);
-            let _ = line.paint(
-                point(x0 + px(4.0), y0 + px(16.0)),
-                px(14.0),
-                TextAlign::Left,
-                None,
-                window,
-                cx,
-            );
-        }
-        if clip.error {
-            let badge = Bounds::from_corners(
-                point(x0 + px(2.0), y0 + px(2.0)),
-                point(x0 + px(12.0), y0 + px(12.0)),
-            );
-            window.paint_quad(fill(badge, rgb(0xe04040)));
-            let run = TextRun {
-                len: 1,
-                font: font(".SystemUIFont"),
-                color: rgb(0xffffff).into(),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            let line = window
-                .text_system()
-                .shape_line("!".into(), px(9.0), &[run], None);
-            let _ = line.paint(
-                point(x0 + px(3.0), y0 + px(2.0)),
-                px(9.0),
-                TextAlign::Left,
-                None,
-                window,
-                cx,
-            );
-        }
-        for keyframe in &clip.keyframes {
-            let kx = bounds.origin.x + px(timeline::time_to_x(&layout, keyframe.time));
-            let cy = y0 + px((ROW_H - 6.0) / 2.0);
-            let half = px(4.0);
-            let mut path = gpui::Path::new(point(kx, cy - half));
-            path.line_to(point(kx + half, cy));
-            path.line_to(point(kx, cy + half));
-            path.line_to(point(kx - half, cy));
-            path.line_to(point(kx, cy - half));
-            window.paint_path(
-                path,
-                if keyframe.selected {
-                    rgb(0xffffff)
-                } else {
-                    rgb(0xf2c14e)
-                },
-            );
-        }
+        paint_clip(bounds, &layout, clip, window, cx);
     }
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let head = Bounds::from_corners(
         point(head_x, bounds.origin.y),
         point(head_x + px(1.5), bounds.origin.y + px(height)),
     );
-    window.paint_quad(fill(head, rgb(0xe8e8e8)));
+    window.paint_quad(fill(head, cx.theme().foreground));
+}
+
+/// Paint one clip block: kind-coloured body, waveform, fade ramps, outline, trim
+/// handles, kind icon, label, lock badge and keyframe diamonds.
+#[allow(clippy::too_many_lines)]
+fn paint_clip(
+    bounds: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    clip: &ClipPaint,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let x0 = bounds.origin.x + px(timeline::time_to_x(layout, clip.start));
+    let x1 = bounds.origin.x + px(timeline::time_to_x(layout, clip.end));
+    let y0 = bounds.origin.y + px(RULER_H + clip.row as f32 * ROW_H + 3.0);
+    let y1 = bounds.origin.y + px(RULER_H + (clip.row as f32 + 1.0) * ROW_H - 3.0);
+    let block = Bounds::from_corners(point(x0, y0), point(x1, y1));
+    let kind_color = clip_color(&clip.kind, cx);
+    let dim = if clip.silenced { 0.5 } else { 1.0 };
+    window.paint_quad(fill(block, kind_color.opacity(0.45 * dim)));
+    window.paint_quad(outline(block, kind_color.opacity(dim), BorderStyle::Solid));
+
+    if let Some(wave) = &clip.waveform {
+        paint_waveform(bounds, layout, clip, wave, (x0, x1, y0, y1), window, cx);
+    }
+    paint_fades(clip, (x0, x1, y0, y1), window, cx);
+
+    if clip.selected {
+        window.paint_quad(outline(block, cx.theme().ring, BorderStyle::Solid));
+        window.paint_quad(outline(
+            Bounds::from_corners(
+                point(x0 + px(1.0), y0 + px(1.0)),
+                point(x1 - px(1.0), y1 - px(1.0)),
+            ),
+            cx.theme().ring,
+            BorderStyle::Solid,
+        ));
+    }
+    // Trim handles only on the hovered or selected clip.
+    if clip.selected || clip.hovered {
+        let handle_w = px(3.0);
+        for edge_x in [x0, x1] {
+            let handle =
+                Bounds::from_corners(point(edge_x - handle_w, y0), point(edge_x + handle_w, y1));
+            window.paint_quad(
+                fill(handle, cx.theme().foreground.opacity(0.85)).corner_radii(px(1.5)),
+            );
+        }
+    }
+    // Kind icon and label, only when the block is wide enough to hold them.
+    if x1 - x0 > px(28.0) {
+        let icon_bounds = Bounds::new(point(x0 + px(5.0), y0 + px(3.0)), size(px(12.0), px(12.0)));
+        paint_icon(clip.icon, icon_bounds, cx.theme().foreground, window, cx);
+        if !clip.label.is_empty() {
+            paint_clip_label(
+                clip.label.clone(),
+                point(x0 + px(20.0), y0 + px(3.0)),
+                x1 - px(4.0),
+                window,
+                cx,
+            );
+        }
+    }
+    if clip.locked && x1 - x0 > px(48.0) {
+        let lock = Bounds::new(
+            point(x1 - px(18.0), y1 - px(15.0)),
+            size(px(12.0), px(12.0)),
+        );
+        paint_icon(IconName::Lock, lock, cx.theme().foreground, window, cx);
+    }
+    for keyframe in &clip.keyframes {
+        let kx = bounds.origin.x + px(timeline::time_to_x(layout, keyframe.time));
+        let cy = y1 - px(10.0);
+        let half = px(4.0);
+        let mut path = gpui::Path::new(point(kx, cy - half));
+        path.line_to(point(kx + half, cy));
+        path.line_to(point(kx, cy + half));
+        path.line_to(point(kx - half, cy));
+        path.line_to(point(kx, cy - half));
+        window.paint_path(
+            path,
+            if keyframe.selected {
+                cx.theme().foreground
+            } else {
+                cx.theme().warning
+            },
+        );
+    }
+}
+
+/// Paint a Lucide icon (from the registered asset source) into `bounds`.
+fn paint_icon(
+    icon: IconName,
+    bounds: Bounds<Pixels>,
+    color: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let _ = window.paint_svg(
+        bounds,
+        icon.path(),
+        None,
+        TransformationMatrix::default(),
+        color,
+        cx,
+    );
+}
+
+/// Mirrored peak bars across the visible part of an audio clip, one every two
+/// pixels, sampled from the cached downsampled peaks.
+fn paint_waveform(
+    bounds: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    clip: &ClipPaint,
+    wave: &Waveform,
+    (x0, x1, y0, y1): (Pixels, Pixels, Pixels, Pixels),
+    window: &mut Window,
+    cx: &mut App,
+) {
+    const STEP: f32 = 2.0;
+    let left = f32::from(x0).max(f32::from(bounds.origin.x));
+    let right = f32::from(x1).min(f32::from(bounds.origin.x) + f32::from(bounds.size.width));
+    if right <= left || layout.pixels_per_tick <= 0.0 {
+        return;
+    }
+    let mid = f32::midpoint(f32::from(y0), f32::from(y1)) + 5.0;
+    let half_max = (f32::from(y1) - f32::from(y0)) / 2.0 - 8.0;
+    if half_max <= 1.0 {
+        return;
+    }
+    let ticks_per_px = 1.0 / layout.pixels_per_tick;
+    let color = cx.theme().foreground.opacity(0.6);
+    let mut x = left;
+    // Bounded by the canvas width: at most `width / STEP` bars.
+    while x < right {
+        let source_start = ((f64::from(x - f32::from(x0)) * ticks_per_px) as i64)
+            .saturating_add(clip.source_offset);
+        let source_end =
+            source_start.saturating_add((f64::from(STEP) * ticks_per_px).ceil() as i64);
+        let peak = wave.peak_between(source_start, source_end.max(source_start + 1));
+        let half = (peak * half_max).max(0.5);
+        let bar = Bounds::from_corners(
+            point(px(x), px(mid - half)),
+            point(px((x + 1.0).min(right)), px(mid + half)),
+        );
+        window.paint_quad(fill(bar, color));
+        x += STEP;
+    }
+}
+
+/// Fade ramps (a darkened triangle over the attenuated region) and, on the
+/// hovered or selected clip, the circular fade handles.
+fn paint_fades(
+    clip: &ClipPaint,
+    (x0, x1, y0, y1): (Pixels, Pixels, Pixels, Pixels),
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let width = f32::from(x1 - x0);
+    if width < 40.0 {
+        return;
+    }
+    let shade = cx.theme().background.opacity(0.45);
+    let ppt = width / (clip.end.0 - clip.start.0).max(1) as f32;
+    let fade_in_px = (clip.fade_in as f32 * ppt).min(width);
+    let fade_out_px = (clip.fade_out as f32 * ppt).min(width);
+    if fade_in_px > 1.0 {
+        let mut path = gpui::Path::new(point(x0, y0));
+        path.line_to(point(x0 + px(fade_in_px), y0));
+        path.line_to(point(x0, y1));
+        path.line_to(point(x0, y0));
+        window.paint_path(path, shade);
+    }
+    if fade_out_px > 1.0 {
+        let mut path = gpui::Path::new(point(x1, y0));
+        path.line_to(point(x1 - px(fade_out_px), y0));
+        path.line_to(point(x1, y1));
+        path.line_to(point(x1, y0));
+        window.paint_path(path, shade);
+    }
+    if clip.selected || clip.hovered {
+        let radius = px(4.0);
+        for (cx_pos, active) in [
+            (x0 + px(fade_in_px + FADE_HANDLE_INSET), clip.fade_in > 0),
+            (x1 - px(fade_out_px + FADE_HANDLE_INSET), clip.fade_out > 0),
+        ] {
+            let handle = Bounds::from_corners(
+                point(cx_pos - radius, y0 + px(FADE_HANDLE_INSET) - radius),
+                point(cx_pos + radius, y0 + px(FADE_HANDLE_INSET) + radius),
+            );
+            window.paint_quad(
+                fill(
+                    handle,
+                    if active {
+                        cx.theme().warning
+                    } else {
+                        cx.theme().foreground
+                    },
+                )
+                .corner_radii(radius),
+            );
+        }
+    }
+}
+
+/// Paint timecode ticks and labels on the ruler, adapting the interval to the zoom.
+#[allow(clippy::too_many_arguments)]
+fn paint_ruler(
+    bounds: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    snapshot: &TimelineSnapshot,
+    width: f32,
+    muted: Hsla,
+    border: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let step = ruler_step(
+        snapshot.duration,
+        layout.pixels_per_tick,
+        snapshot.frame_rate,
+    );
+    let minor = (step / 2).max(1);
+    for tick in timeline::ruler_ticks(layout, minor) {
+        let x = bounds.origin.x + px(timeline::time_to_x(layout, Time(tick)));
+        let is_major = tick % step == 0;
+        let mark_top = bounds.origin.y + px(if is_major { 8.0 } else { 16.0 });
+        let mark = Bounds::from_corners(
+            point(x, mark_top),
+            point(x + px(1.0), bounds.origin.y + px(RULER_H)),
+        );
+        window.paint_quad(fill(mark, if is_major { muted } else { border }));
+        if is_major {
+            let label = timecode::format_timecode(Time(tick), snapshot.frame_rate);
+            paint_clip_label(
+                label.into(),
+                point(x + px(3.0), bounds.origin.y + px(12.0)),
+                x + px(width),
+                window,
+                cx,
+            );
+        }
+    }
+}
+
+/// Choose a "nice" ruler interval so major ticks stay at least 64px apart.
+fn ruler_step(duration: i64, pixels_per_tick: f64, rate: FrameRate) -> i64 {
+    let tps = TICKS_PER_SECOND as f64;
+    let fps = f64::from(timecode::frames_per_second(rate)).max(1.0);
+    let frame = (tps / fps).max(1.0);
+    let candidates = [
+        frame,
+        frame * 2.0,
+        frame * 5.0,
+        frame * 10.0,
+        tps / 2.0,
+        tps,
+        tps * 2.0,
+        tps * 5.0,
+        tps * 10.0,
+        tps * 30.0,
+        tps * 60.0,
+        tps * 120.0,
+        tps * 300.0,
+    ];
+    let step = candidates
+        .into_iter()
+        .find(|candidate| candidate * pixels_per_tick >= 96.0)
+        .unwrap_or(tps * 300.0);
+    (step as i64).clamp(1, duration.max(1))
+}
+
+/// A source-kind colour from the theme's semantic palette.
+fn clip_color(kind: &animathio_core::ClipKind, cx: &App) -> Hsla {
+    match kind {
+        animathio_core::ClipKind::Video(_) => cx.theme().blue,
+        animathio_core::ClipKind::Image(_) => cx.theme().cyan,
+        animathio_core::ClipKind::Audio(_) => cx.theme().green,
+        animathio_core::ClipKind::Builtin(builtin) => match builtin {
+            animathio_core::builtin::Builtin::Text { .. } => cx.theme().magenta,
+            animathio_core::builtin::Builtin::Shape { .. } => cx.theme().yellow,
+        },
+        animathio_core::ClipKind::Plugin { plugin_id, .. } => {
+            if plugin_id.contains("latex") || plugin_id.contains("math") {
+                cx.theme().primary
+            } else if plugin_id.contains("graph") {
+                cx.theme().chart_2
+            } else {
+                cx.theme().accent
+            }
+        }
+        animathio_core::ClipKind::Vector(_) => cx.theme().accent,
+        animathio_core::ClipKind::Error(_) => cx.theme().danger,
+    }
+}
+
+/// Paint a single line of clip text, clipped to the right edge.
+fn paint_clip_label(
+    label: SharedString,
+    origin: Point<Pixels>,
+    right_edge: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if label.is_empty() {
+        return;
+    }
+    let run = TextRun {
+        len: label.len(),
+        font: font(".SystemUIFont"),
+        color: cx.theme().foreground,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window
+        .text_system()
+        .shape_line(label, px(11.0), &[run], None);
+    let line_height = px(14.0);
+    // Clip the text to the block so long labels never spill into the next clip.
+    let mask = ContentMask {
+        bounds: Bounds::from_corners(
+            origin,
+            point(right_edge.max(origin.x), origin.y + line_height),
+        ),
+    };
+    window.with_content_mask(Some(mask), |window| {
+        let _ = line.paint(origin, line_height, TextAlign::Left, None, window, cx);
+    });
 }
 
 fn field_value(clip: &Clip, field: &Field) -> f64 {
@@ -3780,13 +4433,6 @@ fn field_step(field: &Field) -> f64 {
         Field::Transform(TransformProperty::Rotation | TransformProperty::Opacity) => 0.05,
         Field::Transform(_) => 0.01,
         Field::Param(_) => 0.1,
-    }
-}
-
-fn field_scrub_scale(field: &Field) -> f64 {
-    match field {
-        Field::Transform(_) => 0.001,
-        Field::Param(_) => 0.01,
     }
 }
 
@@ -3829,6 +4475,42 @@ fn asset_kind_label(media_type: &str) -> &'static str {
     }
 }
 
+/// Every built-in effect, in a stable order for menus and tabs.
+fn effect_kinds() -> [animathio_core::EffectKind; 8] {
+    [
+        animathio_core::EffectKind::Grayscale,
+        animathio_core::EffectKind::Sepia,
+        animathio_core::EffectKind::Invert,
+        animathio_core::EffectKind::Saturate,
+        animathio_core::EffectKind::Brightness,
+        animathio_core::EffectKind::Contrast,
+        animathio_core::EffectKind::Blur,
+        animathio_core::EffectKind::Opacity,
+    ]
+}
+
+/// A themed context-menu item.
+fn context_item(
+    icon: IconName,
+    label: &str,
+    listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &mut Context<Editor>,
+) -> Stateful<Div> {
+    div()
+        .px_2()
+        .py_1()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .cursor_pointer()
+        .hover(|this| this.bg(cx.theme().list_hover))
+        .child(icons::icon(icon).small())
+        .child(label.to_owned())
+        .id(SharedString::from(format!("context-item-{label}")))
+        .on_click(listener)
+}
+
 /// Human-readable effect name for the effects tab and inspector.
 fn effect_label(kind: animathio_core::EffectKind) -> &'static str {
     match kind {
@@ -3844,18 +4526,51 @@ fn effect_label(kind: animathio_core::EffectKind) -> &'static str {
 }
 
 /// Dim placeholder text used for empty panels and unloaded viewports.
-fn empty_state(label: &'static str) -> Div {
+fn empty_state(label: &'static str, cx: &App) -> Div {
     div()
         .w_full()
         .py_4()
         .flex()
         .justify_center()
-        .text_color(rgb(0x5a6474))
+        .text_color(cx.theme().muted_foreground)
         .child(label)
 }
 
+/// Paint a subtle checkerboard behind transparent viewer regions.
+fn paint_checkerboard(bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+    let cell = 8.0;
+    let mut y = 0.0;
+    let mut row = 0;
+    while y < f32::from(bounds.size.height) {
+        let mut x = 0.0;
+        let mut col = row;
+        while x < f32::from(bounds.size.width) {
+            let cell_bounds = Bounds::from_corners(
+                point(bounds.origin.x + px(x), bounds.origin.y + px(y)),
+                point(
+                    bounds.origin.x + px((x + cell).min(f32::from(bounds.size.width))),
+                    bounds.origin.y + px((y + cell).min(f32::from(bounds.size.height))),
+                ),
+            );
+            window.paint_quad(fill(
+                cell_bounds,
+                if col % 2 == 0 {
+                    cx.theme().background
+                } else {
+                    cx.theme().muted
+                },
+            ));
+            x += cell;
+            col += 1;
+        }
+        y += cell;
+        row += 1;
+    }
+}
+
 /// Paint title-safe and action-safe guides over the viewer.
-fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, _cx: &mut App) {
+fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+    let guide = cx.theme().border;
     let width = f32::from(bounds.size.width);
     let height = f32::from(bounds.size.height);
     let origin = bounds.origin;
@@ -3869,12 +4584,13 @@ fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, _cx: &mut App) 
                 origin.y + px(height * (1.0 - inset)),
             ),
         );
-        window.paint_quad(outline(frame_bounds, rgb(0x3a4658), BorderStyle::Solid));
+        window.paint_quad(outline(frame_bounds, guide, BorderStyle::Solid));
     };
     paint_frame(0.05); // action-safe
     paint_frame(0.10); // title-safe
 }
 
+/// The locked track that a clip-mutating command would edit, if any.
 fn clip_label(project: &Project, clip: &Clip) -> String {
     let kind = match &clip.kind {
         ClipKind::Video(id) | ClipKind::Image(id) | ClipKind::Audio(id) => {
@@ -4048,39 +4764,6 @@ pub(crate) fn point_from_json(value: &Value) -> Option<[f32; 2]> {
 
 fn asset_id_from(value: &str) -> AssetId {
     AssetId::try_from(value.to_owned()).unwrap_or_else(|_| AssetId::of(value.as_bytes()))
-}
-
-fn cycle_option(options: &[String], current: &str) -> String {
-    options
-        .iter()
-        .position(|option| option == current)
-        .and_then(|index| options.get(index + 1).or_else(|| options.first()))
-        .cloned()
-        .unwrap_or_else(|| current.to_owned())
-}
-
-const COLOR_PRESETS: [[u8; 4]; 8] = [
-    [255, 255, 255, 255],
-    [0, 0, 0, 255],
-    [239, 68, 68, 255],
-    [34, 197, 94, 255],
-    [59, 130, 246, 255],
-    [234, 179, 8, 255],
-    [168, 85, 247, 255],
-    [90, 170, 255, 255],
-];
-
-fn cycle_color(current: [u8; 4]) -> [u8; 4] {
-    COLOR_PRESETS
-        .iter()
-        .position(|color| color[0..3] == current[0..3])
-        .and_then(|index| {
-            COLOR_PRESETS
-                .get(index + 1)
-                .or_else(|| COLOR_PRESETS.first())
-        })
-        .copied()
-        .unwrap_or(COLOR_PRESETS[0])
 }
 
 fn media_type_for(path: &Path) -> &'static str {

@@ -119,11 +119,25 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 ## Commands
 
 `core::Command` is an exhaustive enum of serializable, invertible edits:
-`AddTrack`, `RemoveTrack`, `SetTrackGain`, `AddAsset`, `RemoveAsset`,
+`AddTrack`, `RemoveTrack`, `SetTrackGain`, `SetTrackMuted`, `SetTrackSolo`,
+`SetTrackLocked`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
 `SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
-`AddTransition`, `RemoveTransition`, `SetTransitionDuration`.
+`AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `Batch`, `SplitAt`,
+`RemoveRange` and `RippleDelete`.
+
+Track flags: a muted track is silent in the mixer and skipped by `evaluate`;
+while any track is soloed only soloed tracks are mixed and rendered (solo beats
+mute). A locked track rejects every clip-level edit (`AddClip`, `RemoveClip`,
+`MoveClip`, `TrimClip`, `SplitClip`, `MergeClip`, transform/param/effect and
+keyframe commands) in `Command::apply` itself, so the editor, the control
+protocol and MCP all see the same `track N is locked` error; layer-level
+commands (gain, mute, solo, lock) always work so a track can be unlocked.
+`SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks.
+`Batch { commands }` applies its members atomically as one undo step
+(at most 1024 members); fades are a `Batch` of `AddKeyframe`s on a
+clip's `gain` (audio) or opacity (everything else).
 
 `Command::apply(&mut Project) -> Result<Command>` validates the candidate project
 transactionally and returns the exact inverse, so undo/redo, the control protocol,

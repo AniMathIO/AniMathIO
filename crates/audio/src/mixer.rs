@@ -27,7 +27,7 @@ const MAX_SINC_INPUT_FRAMES: usize = MAX_SAMPLE_RATE as usize + SINC_LEN + 1;
 /// Engine-owned native decoded resources, keyed by the project's asset identities.
 #[derive(Default)]
 pub struct AudioPool {
-    sources: BTreeMap<AssetId, Pcm>,
+    pub(crate) sources: BTreeMap<AssetId, Pcm>,
 }
 impl AudioPool {
     /// Decode once, outside the real-time callback. Replacement is explicit by identity.
@@ -127,8 +127,9 @@ impl Mixer {
             .checked_mul(channels)
             .ok_or_else(|| Error::Invalid("mix too large".into()))?;
         let mut output = vec![0.0_f32; len];
+        let any_solo = project.tracks().iter().any(animathio_core::Track::is_solo);
         for track in project.tracks() {
-            if track.gain() == 0.0 {
+            if track.gain() == 0.0 || track.is_muted() || (any_solo && !track.is_solo()) {
                 continue;
             }
             for clip in track.clips().values() {

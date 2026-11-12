@@ -242,6 +242,15 @@ pub struct Track {
     pub(crate) clips: BTreeMap<ClipId, Clip>,
     #[serde(default = "unity_gain")]
     pub(crate) gain: f64,
+    /// Muted layers are silent in the mix and hidden from rendering.
+    #[serde(default)]
+    pub(crate) muted: bool,
+    /// Soloed layers are the only ones audible/visible while any layer is soloed.
+    #[serde(default)]
+    pub(crate) solo: bool,
+    /// Locked layers reject clip edits (add, move, trim, split, delete, effects).
+    #[serde(default)]
+    pub(crate) locked: bool,
     /// Edit-point transitions between adjacent clips of this track.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) transitions: Vec<crate::Transition>,
@@ -255,6 +264,9 @@ impl Track {
             name: name.into(),
             clips: BTreeMap::new(),
             gain: 1.0,
+            muted: false,
+            solo: false,
+            locked: false,
             transitions: Vec::new(),
         }
     }
@@ -262,6 +274,21 @@ impl Track {
     #[must_use]
     pub fn gain(&self) -> f64 {
         self.gain
+    }
+    /// Whether the layer is muted.
+    #[must_use]
+    pub const fn is_muted(&self) -> bool {
+        self.muted
+    }
+    /// Whether the layer is soloed.
+    #[must_use]
+    pub const fn is_solo(&self) -> bool {
+        self.solo
+    }
+    /// Whether the layer rejects clip edits.
+    #[must_use]
+    pub const fn is_locked(&self) -> bool {
+        self.locked
     }
     /// Stable layer identity.
     #[must_use]
@@ -496,7 +523,11 @@ pub struct SceneClip {
 #[must_use]
 pub fn evaluate(project: &Project, time: Time) -> Scene {
     let mut scene = Scene::default();
+    let any_solo = project.tracks.iter().any(Track::is_solo);
     for track in &project.tracks {
+        if track.muted || (any_solo && !track.solo) {
+            continue;
+        }
         for clip in track.clips.values() {
             let span = track.clip_span(clip);
             if time < span.range.start || time >= span.range.end {

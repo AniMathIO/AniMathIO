@@ -144,6 +144,62 @@ fn overlapping_tracks_sum_trim_gain_and_mute_are_applied() {
     assert_eq!(mixer.mix(&project, range(0, 4 * tick)).unwrap(), single);
 }
 #[test]
+fn track_mute_and_solo_gate_the_mix() {
+    let tick = TICKS_PER_SECOND / 48_000;
+    let pcm = Pcm::new(48_000, 1, vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+    let (mut project, pool) = project(&pcm, tick, 4 * tick);
+    let mixer = pool.prepare(48_000, 1).unwrap();
+    let audible = mixer.mix(&project, range(0, 4 * tick)).unwrap();
+    assert!(audible.iter().any(|sample| *sample != 0.0));
+
+    // Muting the only track silences the mix.
+    Command::SetTrackMuted {
+        id: TrackId(0),
+        muted: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert!(
+        mixer
+            .mix(&project, range(0, 4 * tick))
+            .unwrap()
+            .iter()
+            .all(|sample| *sample == 0.0)
+    );
+
+    // A second, unsoloed track is silenced while the first stays soloed.
+    Command::SetTrackMuted {
+        id: TrackId(0),
+        muted: false,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetTrackSolo {
+        id: TrackId(0),
+        solo: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "second"),
+        index: 1,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut second = project.tracks()[0].clips()[&ClipId(0)].clone();
+    second.id = ClipId(1);
+    Command::AddClip {
+        track: TrackId(1),
+        clip: second,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let soloed = mixer.mix(&project, range(0, 4 * tick)).unwrap();
+    for (sample, expected) in soloed.iter().zip(&audible) {
+        assert_eq!(*sample, *expected);
+    }
+}
+#[test]
 fn gain_and_mute_keyframes_use_clip_local_time() {
     let tick = TICKS_PER_SECOND / 48_000;
     let pcm = Pcm::new(48_000, 1, vec![1.; 10]).unwrap();

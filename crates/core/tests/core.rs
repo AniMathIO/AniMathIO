@@ -704,6 +704,206 @@ fn track_gain_is_validated_reversible_and_defaults_for_old_projects() {
 }
 
 #[test]
+fn track_mute_solo_and_lock_are_reversible_and_default_for_old_projects() {
+    let mut project = base();
+    assert!(!project.tracks()[0].is_muted());
+    assert!(!project.tracks()[0].is_solo());
+    assert!(!project.tracks()[0].is_locked());
+    let original = project.clone();
+    for command in [
+        Command::SetTrackMuted {
+            id: TrackId(0),
+            muted: true,
+        },
+        Command::SetTrackSolo {
+            id: TrackId(1),
+            solo: true,
+        },
+        Command::SetTrackLocked {
+            id: TrackId(0),
+            locked: true,
+        },
+    ] {
+        let inverse = command.apply(&mut project).unwrap();
+        assert_ne!(project, original, "{command:?} must change the project");
+        let decoded: Project =
+            serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
+        assert_eq!(decoded, project);
+        inverse.apply(&mut project).unwrap();
+        assert_eq!(project, original);
+    }
+    // Missing fields from pre-flags projects decode to the unlocked defaults.
+    let mut json = serde_json::to_value(&project).unwrap();
+    for track in json["tracks"].as_array_mut().unwrap() {
+        let object = track.as_object_mut().unwrap();
+        object.remove("muted");
+        object.remove("solo");
+        object.remove("locked");
+    }
+    let decoded: Project = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn batch_is_atomic_one_undo_step_and_allows_nesting() {
+    let mut project = base();
+    Command::AddClip {
+        track: TrackId(0),
+        clip: plugin(1, 200, 300),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let original = project.clone();
+    let move_clip = |start| Command::MoveClip {
+        id: ClipId(1),
+        track: TrackId(0),
+        start: Time(start),
+    };
+    let mut history = History::default();
+    history
+        .execute(
+            &mut project,
+            &Command::Batch {
+                commands: vec![move_clip(210), move_clip(220)],
+            },
+        )
+        .unwrap();
+    assert_ne!(project, original);
+    assert!(history.undo(&mut project).unwrap());
+    assert_eq!(project, original);
+    assert!(history.redo(&mut project).unwrap());
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(1)].range.start,
+        Time(220)
+    );
+
+    // A failing member rolls the whole batch back.
+    let before = project.clone();
+    let failing = Command::Batch {
+        commands: vec![move_clip(400), Command::RemoveClip { id: ClipId(99) }],
+    };
+    assert!(failing.apply(&mut project).is_err());
+    assert_eq!(project, before);
+    // Nesting is allowed: inverses of compound edits are themselves batches.
+    let nested = Command::Batch {
+        commands: vec![Command::Batch { commands: vec![] }],
+    };
+    assert!(nested.apply(&mut project).is_ok());
+    // A batch touching a locked layer is rejected.
+    Command::SetTrackLocked {
+        id: TrackId(0),
+        locked: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let locked = Command::Batch {
+        commands: vec![move_clip(7)],
+    };
+    assert!(locked.apply(&mut project).unwrap_err().0.contains("locked"));
+}
+
+#[test]
+fn locked_tracks_reject_clip_edits_but_can_be_unlocked() {
+    let mut project = base();
+    Command::AddClip {
+        track: TrackId(0),
+        clip: plugin(1, 200, 300),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetTrackLocked {
+        id: TrackId(0),
+        locked: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    for command in [
+        Command::RemoveClip { id: ClipId(1) },
+        Command::MoveClip {
+            id: ClipId(1),
+            track: TrackId(0),
+            start: Time(10),
+        },
+        Command::AddClip {
+            track: TrackId(0),
+            clip: plugin(2, 400, 500),
+        },
+    ] {
+        let error = command.apply(&mut project).unwrap_err();
+        assert!(error.0.contains("locked"), "{error:?}");
+        assert_eq!(project, before);
+    }
+    // Another layer stays editable and the lock itself can always be undone.
+    Command::AddClip {
+        track: TrackId(1),
+        clip: plugin(3, 0, 50),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetTrackLocked {
+        id: TrackId(0),
+        locked: false,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::RemoveClip { id: ClipId(1) }
+        .apply(&mut project)
+        .unwrap();
+}
+
+#[test]
+fn evaluate_honours_track_mute_and_solo() {
+    let mut project = base();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: plugin(1, 0, 100),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let both = evaluate(&project, Time(50));
+    assert_eq!(both.clips.len(), 2);
+
+    // Muting a track hides its clips from the resolved scene.
+    Command::SetTrackMuted {
+        id: TrackId(0),
+        muted: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(
+        evaluate(&project, Time(50))
+            .clips
+            .iter()
+            .map(|clip| clip.track)
+            .collect::<Vec<_>>(),
+        vec![TrackId(1)]
+    );
+
+    // Solo beats mute: only soloed tracks resolve while any track is soloed.
+    Command::SetTrackMuted {
+        id: TrackId(0),
+        muted: false,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetTrackSolo {
+        id: TrackId(0),
+        solo: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(
+        evaluate(&project, Time(50))
+            .clips
+            .iter()
+            .map(|clip| clip.track)
+            .collect::<Vec<_>>(),
+        vec![TrackId(0)]
+    );
+}
+
+#[test]
 fn move_keyframe_is_reversible_and_rejects_occupied_destinations() {
     let mut project = animated();
     let original = project.clone();

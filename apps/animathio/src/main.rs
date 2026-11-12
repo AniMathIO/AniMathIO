@@ -18,6 +18,9 @@
 mod control;
 mod editor;
 mod export_worker;
+mod fades;
+mod glyph_guard;
+mod icons;
 mod inspector;
 mod layout;
 mod playback;
@@ -46,41 +49,52 @@ fn main() {
     } else {
         None
     };
-    gpui_platform::application().run(move |cx: &mut App| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
-        cx.on_window_closed(|cx, _window_id| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
+    gpui_platform::application()
+        .with_assets(gpui_kit_assets::AllAssets)
+        .run(move |cx: &mut App| {
+            gpui_component::init(cx);
+            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            cx.on_window_closed(|cx, _window_id| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
 
-        let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
-        let window = cx
-            .open_window(
+            let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
+            let editor_cell: std::rc::Rc<std::cell::RefCell<Option<Entity<editor::Editor>>>> =
+                std::rc::Rc::default();
+            let cell = editor_cell.clone();
+            cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
                 move |window, cx| {
-                    cx.new(|cx| {
+                    let view = cx.new(|cx| {
                         editor::Editor::new(
                             cx, window, project, assets, path, recovered, control, bench,
                         )
-                    })
+                    });
+                    *cell.borrow_mut() = Some(view.clone());
+                    // `Root` hosts the popover layers that gpui-component widgets
+                    // (select, colour picker) render into.
+                    cx.new(|cx| gpui_component::Root::new(view, window, cx))
                 },
             )
             .expect("open editor window");
 
-        let view = window.update(cx, |_, _, cx| cx.entity()).unwrap();
-        cx.intercept_keystrokes(move |event, _window, cx| {
-            view.update(cx, |editor, cx| editor.handle_keystroke(event, cx));
-        })
-        .detach();
+            let view = editor_cell
+                .borrow_mut()
+                .take()
+                .expect("editor view was created with the window");
+            cx.intercept_keystrokes(move |event, window, cx| {
+                view.update(cx, |editor, cx| editor.handle_keystroke(event, window, cx));
+            })
+            .detach();
 
-        cx.activate(true);
-    });
+            cx.activate(true);
+        });
 }
 
 /// Whether the control server should run: `--control` or `ANIMATHIO_CONTROL=1`.
