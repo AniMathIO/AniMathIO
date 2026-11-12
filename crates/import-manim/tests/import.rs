@@ -125,7 +125,10 @@ class LatexScene(Scene):
     assert_eq!(params["mode"], "mathtex");
     assert_eq!(params["size"], 48.0);
     assert_eq!(params["color"], "#FFFF00");
-    assert_eq!(formula.params["reveal"], 1.0);
+    assert_eq!(
+        formula.params["reveal"],
+        animathio_core::ParamValue::Number(1.0)
+    );
 
     // Write: reveal 0 -> 1 over 2 seconds.
     let reveal = animation(&project, "formula", &Target::Param("reveal".to_owned())).unwrap();

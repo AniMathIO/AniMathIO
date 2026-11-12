@@ -166,7 +166,7 @@ fn renders_plugins_at_several_times() {
         let shapes_scene = host
             .render_clip(
                 &shapes,
-                &BTreeMap::from([("radius".to_string(), 100.0)]),
+                &BTreeMap::from([("radius".to_string(), 100.0.into())]),
                 &json!({ "shape": "polygon", "points": 6.0 }),
                 t,
                 (1280, 720),
@@ -223,7 +223,10 @@ fn output_cache_hits_on_identical_params() {
     let mut host = PluginHost::new(tmp.path()).unwrap();
     let shapes = load_plugin(&mut host, "shapes");
 
-    let params = BTreeMap::from([("x".to_string(), 100.0), ("y".to_string(), 120.0)]);
+    let params = BTreeMap::from([
+        ("x".to_string(), 100.0.into()),
+        ("y".to_string(), 120.0.into()),
+    ]);
     let opaque = json!({ "shape": "rect", "width": 50.0, "height": 40.0 });
 
     let first = host
@@ -297,4 +300,69 @@ fn inspector_schema_roundtrips() {
     let json = serde_json::to_string(schema).unwrap();
     let roundtripped: InspectorSchema = serde_json::from_str(&json).unwrap();
     assert_eq!(schema, &roundtripped);
+}
+
+#[test]
+fn evaluated_colour_keyframes_reach_plugin_output_and_cache() {
+    use animathio_core::{
+        Clip, Command as Edit, Interpolation, Keyframe, ParamValue, Project, Target, TimeRange,
+        Track, evaluate,
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let shapes = load_plugin(&mut host, "shapes");
+    let mut project = Project::default();
+    Edit::AddTrack {
+        track: Track::new(TrackId(0), "colour"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut clip = Clip::new(
+        ClipId(0),
+        ClipKind::Plugin {
+            plugin_id: shapes,
+            params: json!({"shape":"circle","fill":[255,0,0,255]}),
+        },
+        TimeRange::new(Time(0), Time(101)).unwrap(),
+    );
+    clip.params
+        .insert("fill".into(), ParamValue::Color([0.0, 0.0, 0.0, 1.0]));
+    Edit::AddClip {
+        track: TrackId(0),
+        clip,
+    }
+    .apply(&mut project)
+    .unwrap();
+    for (time, color) in [(0, [0.0, 0.0, 0.0, 1.0]), (100, [1.0, 1.0, 1.0, 1.0])] {
+        Edit::AddKeyframe {
+            id: ClipId(0),
+            target: Target::Param("fill".into()),
+            time: Time(time),
+            keyframe: Keyframe {
+                value: ParamValue::Color(color),
+                interpolation: Interpolation::Linear,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    for (time, expected) in [(0, 0), (50, 188), (100, 255)] {
+        let scene = evaluate(&project, Time(time));
+        let resolved = host.resolve(&scene, (200, 200));
+        let ClipKind::Vector(vector) = &resolved.clips[0].kind else {
+            panic!("plugin must render")
+        };
+        assert!(vector.elements.iter().any(|element| matches!(element, animathio_core::VectorElement::FillPath { color, .. } if *color == animathio_core::Color::rgba(expected,expected,expected,255))));
+    }
+    // Same time and plugin, different typed colour: cached output must change.
+    let mut scene = evaluate(&project, Time(50));
+    scene.clips[0]
+        .params
+        .insert("fill".into(), ParamValue::Color([1.0, 0.0, 0.0, 1.0]));
+    let resolved = host.resolve(&scene, (200, 200));
+    let ClipKind::Vector(vector) = &resolved.clips[0].kind else {
+        panic!("plugin must render")
+    };
+    assert!(vector.elements.iter().any(|element| matches!(element, animathio_core::VectorElement::FillPath { color, .. } if *color == animathio_core::Color::rgba(255,0,0,255))));
 }

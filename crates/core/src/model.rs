@@ -1,5 +1,5 @@
 use crate::builtin::Color;
-use crate::{EffectId, EffectInstance, Error, FrameRate, Keyframes, Time, invalid};
+use crate::{EffectId, EffectInstance, Error, FrameRate, Keyframes, ParamValue, Time, invalid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -147,7 +147,7 @@ pub enum ClipKind {
     Plugin {
         /// Reverse-domain plugin identifier.
         plugin_id: String,
-        /// Preserved verbatim; numeric automation lives in `Clip::params`.
+        /// Preserved verbatim; typed automation lives in `Clip::params`.
         params: serde_json::Value,
     },
     /// Resolved vector scene, e.g. produced by a plugin or vector clip source.
@@ -172,12 +172,12 @@ pub enum TransformProperty {
     /// Opacity.
     Opacity,
 }
-/// Typed numeric animation target.
+/// Typed animation target.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Target {
     /// Transform component.
     Transform(TransformProperty),
-    /// Named numeric parameter; must exist in the clip's base parameters.
+    /// Named parameter; plugin curves may override an implicit schema default.
     Param(String),
     /// Parameter of one effect instance, addressed by its stable effect id.
     Effect {
@@ -187,13 +187,13 @@ pub enum Target {
         param: String,
     },
 }
-/// One numeric animation in clip-local ticks (keyframes may extend beyond a trim).
+/// One typed animation in clip-local ticks (keyframes may extend beyond a trim).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Animation {
     /// Property to override.
     pub target: Target,
     /// Ordered keyframes.
-    pub keys: Keyframes<f64>,
+    pub keys: Keyframes<ParamValue>,
 }
 
 /// A draft clip. Once inserted, only commands can change the project's copy.
@@ -209,12 +209,12 @@ pub struct Clip {
     pub source_offset: Time,
     /// Base transform.
     pub transform: Transform,
-    /// Named base numeric parameters (e.g. gain or a graph coefficient).
-    pub params: BTreeMap<String, f64>,
+    /// Named base typed parameters (e.g. gain or a graph coefficient).
+    pub params: BTreeMap<String, ParamValue>,
     /// Ordered visual effects, applied after rasterizing the clip source.
     #[serde(default)]
     pub effects: Vec<EffectInstance>,
-    /// Numeric curves in clip-local time, sorted by unique target.
+    /// Typed curves in clip-local time, sorted by unique target.
     pub animations: Vec<Animation>,
 }
 impl Clip {
@@ -418,7 +418,7 @@ impl Project {
                 {
                     return Err(invalid("invalid source time range"));
                 }
-                if !clip.transform.valid() || clip.params.values().any(|v| !v.is_finite()) {
+                if !clip.transform.valid() || clip.params.values().any(|v| !v.valid()) {
                     return Err(invalid("invalid transform or parameter"));
                 }
                 match &clip.kind {
@@ -465,8 +465,8 @@ pub struct SceneClip {
     pub source_time: Time,
     /// Evaluated transform.
     pub transform: Transform,
-    /// Evaluated numeric parameters.
-    pub params: BTreeMap<String, f64>,
+    /// Evaluated typed parameters.
+    pub params: BTreeMap<String, ParamValue>,
     /// Evaluated effect chain, with keyframed parameters resolved.
     #[serde(default)]
     pub effects: Vec<EffectInstance>,
@@ -495,7 +495,11 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
             for animation in &clip.animations {
                 if let Some(value) = animation.keys.sample(local_time) {
                     match &animation.target {
-                        Target::Transform(property) => resolved.transform.set(*property, value),
+                        Target::Transform(property) => {
+                            if let Some(number) = value.as_number() {
+                                resolved.transform.set(*property, number);
+                            }
+                        }
                         Target::Param(name) => {
                             resolved.params.insert(name.clone(), value);
                         }
@@ -505,7 +509,9 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                                 .iter_mut()
                                 .find(|instance| instance.id == *effect)
                             {
-                                instance.params.insert(param.clone(), value);
+                                if let Some(number) = value.as_number() {
+                                    instance.params.insert(param.clone(), number);
+                                }
                             }
                         }
                     }
@@ -538,7 +544,8 @@ fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
         }
         let effect_kind = match &animation.target {
             Target::Param(name) => {
-                if !clip.params.contains_key(name) {
+                if !clip.params.contains_key(name) && !matches!(&clip.kind, ClipKind::Plugin { .. })
+                {
                     return Err(invalid("animation parameter missing"));
                 }
                 None
@@ -556,19 +563,35 @@ fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
             }
             Target::Transform(_) => None,
         };
+        let first = &animation
+            .keys
+            .0
+            .first_key_value()
+            .expect("nonempty animation")
+            .1
+            .value;
+        if let Target::Param(name) = &animation.target
+            && let Some(base) = clip.params.get(name)
+            && !base.same_type(first)
+        {
+            return Err(invalid("keyframe type differs from base parameter"));
+        }
         for (time, key) in &animation.keys.0 {
             let valid_value = match &animation.target {
-                Target::Transform(TransformProperty::Opacity) => (0.0..=1.0).contains(&key.value),
-                Target::Transform(_) | Target::Param(_) => true,
-                Target::Effect { param, .. } => {
-                    let Some(kind) = effect_kind else {
-                        return Err(invalid("animation effect missing"));
-                    };
-                    kind.validate_param(param, key.value).is_ok()
-                }
+                Target::Transform(TransformProperty::Opacity) => key
+                    .value
+                    .as_number()
+                    .is_some_and(|v| (0.0..=1.0).contains(&v)),
+                Target::Transform(_) => key.value.as_number().is_some(),
+                Target::Param(_) => true,
+                Target::Effect { param, .. } => effect_kind.is_some_and(|kind| {
+                    key.value
+                        .as_number()
+                        .is_some_and(|v| kind.validate_param(param, v).is_ok())
+                }),
             };
-            if time.0 < 0 || !key.value.is_finite() || !valid_value {
-                return Err(invalid("invalid keyframe"));
+            if time.0 < 0 || !key.value.valid() || !key.value.same_type(first) || !valid_value {
+                return Err(invalid("invalid or mixed-type keyframe"));
             }
         }
     }

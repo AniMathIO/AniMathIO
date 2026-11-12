@@ -142,17 +142,16 @@ pub enum Command {
         /// New value; `None` removes it (only if not animated).
         value: Option<f64>,
     },
-    /// Set or remove an opaque, non-numeric plugin parameter stored in
-    /// `ClipKind::Plugin::params`.
+    /// Set or remove a typed plugin parameter override. Opaque plugin data is preserved.
     SetPluginParam {
         /// Clip identity.
         id: ClipId,
         /// Parameter name.
         name: String,
-        /// New JSON value; `None` removes it.
-        value: Option<serde_json::Value>,
+        /// New typed value; `None` removes it.
+        value: Option<crate::ParamValue>,
     },
-    /// Insert or replace a numeric keyframe.
+    /// Insert or replace a typed keyframe.
     AddKeyframe {
         /// Clip identity.
         id: ClipId,
@@ -161,9 +160,9 @@ pub enum Command {
         /// Clip-local ticks.
         time: Time,
         /// Value and outgoing interpolation.
-        keyframe: Keyframe<f64>,
+        keyframe: Keyframe<crate::ParamValue>,
     },
-    /// Remove a numeric keyframe; removes an empty animation too.
+    /// Remove a typed keyframe; removes an empty animation too.
     RemoveKeyframe {
         /// Clip identity.
         id: ClipId,
@@ -172,7 +171,7 @@ pub enum Command {
         /// Clip-local ticks.
         time: Time,
     },
-    /// Move a numeric keyframe to a new clip-local time.
+    /// Move a typed keyframe to a new clip-local time.
     MoveKeyframe {
         /// Clip identity.
         id: ClipId,
@@ -412,14 +411,20 @@ impl Command {
             Self::SetParam { id, name, value } => {
                 let clip = clip_mut(project, *id)?;
                 let previous = if let Some(value) = value {
-                    clip.params.insert(name.clone(), *value)
+                    clip.params
+                        .insert(name.clone(), crate::ParamValue::Number(*value))
                 } else {
                     clip.params.remove(name)
                 };
                 Self::SetParam {
                     id: *id,
                     name: name.clone(),
-                    value: previous,
+                    value: previous
+                        .map(|v| {
+                            v.as_number()
+                                .ok_or_else(|| invalid("non-numeric parameter"))
+                        })
+                        .transpose()?,
                 }
             }
             Self::AddEffect { id, index, effect } => {
@@ -481,16 +486,13 @@ impl Command {
             }
             Self::SetPluginParam { id, name, value } => {
                 let clip = clip_mut(project, *id)?;
-                let ClipKind::Plugin { params, .. } = &mut clip.kind else {
+                if !matches!(clip.kind, ClipKind::Plugin { .. }) {
                     return Err(invalid("plugin parameter on a non-plugin clip"));
-                };
-                let object = params
-                    .as_object_mut()
-                    .ok_or_else(|| invalid("plugin parameters must be a JSON object"))?;
+                }
                 let previous = if let Some(value) = value {
-                    object.insert(name.clone(), value.clone())
+                    clip.params.insert(name.clone(), value.clone())
                 } else {
-                    object.remove(name)
+                    clip.params.remove(name)
                 };
                 Self::SetPluginParam {
                     id: *id,

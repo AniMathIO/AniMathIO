@@ -705,7 +705,7 @@ impl PluginHost {
     pub fn render_clip(
         &mut self,
         plugin_id: &str,
-        params: &BTreeMap<String, f64>,
+        params: &BTreeMap<String, animathio_core::ParamValue>,
         opaque_params: &serde_json::Value,
         time_ticks: i64,
         canvas_size: (u32, u32),
@@ -803,7 +803,7 @@ fn compute_cache_key(
     plugin_hash: &[u8; 32],
     time_ticks: i64,
     size: (u32, u32),
-    params: &BTreeMap<String, f64>,
+    params: &BTreeMap<String, animathio_core::ParamValue>,
     opaque_params: &serde_json::Value,
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new();
@@ -812,10 +812,8 @@ fn compute_cache_key(
     hasher.update(&size.0.to_le_bytes());
     hasher.update(&size.1.to_le_bytes());
 
-    for (k, v) in params {
-        hasher.update(k.as_bytes());
-        hasher.update(&v.to_le_bytes());
-    }
+    // Length-delimited structured encoding includes the variant and avoids ambiguous strings.
+    hasher.update(&serde_json::to_vec(params).expect("serializable parameter values"));
 
     if !opaque_params.is_null()
         && let Ok(s) = serde_json::to_string(opaque_params)
@@ -828,7 +826,7 @@ fn compute_cache_key(
 
 fn build_wit_params(
     manifest: &wit_types::Manifest,
-    numeric_params: &BTreeMap<String, f64>,
+    typed_params: &BTreeMap<String, animathio_core::ParamValue>,
     opaque: &serde_json::Value,
 ) -> Vec<wit_types::ParamEntry> {
     let mut entries = Vec::new();
@@ -839,8 +837,8 @@ fn build_wit_params(
 
     if let serde_json::Value::Object(map) = opaque {
         for (k, v) in map {
-            if numeric_params.contains_key(k) {
-                continue; // animated numeric param overrides static base param
+            if typed_params.contains_key(k) {
+                continue; // evaluated typed param overrides opaque base data
             }
             if let Some(value) = json_to_param_value(v, schema.get(k.as_str()).copied()) {
                 entries.push(wit_types::ParamEntry {
@@ -851,11 +849,19 @@ fn build_wit_params(
         }
     }
 
-    for (k, v) in numeric_params {
-        entries.push(wit_types::ParamEntry {
-            id: k.clone(),
-            value: wit_types::ParamValue::Number(*v),
-        });
+    for (k, v) in typed_params {
+        let json = v.to_plugin_json();
+        let value = if matches!(v, animathio_core::ParamValue::AssetRef(None)) {
+            Some(wit_types::ParamValue::AssetRef(String::new()))
+        } else {
+            json_to_param_value(&json, schema.get(k.as_str()).copied())
+        };
+        if let Some(value) = value {
+            entries.push(wit_types::ParamEntry {
+                id: k.clone(),
+                value,
+            });
+        }
     }
 
     entries
