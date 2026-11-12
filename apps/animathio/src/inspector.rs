@@ -230,8 +230,7 @@ pub(crate) fn model_value(model: &ParamModel, value: Option<&serde_json::Value>)
         ),
         ParamModel::Asset { default, .. } => ParamValue::AssetRef(
             value
-                .and_then(serde_json::Value::as_str)
-                .or(default.as_deref())
+                .map_or(default.as_deref(), serde_json::Value::as_str)
                 .and_then(|v| v.to_owned().try_into().ok()),
         ),
     }
@@ -710,6 +709,22 @@ mod typed_tests {
                 base
             );
         }
+    }
+
+    #[test]
+    fn explicit_empty_asset_overrides_a_schema_default() {
+        let asset = animathio_core::AssetId::of(b"default");
+        let model = ParamModel::Asset {
+            id: "a".into(),
+            label: "Asset".into(),
+            media_type: "image/*".into(),
+            default: Some(asset.as_str().to_owned()),
+        };
+        assert_eq!(model_value(&model, None), ParamValue::AssetRef(Some(asset)));
+        assert_eq!(
+            model_value(&model, Some(&serde_json::Value::Null)),
+            ParamValue::AssetRef(None)
+        );
     }
 
     #[test]
