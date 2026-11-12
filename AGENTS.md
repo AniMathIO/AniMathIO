@@ -62,6 +62,23 @@ git show origin/main:main/mcp/tool-schemas.ts              # v1 MCP tool surface
 
 Port behavior, not structure. The v1 store/component layout is exactly what 2.0 replaces.
 
+## GUI testing: always use a virtual display
+
+The maintainer keeps using this machine while agents work. **Never open windows on the
+real desktop.** Run every GUI run, bench (`--bench-viewport`) and screenshot through
+`scripts/virtual-display.sh`. It starts a private Xvfb display, forces X11 and unsets
+`WAYLAND_DISPLAY`, then tears everything down afterwards:
+
+```bash
+scripts/virtual-display.sh ./target/release/animathio --bench-viewport
+scripts/virtual-display.sh --screenshot docs/screenshots/editor-main.png 8 ./target/release/animathio
+```
+
+Don't use `spectacle`, `grim` or anything else that captures the user's session.
+Vulkan (RADV) is available inside Xvfb. Benches there present through a software
+path, so report those numbers as "Xvfb" and don't compare them with
+native-compositor results.
+
 ## Commands
 
 The workspace uses stable Rust, edition 2024. Standalone `spikes/` projects are excluded.
