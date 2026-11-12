@@ -69,6 +69,9 @@ enum Action {
         /// Constant quality, 0..=51; lower is better.
         #[arg(long, default_value_t = 23.0)]
         crf: f32,
+        /// Replace an existing output file instead of failing.
+        #[arg(long)]
+        overwrite: bool,
     },
     /// Check model invariants and all asset content hashes.
     Validate { project: PathBuf },
@@ -214,13 +217,18 @@ fn run(cli: Cli) -> Result<()> {
             to,
             fps,
             crf,
+            overwrite,
         } => {
             let bundle = load(&project)?;
             let range = animathio_core::TimeRange::new(
                 from,
                 to.unwrap_or_else(|| animathio_export::duration(&bundle.project)),
             )?;
-            let bytes = animathio_export::export(
+            let destination = animathio_export::Destination {
+                path: output,
+                overwrite,
+            };
+            animathio_export::export_to_file(
                 &bundle.project,
                 &bundle.assets,
                 range,
@@ -228,6 +236,7 @@ fn run(cli: Cli) -> Result<()> {
                     frame_rate: fps,
                     crf,
                 },
+                &destination,
                 |progress| {
                     if progress.completed == progress.total {
                         eprintln!("exported {} frames", progress.total);
@@ -235,7 +244,6 @@ fn run(cli: Cli) -> Result<()> {
                     true
                 },
             )?;
-            fs::write(output, bytes)?;
         }
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

@@ -71,6 +71,9 @@ pub struct ExportParams {
     /// Encoding quality and optional rational frame rate.
     #[serde(default)]
     pub settings: animathio_export::Settings,
+    /// Replace an existing output file instead of failing with `AlreadyExists`.
+    #[serde(default)]
+    pub overwrite: bool,
 }
 
 /// A read-only summary of the timeline for `timeline.list`.
