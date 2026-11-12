@@ -72,6 +72,8 @@ impl Editor {
                 MenuItem::action("Set in", MarkIn),
                 MenuItem::action("Set out (exclusive)", MarkOut),
                 MenuItem::action("Clear in/out", ClearMarks),
+                MenuItem::action("Go to in", GoToIn),
+                MenuItem::action("Go to out", GoToOut),
                 MenuItem::action("Loop", ToggleLoop),
             ]),
             Menu::new("Tools").items([
@@ -83,7 +85,7 @@ impl Editor {
             Menu::new("Clip").items([
                 MenuItem::action("Split at playhead", SplitClip).disabled(self.selected.is_none()),
                 MenuItem::action("Add effect", ShowEffects),
-                MenuItem::action("Ripple delete", RippleDelete),
+                MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),
             ]),
             Menu::new("Help").items([

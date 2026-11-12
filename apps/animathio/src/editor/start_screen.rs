@@ -8,7 +8,9 @@ impl Editor {
     }
     pub(super) fn start_screen(&self, cx: &mut Context<Self>) -> Div {
         div()
-            .size_full()
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .flex()
             .items_center()
             .justify_center()

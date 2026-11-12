@@ -52,7 +52,12 @@ impl Editor {
             self.open_export_status(window, cx);
             return;
         }
-        let duration = timeline::project_duration(&self.project);
+        let duration = animathio_export::duration(&self.project).0;
+        if duration <= 0 {
+            self.error = Some("Add content before exporting".into());
+            cx.notify();
+            return;
+        }
         let default_range = self
             .marks
             .range(duration)
@@ -143,7 +148,7 @@ impl Editor {
                     let to = timecode::parse_timecode(&to_submit.read(cx).value(), rate);
                     let output = PathBuf::from(output_submit.read(cx).value().trim());
                     let valid = editor.update(cx, |this, cx| {
-                        let duration = timeline::project_duration(&this.project);
+                        let duration = animathio_export::duration(&this.project).0;
                         let range = match choice.as_str() {
                             "In/out" => this.marks.range(duration),
                             "Custom" => from

@@ -98,7 +98,7 @@ impl Editor {
     }
 
     pub(super) fn jump_to_end(&mut self, cx: &mut Context<Self>) {
-        let end = timeline::project_duration(&self.project);
+        let end = animathio_export::duration(&self.project).0;
         self.seek_to(Time(end), cx);
     }
 

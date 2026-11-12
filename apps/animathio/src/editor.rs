@@ -572,7 +572,7 @@ impl Render for Editor {
         self.flush_notices(window, cx);
 
         if self.playing {
-            let duration = timeline::project_duration(&self.project);
+            let duration = animathio_export::duration(&self.project).0.max(1);
             let range = if self.loop_playback {
                 self.marks.range(duration)
             } else {

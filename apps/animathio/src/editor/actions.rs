@@ -10,6 +10,8 @@ actions!(
         ShuttleForward,
         PreviousEdit,
         NextEdit,
+        GoToIn,
+        GoToOut,
         MarkIn,
         MarkOut,
         ClearMarks,
@@ -106,6 +108,10 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("up", Box::new(PreviousEdit), "Viewer"),
         ("down", Box::new(NextEdit), "Timeline"),
         ("down", Box::new(NextEdit), "Viewer"),
+        ("shift-i", Box::new(GoToIn), "Timeline"),
+        ("shift-i", Box::new(GoToIn), "Viewer"),
+        ("shift-o", Box::new(GoToOut), "Timeline"),
+        ("shift-o", Box::new(GoToOut), "Viewer"),
         ("i", Box::new(MarkIn), "Timeline"),
         ("i", Box::new(MarkIn), "Viewer"),
         ("o", Box::new(MarkOut), "Timeline"),
@@ -361,6 +367,16 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         }
         this.step_edit(1, cx);
     }))
+    .on_action(cx.listener(|this, _: &GoToIn, _, cx| {
+        if let Some(time) = this.marks.start {
+            this.seek_to(time, cx);
+        }
+    }))
+    .on_action(cx.listener(|this, _: &GoToOut, _, cx| {
+        if let Some(time) = this.marks.end {
+            this.seek_to(time, cx);
+        }
+    }))
     .on_action(cx.listener(|this, _: &MarkIn, window, cx| {
         if this.fields.any_focused(window, cx) {
             cx.propagate();
@@ -422,8 +438,16 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             cx.propagate();
             return;
         }
-        if let Some(clip) = this.selected {
-            this.execute(&Command::RippleDelete { clip }, cx);
+        let range = this
+            .marks
+            .marked()
+            .then(|| {
+                this.marks
+                    .range(animathio_export::duration(&this.project).0)
+            })
+            .flatten();
+        if let Some(command) = editing::ripple_delete_command(this.selected, range) {
+            this.execute(&command, cx);
         }
     }))
     .on_action(cx.listener(|this, _: &Preferences, window, cx| this.open_preferences(window, cx)))

@@ -73,7 +73,7 @@ pub(crate) struct ClipHit {
 /// Project playback length: the furthest clip end, rounded up to whole seconds
 /// and at least one second so an empty timeline still has a usable ruler.
 pub(crate) fn project_duration(project: &Project) -> i64 {
-    let mut end = TICKS_PER_SECOND;
+    let mut end = project.duration().0.max(TICKS_PER_SECOND);
     for track in project.tracks() {
         for clip in track.clips().values() {
             end = end.max(clip.range.end.0);

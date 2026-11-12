@@ -109,6 +109,14 @@ pub(crate) fn trim_command(
         .iter()
         .find(|track| track.clips().contains_key(&id))?;
     let clip = track.clips().get(&id)?;
+    if at
+        == match edge {
+            TrimEdge::Left => clip.range.start,
+            TrimEdge::Right => clip.range.end,
+        }
+    {
+        return None;
+    }
     let (start, end, offset) = match edge {
         TrimEdge::Left => (
             at,
@@ -156,6 +164,19 @@ pub(crate) fn trim_command(
     Some(Command::Batch { commands })
 }
 
+/// Prefer a selected clip; otherwise ripple an explicitly marked all-track range.
+pub(crate) fn ripple_delete_command(
+    clip: Option<ClipId>,
+    range: Option<TimeRange>,
+) -> Option<Command> {
+    clip.map(|clip| Command::RippleDelete { clip }).or_else(|| {
+        range.map(|range| Command::RemoveRange {
+            range,
+            ripple: true,
+        })
+    })
+}
+
 /// Replace existing reveal animation with a deterministic two-key Write on preset.
 pub(crate) fn write_on_command(clip: &Clip, seconds: f64) -> Option<Command> {
     if !seconds.is_finite() || seconds <= 0.0 {
@@ -199,6 +220,22 @@ mod tests {
     use super::*;
     use animathio_core::{ClipKind, FrameRate, History, Track, TrackId};
     #[test]
+    fn ripple_delete_uses_clip_or_explicit_range() {
+        let range = TimeRange::new(Time(2), Time(4)).unwrap();
+        assert_eq!(
+            ripple_delete_command(Some(ClipId(1)), Some(range)),
+            Some(Command::RippleDelete { clip: ClipId(1) })
+        );
+        assert_eq!(
+            ripple_delete_command(None, Some(range)),
+            Some(Command::RemoveRange {
+                range,
+                ripple: true
+            })
+        );
+        assert_eq!(ripple_delete_command(None, None), None);
+    }
+    #[test]
     fn write_on_replaces_keys_and_rejects_invalid_durations() {
         let clip = Clip::new(
             ClipId(1),
@@ -211,14 +248,43 @@ mod tests {
         for seconds in [0., -1., f64::NAN, 3.] {
             assert!(write_on_command(&clip, seconds).is_none());
         }
-        let Command::Batch { commands } = write_on_command(&clip, 1.).unwrap() else {
-            panic!("expected atomic keyframes")
-        };
-        assert_eq!(commands.len(), 2);
-        assert!(
-            matches!(&commands[1],Command::AddKeyframe { time, keyframe,.. } if *time == Time(animathio_core::TICKS_PER_SECOND) && keyframe.value.as_number() == Some(1.))
+        let mut project = Project::new(FrameRate::new(30, 1).unwrap());
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Math"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: TrackId(1),
+            clip,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let old = write_on_command(&project.tracks()[0].clips()[&ClipId(1)], 0.5).unwrap();
+        old.apply(&mut project).unwrap();
+        let original = project.clone();
+        let command = write_on_command(&project.tracks()[0].clips()[&ClipId(1)], 1.).unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &command).unwrap();
+        let animation = &project.tracks()[0].clips()[&ClipId(1)].animations[0];
+        assert_eq!(animation.keys.keys().len(), 2);
+        assert_eq!(
+            animation.keys.keys()[&Time(animathio_core::TICKS_PER_SECOND)]
+                .value
+                .as_number(),
+            Some(1.)
         );
+        assert!(
+            !animation
+                .keys
+                .keys()
+                .contains_key(&Time(animathio_core::TICKS_PER_SECOND / 2))
+        );
+        history.undo(&mut project).unwrap();
+        assert_eq!(project, original);
     }
+
     #[test]
     fn shuttle_repeats_caps_stops_and_changes_direction() {
         let mut shuttle = Shuttle::default();
@@ -287,6 +353,25 @@ mod tests {
             .apply(&mut project)
             .unwrap();
         }
+        Command::AddTrack {
+            track: Track::new(TrackId(2), "Other"),
+            index: 1,
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: TrackId(2),
+            clip: Clip::new(
+                ClipId(9),
+                ClipKind::Plugin {
+                    plugin_id: "other".into(),
+                    params: serde_json::json!({}),
+                },
+                TimeRange::new(Time(10), Time(20)).unwrap(),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
         let original = project.clone();
         let clip = &project.tracks()[0].clips()[&ClipId(1)];
         assert!(blade_command(clip, Time(0), ClipId(3)).is_none());
@@ -300,6 +385,20 @@ mod tests {
         assert_eq!(project.tracks()[0].clips()[&ClipId(2)].range.start, Time(6));
         history.undo(&mut project).unwrap();
         assert_eq!(project, original);
+        for (edge, at, later_start) in [
+            (TrimEdge::Right, Time(12), Time(12)),
+            (TrimEdge::Left, Time(3), Time(7)),
+        ] {
+            let trim = trim_command(&project, ClipId(1), edge, at, true).unwrap();
+            history.execute(&mut project, &trim).unwrap();
+            assert_eq!(
+                project.tracks()[0].clips()[&ClipId(2)].range.start,
+                later_start
+            );
+            assert_eq!(project.tracks()[1], original.tracks()[1]);
+            history.undo(&mut project).unwrap();
+            assert_eq!(project, original);
+        }
         history
             .execute(&mut project, &Command::RippleDelete { clip: ClipId(1) })
             .unwrap();

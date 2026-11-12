@@ -262,6 +262,9 @@ impl Editor {
                     &call,
                 )?;
                 if replace {
+                    self.marks = InOut::default();
+                    self.shuttle = Shuttle::default();
+                    self.export_options = None;
                     self.path = None;
                     self.selected = None;
                     self.selected_field = None;

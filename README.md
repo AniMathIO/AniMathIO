@@ -89,12 +89,13 @@ The layout and S/M/L timeline track heights persist between sessions.
 
 Use Ctrl (Cmd on macOS) with N/O/S/I/M for New/Open/Save/Import/Export and Z or
 Shift+Z for Undo/Redo. In the timeline, Ctrl/Cmd+B splits at the playhead and Delete
-removes the selection; Shift+Delete ripple-deletes it. Space, Left/Right, Up/Down
+removes the selection; Shift+Delete ripple-deletes it (or the in/out range across
+all tracks when no clip is selected). Space, Left/Right, Up/Down
 and Home/End control playback, frame stepping, edit-point stepping and project bounds.
 J/K/L shuttle backward/stop/forward; repeated J/L doubles the speed up to 16x.
 Reverse and accelerated shuttle are silent; normal 1x playback uses the audio clock.
 
-I and O set in/out points (out is exclusive), Alt+X clears them. The ruler highlights
+I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Alt+X clears them. The ruler highlights
 the range; looping uses it and export defaults to it. Select (A), Blade (B), Ripple
 trim (T) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
 splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later clips
