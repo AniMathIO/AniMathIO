@@ -1,7 +1,8 @@
 use crate::{Backend, Error, Frame, FrameSource, ResourcePool, Size, check_size};
 use animathio_core::{
-    ClipKind, Color as CoreColor, PathVerb, Scene, SceneClip, StrokeCap, StrokeJoin, StrokeStyle,
-    TextElement, Transform, VectorElement, VectorScene,
+    ClipKind, Color as CoreColor, PathVerb, Scene, SceneClip, SceneTransition, StrokeCap,
+    StrokeJoin, StrokeStyle, TextElement, Transform, TransitionKind, TransitionRole, VectorElement,
+    VectorScene, WipeDirection,
     builtin::{Builtin, Color, PathElement, Shape},
 };
 use parley::{
@@ -61,7 +62,28 @@ impl Backend for CpuBackend {
             },
         );
         let mut resources = Resources::new();
-        for clip in &scene.clips {
+        let mut paired = vec![false; scene.clips.len()];
+        for (index, clip) in scene.clips.iter().enumerate() {
+            if paired[index] {
+                continue;
+            }
+            // Both sides of a transition are blended into one layer before compositing.
+            if let Some(state) = clip.transition
+                && let Some(partner) = scene.clips.iter().enumerate().position(|(j, other)| {
+                    j != index
+                        && other
+                            .transition
+                            .is_some_and(|o| o.id == state.id && o.role != state.role)
+                })
+            {
+                paired[partner] = true;
+                let (outgoing, incoming) = match state.role {
+                    TransitionRole::Outgoing => (clip, &scene.clips[partner]),
+                    TransitionRole::Incoming => (&scene.clips[partner], clip),
+                };
+                self.draw_transition(&mut ctx, state, outgoing, incoming, pool, video, size)?;
+                continue;
+            }
             if matches!(clip.kind, ClipKind::Audio(_)) || clip.transform.opacity == 0.0 {
                 continue;
             }
@@ -211,6 +233,13 @@ fn path(shape: &Shape) -> BezPath {
     }
 }
 
+fn transparent(size: Size) -> Frame {
+    Frame {
+        size,
+        pixels: vec![0; size.0 as usize * size.1 as usize * 4],
+    }
+}
+
 fn composite_layer(ctx: &mut RenderContext, frame: &Frame) -> Result<(), Error> {
     frame.validate()?;
     let (width, height) = check_size(frame.size)?;
@@ -312,6 +341,90 @@ impl CpuBackend {
                 self.placeholder(ctx, resources, size, &format!("ERROR\n{message}"))?;
             }
             ClipKind::Audio(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Rasterize one clip with its effects and opacity into a canvas-sized layer.
+    fn clip_layer(
+        &mut self,
+        clip: &SceneClip,
+        pool: &mut ResourcePool,
+        video: &mut dyn FrameSource,
+        size: Size,
+    ) -> Result<Frame, Error> {
+        if matches!(clip.kind, ClipKind::Audio(_))
+            || clip.transform.opacity == 0.0
+            || clip.transform.scale_x == 0.0
+            || clip.transform.scale_y == 0.0
+        {
+            return Ok(transparent(size));
+        }
+        let transform = match &clip.kind {
+            ClipKind::Vector(_) => pixel_transform(clip.transform, size)?,
+            _ => unit_transform(clip.transform, size)?,
+        };
+        let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;
+        crate::effects::apply_chain(&mut layer, &clip.effects)?;
+        crate::transition::fade(&mut layer, clip.transform.opacity);
+        Ok(layer)
+    }
+
+    /// Composite a transition: opacity blend for dissolves, a solid black or white
+    /// intermediate for dips, and a rectangular clip mask for wipes.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_transition(
+        &mut self,
+        ctx: &mut RenderContext,
+        state: SceneTransition,
+        outgoing: &SceneClip,
+        incoming: &SceneClip,
+        pool: &mut ResourcePool,
+        video: &mut dyn FrameSource,
+        size: Size,
+    ) -> Result<(), Error> {
+        use crate::transition::{mix, solid};
+        let from = self.clip_layer(outgoing, pool, video, size)?;
+        let to = self.clip_layer(incoming, pool, video, size)?;
+        let p = state.progress;
+        ctx.set_transform(Affine::IDENTITY);
+        match state.kind {
+            TransitionKind::CrossDissolve => composite_layer(ctx, &mix(&from, &to, p))?,
+            TransitionKind::DipToBlack | TransitionKind::DipToWhite => {
+                let level = if state.kind == TransitionKind::DipToBlack {
+                    0
+                } else {
+                    255
+                };
+                let middle = solid(size, level);
+                let blended = if p < 0.5 {
+                    mix(&from, &middle, p * 2.0)
+                } else {
+                    mix(&middle, &to, p * 2.0 - 1.0)
+                };
+                composite_layer(ctx, &blended)?;
+            }
+            TransitionKind::Wipe { direction } => {
+                let (w, h) = (f64::from(size.0), f64::from(size.1));
+                let mask = match direction {
+                    WipeDirection::LeftToRight => Rect::new(0.0, 0.0, p * w, h),
+                    WipeDirection::RightToLeft => Rect::new((1.0 - p) * w, 0.0, w, h),
+                    WipeDirection::TopToBottom => Rect::new(0.0, 0.0, w, p * h),
+                    WipeDirection::BottomToTop => Rect::new(0.0, (1.0 - p) * h, w, h),
+                };
+                let inverse = match direction {
+                    WipeDirection::LeftToRight => Rect::new(p * w, 0.0, w, h),
+                    WipeDirection::RightToLeft => Rect::new(0.0, 0.0, (1.0 - p) * w, h),
+                    WipeDirection::TopToBottom => Rect::new(0.0, p * h, w, h),
+                    WipeDirection::BottomToTop => Rect::new(0.0, 0.0, w, (1.0 - p) * h),
+                };
+                ctx.push_clip_layer(&inverse.to_path(0.1));
+                composite_layer(ctx, &from)?;
+                ctx.pop_layer();
+                ctx.push_clip_layer(&mask.to_path(0.1));
+                composite_layer(ctx, &to)?;
+                ctx.pop_layer();
+            }
         }
         Ok(())
     }

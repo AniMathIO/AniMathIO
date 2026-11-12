@@ -242,6 +242,9 @@ pub struct Track {
     pub(crate) clips: BTreeMap<ClipId, Clip>,
     #[serde(default = "unity_gain")]
     pub(crate) gain: f64,
+    /// Edit-point transitions between adjacent clips of this track.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) transitions: Vec<crate::Transition>,
 }
 impl Track {
     /// Construct an empty layer.
@@ -252,6 +255,7 @@ impl Track {
             name: name.into(),
             clips: BTreeMap::new(),
             gain: 1.0,
+            transitions: Vec::new(),
         }
     }
     /// Linear audio gain (unity by default).
@@ -396,6 +400,7 @@ impl Project {
         }
         let mut track_ids = BTreeSet::new();
         let mut clip_ids = BTreeSet::new();
+        let mut transition_ids = BTreeSet::new();
         for track in &self.tracks {
             if !track_ids.insert(track.id) {
                 return Err(invalid("duplicate track id"));
@@ -441,6 +446,14 @@ impl Project {
             if ranges.windows(2).any(|pair| pair[0].end > pair[1].start) {
                 return Err(invalid("overlapping clips"));
             }
+            track.validate_transitions()?;
+            if !track
+                .transitions
+                .iter()
+                .all(|t| transition_ids.insert(t.id))
+            {
+                return Err(invalid("duplicate transition id"));
+            }
         }
         Ok(())
     }
@@ -470,16 +483,23 @@ pub struct SceneClip {
     /// Evaluated effect chain, with keyframed parameters resolved.
     #[serde(default)]
     pub effects: Vec<EffectInstance>,
+    /// Transition state when this clip is inside a transition window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<crate::SceneTransition>,
 }
 
 /// Resolve active clips at `time`, independently of previous calls or seek order.
 /// Ranges are half-open; audio sources are included for the future mixer.
+/// Inside a transition window both the outgoing and the incoming clip are active and
+/// carry the same [`crate::SceneTransition`]. The incoming clip's local time is then
+/// negative; its source time is clamped to zero (holding the first source frame).
 #[must_use]
 pub fn evaluate(project: &Project, time: Time) -> Scene {
     let mut scene = Scene::default();
     for track in &project.tracks {
         for clip in track.clips.values() {
-            if time < clip.range.start || time >= clip.range.end {
+            let span = track.clip_span(clip);
+            if time < span.range.start || time >= span.range.end {
                 continue;
             }
             let local_time = Time(time.0 - clip.range.start.0);
@@ -487,10 +507,11 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                 track: track.id,
                 id: clip.id,
                 kind: clip.kind.clone(),
-                source_time: Time(clip.source_offset.0 + local_time.0),
+                source_time: Time((clip.source_offset.0 + local_time.0).max(0)),
                 transform: clip.transform,
                 params: clip.params.clone(),
                 effects: clip.effects.clone(),
+                transition: span.transition_at(clip, time),
             };
             for animation in &clip.animations {
                 if let Some(value) = animation.keys.sample(local_time) {

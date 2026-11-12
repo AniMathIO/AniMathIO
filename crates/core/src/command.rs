@@ -1,7 +1,8 @@
 use crate::builtin::Color;
 use crate::{
     Animation, Asset, AssetId, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error, FrameRate,
-    Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform, invalid,
+    Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform, Transition,
+    TransitionId, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -190,6 +191,25 @@ pub enum Command {
         from: Time,
         /// Destination clip-local ticks; must be free.
         to: Time,
+    },
+    /// Add a transition on the edit point between two adjacent clips of a track.
+    AddTransition {
+        /// Layer owning both clips.
+        track: TrackId,
+        /// Transition (with a project-unique id).
+        transition: Transition,
+    },
+    /// Remove a transition.
+    RemoveTransition {
+        /// Transition identity.
+        id: TransitionId,
+    },
+    /// Change a transition's total (cut-centered) duration.
+    SetTransitionDuration {
+        /// Transition identity.
+        id: TransitionId,
+        /// New positive duration in ticks.
+        duration: Time,
     },
 }
 
@@ -648,8 +668,53 @@ impl Command {
                     to: *from,
                 }
             }
+            Self::AddTransition { track, transition } => {
+                if project
+                    .tracks
+                    .iter()
+                    .any(|t| t.transitions.iter().any(|x| x.id == transition.id))
+                {
+                    return Err(invalid("transition already exists"));
+                }
+                let index = track_index(project, *track)?;
+                let transitions = &mut project.tracks[index].transitions;
+                let position = transitions.partition_point(|x| x.id < transition.id);
+                transitions.insert(position, transition.clone());
+                Self::RemoveTransition { id: transition.id }
+            }
+            Self::RemoveTransition { id } => {
+                let (track, position) = transition_index(project, *id)?;
+                let transition = project.tracks[track].transitions.remove(position);
+                Self::AddTransition {
+                    track: project.tracks[track].id,
+                    transition,
+                }
+            }
+            Self::SetTransitionDuration { id, duration } => {
+                let (track, position) = transition_index(project, *id)?;
+                let transition = &mut project.tracks[track].transitions[position];
+                let previous = transition.duration;
+                transition.duration = *duration;
+                Self::SetTransitionDuration {
+                    id: *id,
+                    duration: previous,
+                }
+            }
         })
     }
+}
+fn transition_index(project: &Project, id: TransitionId) -> Result<(usize, usize), Error> {
+    project
+        .tracks
+        .iter()
+        .enumerate()
+        .find_map(|(track, t)| {
+            t.transitions
+                .iter()
+                .position(|x| x.id == id)
+                .map(|position| (track, position))
+        })
+        .ok_or_else(|| invalid("transition missing"))
 }
 fn track_index(project: &Project, id: TrackId) -> Result<usize, Error> {
     project

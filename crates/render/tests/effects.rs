@@ -23,6 +23,7 @@ fn render_effect(kind: EffectKind, params: &[(&str, f64)], name: &str) {
             transform: Transform::default(),
             params: std::collections::BTreeMap::new(),
             effects: vec![effect],
+            transition: None,
         }],
     };
 
