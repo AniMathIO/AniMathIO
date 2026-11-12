@@ -325,11 +325,24 @@ pub(crate) fn local_name(path: &Path) -> io::Result<Name<'static>> {
     #[cfg(windows)]
     {
         use interprocess::local_socket::{GenericNamespaced, ToNsName};
-        let _ = path;
-        "animathio-control"
+        windows_pipe_name(path)
             .to_ns_name::<GenericNamespaced>()
             .map(Name::into_owned)
     }
+}
+
+#[cfg(windows)]
+fn windows_pipe_name(path: &Path) -> String {
+    // Named pipes have no filesystem entry, so derive a stable per-path name
+    // (FNV-1a over the encoded path bytes). Distinct socket paths — the
+    // per-user default and each test's temp dir — must not share a pipe, and
+    // both client and server derive the same name from the same path.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in path.as_os_str().as_encoded_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("animathio-control-{hash:016x}")
 }
 
 #[cfg(unix)]
