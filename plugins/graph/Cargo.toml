@@ -1,0 +1,13 @@
+[package]
+name = "graph"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.40.0"
+
+[workspace]
