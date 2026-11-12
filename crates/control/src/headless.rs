@@ -9,23 +9,34 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use animathio_core::{AssetId, History, Project, Time, evaluate};
+use animathio_core::{
+    AssetId, Clip, ClipId, ClipKind, Command, History, Interpolation, Keyframe, Project, Target,
+    Time, TimeRange, Track, TrackId, Transform, evaluate,
+};
 use animathio_format::{Bundle, Limits, read_amio, read_json, write_amio, write_json};
+use animathio_import_manim::{ImportLimits as ManimLimits, ManimOptions, import_manim_with_limits};
+use animathio_plugin_host::PluginHost;
 use animathio_render::{RenderCtx, render};
+use animathio_typeset::{MathMode, TypesetEngine};
 use base64::Engine as _;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{
     Call, ControlError, ControlHandler,
     method::{
-        AssetInfo, ProjectState, RenderFrameParams, RenderFrameResult, Timeline, media_type_of,
-        timeline_of,
+        AssetInfo, ClipAdded, GraphAddParams, ImportManimParams, ImportManimResult, MathAddParams,
+        ProjectState, RenderFrameParams, RenderFrameResult, Timeline, media_type_of, timeline_of,
     },
     path::{read_bounded, validate_existing_file, validate_output_file},
 };
 
+const LATEX_PLUGIN_ID: &str = "org.animathio.latex";
+const GRAPH_PLUGIN_ID: &str = "org.animathio.graph";
+
 /// A headless [`ControlHandler`] over an in-memory project.
-#[derive(Clone, Debug)]
+///
+/// Plugin clips are resolved through a lazily loaded [`PluginHost`]; LaTeX is
+/// validated up front through a lazily created [`TypesetEngine`].
 pub struct HeadlessHandler {
     project: Project,
     history: History,
@@ -33,6 +44,8 @@ pub struct HeadlessHandler {
     path: Option<PathBuf>,
     playhead: Time,
     playing: bool,
+    plugins: Option<PluginHost>,
+    typeset: Option<TypesetEngine>,
 }
 
 impl Default for HeadlessHandler {
@@ -44,18 +57,20 @@ impl Default for HeadlessHandler {
             path: None,
             playhead: Time(0),
             playing: false,
+            plugins: None,
+            typeset: None,
         }
     }
 }
 
 impl HeadlessHandler {
-    /// Empty project at the default frame rate.
+    /// Empty project at the default frame rate, with no plugins loaded.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Build a handler from an already-loaded bundle.
+    /// Build a handler from an already-loaded bundle, with no plugins loaded.
     #[must_use]
     pub fn from_bundle(bundle: Bundle, path: Option<PathBuf>) -> Self {
         Self {
@@ -65,20 +80,21 @@ impl HeadlessHandler {
             path,
             playhead: Time(0),
             playing: false,
+            plugins: None,
+            typeset: None,
         }
     }
 
-    /// Load a `.amio` archive or a `project.json` with adjacent assets.
+    /// Load a `.amio` archive or a `project.json` with adjacent assets, plus
+    /// any `.amplugin` files found in `ANIMATHIO_PLUGIN_DIR` or `target/plugins`.
     pub fn load(path: &Path) -> Result<Self, ControlError> {
         let (project, assets) = load_project(path)?;
-        Ok(Self {
-            project,
-            history: History::default(),
-            assets,
-            path: Some(path.to_owned()),
-            playhead: Time(0),
-            playing: false,
-        })
+        let mut handler = Self::default();
+        handler.project = project;
+        handler.assets = assets;
+        handler.path = Some(path.to_owned());
+        handler.plugins = load_plugins();
+        Ok(handler)
     }
 
     /// Read access to the current project.
@@ -123,7 +139,7 @@ impl HeadlessHandler {
     }
 
     fn render_frame_inner(
-        &self,
+        &mut self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
         let mut ctx = RenderCtx::default();
@@ -131,6 +147,10 @@ impl HeadlessHandler {
             ctx.resources.insert(id.clone(), bytes.clone())?;
         }
         let scene = evaluate(&self.project, params.time);
+        let scene = match &mut self.plugins {
+            Some(host) => host.resolve(&scene, (params.width, params.height)),
+            None => scene,
+        };
         let frame = render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;
@@ -209,6 +229,334 @@ impl HeadlessHandler {
         self.playing = false;
         Ok(())
     }
+
+    /// Lazily create and return the shared math typeset engine, when available.
+    fn typeset_engine(&mut self) -> Option<&TypesetEngine> {
+        if self.typeset.is_none() {
+            match TypesetEngine::new() {
+                Ok(engine) => self.typeset = Some(engine),
+                Err(error) => eprintln!("math typesetting unavailable: {error}"),
+            }
+        }
+        self.typeset.as_ref()
+    }
+
+    fn math_add(&mut self, params: MathAddParams) -> Result<ClipAdded, ControlError> {
+        if let Some(engine) = self.typeset_engine() {
+            let mode = match params.mode.as_str() {
+                "typst" => MathMode::Typst,
+                _ => MathMode::Latex,
+            };
+            engine
+                .typeset(&params.latex, mode, params.size as f32)
+                .map_err(ControlError::from)?;
+        }
+
+        let base = next_id(&self.project);
+        let track_id = TrackId(base);
+        let clip_id = ClipId(base + 1);
+        let start = params.start;
+        let duration = params
+            .duration
+            .unwrap_or_else(|| project_duration(&self.project));
+        let range = clip_range(start, duration)?;
+
+        let reveal = params.reveal_duration.filter(|d| d.0 > 0);
+        let mut numeric = BTreeMap::new();
+        numeric.insert("reveal".to_owned(), if reveal.is_some() { 0.0 } else { 1.0 });
+
+        let mut clip = Clip::new(
+            clip_id,
+            ClipKind::Plugin {
+                plugin_id: LATEX_PLUGIN_ID.to_owned(),
+                params: json!({
+                    "source": params.latex,
+                    "mode": params.mode,
+                    "size": params.size,
+                    "color": params.color.unwrap_or([255, 255, 255, 255]),
+                }),
+            },
+            range,
+        );
+        clip.transform = Transform {
+            x: params.x.unwrap_or(0.5),
+            y: params.y.unwrap_or(0.5),
+            ..Transform::default()
+        };
+        clip.params = numeric;
+
+        let index = self.project.tracks().len();
+        self.history.execute(
+            &mut self.project,
+            &Command::AddTrack {
+                track: Track::new(track_id, "Math"),
+                index,
+            },
+        )?;
+        self.history
+            .execute(&mut self.project, &Command::AddClip { track: track_id, clip })?;
+        if let Some(duration) = reveal {
+            self.history.execute(
+                &mut self.project,
+                &Command::AddKeyframe {
+                    id: clip_id,
+                    target: Target::Param("reveal".to_owned()),
+                    time: Time(0),
+                    keyframe: Keyframe {
+                        value: 0.0,
+                        interpolation: Interpolation::Linear,
+                    },
+                },
+            )?;
+            self.history.execute(
+                &mut self.project,
+                &Command::AddKeyframe {
+                    id: clip_id,
+                    target: Target::Param("reveal".to_owned()),
+                    time: duration,
+                    keyframe: Keyframe {
+                        value: 1.0,
+                        interpolation: Interpolation::Linear,
+                    },
+                },
+            )?;
+        }
+
+        Ok(ClipAdded { track_id, clip_id })
+    }
+
+    fn graph_add(&mut self, params: GraphAddParams) -> Result<ClipAdded, ControlError> {
+        let base = next_id(&self.project);
+        let track_id = TrackId(base);
+        let clip_id = ClipId(base + 1);
+        let start = params.start;
+        let duration = params
+            .duration
+            .unwrap_or_else(|| project_duration(&self.project));
+        let range = clip_range(start, duration)?;
+
+        let draw = params.draw_duration.filter(|d| d.0 > 0);
+        let mut numeric = BTreeMap::new();
+        numeric.insert("draw".to_owned(), if draw.is_some() { 0.0 } else { 1.0 });
+
+        let mut opaque = serde_json::Map::new();
+        opaque.insert("items".to_owned(), json!(params.items));
+        if let Some(value) = params.x_min {
+            opaque.insert("x_min".to_owned(), json!(value));
+        }
+        if let Some(value) = params.x_max {
+            opaque.insert("x_max".to_owned(), json!(value));
+        }
+        if let Some(value) = params.y_min {
+            opaque.insert("y_min".to_owned(), json!(value));
+        }
+        if let Some(value) = params.y_max {
+            opaque.insert("y_max".to_owned(), json!(value));
+        }
+        if let Some(value) = params.show_grid {
+            opaque.insert("show_grid".to_owned(), json!(value));
+        }
+        if let Some(value) = params.show_axes {
+            opaque.insert("show_axes".to_owned(), json!(value));
+        }
+        if let Some(value) = params.show_labels {
+            opaque.insert("show_labels".to_owned(), json!(value));
+        }
+        opaque.insert(
+            "color".to_owned(),
+            json!(params.color.unwrap_or([90, 170, 255, 255])),
+        );
+
+        let mut clip = Clip::new(
+            clip_id,
+            ClipKind::Plugin {
+                plugin_id: GRAPH_PLUGIN_ID.to_owned(),
+                params: Value::Object(opaque),
+            },
+            range,
+        );
+        clip.transform = Transform {
+            x: params.x.unwrap_or(0.5),
+            y: params.y.unwrap_or(0.5),
+            ..Transform::default()
+        };
+        clip.params = numeric;
+
+        let index = self.project.tracks().len();
+        self.history.execute(
+            &mut self.project,
+            &Command::AddTrack {
+                track: Track::new(track_id, "Graph"),
+                index,
+            },
+        )?;
+        self.history
+            .execute(&mut self.project, &Command::AddClip { track: track_id, clip })?;
+        if let Some(duration) = draw {
+            self.history.execute(
+                &mut self.project,
+                &Command::AddKeyframe {
+                    id: clip_id,
+                    target: Target::Param("draw".to_owned()),
+                    time: Time(0),
+                    keyframe: Keyframe {
+                        value: 0.0,
+                        interpolation: Interpolation::Linear,
+                    },
+                },
+            )?;
+            self.history.execute(
+                &mut self.project,
+                &Command::AddKeyframe {
+                    id: clip_id,
+                    target: Target::Param("draw".to_owned()),
+                    time: duration,
+                    keyframe: Keyframe {
+                        value: 1.0,
+                        interpolation: Interpolation::Linear,
+                    },
+                },
+            )?;
+        }
+
+        Ok(ClipAdded { track_id, clip_id })
+    }
+
+    fn import_manim(&mut self, params: ImportManimParams) -> Result<ImportManimResult, ControlError> {
+        let (source, script_dir) = match (params.path.as_deref(), params.source.as_deref()) {
+            (Some(path), None) => {
+                let canonical = validate_existing_file(path)?;
+                let bytes = read_bounded(&canonical, ManimLimits::default().source_bytes)?;
+                let source = String::from_utf8(bytes).map_err(|_| {
+                    ControlError::InvalidPath(format!(
+                        "manim script is not valid UTF-8: {}",
+                        canonical.display()
+                    ))
+                })?;
+                let dir = params
+                    .script_dir
+                    .clone()
+                    .or_else(|| canonical.parent().map(Path::to_path_buf));
+                (source, dir)
+            }
+            (None, Some(source)) => (source.to_owned(), params.script_dir.clone()),
+            (Some(_), Some(_)) => {
+                return Err(ControlError::InvalidParams(
+                    "`path` and `source` are mutually exclusive".to_owned(),
+                ));
+            }
+            (None, None) => {
+                return Err(ControlError::InvalidParams(
+                    "either `path` or `source` is required".to_owned(),
+                ));
+            }
+        };
+
+        let options = ManimOptions {
+            scene: params.scene.clone(),
+            script_dir,
+        };
+        let (imported, imported_assets, report) =
+            import_manim_with_limits(&source, &options, &ManimLimits::default())?;
+        let warnings = report.warnings().iter().map(ToString::to_string).collect();
+        let infos = report.infos().iter().map(ToString::to_string).collect();
+        let tracks = imported.tracks().len();
+        let asset_count = imported_assets.len();
+
+        if params.replace {
+            self.project = imported;
+            self.assets = imported_assets
+                .into_iter()
+                .map(|asset| (asset.id, asset.bytes))
+                .collect();
+            self.history = History::default();
+            self.path = None;
+            self.playhead = Time(0);
+            self.playing = false;
+        } else {
+            self.append_project(&imported, imported_assets)?;
+        }
+
+        Ok(ImportManimResult {
+            tracks,
+            assets: asset_count,
+            warnings,
+            infos,
+        })
+    }
+
+    /// Append an imported project's tracks and assets onto the current project,
+    /// remapping identities so they cannot collide with existing clips.
+    fn append_project(
+        &mut self,
+        imported: &Project,
+        imported_assets: Vec<animathio_import_manim::Asset>,
+    ) -> Result<(), ControlError> {
+        for asset in &imported_assets {
+            if !self.project.assets().contains_key(&asset.id) {
+                self.history.execute(
+                    &mut self.project,
+                    &Command::AddAsset {
+                        id: asset.id.clone(),
+                        asset: animathio_core::Asset {
+                            name: asset.name.clone(),
+                            media_type: asset.media_type.clone(),
+                        },
+                    },
+                )?;
+            }
+            self.assets
+                .entry(asset.id.clone())
+                .or_insert_with(|| asset.bytes.clone());
+        }
+
+        let mut next_track = self
+            .project
+            .tracks()
+            .iter()
+            .map(|track| track.id().0)
+            .max()
+            .map_or(1, |max| max + 1);
+        let mut next_clip = self
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|track| track.clips().keys())
+            .map(|clip| clip.0)
+            .max()
+            .map_or(1, |max| max + 1);
+
+        for track in imported.tracks() {
+            let track_id = TrackId(next_track);
+            next_track += 1;
+            let index = self.project.tracks().len();
+            self.history.execute(
+                &mut self.project,
+                &Command::AddTrack {
+                    track: Track::new(track_id, track.name().to_owned()),
+                    index,
+                },
+            )?;
+            if track.gain() != 1.0 {
+                self.history.execute(
+                    &mut self.project,
+                    &Command::SetTrackGain {
+                        id: track_id,
+                        gain: track.gain(),
+                    },
+                )?;
+            }
+            for clip in track.clips().values() {
+                let clip_id = ClipId(next_clip);
+                next_clip += 1;
+                let mut clip = clip.clone();
+                clip.id = clip_id;
+                self.history
+                    .execute(&mut self.project, &Command::AddClip { track: track_id, clip })?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ControlHandler for HeadlessHandler {
@@ -246,6 +594,9 @@ impl ControlHandler for HeadlessHandler {
                 self.import_v1(&path)?;
                 serde_json::to_value(())?
             }
+            Call::MathAdd { params } => serde_json::to_value(self.math_add(params)?)?,
+            Call::GraphAdd { params } => serde_json::to_value(self.graph_add(params)?)?,
+            Call::ImportManim { params } => serde_json::to_value(self.import_manim(params)?)?,
         })
     }
 }
@@ -290,6 +641,98 @@ fn load_project(path: &Path) -> Result<(Project, BTreeMap<AssetId, Vec<u8>>), Co
 
 fn animathio_import_v1_limits() -> u64 {
     animathio_import_v1::ImportLimits::default().inflated_bytes
+}
+
+/// Smallest unused identity across all tracks and clips.
+fn next_id(project: &Project) -> u64 {
+    let mut max = 0_u64;
+    for track in project.tracks() {
+        max = max.max(track.id().0);
+        for clip in track.clips().keys() {
+            max = max.max(clip.0);
+        }
+    }
+    max.saturating_add(1)
+}
+
+/// A sane fallback duration for clips added without an explicit length.
+fn project_duration(project: &Project) -> Time {
+    if project.duration().0 > 0 {
+        project.duration()
+    } else {
+        Time(animathio_core::TICKS_PER_SECOND * 3)
+    }
+}
+
+/// A nonempty half-open range starting at `start` and lasting `duration` ticks.
+fn clip_range(start: Time, duration: Time) -> Result<TimeRange, ControlError> {
+    if duration.0 <= 0 {
+        return Err(ControlError::InvalidParams(
+            "clip duration must be positive".to_owned(),
+        ));
+    }
+    let end = start
+        .0
+        .checked_add(duration.0)
+        .ok_or_else(|| ControlError::InvalidParams("clip time range overflow".to_owned()))?;
+    Ok(TimeRange::new(start, Time(end))?)
+}
+
+/// Directory to scan for `.amplugin` bundles.
+///
+/// `ANIMATHIO_PLUGIN_DIR` wins; otherwise `target/plugins` is located from the
+/// current directory upwards so it works both from the workspace root and from
+/// an `apps/animathio-cli` integration-test working directory.
+fn plugin_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("ANIMATHIO_PLUGIN_DIR") {
+        let dir = PathBuf::from(dir);
+        if dir.is_dir() {
+            return Some(dir);
+        }
+    }
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let candidate = dir.join("target").join("plugins");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+fn plugin_cache_dir() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|base| base.cache_dir().join("animathio").join("plugins"))
+        .unwrap_or_else(|| std::env::temp_dir().join("animathio-plugin-cache"))
+}
+
+/// Load `.amplugin` bundles from [`plugin_dir`], if any exist.
+fn load_plugins() -> Option<PluginHost> {
+    let dir = plugin_dir()?;
+    let has_plugins = fs::read_dir(&dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .any(|entry| entry.path().extension().is_some_and(|ext| ext == "amplugin"));
+    if !has_plugins {
+        return None;
+    }
+    let mut host = match PluginHost::new(plugin_cache_dir()) {
+        Ok(host) => host,
+        Err(error) => {
+            eprintln!("plugin host unavailable: {error}");
+            return None;
+        }
+    };
+    match host.load_plugins_dir(&dir) {
+        Ok(ids) if !ids.is_empty() => {
+            eprintln!("loaded plugins from {}: {}", dir.display(), ids.join(", "));
+        }
+        Ok(_) => eprintln!("no plugins loaded from {}", dir.display()),
+        Err(error) => eprintln!("failed to load plugins from {}: {error}", dir.display()),
+    }
+    Some(host)
 }
 
 #[cfg(test)]
