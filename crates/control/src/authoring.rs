@@ -6,8 +6,8 @@ use crate::{
     path::{read_bounded, validate_existing_file},
 };
 use animathio_core::{
-    AssetId, Clip, ClipId, ClipKind, Command, History, Interpolation, Keyframe, Project, Target,
-    Time, TimeRange, Track, TrackId, Transform,
+    AssetId, Clip, ClipId, ClipKind, Command, History, Interpolation, Keyframe, ParamValue,
+    Project, Target, Time, TimeRange, Track, TrackId, Transform,
 };
 use animathio_import_manim::{ImportLimits as ManimLimits, ManimOptions, import_manim_with_limits};
 use animathio_typeset::{MathMode, TypesetEngine};
@@ -92,7 +92,7 @@ impl AuthoringSession<'_> {
         let mut numeric = BTreeMap::new();
         numeric.insert(
             "reveal".to_owned(),
-            if reveal.is_some() { 0.0 } else { 1.0 },
+            ParamValue::Number(if reveal.is_some() { 0.0 } else { 1.0 }),
         );
 
         let mut clip = Clip::new(
@@ -147,7 +147,10 @@ impl AuthoringSession<'_> {
 
         let draw = params.draw_duration.filter(|d| d.0 > 0);
         let mut numeric = BTreeMap::new();
-        numeric.insert("draw".to_owned(), if draw.is_some() { 0.0 } else { 1.0 });
+        numeric.insert(
+            "draw".to_owned(),
+            ParamValue::Number(if draw.is_some() { 0.0 } else { 1.0 }),
+        );
 
         let mut opaque = serde_json::Map::new();
         opaque.insert("items".to_owned(), json!(params.items));
@@ -232,7 +235,7 @@ impl AuthoringSession<'_> {
                         target: Target::Param(param.to_owned()),
                         time,
                         keyframe: Keyframe {
-                            value,
+                            value: ParamValue::Number(value),
                             interpolation: Interpolation::Linear,
                         },
                     },
