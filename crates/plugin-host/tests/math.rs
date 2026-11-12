@@ -10,7 +10,7 @@ use animathio_core::{
     ClipId, ClipKind, Scene as CoreScene, SceneClip, Time, TrackId, Transform, VectorScene,
 };
 use animathio_plugin_api::{PluginManifestToml, PluginPackage};
-use animathio_plugin_host::PluginHost;
+use animathio_plugin_host::{PluginDirectory, PluginHost};
 use animathio_render::{RenderCtx, render};
 use serde_json::json;
 
@@ -83,6 +83,56 @@ fn load_plugin(host: &mut PluginHost, name: &str) -> String {
         .clone();
     let package = PluginPackage::new(built.manifest.clone(), built.wasm.clone()).unwrap();
     host.load_plugin_package(package).unwrap()
+}
+
+#[test]
+fn discovery_rejects_user_packages_with_reserved_ids_but_loads_trusted_bundles() {
+    let built = &built_plugins()
+        .iter()
+        .find(|(name, _)| name == "latex")
+        .unwrap()
+        .1;
+    let user = tempfile::tempdir().unwrap();
+    let bundled = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let package = PluginPackage::new(built.manifest.clone(), built.wasm.clone()).unwrap();
+    let bytes = package.create_bytes().unwrap();
+    std::fs::write(user.path().join("latex.amplugin"), &bytes).unwrap();
+    std::fs::write(bundled.path().join("latex.amplugin"), &bytes).unwrap();
+    let mut host = PluginHost::new(cache.path()).unwrap();
+    assert!(
+        host.load_plugin_directory(&PluginDirectory {
+            path: user.path().to_owned(),
+            allow_reserved_ids: false
+        })
+        .unwrap()
+        .is_empty()
+    );
+    assert!(host.loaded_plugin_ids().is_empty());
+    assert_eq!(
+        host.load_plugin_directory(&PluginDirectory {
+            path: bundled.path().to_owned(),
+            allow_reserved_ids: true
+        })
+        .unwrap(),
+        vec!["org.animathio.latex"]
+    );
+    let mut manifest = built.manifest.clone();
+    manifest.id = "com.example.math".to_owned();
+    let package = PluginPackage::new(manifest, built.wasm.clone()).unwrap();
+    std::fs::write(
+        user.path().join("custom.amplugin"),
+        package.create_bytes().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        host.load_plugin_directory(&PluginDirectory {
+            path: user.path().to_owned(),
+            allow_reserved_ids: false
+        })
+        .unwrap(),
+        vec!["com.example.math"]
+    );
 }
 
 fn vector_clip(scene: VectorScene) -> SceneClip {

@@ -21,6 +21,7 @@ serde_json.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util"] }
 
 [dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 tempfile = "3"
 

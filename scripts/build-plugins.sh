@@ -12,7 +12,7 @@ mkdir -p target/plugins
 build_plugin() {
     local name="$1"
     echo ">> building plugin: ${name}"
-    cargo build \
+    CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo build \
         --manifest-path "plugins/${name}/Cargo.toml" \
         --target wasm32-wasip2 \
         --target-dir "$PWD/target" \

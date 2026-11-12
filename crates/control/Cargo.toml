@@ -9,8 +9,11 @@ publish.workspace = true
 [dependencies]
 animathio-core.workspace = true
 animathio-format = { path = "../format" }
+animathio-import-manim = { path = "../import-manim" }
 animathio-import-v1 = { path = "../import-v1" }
+animathio-plugin-host = { path = "../plugin-host" }
 animathio-render = { path = "../render" }
+animathio-typeset = { path = "../typeset" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
