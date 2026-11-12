@@ -13,6 +13,21 @@ AniMathIO 2.0 is a from-scratch Rust rewrite of AniMathIO, an editor for Manim-l
 - **Time is integer ticks + rational frame rates. Coordinates are resolution-independent.** No `f64` seconds and no absolute pixels in the model.
 - **The core owns its domain types.** Third-party crates (FilmCraft codecs, vello, GPUI) sit behind adapters.
 
+## Docs
+
+Docs live in `docs/` and are kept accurate against the code — every command and
+API they describe must exist. Update them alongside behaviour changes:
+
+- `README.md` — what 2.0 is, status, build/run and import instructions
+- `docs/architecture.md` — crate map, layering, time model, engine rules, data flow
+- `docs/plugins.md` — plugin authoring guide (WIT world, host imports, schema, sandbox, example)
+- `docs/cli.md` — every `animathio-cli` subcommand (regenerate from `--help`)
+- `docs/mcp.md` — control protocol (JSON-RPC, socket, token) and the MCP tool surface
+- `docs/migrating-from-v1.md` — what maps from 1.x and known gaps
+
+The minimal plugin example under `plugins/examples/hello` must keep compiling for
+`wasm32-wasip2`; it is referenced verbatim by `docs/plugins.md`.
+
 ## Branch rules
 
 - 2.0 PRs target **`v2`**. Never target `main` or `staging`: those serve v1 until the 2.0 swap.
