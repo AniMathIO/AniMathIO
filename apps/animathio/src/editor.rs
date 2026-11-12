@@ -35,8 +35,8 @@ mod fields;
 
 const RULER_H: f32 = 28.0;
 const ROW_H: f32 = 44.0;
-const TIMELINE_H: f32 = 260.0;
-const HEADER_W: f32 = 220.0;
+const TIMELINE_H: f32 = 372.0;
+const HEADER_W: f32 = 240.0;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
 const DEFAULT_MEDIA_TICKS: i64 = TICKS_PER_SECOND * 2;
@@ -3582,95 +3582,105 @@ impl Editor {
             let muted = track.is_muted();
             let solo = track.is_solo();
             let locked = track.is_locked();
+            let controls = div()
+                .w_full()
+                .flex()
+                .flex_row()
+                .items_center()
+                .child(
+                    div()
+                        .w(px(28.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("{gain:.1}")),
+                )
+                .child(icon_button(
+                    "gain-",
+                    icons::icon(IconName::Minus),
+                    "Lower track gain",
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.nudge_track_gain(id, -0.1, cx);
+                    }),
+                ))
+                .child(icon_button(
+                    "gain+",
+                    icons::icon(IconName::Plus),
+                    "Raise track gain",
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.nudge_track_gain(id, 0.1, cx);
+                    }),
+                ))
+                .child(div().flex_1())
+                .child(
+                    icon_button(
+                        "track-mute",
+                        icons::icon(if muted {
+                            IconName::VolumeX
+                        } else {
+                            IconName::Volume2
+                        }),
+                        if muted { "Unmute track" } else { "Mute track" },
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
+                        }),
+                    )
+                    .selected(muted)
+                    .toggled(muted),
+                )
+                .child(
+                    icon_button(
+                        "track-solo",
+                        icons::icon(IconName::Headphones),
+                        if solo { "Unsolo track" } else { "Solo track" },
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
+                        }),
+                    )
+                    .selected(solo)
+                    .toggled(solo),
+                )
+                .child(
+                    icon_button(
+                        "track-lock",
+                        icons::icon(if locked {
+                            IconName::Lock
+                        } else {
+                            IconName::LockOpen
+                        }),
+                        if locked { "Unlock track" } else { "Lock track" },
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(
+                                &Command::SetTrackLocked {
+                                    id,
+                                    locked: !locked,
+                                },
+                                cx,
+                            );
+                        }),
+                    )
+                    .selected(locked)
+                    .toggled(locked),
+                );
             header = header.child(
                 div()
+                    // A per-track id scopes the buttons' hover/tooltip state.
+                    .id(("track-header", id.0))
                     .h(px(ROW_H))
                     .w_full()
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_0()
-                    .px_1()
+                    .flex_col()
+                    .justify_center()
+                    .px_2()
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
                         div()
-                            .flex_1()
-                            .overflow_hidden()
+                            .w_full()
+                            .truncate()
+                            .text_xs()
                             .text_color(cx.theme().foreground)
                             .child(name),
                     )
-                    .child(
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{gain:.1}")),
-                    )
-                    .child(icon_button(
-                        "gain-",
-                        icons::icon(IconName::Minus),
-                        "Lower track gain",
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.nudge_track_gain(id, -0.1, cx);
-                        }),
-                    ))
-                    .child(icon_button(
-                        "gain+",
-                        icons::icon(IconName::Plus),
-                        "Raise track gain",
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.nudge_track_gain(id, 0.1, cx);
-                        }),
-                    ))
-                    .child(
-                        icon_button(
-                            "track-mute",
-                            icons::icon(if muted {
-                                IconName::VolumeX
-                            } else {
-                                IconName::Volume2
-                            }),
-                            if muted { "Unmute track" } else { "Mute track" },
-                            cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
-                            }),
-                        )
-                        .selected(muted)
-                        .toggled(muted),
-                    )
-                    .child(
-                        icon_button(
-                            "track-solo",
-                            icons::icon(IconName::Headphones),
-                            if solo { "Unsolo track" } else { "Solo track" },
-                            cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
-                            }),
-                        )
-                        .selected(solo)
-                        .toggled(solo),
-                    )
-                    .child(
-                        icon_button(
-                            "track-lock",
-                            icons::icon(if locked {
-                                IconName::Lock
-                            } else {
-                                IconName::LockOpen
-                            }),
-                            if locked { "Unlock track" } else { "Lock track" },
-                            cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.execute(
-                                    &Command::SetTrackLocked {
-                                        id,
-                                        locked: !locked,
-                                    },
-                                    cx,
-                                );
-                            }),
-                        )
-                        .selected(locked)
-                        .toggled(locked),
-                    ),
+                    .child(controls),
             );
         }
         header
@@ -4188,7 +4198,7 @@ fn paint_ruler(
             let label = timecode::format_timecode(Time(tick), snapshot.frame_rate);
             paint_clip_label(
                 label.into(),
-                point(x + px(3.0), bounds.origin.y + px(18.0)),
+                point(x + px(3.0), bounds.origin.y + px(12.0)),
                 x + px(width),
                 window,
                 cx,
@@ -4270,14 +4280,17 @@ fn paint_clip_label(
     let line = window
         .text_system()
         .shape_line(label, px(11.0), &[run], None);
-    let _ = line.paint(
-        origin,
-        px(f32::from(right_edge) - f32::from(origin.x)).max(px(1.0)),
-        TextAlign::Left,
-        None,
-        window,
-        cx,
-    );
+    let line_height = px(14.0);
+    // Clip the text to the block so long labels never spill into the next clip.
+    let mask = ContentMask {
+        bounds: Bounds::from_corners(
+            origin,
+            point(right_edge.max(origin.x), origin.y + line_height),
+        ),
+    };
+    window.with_content_mask(Some(mask), |window| {
+        let _ = line.paint(origin, line_height, TextAlign::Left, None, window, cx);
+    });
 }
 
 fn field_value(clip: &Clip, field: &Field) -> f64 {
