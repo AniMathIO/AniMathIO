@@ -949,7 +949,7 @@ impl McpServer {
                 .project
                 .tracks()
                 .iter()
-                .flat_map(|t| t.transitions())
+                .flat_map(Track::transitions)
                 .map(|t| t.id.0.saturating_add(1))
                 .max()
                 .unwrap_or(0),

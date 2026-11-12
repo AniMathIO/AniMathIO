@@ -8,9 +8,11 @@ pub(crate) fn mix(a: &Frame, b: &Frame, t: f64) -> Frame {
     let t = t.clamp(0.0, 1.0);
     let mut pixels = vec![0_u8; a.pixels.len()];
     for ((out, pa), pb) in pixels
-        .chunks_exact_mut(4)
-        .zip(a.pixels.chunks_exact(4))
-        .zip(b.pixels.chunks_exact(4))
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(a.pixels.as_chunks::<4>().0)
+        .zip(b.pixels.as_chunks::<4>().0)
     {
         let (aa, ab) = (f64::from(pa[3]) / 255.0, f64::from(pb[3]) / 255.0);
         let alpha = aa * (1.0 - t) + ab * t;

@@ -384,12 +384,12 @@ impl CpuBackend {
         size: Size,
     ) -> Result<(), Error> {
         use crate::transition::{mix, solid};
-        let a = self.clip_layer(outgoing, pool, video, size)?;
-        let b = self.clip_layer(incoming, pool, video, size)?;
+        let from = self.clip_layer(outgoing, pool, video, size)?;
+        let to = self.clip_layer(incoming, pool, video, size)?;
         let p = state.progress;
         ctx.set_transform(Affine::IDENTITY);
         match state.kind {
-            TransitionKind::CrossDissolve => composite_layer(ctx, &mix(&a, &b, p))?,
+            TransitionKind::CrossDissolve => composite_layer(ctx, &mix(&from, &to, p))?,
             TransitionKind::DipToBlack | TransitionKind::DipToWhite => {
                 let level = if state.kind == TransitionKind::DipToBlack {
                     0
@@ -398,9 +398,9 @@ impl CpuBackend {
                 };
                 let middle = solid(size, level);
                 let blended = if p < 0.5 {
-                    mix(&a, &middle, p * 2.0)
+                    mix(&from, &middle, p * 2.0)
                 } else {
-                    mix(&middle, &b, p * 2.0 - 1.0)
+                    mix(&middle, &to, p * 2.0 - 1.0)
                 };
                 composite_layer(ctx, &blended)?;
             }
@@ -419,10 +419,10 @@ impl CpuBackend {
                     WipeDirection::BottomToTop => Rect::new(0.0, 0.0, w, (1.0 - p) * h),
                 };
                 ctx.push_clip_layer(&inverse.to_path(0.1));
-                composite_layer(ctx, &a)?;
+                composite_layer(ctx, &from)?;
                 ctx.pop_layer();
                 ctx.push_clip_layer(&mask.to_path(0.1));
-                composite_layer(ctx, &b)?;
+                composite_layer(ctx, &to)?;
                 ctx.pop_layer();
             }
         }
