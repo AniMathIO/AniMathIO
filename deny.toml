@@ -1,0 +1,17 @@
+# cargo-deny configuration. Currently scoped to license checking: the FilmCraft media stack
+# pulls in symphonia (MPL-2.0) for audio bootstrap, everything else is permissive.
+# Run with: cargo deny check licenses
+
+[licenses]
+version = 2
+# Symphonia and its sub-crates are MPL-2.0 (file-level copyleft); it is pulled in by
+# filmcraft-codecs for MP3/FLAC/ALAC/HE-AAC and the MP4/MKV demux fallback.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "MPL-2.0",
+    "Zlib",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "Unicode-3.0",
+]
