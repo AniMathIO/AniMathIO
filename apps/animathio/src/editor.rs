@@ -475,6 +475,28 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(())?
             }
+            call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
+                let replace = matches!(&call, Call::ImportManim { params } if params.replace);
+                let importing = matches!(&call, Call::ImportManim { .. });
+                let result = animathio_control::apply_authoring_call(
+                    &mut self.project,
+                    &mut self.history,
+                    &mut self.assets,
+                    &call,
+                )?;
+                if replace {
+                    self.path = None;
+                    self.selected = None;
+                    self.selected_field = None;
+                    self.seek_to(Time(0), cx);
+                }
+                self.next_id = next_id(&self.project);
+                if importing {
+                    self.worker.load(self.assets.clone());
+                }
+                self.after_edit(cx);
+                result
+            }
         })
     }
 
@@ -2911,23 +2933,6 @@ fn audio_asset_ids(project: &Project) -> BTreeSet<AssetId> {
         .collect()
 }
 
-fn plugin_search_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Ok(dir) = std::env::var("ANIMATHIO_PLUGIN_DIR") {
-        dirs.push(PathBuf::from(dir));
-    }
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(target_dir) = exe.parent().and_then(Path::parent)
-    {
-        // In-tree builds: `target/{debug,release}/animathio` -> `target/plugins`.
-        dirs.push(target_dir.join("plugins"));
-    }
-    if let Some(base) = directories::BaseDirs::new() {
-        dirs.push(base.data_dir().join("animathio").join("plugins"));
-    }
-    dirs
-}
-
 fn plugins_cache_dir() -> PathBuf {
     directories::BaseDirs::new().map_or_else(
         || std::env::temp_dir().join("animathio-plugin-cache"),
@@ -2950,11 +2955,11 @@ fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Option<String>)
         }
     };
     let mut error = None;
-    for dir in plugin_search_dirs() {
-        match host.load_plugins_dir(&dir) {
+    for dir in animathio_plugin_host::plugin_search_dirs() {
+        match host.load_plugin_directory(&dir) {
             Ok(_) => {}
             Err(message) => {
-                eprintln!("plugin load failed from {}: {message}", dir.display());
+                eprintln!("plugin load failed from {}: {message}", dir.path.display());
                 error.get_or_insert_with(|| format!("plugin load failed: {message}"));
             }
         }
