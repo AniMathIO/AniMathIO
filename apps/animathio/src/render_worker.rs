@@ -6,9 +6,7 @@ use animathio_core::{AssetId, Scene};
 use animathio_render::{BackendKind, RenderCtx, preview_backend, render};
 use gpui::RenderImage;
 
-/// One immutable frame job. The UI thread evaluates and resolves the scene (running
-/// plugin clips through the plugin host) so the worker stays free of any mutable
-/// runtime state beyond its render resources.
+/// One immutable frame job; plugin resolution and rasterization run on the worker.
 pub(crate) struct RenderRequest {
     pub(crate) generation: u64,
     pub(crate) scene: Scene,
@@ -23,7 +21,7 @@ pub(crate) struct RenderResult {
 }
 
 pub(crate) enum WorkerMsg {
-    Load(BTreeMap<AssetId, Vec<u8>>),
+    Load(Arc<BTreeMap<AssetId, Vec<u8>>>),
     /// Switch the preview backend; GPU falls back to CPU when unavailable.
     Backend(BackendKind),
     Render(RenderRequest),
@@ -47,7 +45,7 @@ impl RenderWorker {
         Self { tx, rx }
     }
 
-    pub(crate) fn load(&self, assets: BTreeMap<AssetId, Vec<u8>>) {
+    pub(crate) fn load(&self, assets: Arc<BTreeMap<AssetId, Vec<u8>>>) {
         let _ = self.tx.send(WorkerMsg::Load(assets));
     }
 
@@ -66,6 +64,7 @@ impl RenderWorker {
 
 fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
     let mut ctx = RenderCtx::default();
+    let (mut host, _, _) = crate::editor::load_plugins();
     while let Ok(msg) = rx.recv() {
         // Drain whatever is queued now, keep only the newest render, and apply any
         // asset load before it. Older requests are discarded unrendered.
@@ -86,7 +85,7 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
         if let Some(assets) = assets {
             // Rebuilding the context drops resources from the previous project but
             // keeps the (possibly GPU) backend and its device.
-            match RenderCtx::from_assets(assets) {
+            match RenderCtx::from_assets((*assets).clone()) {
                 Ok(mut loaded) => {
                     let current =
                         ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
@@ -104,9 +103,13 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
             }
             ctx.set_backend(selected.backend);
         }
-        if let Some(request) = latest
-            && let Some(image) = render_image(&mut ctx, &request)
-        {
+        if let Some(mut request) = latest {
+            if let Some(host) = &mut host {
+                request.scene = host.resolve(&request.scene, request.size);
+            }
+            let Some(image) = render_image(&mut ctx, &request) else {
+                continue;
+            };
             let _ = tx.send(RenderResult {
                 generation: request.generation,
                 image,

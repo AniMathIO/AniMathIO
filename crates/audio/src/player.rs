@@ -207,7 +207,8 @@ impl Player {
                     }
                     Ok(())
                 })();
-                if result.is_err() {
+                if let Err(error) = &result {
+                    eprintln!("audio mixer: {error}");
                     worker_error.store(true, Ordering::Release);
                 }
                 result

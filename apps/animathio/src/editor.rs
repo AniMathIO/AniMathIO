@@ -341,7 +341,9 @@ impl RecentFiles {
 pub(crate) struct Editor {
     project: Project,
     history: History,
-    assets: BTreeMap<AssetId, Vec<u8>>,
+    assets: Arc<BTreeMap<AssetId, Vec<u8>>>,
+    audio_generation: u64,
+    save_pending: bool,
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
     path: Option<PathBuf>,
@@ -421,11 +423,13 @@ impl Editor {
         let worker = RenderWorker::spawn();
         let preview = crate::preview_settings::PreviewSettings::load();
         worker.set_backend(preview.backend());
-        worker.load(assets.clone());
+        worker.load(Arc::new(assets.clone()));
         let mut this = Self {
             project,
             history: History::default(),
-            assets,
+            assets: Arc::new(assets),
+            audio_generation: 0,
+            save_pending: false,
             pool,
             audio_ids,
             path,
@@ -484,9 +488,20 @@ impl Editor {
         window.focus(&this.focus_handle, cx);
         cx.spawn(async move |this, cx| {
             loop {
-                let timer = cx.background_executor().timer(Duration::from_secs(1));
+                let timer = cx.background_executor().timer(Duration::from_millis(25));
                 timer.await;
-                if this.update(cx, Editor::autosave_tick).is_err() {
+                if this
+                    .update(cx, |editor, cx| {
+                        editor.drain_control(cx);
+                        if editor.clock.has_error() {
+                            editor.error =
+                                Some("Audio playback failed; pause and play to retry".into());
+                            cx.notify();
+                        }
+                        editor.autosave_tick(cx);
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -509,7 +524,6 @@ impl Editor {
         self.request_generation = self.request_generation.wrapping_add(1);
         self.last_requested = Some(time);
         let scene = evaluate(&self.project, time);
-        let scene = self.resolve_scene(scene, size);
         self.worker.request(RenderRequest {
             generation: self.request_generation,
             scene,
@@ -613,6 +627,96 @@ impl Editor {
             let Ok(ControlMsg::Invoke(call, reply)) = next else {
                 return;
             };
+            if let Call::AssetsImport { path } = &call {
+                let path = path.clone();
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            let canonical = validate_existing_file(&path)?;
+                            let bytes = read_bounded(
+                                &canonical,
+                                animathio_format::Limits::default().asset_bytes,
+                            )?;
+                            let info = AssetInfo {
+                                id: AssetId::of(&bytes),
+                                name: canonical.file_name().map_or_else(
+                                    || "asset".to_owned(),
+                                    |n| n.to_string_lossy().into_owned(),
+                                ),
+                                media_type: media_type_of(&canonical.to_string_lossy()).to_owned(),
+                            };
+                            Ok::<_, ControlError>((info, bytes))
+                        })
+                        .await;
+                    let _ = this.update(cx, |editor, cx| {
+                        let result = result.and_then(|(info, bytes)| {
+                            Arc::make_mut(&mut editor.assets).insert(info.id.clone(), bytes);
+                            editor.worker.load(editor.assets.clone());
+                            Ok(serde_json::to_value(info)?)
+                        });
+                        let _ = reply.send(result);
+                        cx.notify();
+                    });
+                })
+                .detach();
+                continue;
+            }
+            if let Call::ProjectSave { path } = &call {
+                if self.save_pending {
+                    let _ =
+                        reply.send(Err(ControlError::Other("a save is already running".into())));
+                    continue;
+                }
+                self.save_pending = true;
+                let target = path.clone().or_else(|| self.path.clone());
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                let generation = self.audio_generation;
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            let target = target.ok_or_else(|| {
+                                ControlError::Unsupported("project has never been saved".into())
+                            })?;
+                            let target = validate_output_file(&target)?;
+                            write_project(&target, &project, &assets)
+                                .map_err(ControlError::Other)?;
+                            Ok::<_, ControlError>(target)
+                        })
+                        .await;
+                    let _ = this.update(cx, |editor, cx| {
+                        editor.save_pending = false;
+                        let result = result.and_then(|target| {
+                            editor.path = Some(target.clone());
+                            if generation == editor.audio_generation {
+                                editor.dirty = false;
+                            }
+                            editor.recent.add(&target);
+                            Ok(serde_json::to_value(target.display().to_string())?)
+                        });
+                        let _ = reply.send(result);
+                        cx.notify();
+                    });
+                })
+                .detach();
+                continue;
+            }
+            if let Call::RenderFrame { .. } = &call {
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                std::thread::spawn(move || {
+                    use animathio_control::ControlHandler;
+                    let mut handler = animathio_control::HeadlessHandler::from_bundle(
+                        animathio_format::Bundle {
+                            project,
+                            assets: (*assets).clone(),
+                        },
+                        None,
+                    );
+                    let _ = reply.send(handler.handle(call));
+                });
+                continue;
+            }
             if let Call::Export { params } = call {
                 if self.export_task.is_some() {
                     let _ = reply.send(Err(ControlError::Other(
@@ -751,7 +855,7 @@ impl Editor {
                 let result = animathio_control::apply_authoring_call(
                     &mut self.project,
                     &mut self.history,
-                    &mut self.assets,
+                    Arc::make_mut(&mut self.assets),
                     &call,
                 )?;
                 if replace {
@@ -774,7 +878,7 @@ impl Editor {
         &mut self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
-        let mut ctx = animathio_render::RenderCtx::from_assets(self.assets.clone())?;
+        let mut ctx = animathio_render::RenderCtx::from_assets((*self.assets).clone())?;
         let scene = animathio_core::evaluate(&self.project, params.time);
         let scene = self.resolve_scene(scene, (params.width, params.height));
         let frame = animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
@@ -804,7 +908,7 @@ impl Editor {
         let name = canonical
             .file_name()
             .map_or_else(|| "asset".to_owned(), |n| n.to_string_lossy().into_owned());
-        self.assets.insert(id.clone(), bytes);
+        Arc::make_mut(&mut self.assets).insert(id.clone(), bytes);
         self.worker.load(self.assets.clone());
         Ok(AssetInfo {
             id,
@@ -826,7 +930,7 @@ impl Editor {
         }
         self.project = project;
         self.history = History::default();
-        self.assets = assets.into_iter().map(|a| (a.id, a.bytes)).collect();
+        self.assets = Arc::new(assets.into_iter().map(|a| (a.id, a.bytes)).collect());
         self.path = None;
         self.position = Time(0);
         self.playing = false;
@@ -895,7 +999,7 @@ impl Editor {
     fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.dirty = true;
         self.selected = self.selected.filter(|id| self.find_clip(*id).is_some());
-        self.sync_audio();
+        self.sync_audio(cx);
         let time = self.current_render_time();
         self.request_render(time);
         cx.notify();
@@ -904,36 +1008,48 @@ impl Editor {
     /// Keep the engine-owned audio pool and the player's snapshots in lock-step
     /// with the project. The project snapshot is swapped every edit; the mixer is
     /// only rebuilt when the set of decoded audio assets actually changed.
-    fn sync_audio(&mut self) {
-        self.pool.collect(&self.project);
+    fn sync_audio(&mut self, cx: &mut Context<Self>) {
+        self.audio_generation = self.audio_generation.wrapping_add(1);
+        let generation = self.audio_generation;
         let live = audio_asset_ids(&self.project);
-        self.waveforms
-            .borrow_mut()
-            .retain(|id, _| live.contains(id));
         let Some((rate, channels)) = self.clock.mixer_format() else {
             self.clock.set_project(Arc::new(self.project.clone()));
             return;
         };
-        let mut changed = false;
-        for id in &live {
-            if !self.pool.contains(id) {
-                if let Err(message) = load_audio(&mut self.pool, &self.project, &self.assets) {
-                    self.error = Some(message);
-                }
-                changed = true;
-                break;
-            }
+        if live == self.audio_ids {
+            self.clock.set_project(Arc::new(self.project.clone()));
+            return;
         }
-        if changed || live != self.audio_ids {
-            match self.pool.prepare(rate, channels) {
-                Ok(mixer) => {
-                    self.clock.set_mixer(Arc::new(mixer));
-                    self.audio_ids = live;
+        let project = self.project.clone();
+        let assets = self.assets.clone();
+        let mut pool = self.pool.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    load_audio(&mut pool, &project, &assets)?;
+                    let mixer = pool.prepare(rate, channels).map_err(|e| e.to_string())?;
+                    Ok::<_, String>((pool, mixer))
+                })
+                .await;
+            let _ = this.update(cx, |editor, cx| {
+                if editor.audio_generation != generation {
+                    return;
                 }
-                Err(error) => self.error = Some(error.to_string()),
-            }
-        }
-        self.clock.set_project(Arc::new(self.project.clone()));
+                match result {
+                    Ok((pool, mixer)) => {
+                        editor.pool = pool;
+                        editor.pool.collect(&editor.project);
+                        editor.clock.set_mixer(Arc::new(mixer));
+                        editor.clock.set_project(Arc::new(editor.project.clone()));
+                        editor.audio_ids = live;
+                        editor.waveforms.borrow_mut().clear();
+                    }
+                    Err(error) => editor.error = Some(format!("Audio preparation failed: {error}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn autosave_tick(&mut self, cx: &mut Context<Self>) {
@@ -941,10 +1057,7 @@ impl Editor {
             return;
         }
         let path = autosave_path(self.path.as_ref().expect("checked above"));
-        match write_project(&path, &self.project, &self.assets) {
-            Ok(()) => self.last_autosave = Instant::now(),
-            Err(error) => self.error = Some(format!("autosave failed: {error}")),
-        }
+        self.save_background(path, true, cx);
         cx.notify();
     }
 
@@ -982,7 +1095,7 @@ impl Editor {
                 true
             }
             (true, false, false, "s") => {
-                self.save();
+                self.save(cx);
                 true
             }
             (true, false, false, "o") => {
@@ -1794,7 +1907,7 @@ impl Editor {
         );
     }
 
-    fn save(&mut self) {
+    fn save(&mut self, cx: &mut Context<Self>) {
         let path = if let Some(path) = &self.path {
             path.clone()
         } else {
@@ -1807,15 +1920,43 @@ impl Editor {
             };
             path
         };
-        match write_project(&path, &self.project, &self.assets) {
-            Ok(()) => {
-                self.path = Some(path.clone());
-                self.dirty = false;
-                self.last_autosave = Instant::now();
-                self.recent.add(&path);
+        self.save_background(path, false, cx);
+    }
+
+    fn save_background(&mut self, path: PathBuf, autosave: bool, cx: &mut Context<Self>) {
+        if self.save_pending {
+            if !autosave {
+                self.error = Some("a save is already running".into());
             }
-            Err(error) => self.error = Some(error),
+            return;
         }
+        self.save_pending = true;
+        let project = self.project.clone();
+        let assets = self.assets.clone();
+        let generation = self.audio_generation;
+        self.last_autosave = Instant::now();
+        cx.spawn(async move |this, cx| {
+            let destination = path.clone();
+            let result = cx
+                .background_spawn(async move { write_project(&destination, &project, &assets) })
+                .await;
+            let _ = this.update(cx, |editor, cx| {
+                editor.save_pending = false;
+                match result {
+                    Ok(()) if !autosave => {
+                        editor.path = Some(path.clone());
+                        if editor.audio_generation == generation {
+                            editor.dirty = false;
+                        }
+                        editor.recent.add(&path);
+                    }
+                    Ok(()) => {}
+                    Err(error) => editor.error = Some(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn open(&mut self, cx: &mut Context<Self>) {
@@ -1831,9 +1972,10 @@ impl Editor {
     fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         match read_project_with_recovery(path) {
             Ok((project, assets, recovered)) => {
+                self.audio_generation = self.audio_generation.wrapping_add(1);
                 self.project = project;
                 self.history = History::default();
-                self.assets = assets.clone();
+                self.assets = Arc::new(assets.clone());
                 self.path = Some(path.to_path_buf());
                 self.dirty = recovered;
                 self.last_autosave = Instant::now();
@@ -1848,7 +1990,7 @@ impl Editor {
                 self.position = Time(0);
                 self.playing = false;
                 self.next_id = next_id(&self.project);
-                self.worker.load(assets);
+                self.worker.load(Arc::new(assets));
                 self.request_render(Time(0));
                 self.recent.add(path);
                 if recovered {
@@ -1909,7 +2051,7 @@ impl Editor {
                 )
                 .map_err(|e| e.0)?;
         }
-        self.assets.insert(id.clone(), bytes.clone());
+        Arc::make_mut(&mut self.assets).insert(id.clone(), bytes.clone());
         let (kind, duration) = if media_type.starts_with("audio/") {
             if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
                 let duration = frames_to_ticks(source.pcm().frames(), source.pcm().rate())
@@ -2930,7 +3072,7 @@ impl Editor {
         let items: Vec<(&str, MenuAction)> = match menu {
             MenuId::File => vec![
                 ("Open… Ctrl+O", Box::new(Self::open)),
-                ("Save Ctrl+S", Box::new(|this, _cx| this.save())),
+                ("Save Ctrl+S", Box::new(Editor::save)),
                 ("Import media…", Box::new(Self::import_media)),
                 ("Export…", Box::new(Self::open_export_dialog)),
                 ("Settings", Box::new(Self::toggle_settings)),

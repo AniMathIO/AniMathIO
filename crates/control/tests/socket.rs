@@ -151,3 +151,42 @@ fn bind_does_not_follow_symlinked_token_path() {
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
     drop(server);
 }
+
+#[test]
+fn concurrent_clients_disconnect_and_idle_shutdown() {
+    let dir = private_dir();
+    let spec = spec(dir.path());
+    let running = ControlServer::bind(spec.clone())
+        .unwrap()
+        .spawn(HeadlessHandler::new())
+        .unwrap();
+    let mut first = ControlClient::connect(&spec).unwrap();
+    let mut second = ControlClient::connect(&spec).unwrap();
+    first.project_get().unwrap();
+    second.project_get().unwrap();
+    drop(first);
+    let mut third = ControlClient::connect(&spec).unwrap();
+    third.project_get().unwrap();
+    // Both remaining clients stay connected and idle during shutdown.
+    let start = std::time::Instant::now();
+    drop(running);
+    assert!(start.elapsed() < std::time::Duration::from_secs(1));
+}
+
+#[cfg(unix)]
+#[test]
+fn truncated_request_does_not_stop_accepting() {
+    use std::io::Write;
+    let dir = private_dir();
+    let spec = spec(dir.path());
+    let running = ControlServer::bind(spec.clone())
+        .unwrap()
+        .spawn(HeadlessHandler::new())
+        .unwrap();
+    let mut broken = std::os::unix::net::UnixStream::connect(&spec.path).unwrap();
+    broken.write_all(b"{truncated").unwrap();
+    drop(broken);
+    let mut client = ControlClient::connect(&spec).unwrap();
+    client.project_get().unwrap();
+    drop(running);
+}
