@@ -50,6 +50,8 @@ jobs:
       - name: Build plugins
         if: runner.os == 'Linux'
         run: ./scripts/build-plugins.sh
+      - name: Build plugin authoring example
+        run: cargo build --manifest-path plugins/examples/hello/Cargo.toml --target wasm32-wasip2 --release --locked
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Clippy
