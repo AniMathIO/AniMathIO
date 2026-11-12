@@ -30,8 +30,9 @@ pub(crate) struct Stmt {
 /// Interpreted statement kinds.
 #[derive(Debug)]
 pub(crate) enum StmtKind {
-    /// `var = MobjectFactory(...)`.
-    Declare { name: String, mobject: MobjectDecl },
+    /// `var = MobjectFactory(...)`, `var = VGroup(...)` or a chained inline
+    /// constructor such as `var = Circle().scale(2)`.
+    Declare { name: String, expr: MobjectExpr },
     /// `target.method(...)` (possibly through `.animate`, which is rejected here
     /// because `.animate` belongs inside `self.play`).
     Mutate {
@@ -39,6 +40,9 @@ pub(crate) enum StmtKind {
         method: Method,
         animated: bool,
     },
+    /// A method call on an inline (non-identifier) mobject expression, e.g.
+    /// `VGroup(a, b).arrange(DOWN)` or `Circle().scale(2)`.
+    MutateExpr { expr: MobjectExpr, animated: bool },
     /// `self.play(...)`.
     Play {
         animations: Vec<Anim>,
@@ -48,9 +52,9 @@ pub(crate) enum StmtKind {
     /// `self.wait(seconds)`.
     Wait { seconds: f64 },
     /// `self.add(a, b, ...)`.
-    Add { targets: Vec<String> },
+    Add { targets: Vec<MobjectExpr> },
     /// `self.remove(a, b, ...)`.
-    Remove { targets: Vec<String> },
+    Remove { targets: Vec<MobjectExpr> },
     /// A construct the importer cannot interpret.
     Unsupported { message: String },
 }
@@ -61,15 +65,15 @@ pub(crate) enum Anim {
     /// `Write(x)`, `FadeIn(x)`, etc.
     Simple {
         kind: AnimKind,
-        target: String,
+        target: MobjectExpr,
         run_time: Option<f64>,
     },
     /// `x.animate.shift(...)` and friends.
     Animate { target: String, method: Method },
     /// `Transform(a, b)` / `ReplacementTransform(a, b)`.
     Transform {
-        source: String,
-        target: String,
+        source: MobjectExpr,
+        target: MobjectExpr,
         run_time: Option<f64>,
     },
     /// An animation the importer cannot interpret.
@@ -111,6 +115,9 @@ pub(crate) enum Method {
     Rotate {
         angle: f64,
     },
+    Arrange {
+        direction: (f64, f64),
+    },
     Unsupported {
         name: String,
     },
@@ -122,6 +129,31 @@ pub(crate) struct MobjectDecl {
     pub kind: DeclKind,
     /// Constructor-provided centre (`Dot(point=...)`), if any.
     pub center: Option<(f64, f64)>,
+}
+
+/// A mobject expression with its source position: a named reference, an inline
+/// constructor, a `VGroup` or a chained method call on any of those.
+#[derive(Debug, Clone)]
+pub(crate) struct MobjectExpr {
+    pub line: usize,
+    pub column: usize,
+    pub snippet: String,
+    pub kind: MobjectExprKind,
+}
+
+/// The shape of a mobject expression.
+#[derive(Debug, Clone)]
+pub(crate) enum MobjectExprKind {
+    /// `a` — a reference to an already-declared mobject.
+    Ref(String),
+    /// `Circle()` — an inline mobject constructor.
+    Factory(MobjectDecl),
+    /// `VGroup(a, b)` — a group of member expressions.
+    Group(Vec<MobjectExpr>),
+    /// `expr.method(...)`.
+    Chain(Box<MobjectExpr>, Method),
+    /// An expression that looks like a mobject but is not supported.
+    Unsupported(String),
 }
 
 /// The parsed mobject constructor arguments.
@@ -354,20 +386,20 @@ fn parse_assignment(node: &Node<'_>, source: &str) -> StmtKind {
         };
     }
     let name = eval::text_of(&left, source);
-    if right.kind() == "call"
-        && let Some(decl) = parse_factory(&right, &name, source)
-    {
-        return StmtKind::Declare {
-            name,
-            mobject: decl,
-        };
-    }
+    // `target.method(...)` on an identifier mutates that named mobject in place.
     if let Some((target, method, animated)) = parse_method_chain(&right, source) {
         return StmtKind::Mutate {
             target,
             method,
             animated,
         };
+    }
+    // A factory, VGroup or chained inline constructor becomes a declaration.
+    // Bare identifier aliases (`x = y`) stay unsupported.
+    if let Some(expr) = parse_mobject_expr(&right, source)
+        && !matches!(&expr.kind, MobjectExprKind::Ref(_))
+    {
+        return StmtKind::Declare { name, expr };
     }
     StmtKind::Unsupported {
         message: format!(
@@ -563,6 +595,9 @@ fn parse_call_statement(call: &Node<'_>, source: &str) -> Option<StmtKind> {
                 animated,
             });
         }
+        if let Some((expr, animated)) = parse_chain_expr(call, source) {
+            return Some(StmtKind::MutateExpr { expr, animated });
+        }
     }
     Some(StmtKind::Unsupported {
         message: format!("unsupported call: {}", eval::text_of(call, source)),
@@ -612,7 +647,7 @@ fn parse_anim(node: &Node<'_>, source: &str) -> Option<Anim> {
     let function = node.child_by_field_name("function")?;
     if function.kind() == "identifier" {
         let name = eval::text_of(&function, source);
-        let (positional, kwargs) = call_arguments(node, source);
+        let (_, kwargs) = call_arguments(node, source);
         let run_time = kwarg(&kwargs, "run_time").and_then(eval::as_number);
         let kind = match name.as_str() {
             "Write" => AnimKind::Write,
@@ -629,28 +664,27 @@ fn parse_anim(node: &Node<'_>, source: &str) -> Option<Anim> {
                 });
             }
         };
+        let args = positional_nodes(node, source);
         if matches!(kind, AnimKind::Transform | AnimKind::ReplacementTransform) {
+            let (Some(source_node), Some(target_node)) = (args.first(), args.get(1)) else {
+                return Some(Anim::Unsupported {
+                    text: eval::text_of(node, source),
+                });
+            };
             return Some(Anim::Transform {
-                source: positional
-                    .first()
-                    .and_then(eval::as_ident)
-                    .unwrap_or_default()
-                    .to_owned(),
-                target: positional
-                    .get(1)
-                    .and_then(eval::as_ident)
-                    .unwrap_or_default()
-                    .to_owned(),
+                source: parse_mobject_target(source_node, source),
+                target: parse_mobject_target(target_node, source),
                 run_time,
             });
         }
+        let Some(target_node) = args.first() else {
+            return Some(Anim::Unsupported {
+                text: eval::text_of(node, source),
+            });
+        };
         return Some(Anim::Simple {
             kind,
-            target: positional
-                .first()
-                .and_then(eval::as_ident)
-                .unwrap_or_default()
-                .to_owned(),
+            target: parse_mobject_target(target_node, source),
             run_time,
         });
     }
@@ -727,6 +761,9 @@ fn build_method(name: &str, positional: &[Value]) -> Method {
         "rotate" => Method::Rotate {
             angle: positional.first().and_then(eval::as_number).unwrap_or(0.0),
         },
+        "arrange" => Method::Arrange {
+            direction: vector.unwrap_or((0.0, 0.0)),
+        },
         other => Method::Unsupported {
             name: other.to_owned(),
         },
@@ -738,12 +775,133 @@ fn parse_wait(call: &Node<'_>, source: &str) -> f64 {
     positional.first().and_then(eval::as_number).unwrap_or(1.0)
 }
 
-fn parse_targets(call: &Node<'_>, source: &str) -> Vec<String> {
-    let (positional, _) = call_arguments(call, source);
-    positional
+/// Parse a mobject expression: a reference, inline constructor, `VGroup` or a
+/// chained method call on any of those. Returns `None` when `node` is not a
+/// mobject-shaped expression at all.
+fn parse_mobject_expr(node: &Node<'_>, source: &str) -> Option<MobjectExpr> {
+    let (line, column, snippet) = position(node, source);
+    let kind = match node.kind() {
+        "identifier" => MobjectExprKind::Ref(eval::text_of(node, source)),
+        "call" => {
+            let function = node.child_by_field_name("function")?;
+            if function.kind() == "identifier" {
+                let name = eval::text_of(&function, source);
+                if name == "VGroup" {
+                    MobjectExprKind::Group(parse_group_members(node, source))
+                } else {
+                    let decl = parse_factory(node, "", source)?;
+                    MobjectExprKind::Factory(decl)
+                }
+            } else if function.kind() == "attribute" {
+                let method_name = function
+                    .child_by_field_name("attribute")
+                    .map(|a| eval::text_of(&a, source))
+                    .unwrap_or_default();
+                let object = function.child_by_field_name("object")?;
+                let base = parse_mobject_expr(&object, source)?;
+                let (positional, _kwargs) = call_arguments(node, source);
+                let method = build_method(&method_name, &positional);
+                MobjectExprKind::Chain(Box::new(base), method)
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+    Some(MobjectExpr {
+        line,
+        column,
+        snippet,
+        kind,
+    })
+}
+
+/// Parse a mobject argument, preserving unsupported-looking expressions so the
+/// importer can warn about them instead of silently dropping them.
+fn parse_mobject_target(node: &Node<'_>, source: &str) -> MobjectExpr {
+    let (line, column, snippet) = position(node, source);
+    match parse_mobject_expr(node, source) {
+        Some(expr) => expr,
+        None => MobjectExpr {
+            line,
+            column,
+            snippet,
+            kind: MobjectExprKind::Unsupported(eval::text_of(node, source)),
+        },
+    }
+}
+
+fn parse_group_members(call: &Node<'_>, source: &str) -> Vec<MobjectExpr> {
+    positional_nodes(call, source)
         .iter()
-        .filter_map(eval::as_ident)
-        .map(str::to_owned)
+        .map(|node| parse_mobject_target(node, source))
+        .collect()
+}
+
+/// Resolve a chained method call whose base is not a plain identifier (e.g.
+/// `VGroup(a, b).arrange(DOWN)`). Identifier bases are handled by
+/// [`parse_method_chain`].
+fn parse_chain_expr(call: &Node<'_>, source: &str) -> Option<(MobjectExpr, bool)> {
+    let function = call.child_by_field_name("function")?;
+    if function.kind() != "attribute" {
+        return None;
+    }
+    let method_name = function
+        .child_by_field_name("attribute")
+        .map(|a| eval::text_of(&a, source))
+        .unwrap_or_default();
+    let mut object = function.child_by_field_name("object")?;
+    let mut animated = false;
+    while object.kind() == "attribute" {
+        let object_attr = object
+            .child_by_field_name("attribute")
+            .map(|a| eval::text_of(&a, source))
+            .unwrap_or_default();
+        if object_attr == "animate" {
+            animated = true;
+            object = object.child_by_field_name("object")?;
+        } else {
+            return None;
+        }
+    }
+    let base = parse_mobject_expr(&object, source)?;
+    if matches!(&base.kind, MobjectExprKind::Ref(_)) {
+        return None;
+    }
+    let (positional, _kwargs) = call_arguments(call, source);
+    let method = build_method(&method_name, &positional);
+    let (line, column, snippet) = position(call, source);
+    Some((
+        MobjectExpr {
+            line,
+            column,
+            snippet,
+            kind: MobjectExprKind::Chain(Box::new(base), method),
+        },
+        animated,
+    ))
+}
+
+/// Raw non-keyword argument nodes (values, not evaluated).
+fn positional_nodes<'t>(call: &Node<'t>, _source: &str) -> Vec<Node<'t>> {
+    let mut nodes = Vec::new();
+    let Some(arguments) = call.child_by_field_name("arguments") else {
+        return nodes;
+    };
+    let mut cursor = arguments.walk();
+    for arg in arguments.named_children(&mut cursor) {
+        if arg.kind() == "keyword_argument" {
+            continue;
+        }
+        nodes.push(arg);
+    }
+    nodes
+}
+
+fn parse_targets(call: &Node<'_>, source: &str) -> Vec<MobjectExpr> {
+    positional_nodes(call, source)
+        .iter()
+        .map(|node| parse_mobject_target(node, source))
         .collect()
 }
 
@@ -853,7 +1011,10 @@ mod tests {
             .statements
             .iter()
             .filter_map(|s| match &s.kind {
-                StmtKind::Declare { name, mobject } => Some((name.as_str(), mobject)),
+                StmtKind::Declare { name, expr } => match &expr.kind {
+                    MobjectExprKind::Factory(decl) => Some((name.as_str(), decl)),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect()
@@ -941,7 +1102,10 @@ class S(Scene):
         match first {
             Anim::Simple { kind, target, .. } => {
                 assert_eq!(*kind, AnimKind::Write);
-                assert_eq!(target, "a");
+                assert!(matches!(
+                    &target.kind,
+                    MobjectExprKind::Ref(name) if name == "a"
+                ));
             }
             other => panic!("expected simple animation, got {other:?}"),
         }
