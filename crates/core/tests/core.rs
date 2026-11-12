@@ -796,7 +796,7 @@ fn animated_split_preserves_boundary_and_exact_undo_redo() {
     for (time, value) in [(0, 0.0), (100, 1.0)] {
         Command::AddKeyframe {
             id: ClipId(0),
-            target: Target::Opacity,
+            target: Target::Transform(TransformProperty::Opacity),
             time: Time(time),
             keyframe: Keyframe {
                 value: ParamValue::Number(value),
