@@ -122,12 +122,37 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `AddTrack`, `RemoveTrack`, `SetTrackGain`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
-`SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`.
+`SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
+`AddTransition`, `RemoveTransition`, `SetTransitionDuration`.
 
 `Command::apply(&mut Project) -> Result<Command>` validates the candidate project
 transactionally and returns the exact inverse, so undo/redo, the control protocol,
 MCP and plugins all funnel through one API. A failed edit leaves the project
 unchanged.
+
+## Transitions
+
+Transitions live on the `Track` (`transitions`, serde default empty) and sit on the
+edit point between two adjacent clips: `Transition { id, kind, duration, from, to }`
+where `from.range.end == to.range.start`. This was chosen over per-clip
+transition-in/out fields because one record per cut cannot disagree with itself
+and clips stay non-overlapping in the model. The window `[cut - d/2, cut + d - d/2)`
+is centred on the cut; `evaluate` extends the outgoing clip past its end and starts
+the incoming clip early (its source time is clamped at zero), and both
+`SceneClip`s carry the same `SceneTransition { id, kind, progress, role }`.
+
+Validation requires both clips on the transition's track, adjacency, a positive
+duration, one transition per cut, and that each clip covers the halves of the
+transitions on both of its edges. Edits that break adjacency (move, trim, split,
+remove) are rejected until the transition is removed.
+
+The CPU backend renders both sides into canvas layers (effects and opacity
+applied) and blends them: premultiplied linear mix for `CrossDissolve`, through an
+opaque black/white frame for `DipToBlack`/`DipToWhite`, and rectangular clip
+layers for `Wipe { direction }`. The audio mixer extends cross-dissolved audio clips
+across the window with equal-power gains (`cos`/`sin` of `p·π/2`); other kinds keep
+a hard audio cut, and an incoming clip without a source handle is silent before
+its source start.
 
 ## Data flow
 

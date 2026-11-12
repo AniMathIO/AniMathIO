@@ -107,6 +107,8 @@ clears its undo history.
 | `render_frame` | Render one frame to PNG | base64 return, or written to a path |
 | `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; returns the written path |
 | `import_v1` | Import a v1 `.animathio` project, replacing the current one | |
+| `add_transition` | Add a transition on the cut between two adjacent clips | `kind`: `cross_dissolve` (default), `dip_to_black`, `dip_to_white`, `wipe` (+ `direction`: `left_to_right`/`right_to_left`/`top_to_bottom`/`bottom_to_top`); edit point by `between_clip_a` + `clip_b`, or by the nearest cut to `at_time_ms` (optionally on `track`); `duration_ms` is centred on the cut |
+| `list_transitions` | List transitions | id, track, clips, kind, `cut_ms`, `duration_ms` |
 | `import_manim_scene` | Import a supported Manim scene without executing Python | Exactly one of `path` or inline `source`; optional `script_dir`, `scene`, `replace` (default false) |
 
 `add_math` validates source through `crates/typeset` before changing the project;
@@ -127,12 +129,18 @@ and `infos` arrays. File input uses the canonical script parent for relative
 assets unless `script_dir` is provided; inline input should provide `script_dir`
 when it references relative assets. Source size is limited by the importer.
 
+`add_transition` applies `Command::AddTransition` through the shared history, so it
+is undoable; the clips must be adjacent on one track and long enough to cover half
+the duration on each side. On the control protocol, use `command.apply` with
+`AddTransition`, `RemoveTransition` or `SetTransitionDuration`.
+
 For example, MCP `tools/call` arguments can be:
 
 ```json
 {"name":"add_math","arguments":{"latex":"x^2 + y^2 = z^2","size":48,"duration_ms":3000,"reveal_duration_ms":1000}}
 {"name":"add_graph","arguments":{"x_min":-3,"x_max":3,"items":"plot y=x^2","draw_duration_ms":1000}}
 {"name":"import_manim_scene","arguments":{"path":"/path/to/scene.py","scene":"Demo","replace":false}}
+{"name":"add_transition","arguments":{"at_time_ms":2000,"kind":"cross_dissolve","duration_ms":500}}
 ```
 
 ### Headless plugin loading
