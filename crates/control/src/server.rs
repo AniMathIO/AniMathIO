@@ -340,7 +340,7 @@ fn windows_pipe_name(path: &Path) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in path.as_os_str().as_encoded_bytes() {
         hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x1_0000_0001_b3);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     format!("animathio-control-{hash:016x}")
 }
