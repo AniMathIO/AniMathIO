@@ -125,11 +125,7 @@ impl Exporter {
         resolve: &mut impl FnMut(Scene) -> Scene,
     ) -> Result<Frame, Error> {
         let scene = resolve(evaluate(project, time));
-        Ok(render(
-            &scene,
-            &mut self.ctx,
-            (project.width(), project.height()),
-        )?)
+        Ok(render(&scene, &mut self.ctx, resolution(project))?)
     }
 
     /// Render, mix and encode offline. Returning `false` from `progress` cancels the job.
@@ -145,7 +141,8 @@ impl Exporter {
         project.validate()?;
         let rate = settings.frame_rate.unwrap_or(project.frame_rate());
         let total = frame_count(project, range, rate)?;
-        let mut video = VideoConfig::new(project.width(), project.height(), rate);
+        let (width, height) = resolution(project);
+        let mut video = VideoConfig::new(width, height, rate);
         video.quality = Quality::Crf(settings.crf);
         if !progress(Progress {
             completed: 0,
@@ -229,6 +226,24 @@ fn frame_count(project: &Project, range: TimeRange, rate: FrameRate) -> Result<u
         ));
     }
     Ok(count)
+}
+
+/// Effective output resolution, mirroring the headless CLI's historical 640×360 fallback when a
+/// dimension is unset (`0`).
+#[must_use]
+pub fn resolution(project: &Project) -> (u32, u32) {
+    (
+        if project.width() == 0 {
+            640
+        } else {
+            project.width()
+        },
+        if project.height() == 0 {
+            360
+        } else {
+            project.height()
+        },
+    )
 }
 
 /// Effective duration, deriving it from clips when the project has no explicit duration.

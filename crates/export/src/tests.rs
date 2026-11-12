@@ -190,6 +190,47 @@ fn cancellation_and_invalid_ranges_fail_without_finishing() {
 }
 
 #[test]
+fn unset_resolution_falls_back_to_640x360() {
+    let mut project = Project::default();
+    assert_eq!(project.width(), 0);
+    assert_eq!(project.height(), 0);
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap();
+    Command::AddTrack {
+        track: Track::new(TrackId(0), "Text"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(0),
+        clip: Clip::new(
+            ClipId(0),
+            ClipKind::Builtin(Builtin::Text {
+                text: "default canvas".into(),
+                font_size: 0.1,
+                color: [255, 255, 255, 255],
+            }),
+            range,
+        ),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let bytes = export(
+        &project,
+        &BTreeMap::new(),
+        TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 2)).unwrap(),
+        Settings::default(),
+        |_| true,
+    )
+    .unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("fallback.mp4");
+    std::fs::write(&path, &bytes).unwrap();
+    let video = FilmCraftBackend::new().probe(&path).unwrap().video.unwrap();
+    assert_eq!((video.width, video.height), (640, 360));
+}
+
+#[test]
 fn rational_frame_steps_and_audio_blocks_are_deterministic() {
     let (project, assets) = project();
     let mut exporter = Exporter::new(&project, &assets).unwrap();
