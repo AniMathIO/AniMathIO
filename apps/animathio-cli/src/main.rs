@@ -62,6 +62,17 @@ enum Action {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// Convert a Manim Community scene script to a `.amio` archive.
+    ImportManim {
+        /// Manim scene script (`.py`).
+        input: PathBuf,
+        /// Import this scene class; defaults to the first `Scene` subclass.
+        #[arg(long)]
+        scene: Option<String>,
+        /// Output `.amio` archive.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
     /// Write a three-second animated image/text/shape demo archive.
     NewSample {
         #[arg(short, long)]
@@ -148,6 +159,11 @@ fn run(cli: Cli) -> Result<()> {
                 output.display()
             );
         }
+        Action::ImportManim {
+            input,
+            scene,
+            output,
+        } => run_import_manim(&input, scene, &output)?,
         Action::Render {
             project,
             frame,
@@ -209,6 +225,31 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+fn run_import_manim(input: &Path, scene: Option<String>, output: &Path) -> Result<()> {
+    let source = fs::read_to_string(input)?;
+    let options = animathio_import_manim::ManimOptions {
+        scene,
+        script_dir: input.parent().map(Path::to_path_buf),
+    };
+    let (project, assets, report) =
+        animathio_import_manim::import_manim_with_options(&source, &options)?;
+    for warning in report.warnings() {
+        eprintln!("warning: {warning}");
+    }
+    let asset_map: BTreeMap<AssetId, Vec<u8>> = assets
+        .into_iter()
+        .map(|asset| (asset.id, asset.bytes))
+        .collect();
+    write_amio(File::create(output)?, &project, &asset_map)?;
+    println!(
+        "imported {} tracks, {} assets into {}",
+        project.tracks().len(),
+        asset_map.len(),
+        output.display()
+    );
     Ok(())
 }
 
