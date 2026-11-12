@@ -490,3 +490,19 @@ fn non_dissolve_transitions_keep_a_hard_audio_cut() {
     let mix = crossfade_mix(TransitionKind::DipToBlack);
     assert!(mix.iter().all(|&s| s == 1.0));
 }
+
+#[test]
+fn unsupported_surround_rebuild_keeps_previous_mixer_usable() {
+    let mut pool = AudioPool::default();
+    let good = pool.prepare(48_000, 2).unwrap();
+    let id = AssetId::of(b"surround");
+    pool.insert(id, &Pcm::new(48_000, 6, vec![0.0; 60]).unwrap())
+        .unwrap();
+    let error = pool
+        .prepare(48_000, 2)
+        .err()
+        .expect("surround must be rejected");
+    assert!(error.to_string().contains("6-channel audio to 2-channel"));
+    let range = TimeRange::new(Time(0), Time(100)).unwrap();
+    assert!(good.mix(&Project::default(), range).is_ok());
+}

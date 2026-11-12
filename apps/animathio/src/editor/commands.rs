@@ -55,7 +55,7 @@ impl Editor {
     pub(super) fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.dirty = true;
         self.selected = self.selected.filter(|id| self.find_clip(*id).is_some());
-        self.sync_audio();
+        self.sync_audio(cx);
         let time = self.current_render_time();
         self.request_render(time);
         cx.notify();
@@ -64,36 +64,48 @@ impl Editor {
     /// Keep the engine-owned audio pool and the player's snapshots in lock-step
     /// with the project. The project snapshot is swapped every edit; the mixer is
     /// only rebuilt when the set of decoded audio assets actually changed.
-    pub(super) fn sync_audio(&mut self) {
-        self.pool.collect(&self.project);
+    pub(super) fn sync_audio(&mut self, cx: &mut Context<Self>) {
+        self.audio_generation = self.audio_generation.wrapping_add(1);
+        let generation = self.audio_generation;
         let live = audio_asset_ids(&self.project);
-        self.waveforms
-            .borrow_mut()
-            .retain(|id, _| live.contains(id));
         let Some((rate, channels)) = self.clock.mixer_format() else {
             self.clock.set_project(Arc::new(self.project.clone()));
             return;
         };
-        let mut changed = false;
-        for id in &live {
-            if !self.pool.contains(id) {
-                if let Err(message) = load_audio(&mut self.pool, &self.project, &self.assets) {
-                    self.error = Some(message);
-                }
-                changed = true;
-                break;
-            }
+        if live == self.audio_ids {
+            self.clock.set_project(Arc::new(self.project.clone()));
+            return;
         }
-        if changed || live != self.audio_ids {
-            match self.pool.prepare(rate, channels) {
-                Ok(mixer) => {
-                    self.clock.set_mixer(Arc::new(mixer));
-                    self.audio_ids = live;
+        let project = self.project.clone();
+        let assets = self.assets.clone();
+        let mut pool = self.pool.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    load_audio(&mut pool, &project, &assets)?;
+                    let mixer = pool.prepare(rate, channels).map_err(|e| e.to_string())?;
+                    Ok::<_, String>((pool, mixer))
+                })
+                .await;
+            let _ = this.update(cx, |editor, cx| {
+                if editor.audio_generation != generation {
+                    return;
                 }
-                Err(error) => self.error = Some(error.to_string()),
-            }
-        }
-        self.clock.set_project(Arc::new(self.project.clone()));
+                match result {
+                    Ok((pool, mixer)) => {
+                        editor.pool = pool;
+                        editor.pool.collect(&editor.project);
+                        editor.clock.set_mixer(Arc::new(mixer));
+                        editor.clock.set_project(Arc::new(editor.project.clone()));
+                        editor.audio_ids = live;
+                        editor.waveforms.borrow_mut().clear();
+                    }
+                    Err(error) => editor.error = Some(format!("Audio preparation failed: {error}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(super) fn autosave_tick(&mut self, cx: &mut Context<Self>) {
@@ -101,10 +113,7 @@ impl Editor {
             return;
         }
         let path = autosave_path(self.path.as_ref().expect("checked above"));
-        match write_project(&path, &self.project, &self.assets) {
-            Ok(()) => self.last_autosave = Instant::now(),
-            Err(error) => self.error = Some(format!("autosave failed: {error}")),
-        }
+        self.save_background(path, true, cx);
         cx.notify();
     }
 

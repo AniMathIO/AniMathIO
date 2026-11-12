@@ -348,7 +348,9 @@ impl RecentFiles {
 pub(crate) struct Editor {
     project: Project,
     history: History,
-    assets: BTreeMap<AssetId, Vec<u8>>,
+    assets: Arc<BTreeMap<AssetId, Vec<u8>>>,
+    audio_generation: u64,
+    save_pending: bool,
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
     path: Option<PathBuf>,
@@ -432,11 +434,13 @@ impl Editor {
         let worker = RenderWorker::spawn();
         let preview = crate::preview_settings::PreviewSettings::load();
         worker.set_backend(preview.backend());
-        worker.load(assets.clone());
+        worker.load(Arc::new(assets.clone()));
         let mut this = Self {
             project,
             history: History::default(),
-            assets,
+            assets: Arc::new(assets),
+            audio_generation: 0,
+            save_pending: false,
             pool,
             audio_ids,
             path,
@@ -505,7 +509,7 @@ impl Editor {
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(16))
+                    .timer(Duration::from_millis(25))
                     .await;
                 if this
                     .update_in(cx, |this, window, cx| {
@@ -513,6 +517,11 @@ impl Editor {
                             cx.notify();
                         }
                         this.drain_control(cx);
+                        if this.clock.has_error() {
+                            this.error =
+                                Some("Audio playback failed; pause and play to retry".into());
+                            cx.notify();
+                        }
                         this.autosave_tick(cx);
                     })
                     .is_err()

@@ -14,7 +14,8 @@ impl Editor {
         .apply(&mut self.project)
         .expect("new project's first track");
         self.history = History::default();
-        self.assets.clear();
+        Arc::make_mut(&mut self.assets).clear();
+        self.audio_generation = self.audio_generation.wrapping_add(1);
         self.pool = AudioPool::default();
         self.audio_ids.clear();
         self.waveforms.borrow_mut().clear();
@@ -32,34 +33,66 @@ impl Editor {
         cx.notify();
     }
 
-    pub(super) fn save(&mut self, cx: &mut Context<Self>) {
-        self.finish_color_edit(cx);
-        let path = if let Some(path) = &self.path {
-            path.clone()
-        } else {
-            let Some(path) = rfd::FileDialog::new()
-                .add_filter("AniMathIO project", &["amio"])
-                .set_file_name("project.amio")
-                .save_file()
-            else {
-                return;
-            };
-            path
+    pub(super) fn save(&self) {
+        let Some(path) = Self::config_path() else {
+            return;
         };
-        match write_project(&path, &self.project, &self.assets) {
-            Ok(()) => {
-                self.path = Some(path.clone());
-                self.dirty = false;
-                self.last_autosave = Instant::now();
-                self.recent.add(&path);
-                self.notices
-                    .push(gpui_component::notification::Notification::success(
-                        "Project saved",
-                    ));
-                cx.notify();
-            }
-            Err(error) => self.error = Some(error),
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
         }
+        let Ok(bytes) = serde_json::to_vec_pretty(&self.paths) else {
+            return;
+        };
+        let _ = std::fs::write(path, bytes);
+    }
+
+    pub(super) fn save_background(
+        &mut self,
+        path: PathBuf,
+        autosave: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.save_pending {
+            if !autosave {
+                self.error = Some("a save is already running".into());
+            }
+            return;
+        }
+        self.save_pending = true;
+        let project = self.project.clone();
+        let assets = self.assets.clone();
+        let generation = self.audio_generation;
+        let original_path = self.path.clone();
+        self.last_autosave = Instant::now();
+        cx.spawn(async move |this, cx| {
+            let destination = path.clone();
+            let result = cx
+                .background_spawn(async move { write_project(&destination, &project, &assets) })
+                .await;
+            let _ = this.update(cx, |editor, cx| {
+                editor.save_pending = false;
+                match result {
+                    Ok(()) if !autosave => {
+                        if editor.path == original_path {
+                            editor.path = Some(path.clone());
+                        }
+                        if editor.audio_generation == generation {
+                            editor.dirty = false;
+                        }
+                        editor.recent.add(&path);
+                        editor
+                            .notices
+                            .push(gpui_component::notification::Notification::success(
+                                "Project saved",
+                            ));
+                    }
+                    Ok(()) => {}
+                    Err(error) => editor.error = Some(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(super) fn open(&mut self, cx: &mut Context<Self>) {
@@ -76,9 +109,10 @@ impl Editor {
         self.finish_color_edit(cx);
         match read_project_with_recovery(path) {
             Ok((project, assets, recovered)) => {
+                self.audio_generation = self.audio_generation.wrapping_add(1);
                 self.project = project;
                 self.history = History::default();
-                self.assets = assets.clone();
+                self.assets = Arc::new(assets.clone());
                 self.path = Some(path.to_path_buf());
                 self.dirty = recovered;
                 self.last_autosave = Instant::now();
@@ -93,7 +127,7 @@ impl Editor {
                 self.position = Time(0);
                 self.playing = false;
                 self.next_id = next_id(&self.project);
-                self.worker.load(assets);
+                self.worker.load(Arc::new(assets));
                 self.request_render(Time(0));
                 self.recent.add(path);
                 if recovered {
@@ -157,7 +191,7 @@ impl Editor {
                 )
                 .map_err(|e| e.0)?;
         }
-        self.assets.insert(id.clone(), bytes.clone());
+        Arc::make_mut(&mut self.assets).insert(id.clone(), bytes.clone());
         let (kind, duration) = if media_type.starts_with("audio/") {
             if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
                 let duration = frames_to_ticks(source.pcm().frames(), source.pcm().rate())

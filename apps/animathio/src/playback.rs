@@ -8,6 +8,9 @@ use animathio_core::{Project, Rounding, TICKS_PER_SECOND, Time};
 /// is due now" once per UI frame; video is never drift-corrected on its own.
 pub(crate) trait Clock {
     fn now(&self) -> Time;
+    fn has_error(&self) -> bool {
+        false
+    }
     fn play(&mut self) -> Result<(), String>;
     fn pause(&mut self) -> Result<(), String>;
     fn seek(&mut self, time: Time) -> Result<(), String>;
@@ -48,6 +51,9 @@ impl AudioClock {
 }
 
 impl Clock for AudioClock {
+    fn has_error(&self) -> bool {
+        self.player.has_error()
+    }
     fn now(&self) -> Time {
         self.player.now()
     }

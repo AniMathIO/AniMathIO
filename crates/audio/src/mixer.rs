@@ -25,14 +25,14 @@ const SINC_LEN: usize = 256;
 const MAX_SINC_INPUT_FRAMES: usize = MAX_SAMPLE_RATE as usize + SINC_LEN + 1;
 
 /// Engine-owned native decoded resources, keyed by the project's asset identities.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AudioPool {
-    pub(crate) sources: BTreeMap<AssetId, Pcm>,
+    pub(crate) sources: BTreeMap<AssetId, Arc<Pcm>>,
 }
 impl AudioPool {
     /// Decode once, outside the real-time callback. Replacement is explicit by identity.
     pub fn insert(&mut self, id: AssetId, source: &impl AudioSource) -> Result<(), Error> {
-        self.sources.insert(id, source.decode_all()?);
+        self.sources.insert(id, Arc::new(source.decode_all()?));
         Ok(())
     }
     /// Number of live native decoded resources.
@@ -236,9 +236,9 @@ fn prepare(pcm: &Pcm, rate: u32, channels: u16) -> Result<Vec<f32>, Error> {
     let native_channels = usize::from(pcm.channels());
     let channels = usize::from(channels);
     if channels != native_channels && channels != 1 && native_channels != 1 {
-        return Err(Error::Unsupported(
-            "channel mapping supports equal layouts or mono conversion".into(),
-        ));
+        return Err(Error::Unsupported(format!(
+            "cannot map {native_channels}-channel audio to {channels}-channel output; only equal layouts or mono conversion are supported"
+        )));
     }
     let mut planar: Vec<Vec<f32>> = (0..native_channels)
         .map(|channel| {

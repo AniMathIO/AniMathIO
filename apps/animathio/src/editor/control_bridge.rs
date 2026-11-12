@@ -14,6 +14,108 @@ impl Editor {
             let Ok(ControlMsg::Invoke(call, reply)) = next else {
                 return;
             };
+            self.finish_color_edit(cx);
+            if let Call::AssetsImport { path } = &call {
+                let path = path.clone();
+                let expected_assets = self.assets.clone();
+                let mut imported_assets = expected_assets.clone();
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            let canonical = validate_existing_file(&path)?;
+                            let bytes = read_bounded(
+                                &canonical,
+                                animathio_format::Limits::default().asset_bytes,
+                            )?;
+                            let info = AssetInfo {
+                                id: AssetId::of(&bytes),
+                                name: canonical.file_name().map_or_else(
+                                    || "asset".to_owned(),
+                                    |n| n.to_string_lossy().into_owned(),
+                                ),
+                                media_type: media_type_of(&canonical.to_string_lossy()).to_owned(),
+                            };
+                            Arc::make_mut(&mut imported_assets).insert(info.id.clone(), bytes);
+                            Ok::<_, ControlError>((info, imported_assets))
+                        })
+                        .await;
+                    let _ = this.update(cx, |editor, cx| {
+                        let result = result.and_then(|(info, assets)| {
+                            if !Arc::ptr_eq(&editor.assets, &expected_assets) {
+                                return Err(ControlError::Other(
+                                    "assets changed during import; retry the import".into(),
+                                ));
+                            }
+                            editor.assets = assets;
+                            editor.worker.load(editor.assets.clone());
+                            Ok(serde_json::to_value(info)?)
+                        });
+                        let _ = reply.send(result);
+                        cx.notify();
+                    });
+                })
+                .detach();
+                continue;
+            }
+            if let Call::ProjectSave { path } = &call {
+                if self.save_pending {
+                    let _ =
+                        reply.send(Err(ControlError::Other("a save is already running".into())));
+                    continue;
+                }
+                self.save_pending = true;
+                let target = path.clone().or_else(|| self.path.clone());
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                let generation = self.audio_generation;
+                let original_path = self.path.clone();
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            let target = target.ok_or_else(|| {
+                                ControlError::Unsupported("project has never been saved".into())
+                            })?;
+                            let target = validate_output_file(&target)?;
+                            write_project(&target, &project, &assets)
+                                .map_err(ControlError::Other)?;
+                            Ok::<_, ControlError>(target)
+                        })
+                        .await;
+                    let _ = this.update(cx, |editor, cx| {
+                        editor.save_pending = false;
+                        let result = result.and_then(|target| {
+                            if editor.path == original_path {
+                                editor.path = Some(target.clone());
+                            }
+                            if generation == editor.audio_generation {
+                                editor.dirty = false;
+                            }
+                            editor.recent.add(&target);
+                            Ok(serde_json::to_value(target.display().to_string())?)
+                        });
+                        let _ = reply.send(result);
+                        cx.notify();
+                    });
+                })
+                .detach();
+                continue;
+            }
+            if let Call::RenderFrame { .. } = &call {
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                std::thread::spawn(move || {
+                    use animathio_control::ControlHandler;
+                    let mut handler = animathio_control::HeadlessHandler::from_bundle(
+                        animathio_format::Bundle {
+                            project,
+                            assets: (*assets).clone(),
+                        },
+                        None,
+                    );
+                    let _ = reply.send(handler.handle(call));
+                });
+                continue;
+            }
             if let Call::Export { params } = call {
                 if self.export_task.is_some() {
                     let _ = reply.send(Err(ControlError::Other(
@@ -153,7 +255,7 @@ impl Editor {
                 let result = animathio_control::apply_authoring_call(
                     &mut self.project,
                     &mut self.history,
-                    &mut self.assets,
+                    Arc::make_mut(&mut self.assets),
                     &call,
                 )?;
                 if replace {
@@ -176,7 +278,7 @@ impl Editor {
         &mut self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
-        let mut ctx = animathio_render::RenderCtx::from_assets(self.assets.clone())?;
+        let mut ctx = animathio_render::RenderCtx::from_assets((*self.assets).clone())?;
         let scene = animathio_core::evaluate(&self.project, params.time);
         let scene = self.resolve_scene(scene, (params.width, params.height));
         let frame = animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
@@ -206,7 +308,7 @@ impl Editor {
         let name = canonical
             .file_name()
             .map_or_else(|| "asset".to_owned(), |n| n.to_string_lossy().into_owned());
-        self.assets.insert(id.clone(), bytes);
+        Arc::make_mut(&mut self.assets).insert(id.clone(), bytes);
         self.worker.load(self.assets.clone());
         Ok(AssetInfo {
             id,
@@ -228,7 +330,7 @@ impl Editor {
         }
         self.project = project;
         self.history = History::default();
-        self.assets = assets.into_iter().map(|a| (a.id, a.bytes)).collect();
+        self.assets = Arc::new(assets.into_iter().map(|a| (a.id, a.bytes)).collect());
         self.path = None;
         self.position = Time(0);
         self.playing = false;

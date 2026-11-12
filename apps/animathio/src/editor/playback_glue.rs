@@ -16,7 +16,6 @@ impl Editor {
         self.request_generation = self.request_generation.wrapping_add(1);
         self.last_requested = Some(time);
         let scene = evaluate(&self.project, time);
-        let scene = self.resolve_scene(scene, size);
         self.worker.request(RenderRequest {
             generation: self.request_generation,
             scene,
