@@ -680,6 +680,7 @@ impl Editor {
                 let project = self.project.clone();
                 let assets = self.assets.clone();
                 let generation = self.audio_generation;
+                let original_path = self.path.clone();
                 cx.spawn(async move |this, cx| {
                     let result = cx
                         .background_spawn(async move {
@@ -695,7 +696,9 @@ impl Editor {
                     let _ = this.update(cx, |editor, cx| {
                         editor.save_pending = false;
                         let result = result.and_then(|target| {
-                            editor.path = Some(target.clone());
+                            if editor.path == original_path {
+                                editor.path = Some(target.clone());
+                            }
                             if generation == editor.audio_generation {
                                 editor.dirty = false;
                             }
@@ -1942,6 +1945,7 @@ impl Editor {
         let project = self.project.clone();
         let assets = self.assets.clone();
         let generation = self.audio_generation;
+        let original_path = self.path.clone();
         self.last_autosave = Instant::now();
         cx.spawn(async move |this, cx| {
             let destination = path.clone();
@@ -1952,7 +1956,9 @@ impl Editor {
                 editor.save_pending = false;
                 match result {
                     Ok(()) if !autosave => {
-                        editor.path = Some(path.clone());
+                        if editor.path == original_path {
+                            editor.path = Some(path.clone());
+                        }
                         if editor.audio_generation == generation {
                             editor.dirty = false;
                         }
