@@ -1,0 +1,22 @@
+[package]
+name = "animathio-import-manim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+animathio-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tree-sitter = "0.25"
+tree-sitter-python = "0.25"
+
+[dev-dependencies]
+animathio-format = { path = "../../crates/format" }
+tempfile = "3"
+
+[lints]
+workspace = true

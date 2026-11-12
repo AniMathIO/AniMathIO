@@ -241,3 +241,46 @@ fn import_v1_writes_a_valid_archive() {
     assert_eq!(bundle.project.height(), 600);
     assert_eq!(bundle.project.background(), [17, 17, 17, 255]);
 }
+
+#[test]
+fn import_manim_writes_a_valid_archive_and_selects_scenes() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("scene.py");
+    let output = dir.path().join("out.amio");
+    fs::write(
+        &input,
+        r#"
+from manim import *
+
+class First(Scene):
+    def construct(self):
+        self.wait(1)
+
+class Second(Scene):
+    def construct(self):
+        title = Text("hello", color=WHITE)
+        self.play(Write(title), run_time=2)
+        self.wait(1)
+"#,
+    )
+    .unwrap();
+
+    ok(&[
+        "import-manim",
+        path(&input),
+        "--scene",
+        "Second",
+        "-o",
+        path(&output),
+    ]);
+    ok(&["validate", path(&output)]);
+    let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 1);
+    assert_eq!(bundle.project.width(), 1920);
+    assert_eq!(bundle.project.height(), 1080);
+    assert_eq!(bundle.project.background(), [0, 0, 0, 255]);
+    assert_eq!(
+        bundle.project.duration(),
+        animathio_core::Time(animathio_core::TICKS_PER_SECOND * 3)
+    );
+}
