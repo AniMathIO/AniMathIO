@@ -59,6 +59,7 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
       - name: Check licenses
-        uses: EmbarkStudios/cargo-deny-action@v2
+        if: runner.os == 'Linux'
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check licenses

@@ -130,7 +130,7 @@ struct WorkerPool {
 impl WorkerPool {
     fn new(threads: usize) -> Self {
         let threads = threads.clamp(1, 32);
-        let (tx, rx) = crossbeam_channel::unbounded::<Job>();
+        let (tx, rx) = crossbeam_channel::bounded::<Job>(64);
         for _ in 0..threads {
             let rx = rx.clone();
             std::thread::Builder::new()
@@ -169,7 +169,7 @@ impl MediaPool {
                 assets: BTreeMap::new(),
                 cache: FrameCache::new(config.budget_bytes),
             })),
-            prefetch: config.prefetch,
+            prefetch: config.prefetch.min(32),
         }
     }
 
@@ -203,8 +203,45 @@ impl MediaPool {
             playhead: AtomicI64::new(0),
         });
         let mut inner = crate::lock(self.inner.as_ref());
-        inner.assets.insert(asset, state);
+        if let Some(old) = inner.assets.insert(asset.clone(), state) {
+            old.released.store(true, Ordering::SeqCst);
+        }
+        inner.cache.remove_asset(&asset);
         Ok(())
+    }
+
+    /// Register content-addressed bytes, sharing their allocation between decoders.
+    pub fn add_bytes(&self, asset: AssetId, bytes: Arc<[u8]>) -> Result<()> {
+        if AssetId::of(&bytes) != asset {
+            return Err(MediaError::Invalid("asset hash mismatch".into()));
+        }
+        let info = self.backend.probe_bytes("media", bytes.clone())?;
+        let video = if info.video.is_some() {
+            Some(self.backend.open_video_bytes("media", bytes.clone())?)
+        } else {
+            None
+        };
+        let audio = if info.audio.is_empty() {
+            None
+        } else {
+            Some(self.backend.open_audio_bytes("media", bytes)?)
+        };
+        let state = Arc::new(AssetState {
+            id: asset.clone(),
+            video,
+            audio,
+            info,
+            released: AtomicBool::new(false),
+            playhead: AtomicI64::new(-1),
+        });
+        self.release(asset.clone());
+        crate::lock(&self.inner).assets.insert(asset, state);
+        Ok(())
+    }
+
+    /// Read registered asset metadata.
+    pub fn info(&self, asset: &AssetId) -> Option<MediaInfo> {
+        self.state(asset).map(|state| state.info.clone())
     }
 
     /// Decode the frame displayed at `t` for `asset`, returning a shared RGBA frame.
@@ -299,7 +336,7 @@ impl MediaPool {
             .frame_to_time(1, Rounding::Floor)
             .unwrap_or_default()
             .0;
-        if dt <= 0 {
+        if dt <= 0 || prev < 0 || t.0.abs_diff(prev) > (dt as u64).saturating_mul(2) {
             return;
         }
         let inner = self.inner.clone();
@@ -308,10 +345,13 @@ impl MediaPool {
             let Some(target) = t.0.checked_add(direction.saturating_mul(offset)) else {
                 break;
             };
+            if target < 0 || target >= state.info.duration.0 {
+                break;
+            }
             let key = (state.id.clone(), Time(target));
             let inner2 = inner.clone();
             let state2 = state.clone();
-            self.workers.spawn(Box::new(move || {
+            let _ = self.workers.tx.try_send(Box::new(move || {
                 let mut guard = crate::lock(inner2.as_ref());
                 if guard.cache.get(&key).is_some() {
                     return;
@@ -328,6 +368,9 @@ fn decode_and_cache(
     state: &Arc<AssetState>,
     t: Time,
 ) -> Result<Arc<Frame>> {
+    if state.released.load(Ordering::SeqCst) {
+        return Err(MediaError::Shutdown);
+    }
     let frame = state
         .video
         .as_ref()
@@ -351,5 +394,41 @@ fn insert_if_current(
         && !state.released.load(Ordering::SeqCst);
     if current {
         guard.cache.insert((state.id.clone(), t), frame);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ColorInfo, ColorRange, Matrix, Primaries, Transfer};
+    #[test]
+    fn lru_evicts_by_bytes_and_get_refreshes_recency() {
+        let id = AssetId::of(b"asset");
+        let frame = Arc::new(Frame {
+            width: 2,
+            height: 2,
+            pixels: Arc::from([0u8; 16]),
+            pts: Time(0),
+            color: ColorInfo {
+                matrix: Matrix::Bt601,
+                transfer: Transfer::Bt709,
+                primaries: Primaries::Bt709,
+                range: ColorRange::Limited,
+                matrix_specified: false,
+            },
+        });
+        let mut cache = FrameCache::new(32);
+        let key = |n| (id.clone(), Time(n));
+        cache.insert(key(0), frame.clone());
+        cache.insert(key(1), frame.clone());
+        cache.get(&key(0)).unwrap();
+        cache.insert(key(2), frame.clone());
+        assert!(cache.get(&key(1)).is_none());
+        assert!(cache.get(&key(0)).is_some());
+        assert_eq!(cache.bytes, 32);
+        cache.budget = 1;
+        cache.insert(key(3), frame);
+        assert!(cache.is_empty());
+        assert_eq!(cache.bytes, 0);
     }
 }

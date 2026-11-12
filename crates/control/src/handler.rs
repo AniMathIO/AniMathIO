@@ -57,6 +57,14 @@ pub trait ControlHandler {
         from_value(self.handle(Call::RenderFrame { params })?)
     }
 
+    /// Export an offline MP4 and return its destination after completion.
+    fn export_video(
+        &mut self,
+        params: crate::method::ExportParams,
+    ) -> Result<String, ControlError> {
+        from_value(self.handle(Call::Export { params })?)
+    }
+
     /// Move the playhead.
     fn playback_seek(&mut self, time: animathio_core::Time) -> Result<(), ControlError> {
         let () = from_value(self.handle(Call::PlaybackSeek { time })?)?;

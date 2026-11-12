@@ -21,6 +21,7 @@ filmcraft-frame = "0.9.0"
 filmcraft-h264 = "0.9.0"
 filmcraft-h264enc = "0.9.0"
 filmcraft-isobmff = "0.9.0"
+filmcraft-matroska = "0.9.0"
 filmcraft-media = "0.9.0"
 filmcraft-time = "0.9.0"
 

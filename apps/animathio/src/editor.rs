@@ -243,6 +243,7 @@ pub(crate) struct Editor {
     plugins: Vec<PluginDescriptor>,
     add_menu_open: bool,
     settings_open: bool,
+    export_task: Option<crate::export_worker::ExportTask>,
     keyframe_drag: Option<KeyframeDrag>,
     selected_keyframe: Option<KeyframeSelection>,
     error: Option<String>,
@@ -305,6 +306,7 @@ impl Editor {
             plugins,
             add_menu_open: false,
             settings_open: false,
+            export_task: None,
             keyframe_drag: None,
             selected_keyframe: None,
             error,
@@ -377,6 +379,27 @@ impl Editor {
             let Ok(ControlMsg::Invoke(call, reply)) = next else {
                 return;
             };
+            if let Call::Export { params } = call {
+                if self.export_task.is_some() {
+                    let _ = reply.send(Err(ControlError::Other(
+                        "an export is already running".into(),
+                    )));
+                } else {
+                    match crate::export_worker::ExportTask::spawn(
+                        self.project.clone(),
+                        self.assets.clone(),
+                        params,
+                        Some(reply.clone()),
+                    ) {
+                        Ok(task) => self.export_task = Some(task),
+                        Err(error) => {
+                            let _ = reply.send(Err(ControlError::Other(error)));
+                        }
+                    }
+                }
+                cx.notify();
+                continue;
+            }
             let result = self.handle_control_call(call, cx);
             let _ = reply.send(result);
         }
@@ -388,6 +411,9 @@ impl Editor {
         cx: &mut Context<Self>,
     ) -> Result<Value, ControlError> {
         Ok(match call {
+            Call::Export { .. } => {
+                return Err(ControlError::Other("export must run on its worker".into()));
+            }
             Call::ProjectGet => serde_json::to_value(ProjectState {
                 project: self.project.clone(),
                 path: self.path.as_ref().map(|p| p.display().to_string()),
@@ -482,10 +508,7 @@ impl Editor {
         &mut self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
-        let mut ctx = animathio_render::RenderCtx::default();
-        for (id, bytes) in &self.assets {
-            ctx.resources.insert(id.clone(), bytes.clone())?;
-        }
+        let mut ctx = animathio_render::RenderCtx::from_assets(self.assets.clone())?;
         let scene = animathio_core::evaluate(&self.project, params.time);
         let scene = self.resolve_scene(scene, (params.width, params.height));
         let frame = animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
@@ -2478,6 +2501,78 @@ impl Editor {
             )
     }
 
+    fn on_export_click(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.export_task.is_some() {
+            return;
+        }
+        let Some(output) = rfd::FileDialog::new()
+            .add_filter("MP4 video", &["mp4"])
+            .set_file_name("video.mp4")
+            .save_file()
+        else {
+            return;
+        };
+        let params = animathio_control::ExportParams {
+            output,
+            from: Time(0),
+            to: None,
+            settings: animathio_export::Settings::default(),
+        };
+        match crate::export_worker::ExportTask::spawn(
+            self.project.clone(),
+            self.assets.clone(),
+            params,
+            None,
+        ) {
+            Ok(task) => self.export_task = Some(task),
+            Err(error) => self.error = Some(error),
+        }
+        cx.notify();
+    }
+
+    fn export_dialog(&self, cx: &mut Context<Self>) -> Div {
+        use std::sync::atomic::Ordering;
+        let Some(task) = &self.export_task else {
+            return div();
+        };
+        let completed = task.completed.load(Ordering::Relaxed);
+        let total = task.total.load(Ordering::Relaxed);
+        let width = if total == 0 {
+            0.0
+        } else {
+            240.0 * completed as f32 / total as f32
+        };
+        div()
+            .absolute()
+            .top(px(60.))
+            .left(px(30.))
+            .w(px(280.))
+            .p_3()
+            .bg(rgb(0x1f2430))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child("Exporting MP4")
+            .child(format!("{completed} / {total} frames"))
+            .child(
+                div()
+                    .w(px(240.))
+                    .h(px(8.))
+                    .bg(rgb(0x394354))
+                    .child(div().w(px(width)).h(px(8.)).bg(rgb(0x5eabff))),
+            )
+            .child(button(
+                "cancel-export",
+                "Cancel",
+                cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Some(task) = &this.export_task {
+                        task.cancel.store(true, Ordering::Relaxed);
+                    }
+                    cx.notify();
+                }),
+            ))
+    }
+
     fn top_bar(&self, cx: &mut Context<Self>) -> Div {
         let play_label = if self.playing { "Pause" } else { "Play" };
         let dirty = if self.dirty { " ●" } else { "" };
@@ -2492,6 +2587,11 @@ impl Editor {
             .bg(rgb(0x1f2430))
             .child(button("open", "Open", cx.listener(Self::on_open_click)))
             .child(button("save", "Save", cx.listener(Self::on_save_click)))
+            .child(button(
+                "export",
+                "Export…",
+                cx.listener(Self::on_export_click),
+            ))
             .child(button(
                 "import",
                 "Add media…",
@@ -2603,6 +2703,22 @@ impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.pump_results(window);
         self.drain_control(cx);
+        if let Some(task) = &self.export_task {
+            match task.result.try_recv() {
+                Ok(result) => {
+                    self.error = Some(match result {
+                        Ok(path) => format!("Exported {}", path.display()),
+                        Err(error) => error,
+                    });
+                    self.export_task = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.error = Some("export worker stopped unexpectedly".into());
+                    self.export_task = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => window.request_animation_frame(),
+            }
+        }
 
         if self.playing {
             let now = self.clock.now();
@@ -2678,6 +2794,9 @@ impl Render for Editor {
         }
         if self.settings_open {
             root = root.child(self.settings_dialog(cx));
+        }
+        if self.export_task.is_some() {
+            root = root.child(self.export_dialog(cx));
         }
         root
     }
@@ -2932,7 +3051,7 @@ fn plugins_cache_dir() -> PathBuf {
 /// Load every clip-source plugin from the bundled build output and the user
 /// plugins directory. Descriptors are plain data for the UI; the host itself is
 /// kept on the UI thread and drives both preview and control rendering.
-fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Option<String>) {
+pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Option<String>) {
     let mut host = match PluginHost::new(plugins_cache_dir()) {
         Ok(host) => host,
         Err(error) => {

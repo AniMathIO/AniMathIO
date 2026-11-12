@@ -24,6 +24,7 @@ mod color;
 mod encoder;
 mod frame;
 mod info;
+pub mod limits;
 mod pool;
 mod time;
 

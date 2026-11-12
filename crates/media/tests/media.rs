@@ -60,14 +60,16 @@ fn psnr_rgba_rgb24(rgba: &[u8], rgb24: &[u8]) -> f64 {
 }
 
 fn ffmpeg_available() -> bool {
-    Command::new("ffmpeg")
+    Command::new("nice")
+        .args(["-n", "19", "ffmpeg", "-threads", "1"])
         .arg("-version")
         .output()
         .is_ok_and(|o| o.status.success())
 }
 
 fn ffmpeg_rgb_at(path: &Path, t_seconds: f64, width: usize, height: usize) -> Option<Vec<u8>> {
-    let out = Command::new("ffmpeg")
+    let out = Command::new("nice")
+        .args(["-n", "19", "ffmpeg", "-threads", "1"])
         .args(["-v", "error", "-ss"])
         .arg(format!("{t_seconds:.6}"))
         .args(["-i"])
@@ -183,7 +185,8 @@ fn sequential_matches_random_access() {
         .collect();
     // Random access to a shuffled set of frame indices must be byte-identical.
     for frame in [59, 0, 13, 40, 27, 7, 33, 21, 51, 3] {
-        let ours = decoder.frame_at(frame_time(frame)).expect("decode");
+        let cold = FilmCraftBackend::new().open_video(&fixture()).unwrap();
+        let ours = cold.frame_at(frame_time(frame)).expect("decode");
         assert_eq!(&*ours.pixels, sequential[frame as usize]);
     }
 }
@@ -306,4 +309,41 @@ fn synthetic_frame(i: u32, width: u32, height: u32) -> Vec<u8> {
         }
     }
     buf
+}
+
+#[test]
+fn malformed_and_truncated_inputs_return_errors() {
+    let backend = FilmCraftBackend::new();
+    let fixture = std::fs::read(fixture()).unwrap();
+    for end in [0, 1, 7, 32, fixture.len() / 2, fixture.len() - 1] {
+        assert!(
+            backend
+                .probe_bytes("broken.mp4", Arc::from(&fixture[..end]))
+                .is_err(),
+            "accepted truncation at {end}"
+        );
+    }
+    let mut forged = fixture.clone();
+    let at = forged.windows(4).position(|w| w == b"stsz").unwrap() + 12;
+    forged[at..at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+    assert!(backend.probe_bytes("huge.mp4", forged.into()).is_err());
+}
+
+#[test]
+fn oversized_and_nonfinite_encoder_inputs_return_errors() {
+    for (width, height) in [(u32::MAX, 2), (8192, 8192), (0, 0)] {
+        assert!(
+            Mp4Encoder::new(EncoderConfig::video_only(VideoConfig::new(
+                width,
+                height,
+                rate30()
+            )))
+            .is_err()
+        );
+    }
+    for crf in [f32::NAN, f32::INFINITY, -1.0, 52.0] {
+        let mut config = VideoConfig::new(32, 32, rate30());
+        config.quality = Quality::Crf(crf);
+        assert!(Mp4Encoder::new(EncoderConfig::video_only(config)).is_err());
+    }
 }

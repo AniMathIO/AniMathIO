@@ -219,9 +219,47 @@ pub(crate) fn resolve(bytes: &[u8], resolved: fc::ColorInfo) -> (ColorInfo, bool
             ColorInfo::from_filmcraft(resolved, matrix, specified),
             probe.vfr,
         )
+    } else if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
+        let matrix = filmcraft_matroska::open_with(
+            bytes,
+            &filmcraft_matroska::OpenOptions {
+                index: false,
+                verify_crc: false,
+            },
+        )
+        .ok()
+        .and_then(|file| file.tracks.into_iter().find(|t| t.video.is_some()))
+        .and_then(|track| {
+            let container = track
+                .video
+                .as_ref()
+                .and_then(|v| v.colour.as_ref())
+                .and_then(|c| c.matrix_coefficients)
+                .and_then(|c| u8::try_from(c).ok())
+                .and_then(fc::Matrix::from_code);
+            container.or_else(|| match track.codec {
+                filmcraft_matroska::Codec::Avc { avcc } => {
+                    filmcraft_isobmff::AvcConfig::parse(&avcc)
+                        .ok()
+                        .and_then(|cfg| avc_vui(&cfg))
+                        .and_then(|vui| fc::Matrix::from_code(vui.matrix_coefficients))
+                }
+                _ => None,
+            })
+        });
+        (
+            ColorInfo::from_filmcraft(
+                resolved,
+                matrix.map_or(Matrix::Bt601, Matrix::from),
+                matrix.is_some(),
+            ),
+            false,
+        )
     } else {
-        let color = ColorInfo::from_filmcraft(resolved, resolved.matrix.into(), true);
-        (color, false)
+        (
+            ColorInfo::from_filmcraft(resolved, Matrix::Bt601, false),
+            false,
+        )
     }
 }
 
@@ -270,8 +308,53 @@ pub(crate) fn yuv8_to_rgba8(
 
 /// Convert a decoded [`filmcraft_frame::VideoFrame`] to straight-alpha RGBA8, honouring our
 /// explicit colour resolution.
-pub(crate) fn frame_to_rgba8(frame: &filmcraft_frame::VideoFrame, color: ColorInfo) -> Vec<u8> {
-    match &frame.data {
+pub(crate) fn frame_to_rgba8(
+    frame: &filmcraft_frame::VideoFrame,
+    color: ColorInfo,
+) -> crate::Result<Vec<u8>> {
+    let bytes = crate::limits::frame_bytes(frame.width, frame.height)?;
+    let pixels = bytes / 4;
+    let planes_valid = |lengths: [usize; 3], chroma: Chroma, alpha: Option<usize>| {
+        let (sx, sy) = chroma.shifts();
+        let uv =
+            (frame.width as usize).div_ceil(1 << sx) * (frame.height as usize).div_ceil(1 << sy);
+        lengths[0] >= pixels
+            && lengths[1] >= uv
+            && lengths[2] >= uv
+            && alpha.is_none_or(|n| n >= pixels)
+    };
+    let valid = match &frame.data {
+        PixelData::Rgba8(data) => data.len() == bytes,
+        PixelData::RgbaF32(data) => data.len() == bytes,
+        PixelData::Yuv8 {
+            planes,
+            chroma,
+            alpha,
+        } => planes_valid(
+            planes.each_ref().map(|p| p.len()),
+            *chroma,
+            alpha.as_ref().map(|p| p.len()),
+        ),
+        PixelData::Yuv16 {
+            planes,
+            chroma,
+            bits,
+            alpha,
+        } => {
+            (9..=16).contains(bits)
+                && planes_valid(
+                    planes.each_ref().map(|p| p.len()),
+                    *chroma,
+                    alpha.as_ref().map(|p| p.len()),
+                )
+        }
+    };
+    if !valid {
+        return Err(crate::MediaError::Decode(
+            "truncated decoded frame planes".into(),
+        ));
+    }
+    Ok(match &frame.data {
         PixelData::Rgba8(data) => data.as_ref().clone(),
         PixelData::Yuv8 {
             planes,
@@ -286,10 +369,16 @@ pub(crate) fn frame_to_rgba8(frame: &filmcraft_frame::VideoFrame, color: ColorIn
             color.matrix,
             color.range,
         ),
-        // 10/12-bit and float sources go through FilmCraft's own (colour-managed) conversion.
-        // The explicit BT.601 default for these paths is a deferred item.
-        _ => frame.to_rgba8(),
-    }
+        _ => {
+            let mut frame = frame.clone();
+            frame.color.matrix = match color.matrix {
+                Matrix::Bt601 => fc::Matrix::Bt601,
+                Matrix::Bt709 => fc::Matrix::Bt709,
+                Matrix::Bt2020Ncl => fc::Matrix::Bt2020Ncl,
+            };
+            frame.to_rgba8()
+        }
+    })
 }
 
 fn kr_kb(matrix: Matrix) -> (f64, f64) {

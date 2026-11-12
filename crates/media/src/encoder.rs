@@ -126,6 +126,7 @@ pub struct Mp4Encoder {
     audio_track: Option<usize>,
     frame_index: u64,
     audio_buf: Vec<f32>,
+    encoded_bytes: usize,
 }
 
 impl Mp4Encoder {
@@ -133,6 +134,15 @@ impl Mp4Encoder {
     pub fn new(config: EncoderConfig) -> Result<Self> {
         let video = config.video;
         let audio_config = config.audio;
+        crate::limits::frame_bytes(video.width, video.height)?;
+        if video.threads > 3
+            || matches!(video.quality, Quality::Crf(v) if !v.is_finite() || !(0.0..=51.0).contains(&v))
+        {
+            return Err(MediaError::Invalid("invalid encoder threads or CRF".into()));
+        }
+        if let Some(a) = audio_config {
+            crate::limits::audio(a.sample_rate, a.channels, 0)?;
+        }
         if video.width == 0 || video.height == 0 {
             return Err(MediaError::Invalid(
                 "video dimensions must be positive".into(),
@@ -229,12 +239,16 @@ impl Mp4Encoder {
             audio_track,
             frame_index: 0,
             audio_buf: Vec::new(),
+            encoded_bytes: 0,
         })
     }
 
     /// Encode one RGBA8 frame in presentation order.
     pub fn encode_video_frame(&mut self, rgba: &[u8]) -> Result<()> {
-        let expected = usize::try_from(self.width * self.height * 4).unwrap_or(0);
+        let expected = crate::limits::frame_bytes(self.width, self.height)?;
+        if self.frame_index >= crate::limits::MAX_FRAMES {
+            return Err(crate::limits::invalid());
+        }
         if rgba.len() != expected {
             return Err(MediaError::Invalid(format!(
                 "frame buffer is {len} bytes, expected {expected}",
@@ -251,7 +265,9 @@ impl Mp4Encoder {
         };
         let frame_index = i64::try_from(self.frame_index)
             .map_err(|_| MediaError::Invalid("frame count overflow".into()))?;
-        let pts = frame_index * i64::from(self.fps_den);
+        let pts = frame_index
+            .checked_mul(i64::from(self.fps_den))
+            .ok_or_else(crate::limits::invalid)?;
         let packets = self
             .h264
             .encode(&yuv, pts)
@@ -274,12 +290,27 @@ impl Mp4Encoder {
                 "audio sample count is not a whole number of frames".into(),
             ));
         }
-        self.audio_buf.extend_from_slice(interleaved);
-        let frame_len = channels * filmcraft_aac::FRAME_LEN;
-        while self.audio_buf.len() >= frame_len {
-            let chunk: Vec<f32> = self.audio_buf.drain(..frame_len).collect();
-            self.encode_audio_frame(&chunk, channels)?;
+        if interleaved.len() > crate::limits::MAX_AUDIO_SAMPLES
+            || interleaved.iter().any(|s| !s.is_finite())
+        {
+            return Err(crate::limits::invalid());
         }
+        let frame_len = channels * filmcraft_aac::FRAME_LEN;
+        let mut remaining = interleaved;
+        if !self.audio_buf.is_empty() {
+            let needed = (frame_len - self.audio_buf.len()).min(remaining.len());
+            self.audio_buf.extend_from_slice(&remaining[..needed]);
+            remaining = &remaining[needed..];
+            if self.audio_buf.len() == frame_len {
+                let chunk = std::mem::take(&mut self.audio_buf);
+                self.encode_audio_frame(&chunk, channels)?;
+            }
+        }
+        let mut chunks = remaining.chunks_exact(frame_len);
+        for chunk in &mut chunks {
+            self.encode_audio_frame(chunk, channels)?;
+        }
+        self.audio_buf.extend_from_slice(chunks.remainder());
         Ok(())
     }
 
@@ -331,7 +362,17 @@ impl Mp4Encoder {
         Ok(())
     }
 
+    fn account_packet(&mut self, bytes: usize) -> Result<()> {
+        self.encoded_bytes = self
+            .encoded_bytes
+            .checked_add(bytes)
+            .filter(|n| *n <= crate::limits::MAX_INPUT_BYTES)
+            .ok_or_else(crate::limits::invalid)?;
+        Ok(())
+    }
+
     fn write_video_packet(&mut self, packet: &Packet) -> Result<()> {
+        self.account_packet(packet.data.len())?;
         self.mux
             .write_sample(
                 self.video_track,
@@ -346,6 +387,7 @@ impl Mp4Encoder {
     }
 
     fn write_audio_access_unit(&mut self, au: &[u8]) -> Result<()> {
+        self.account_packet(au.len())?;
         let Some(track) = self.audio_track else {
             return Ok(());
         };

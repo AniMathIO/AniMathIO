@@ -185,7 +185,6 @@ pub(crate) struct RenderFrame {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[allow(dead_code)] // schema-only placeholder until the export crate lands
 pub(crate) struct ExportVideo {
     pub(crate) path: String,
     pub(crate) format: Option<String>,
@@ -815,9 +814,24 @@ impl McpServer {
         }))
     }
 
-    #[tool(description = "Export the project to an .mp4/.webm file. Not implemented yet in v2.")]
-    async fn export_video(&self, _: Parameters<ExportVideo>) -> Result<CallToolResult, McpError> {
-        Err(unsupported("export is not implemented yet in v2"))
+    #[tool(description = "Export an offline H.264 + AAC MP4 snapshot of the project.")]
+    async fn export_video(
+        &self,
+        Parameters(p): Parameters<ExportVideo>,
+    ) -> Result<CallToolResult, McpError> {
+        if p.format.as_deref().is_some_and(|format| format != "mp4") {
+            return Err(unsupported("only mp4 export is available"));
+        }
+        let mut backend = self.backend.lock().await;
+        let path = backend
+            .export_video(animathio_control::ExportParams {
+                output: PathBuf::from(p.path),
+                from: Time(0),
+                to: None,
+                settings: animathio_export::Settings::default(),
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({ "path": path }))
     }
 
     #[tool(description = "Import a v1 `.animathio` project, replacing the current project.")]

@@ -52,6 +52,24 @@ enum Action {
         #[command(flatten)]
         size: OutputSize,
     },
+    /// Export an offline H.264 + AAC MP4.
+    Export {
+        project: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Inclusive start in decimal seconds or Nticks.
+        #[arg(long, value_parser = parse_time, default_value = "0")]
+        from: Time,
+        /// Exclusive end in decimal seconds or Nticks; defaults to project duration.
+        #[arg(long, value_parser = parse_time)]
+        to: Option<Time>,
+        /// Output rate, e.g. 30 or 30000/1001.
+        #[arg(long, value_parser = parse_rate)]
+        fps: Option<animathio_core::FrameRate>,
+        /// Constant quality, 0..=51; lower is better.
+        #[arg(long, default_value_t = 23.0)]
+        crf: f32,
+    },
     /// Check model invariants and all asset content hashes.
     Validate { project: PathBuf },
     /// Convert a v1 `.animathio` project to a `.amio` archive.
@@ -188,6 +206,36 @@ fn run(cli: Cli) -> Result<()> {
             )?
             .save_png(output)?;
         }
+        Action::Export {
+            project,
+            output,
+            from,
+            to,
+            fps,
+            crf,
+        } => {
+            let bundle = load(&project)?;
+            let range = animathio_core::TimeRange::new(
+                from,
+                to.unwrap_or_else(|| animathio_export::duration(&bundle.project)),
+            )?;
+            let bytes = animathio_export::export(
+                &bundle.project,
+                &bundle.assets,
+                range,
+                animathio_export::Settings {
+                    frame_rate: fps,
+                    crf,
+                },
+                |progress| {
+                    if progress.completed == progress.total {
+                        eprintln!("exported {} frames", progress.total);
+                    }
+                    true
+                },
+            )?;
+            fs::write(output, bytes)?;
+        }
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {
             project,
@@ -271,11 +319,7 @@ async fn run_mcp(project: Option<PathBuf>) -> Result<()> {
 }
 
 fn context(assets: BTreeMap<AssetId, Vec<u8>>) -> Result<RenderCtx> {
-    let mut ctx = RenderCtx::default();
-    for (id, bytes) in assets {
-        ctx.resources.insert(id, bytes)?;
-    }
-    Ok(ctx)
+    Ok(RenderCtx::from_assets(assets)?)
 }
 
 fn read_import_input(path: &Path) -> Result<Vec<u8>> {
@@ -325,6 +369,13 @@ fn load(path: &Path) -> Result<Bundle> {
         assets.insert(id.clone(), bytes);
     }
     Ok(Bundle { project, assets })
+}
+
+fn parse_rate(value: &str) -> std::result::Result<animathio_core::FrameRate, String> {
+    let (num, den) = value.split_once('/').unwrap_or((value, "1"));
+    let num = num.parse().map_err(|_| "invalid frame rate".to_owned())?;
+    let den = den.parse().map_err(|_| "invalid frame rate".to_owned())?;
+    animathio_core::FrameRate::new(num, den).map_err(|e| e.to_string())
 }
 
 // Decimal arithmetic stays in integer ticks; reject sub-tick values instead of rounding.

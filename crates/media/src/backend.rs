@@ -3,9 +3,9 @@
 //! The FFmpeg fallback backend is intentionally not implemented yet; the trait is shaped so it
 //! can be added later without touching callers.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::io::Read;
+use std::path::Path;
+use std::sync::Arc;
 
 use animathio_core::{FrameRate, TICKS_PER_SECOND, Time};
 use filmcraft_media::{FrameRequest, SharedSource};
@@ -35,7 +35,19 @@ pub trait AudioDecoder: Send + Sync {
 /// A media backend: probes files and opens decoders. Implementations are cheap, shared handles;
 /// decoded resources are owned by the [`MediaPool`](crate::MediaPool).
 pub trait MediaBackend: Send + Sync {
-    /// Read static metadata without opening a decoder.
+    /// Read metadata from in-memory encoded media.
+    fn probe_bytes(&self, _name: &str, _bytes: Arc<[u8]>) -> Result<MediaInfo> {
+        Err(MediaError::Format("byte loading unavailable".into()))
+    }
+    /// Open video from verified in-memory asset bytes.
+    fn open_video_bytes(&self, _name: &str, _bytes: Arc<[u8]>) -> Result<Box<dyn VideoDecoder>> {
+        Err(MediaError::Format("byte loading unavailable".into()))
+    }
+    /// Open audio from verified in-memory asset bytes.
+    fn open_audio_bytes(&self, _name: &str, _bytes: Arc<[u8]>) -> Result<Box<dyn AudioDecoder>> {
+        Err(MediaError::Format("byte loading unavailable".into()))
+    }
+    /// Read static metadata from a file.
     fn probe(&self, path: &Path) -> Result<MediaInfo>;
     /// Open a video decoder for `path`.
     fn open_video(&self, path: &Path) -> Result<Box<dyn VideoDecoder>>;
@@ -46,12 +58,9 @@ pub trait MediaBackend: Send + Sync {
 /// The FilmCraft backend (MP4/MOV/Matroska/WebM/Ogg/MPEG-TS and standalone audio, via
 /// `filmcraft-codecs`).
 ///
-/// File bytes are cached by canonical path so `open_video` and `open_audio` on the same file
-/// share one in-memory copy. Decoding uses FilmCraft's GOP-aware seek.
+/// Decoding uses FilmCraft's GOP-aware seek. Byte-based loading shares one encoded asset allocation.
 #[derive(Default)]
-pub struct FilmCraftBackend {
-    bytes: Mutex<HashMap<PathBuf, Arc<[u8]>>>,
-}
+pub struct FilmCraftBackend;
 
 impl FilmCraftBackend {
     /// Create an empty backend.
@@ -61,36 +70,42 @@ impl FilmCraftBackend {
     }
 
     fn load(&self, path: &Path) -> Result<Arc<[u8]>> {
-        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let mut map = crate::lock(&self.bytes);
-        if let Some(bytes) = map.get(&canon) {
-            return Ok(bytes.clone());
-        }
-        let bytes: Arc<[u8]> = std::fs::read(path)
-            .map_err(|e| MediaError::Io(format!("{}: {e}", path.display())))?
-            .into();
-        map.insert(canon, bytes.clone());
-        Ok(bytes)
-    }
-
-    fn source(&self, path: &Path) -> Result<SharedSource> {
-        let bytes = self.load(path)?;
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("media")
-            .to_owned();
-        open_source(&name, bytes)
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .map_err(|e| MediaError::Io(e.to_string()))?
+            .take(crate::limits::MAX_INPUT_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| MediaError::Io(e.to_string()))?;
+        crate::limits::input(&bytes)?;
+        Ok(bytes.into())
     }
 }
 
 fn open_source(name: &str, bytes: Arc<[u8]>) -> Result<SharedSource> {
-    filmcraft_codecs::open_bytes(name, bytes).map_err(|e| match e {
+    crate::limits::input(&bytes)?;
+    let source = filmcraft_codecs::open_bytes(name, bytes).map_err(|e| match e {
         filmcraft_media::MediaError::Unsupported(msg) | filmcraft_media::MediaError::Io(msg) => {
             MediaError::Format(msg)
         }
         other => MediaError::Decode(other.to_string()),
-    })
+    })?;
+    let info = source.info();
+    if info.duration.0 < 0 {
+        return Err(crate::limits::invalid());
+    }
+    if let Some(v) = &info.video {
+        crate::limits::frame_bytes(v.width, v.height)?;
+        let frames = i128::from(info.duration.0) * i128::from(v.frame_rate.num)
+            / i128::from(filmcraft_time::TICKS_PER_SECOND)
+            / i128::from(v.frame_rate.den.max(1));
+        if frames > i128::from(crate::limits::MAX_FRAMES) {
+            return Err(crate::limits::invalid());
+        }
+    }
+    for a in &info.audio_streams {
+        crate::limits::audio(a.sample_rate, a.channels as usize, 0)?;
+    }
+    Ok(source)
 }
 
 fn map_media_error(e: filmcraft_media::MediaError) -> MediaError {
@@ -167,7 +182,8 @@ impl VideoDecoder for FilmCraftVideoDecoder {
             .source
             .video_frame(FrameRequest::full(to_filmcraft(media_time)))
             .map_err(map_media_error)?;
-        let rgba = color::frame_to_rgba8(&frame, self.color);
+        crate::limits::frame_bytes(frame.width, frame.height)?;
+        let rgba = color::frame_to_rgba8(&frame, self.color)?;
         Ok(Arc::new(Frame {
             width: frame.width,
             height: frame.height,
@@ -191,6 +207,7 @@ impl AudioDecoder for FilmCraftAudioDecoder {
 
     fn samples(&self, media_time: Time, len: usize) -> Result<Arc<[f32]>> {
         let sample_rate = self.info.sample_rate;
+        crate::limits::audio(sample_rate, self.info.channels as usize, len)?;
         if sample_rate == 0 {
             return Err(MediaError::NoStream("audio"));
         }
@@ -212,24 +229,18 @@ fn sample_index(time: Time, sample_rate: u32) -> i64 {
 
 impl MediaBackend for FilmCraftBackend {
     fn probe(&self, path: &Path) -> Result<MediaInfo> {
-        let bytes = self.load(path)?;
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("media")
-            .to_owned();
-        let source = open_source(&name, bytes.clone())?;
+        self.probe_bytes("media", self.load(path)?)
+    }
+    fn probe_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<MediaInfo> {
+        let source = open_source(name, bytes.clone())?;
         Ok(media_info(&source, &bytes))
     }
 
     fn open_video(&self, path: &Path) -> Result<Box<dyn VideoDecoder>> {
-        let bytes = self.load(path)?;
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("media")
-            .to_owned();
-        let source = open_source(&name, bytes.clone())?;
+        self.open_video_bytes("media", self.load(path)?)
+    }
+    fn open_video_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<Box<dyn VideoDecoder>> {
+        let source = open_source(name, bytes.clone())?;
         let mi = source.info();
         let v = mi.video.as_ref().ok_or(MediaError::NoStream("video"))?;
         let (color, vfr) = color::resolve(&bytes, v.color);
@@ -251,7 +262,10 @@ impl MediaBackend for FilmCraftBackend {
     }
 
     fn open_audio(&self, path: &Path) -> Result<Box<dyn AudioDecoder>> {
-        let source = self.source(path)?;
+        self.open_audio_bytes("media", self.load(path)?)
+    }
+    fn open_audio_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<Box<dyn AudioDecoder>> {
+        let source = open_source(name, bytes)?;
         let mi = source.info();
         let a = mi.audio().ok_or(MediaError::NoStream("audio"))?;
         let info = AudioStreamInfo {

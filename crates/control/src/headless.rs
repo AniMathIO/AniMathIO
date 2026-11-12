@@ -126,10 +126,7 @@ impl HeadlessHandler {
         &self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
-        let mut ctx = RenderCtx::default();
-        for (id, bytes) in &self.assets {
-            ctx.resources.insert(id.clone(), bytes.clone())?;
-        }
+        let mut ctx = RenderCtx::from_assets(self.assets.clone())?;
         let scene = evaluate(&self.project, params.time);
         let frame = render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
@@ -214,6 +211,25 @@ impl HeadlessHandler {
 impl ControlHandler for HeadlessHandler {
     fn handle(&mut self, call: Call) -> Result<Value, ControlError> {
         Ok(match call {
+            Call::Export { params } => {
+                let output = validate_output_file(&params.output)?;
+                let range = animathio_core::TimeRange::new(
+                    params.from,
+                    params
+                        .to
+                        .unwrap_or_else(|| animathio_export::duration(&self.project)),
+                )?;
+                let bytes = animathio_export::export(
+                    &self.project,
+                    &self.assets,
+                    range,
+                    params.settings,
+                    |_| true,
+                )
+                .map_err(|e| ControlError::Other(e.to_string()))?;
+                fs::write(&output, bytes)?;
+                serde_json::to_value(output.display().to_string())?
+            }
             Call::ProjectGet => serde_json::to_value(self.state())?,
             Call::ProjectOpen { path } => {
                 self.open(&path)?;
