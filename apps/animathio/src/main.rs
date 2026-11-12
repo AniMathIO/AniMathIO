@@ -21,6 +21,7 @@ mod export_worker;
 mod inspector;
 mod layout;
 mod playback;
+mod preview_settings;
 mod render_worker;
 mod timecode;
 mod timeline;

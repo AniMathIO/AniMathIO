@@ -330,6 +330,8 @@ pub(crate) struct Editor {
     plugin_host: Option<PluginHost>,
     plugins: Vec<PluginDescriptor>,
     settings_open: bool,
+    /// Persisted "GPU preview" toggle.
+    preview: crate::preview_settings::PreviewSettings,
     export_task: Option<crate::export_worker::ExportTask>,
     keyframe_drag: Option<KeyframeDrag>,
     selected_keyframe: Option<KeyframeSelection>,
@@ -373,6 +375,8 @@ impl Editor {
         let initial_next_id = next_id(&project);
         let clock = make_clock(&project, &pool);
         let worker = RenderWorker::spawn();
+        let preview = crate::preview_settings::PreviewSettings::load();
+        worker.set_backend(preview.backend());
         worker.load(assets.clone());
         let mut this = Self {
             project,
@@ -400,6 +404,7 @@ impl Editor {
             plugin_host,
             plugins,
             settings_open: false,
+            preview,
             export_task: None,
             keyframe_drag: None,
             selected_keyframe: None,
@@ -1346,6 +1351,16 @@ impl Editor {
             PanelSide::Bottom => self.dock.bottom_open = !self.dock.bottom_open,
         }
         self.dock.save();
+        cx.notify();
+    }
+
+    fn toggle_gpu_preview(&mut self, cx: &mut Context<Self>) {
+        self.preview.gpu = !self.preview.gpu;
+        self.preview.save();
+        self.worker.set_backend(self.preview.backend());
+        if let Some(time) = self.last_requested {
+            self.request_render(time);
+        }
         cx.notify();
     }
 
@@ -2963,6 +2978,14 @@ impl Editor {
                 (
                     "Toggle timeline",
                     Box::new(|this, cx| this.toggle_panel(PanelSide::Bottom, cx)),
+                ),
+                (
+                    if self.preview.gpu {
+                        "GPU preview: on"
+                    } else {
+                        "GPU preview: off"
+                    },
+                    Box::new(Self::toggle_gpu_preview),
                 ),
             ],
             MenuId::Clip => vec![
