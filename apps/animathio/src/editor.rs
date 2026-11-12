@@ -629,6 +629,8 @@ impl Editor {
             };
             if let Call::AssetsImport { path } = &call {
                 let path = path.clone();
+                let expected_assets = self.assets.clone();
+                let mut imported_assets = expected_assets.clone();
                 cx.spawn(async move |this, cx| {
                     let result = cx
                         .background_spawn(async move {
@@ -645,12 +647,18 @@ impl Editor {
                                 ),
                                 media_type: media_type_of(&canonical.to_string_lossy()).to_owned(),
                             };
-                            Ok::<_, ControlError>((info, bytes))
+                            Arc::make_mut(&mut imported_assets).insert(info.id.clone(), bytes);
+                            Ok::<_, ControlError>((info, imported_assets))
                         })
                         .await;
                     let _ = this.update(cx, |editor, cx| {
-                        let result = result.and_then(|(info, bytes)| {
-                            Arc::make_mut(&mut editor.assets).insert(info.id.clone(), bytes);
+                        let result = result.and_then(|(info, assets)| {
+                            if !Arc::ptr_eq(&editor.assets, &expected_assets) {
+                                return Err(ControlError::Other(
+                                    "assets changed during import; retry the import".into(),
+                                ));
+                            }
+                            editor.assets = assets;
                             editor.worker.load(editor.assets.clone());
                             Ok(serde_json::to_value(info)?)
                         });
