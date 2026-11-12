@@ -182,6 +182,18 @@ impl Track {
             if from.range.end != to.range.start {
                 return Err(invalid("transition clips must be adjacent"));
             }
+            // The outgoing clip plays `after` ticks past its end on both clocks.
+            let length = from.range.end.0 - from.range.start.0;
+            if from.range.end.0.checked_add(transition.after()).is_none()
+                || from
+                    .source_offset
+                    .0
+                    .checked_add(length)
+                    .and_then(|end| end.checked_add(transition.after()))
+                    .is_none()
+            {
+                return Err(invalid("transition overflows the timeline"));
+            }
             if self
                 .transitions
                 .iter()

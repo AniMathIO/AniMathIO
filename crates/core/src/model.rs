@@ -447,7 +447,11 @@ impl Project {
                 return Err(invalid("overlapping clips"));
             }
             track.validate_transitions()?;
-            if !track.transitions.iter().all(|t| transition_ids.insert(t.id)) {
+            if !track
+                .transitions
+                .iter()
+                .all(|t| transition_ids.insert(t.id))
+            {
                 return Err(invalid("duplicate transition id"));
             }
         }

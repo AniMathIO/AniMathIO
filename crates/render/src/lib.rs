@@ -3,6 +3,7 @@
 mod cpu;
 pub mod effects;
 pub mod sample;
+mod transition;
 
 use animathio_core::{AssetId, ClipKind, Project, Scene, Time};
 use std::{

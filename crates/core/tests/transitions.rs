@@ -67,9 +67,11 @@ fn add_remove_and_resize_are_exactly_invertible() {
     undo_resize.apply(&mut project).unwrap();
     assert_eq!(project, with_transition);
 
-    let undo_remove = Command::RemoveTransition { id: TransitionId(7) }
-        .apply(&mut project)
-        .unwrap();
+    let undo_remove = Command::RemoveTransition {
+        id: TransitionId(7),
+    }
+    .apply(&mut project)
+    .unwrap();
     assert_eq!(project, original);
     undo_remove.apply(&mut project).unwrap();
     assert_eq!(project, with_transition);
@@ -123,7 +125,11 @@ fn validation_rejects_bad_transitions_without_changing_the_project() {
         .apply(&mut project)
         .is_err()
     );
-    assert!(Command::RemoveClip { id: ClipId(1) }.apply(&mut project).is_err());
+    assert!(
+        Command::RemoveClip { id: ClipId(1) }
+            .apply(&mut project)
+            .is_err()
+    );
 }
 
 #[test]
@@ -184,11 +190,19 @@ fn evaluate_shows_both_clips_with_matching_progress() {
     assert_eq!(i.role, TransitionRole::Incoming);
     assert_eq!(o.progress, 0.25);
     assert_eq!(i.progress, 0.25);
-    assert_eq!(inc.source_time, Time(0), "early incoming frames hold source 0");
+    assert_eq!(
+        inc.source_time,
+        Time(0),
+        "early incoming frames hold source 0"
+    );
 
     let after_cut = evaluate(&project, Time(110));
     let out = after_cut.clips.iter().find(|c| c.id == ClipId(1)).unwrap();
-    assert_eq!(out.source_time, Time(110), "outgoing clip plays past its end");
+    assert_eq!(
+        out.source_time,
+        Time(110),
+        "outgoing clip plays past its end"
+    );
     assert_eq!(out.transition.unwrap().progress, 0.75);
 
     let end = evaluate(&project, Time(120));

@@ -24,7 +24,7 @@ use animathio_control::{
 use animathio_core::{
     Asset, Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Project, Rounding,
     TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform, TransformProperty,
-    builtin::Builtin,
+    Transition, TransitionId, TransitionKind, WipeDirection, builtin::Builtin,
 };
 use rmcp::{
     ErrorData as McpError, ServerHandler,
@@ -151,6 +151,26 @@ pub(crate) struct Placement {
 pub(crate) struct TimeFrame {
     pub(crate) start: Option<f64>,
     pub(crate) end: Option<f64>,
+}
+
+/// Edit point: either two adjacent clip ids, or a time (plus optional track) that
+/// selects the nearest cut.
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddTransitionArgs {
+    /// Track id; optional, narrows the `at_time_ms` search.
+    pub(crate) track: Option<String>,
+    /// Outgoing clip id (its end is the cut).
+    pub(crate) between_clip_a: Option<String>,
+    /// Incoming clip id (its start is the cut).
+    pub(crate) clip_b: Option<String>,
+    /// Pick the edit point nearest to this time instead of naming clips.
+    pub(crate) at_time_ms: Option<f64>,
+    /// `cross_dissolve` (default), `dip_to_black`, `dip_to_white` or `wipe`.
+    pub(crate) kind: Option<String>,
+    /// Wipe direction: `left_to_right` (default), `right_to_left`, `top_to_bottom`, `bottom_to_top`.
+    pub(crate) direction: Option<String>,
+    /// Total duration, centred on the cut.
+    pub(crate) duration_ms: f64,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -341,6 +361,80 @@ fn parse_interpolation(value: Option<&str>) -> Interpolation {
         Some("ease_in_out") => Interpolation::EaseInOut,
         _ => Interpolation::Linear,
     }
+}
+
+fn parse_transition_kind(
+    kind: Option<&str>,
+    direction: Option<&str>,
+) -> Result<TransitionKind, McpError> {
+    Ok(match kind.unwrap_or("cross_dissolve") {
+        "cross_dissolve" | "dissolve" => TransitionKind::CrossDissolve,
+        "dip_to_black" => TransitionKind::DipToBlack,
+        "dip_to_white" => TransitionKind::DipToWhite,
+        "wipe" => TransitionKind::Wipe {
+            direction: match direction.unwrap_or("left_to_right") {
+                "left_to_right" => WipeDirection::LeftToRight,
+                "right_to_left" => WipeDirection::RightToLeft,
+                "top_to_bottom" => WipeDirection::TopToBottom,
+                "bottom_to_top" => WipeDirection::BottomToTop,
+                _ => return Err(invalid("unknown wipe direction")),
+            },
+        },
+        _ => {
+            return Err(invalid(
+                "kind must be cross_dissolve, dip_to_black, dip_to_white or wipe",
+            ));
+        }
+    })
+}
+
+/// Resolve `(track, outgoing, incoming)` for an edit point.
+fn find_edit_point(
+    project: &Project,
+    args: &AddTransitionArgs,
+) -> Result<(TrackId, ClipId, ClipId), McpError> {
+    let track_filter = args
+        .track
+        .as_deref()
+        .map(|t| t.parse::<u64>().map(TrackId))
+        .transpose()
+        .map_err(|_| invalid("track must be a numeric track id"))?;
+    let tracks = project
+        .tracks()
+        .iter()
+        .filter(|t| track_filter.is_none_or(|id| t.id() == id));
+    if let (Some(a), Some(b)) = (&args.between_clip_a, &args.clip_b) {
+        let (a, b) = (parse_clip_id(a)?, parse_clip_id(b)?);
+        return tracks
+            .into_iter()
+            .find(|t| t.clips().contains_key(&a) && t.clips().contains_key(&b))
+            .map(|t| (t.id(), a, b))
+            .ok_or_else(|| invalid("both clips must be on one track"));
+    }
+    let at = ms_to_ticks(
+        args.at_time_ms
+            .ok_or_else(|| invalid("give between_clip_a + clip_b, or at_time_ms"))?,
+    )?;
+    tracks
+        .flat_map(|track| {
+            track.clips().values().filter_map(move |a| {
+                track
+                    .clips()
+                    .values()
+                    .find(|b| b.range.start == a.range.end)
+                    .map(|b| {
+                        (
+                            track.id(),
+                            a.id,
+                            b.id,
+                            (a.range.end.0 - at.0).unsigned_abs(),
+                        )
+                    })
+            })
+        })
+        .min_by_key(|candidate| candidate.3)
+        .map(|(track, a, b, _)| (track, a, b))
+        .ok_or_else(|| invalid("no edit point between adjacent clips found"))
 }
 
 fn tool_text(value: impl serde::Serialize) -> Result<CallToolResult, McpError> {
@@ -836,6 +930,72 @@ impl McpServer {
             })
             .map_err(mcp_error)?;
         tool_text(json!({"clip_id": clip_id.0}))
+    }
+
+    #[tool(
+        description = "Add a transition (cross_dissolve, dip_to_black, dip_to_white or wipe) on the cut between two adjacent clips, named by clip ids or by the nearest cut to at_time_ms. The duration is centred on the cut."
+    )]
+    async fn add_transition(
+        &self,
+        Parameters(p): Parameters<AddTransitionArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        let kind = parse_transition_kind(p.kind.as_deref(), p.direction.as_deref())?;
+        let duration = ms_to_ticks(p.duration_ms)?;
+        let (track, from, to) = find_edit_point(&state.project, &p)?;
+        let id = TransitionId(
+            state
+                .project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.transitions())
+                .map(|t| t.id.0.saturating_add(1))
+                .max()
+                .unwrap_or(0),
+        );
+        backend
+            .command_apply(Command::AddTransition {
+                track,
+                transition: Transition {
+                    id,
+                    kind,
+                    duration,
+                    from,
+                    to,
+                },
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({"transition_id": id.0, "track_id": track.0, "from": from.0, "to": to.0}))
+    }
+
+    #[tool(
+        description = "List every transition with its track, clips, kind, cut and duration (milliseconds)."
+    )]
+    async fn list_transitions(&self) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        let ms = |t: Time| t.0 as f64 * 1000.0 / TICKS_PER_SECOND as f64;
+        let list: Vec<_> = state
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|track| {
+                track.transitions().iter().map(move |t| {
+                    let cut = track.clips().get(&t.from).map(|c| c.range.end);
+                    json!({
+                        "id": t.id.0,
+                        "track_id": track.id().0,
+                        "from": t.from.0,
+                        "to": t.to.0,
+                        "kind": t.kind,
+                        "duration_ms": ms(t.duration),
+                        "cut_ms": cut.map(ms),
+                    })
+                })
+            })
+            .collect();
+        tool_text(json!({"transitions": list}))
     }
 
     #[tool(description = "Undo the last edit.")]
