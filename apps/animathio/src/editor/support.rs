@@ -33,6 +33,13 @@ pub(super) fn icon_button(
         "step-fwd" => Some((Box::new(actions::NextFrame), "Viewer")),
         "jump-end" => Some((Box::new(actions::GoToEnd), "Viewer")),
         "loop" => Some((Box::new(actions::ToggleLoop), "Viewer")),
+        "tool-select" => Some((Box::new(actions::SelectTool), "Timeline")),
+        "tool-blade" => Some((Box::new(actions::BladeTool), "Timeline")),
+        "tool-ripple" => Some((Box::new(actions::RippleTool), "Timeline")),
+        "tool-hand" => Some((Box::new(actions::HandTool), "Timeline")),
+        "mark-in" => Some((Box::new(actions::MarkIn), "Timeline")),
+        "mark-out" => Some((Box::new(actions::MarkOut), "Timeline")),
+        "zoom-fit" => Some((Box::new(actions::ZoomToFit), "Timeline")),
         "snap" => Some((Box::new(actions::ToggleSnapping), "Timeline")),
         "zoom-in" => Some((Box::new(actions::ZoomIn), "Timeline")),
         "zoom-out" => Some((Box::new(actions::ZoomOut), "Timeline")),
@@ -103,12 +110,49 @@ pub(super) fn paint_timeline(
     for clip in &snapshot.clips {
         paint_clip(bounds, &layout, clip, window, cx);
     }
+    if snapshot.marks.marked()
+        && let Some(range) = snapshot.marks.range(snapshot.duration)
+    {
+        let x0 = bounds.origin.x + px(timeline::time_to_x(&layout, range.start));
+        let x1 = bounds.origin.x + px(timeline::time_to_x(&layout, range.end));
+        window.paint_quad(fill(
+            Bounds::from_corners(
+                point(x0, bounds.origin.y),
+                point(x1, bounds.origin.y + px(RULER_H)),
+            ),
+            snapshot.theme.primary.opacity(0.25),
+        ));
+        for x in [x0, x1] {
+            window.paint_quad(fill(
+                Bounds::new(point(x, bounds.origin.y), size(px(2.), px(height))),
+                snapshot.theme.primary.opacity(0.65),
+            ));
+            window.paint_quad(fill(
+                Bounds::new(point(x, bounds.origin.y), size(px(8.), px(6.))),
+                snapshot.theme.primary,
+            ));
+        }
+    }
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let head = Bounds::from_corners(
         point(head_x, bounds.origin.y),
         point(head_x + px(1.5), bounds.origin.y + px(height)),
     );
-    window.paint_quad(fill(head, cx.theme().foreground));
+    window.paint_quad(fill(head, cx.theme().danger));
+    window.paint_quad(fill(
+        Bounds::new(
+            point(head_x - px(4.), bounds.origin.y),
+            size(px(10.), px(8.)),
+        ),
+        cx.theme().danger,
+    ));
+    if let Some(time) = snapshot.snap_line {
+        let x = bounds.origin.x + px(timeline::time_to_x(&layout, time));
+        window.paint_quad(fill(
+            Bounds::new(point(x, bounds.origin.y), size(px(2.), px(height))),
+            gpui::rgb(0xffd43b),
+        ));
+    }
 }
 
 /// Paint one clip block: kind-coloured body, waveform, fade ramps, outline, trim
@@ -738,23 +782,15 @@ pub(super) fn frames_to_ticks(frames: usize, rate: u32) -> i64 {
     i64::try_from(frames as u128 * TICKS_PER_SECOND as u128 / ticks).unwrap_or(i64::MAX)
 }
 
-pub(super) fn parse_hex_color(value: &str) -> Option<[u8; 4]> {
-    let hex = value.strip_prefix('#').unwrap_or(value);
-    let (rgb, alpha) = match hex.len() {
-        6 => (hex, 255),
-        8 => (&hex[..6], u8::from_str_radix(&hex[6..], 16).ok()?),
-        _ => return None,
-    };
-    let value = u32::from_str_radix(rgb, 16).ok()?;
-    Some([
-        ((value >> 16) & 0xff) as u8,
-        ((value >> 8) & 0xff) as u8,
-        (value & 0xff) as u8,
-        alpha,
-    ])
-}
-
 pub(super) fn parse_fps(value: &str) -> Result<FrameRate, String> {
+    if let Some((numerator, denominator)) = value.split_once('/') {
+        return FrameRate::new(
+            numerator.parse().map_err(|_| "invalid numerator")?,
+            denominator.parse().map_err(|_| "invalid denominator")?,
+        )
+        .map_err(|e| e.0);
+    }
+
     let fps = value
         .parse::<f64>()
         .map_err(|_| "invalid frame rate".to_owned())?;

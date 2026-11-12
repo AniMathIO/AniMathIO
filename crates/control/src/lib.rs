@@ -14,6 +14,7 @@ mod authoring;
 mod client;
 mod edit;
 mod error;
+mod export_presets;
 mod handler;
 mod headless;
 mod method;
@@ -24,10 +25,11 @@ mod token;
 pub use authoring::apply_authoring_call;
 pub use client::ControlClient;
 pub use edit::{
-    ExportPreset, TitleStyle, TrimSilenceParams, TrimSilenceResult, content_end, describe_timeline,
+    TitleStyle, TrimSilenceParams, TrimSilenceResult, content_end, describe_timeline,
     detect_silence, timecode, title_command, trim_silence,
 };
 pub use error::ControlError;
+pub use export_presets::ExportPreset;
 pub use handler::{ControlHandler, dispatch, from_value};
 pub use headless::HeadlessHandler;
 pub use method::{

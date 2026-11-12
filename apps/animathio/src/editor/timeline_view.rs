@@ -19,6 +19,40 @@ impl Editor {
             self.scrub_to(x, cx);
             return;
         }
+        if self.tool == Tool::Hand {
+            self.gesture = Some(TimelineGesture::Pan {
+                x,
+                scroll: self.timeline_scroll,
+            });
+            return;
+        }
+        if self.tool == Tool::Blade {
+            let at = timeline::drop_start(&layout, &self.project, x, self.position, self.snapping);
+            self.snap_line = self
+                .snapping
+                .then(|| {
+                    timeline::snap_target(
+                        &layout,
+                        &self.project,
+                        None,
+                        self.position,
+                        timeline::x_to_time(&layout, x),
+                    )
+                })
+                .flatten();
+            if event.modifiers.shift {
+                self.execute(&Command::SplitAt { times: vec![at] }, cx);
+            } else if let Some(hit) = timeline::hit_test(&layout, &self.project, x, y) {
+                let right_id = self.next_clip_id();
+                if let Some(command) = self
+                    .find_clip(hit.clip)
+                    .and_then(|clip| editing::blade_command(clip, at, right_id))
+                {
+                    self.execute(&command, cx);
+                }
+            }
+            return;
+        }
         if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
             self.selected = Some(clip_id);
             self.selected_field = None;
@@ -63,6 +97,7 @@ impl Editor {
                 origin_start: clip.range.start,
                 origin_end: clip.range.end,
                 origin_source_offset: clip.source_offset,
+                ripple: self.tool == Tool::Ripple || event.modifiers.control,
                 current: match edge {
                     TrimEdge::Left => clip.range.start,
                     TrimEdge::Right => clip.range.end,
@@ -188,6 +223,29 @@ impl Editor {
             self.hovered_clip = hovered;
             cx.notify();
         }
+        if self.pool_drag.is_some() {
+            self.snap_line = if self.snapping {
+                timeline::snap_target(
+                    &layout,
+                    &self.project,
+                    None,
+                    self.position,
+                    timeline::x_to_time(&layout, x),
+                )
+            } else {
+                None
+            };
+            cx.notify();
+            return;
+        }
+        if self.tool == Tool::Blade && !event.dragging() {
+            let raw = timeline::x_to_time(&layout, x);
+            self.snap_line = self
+                .snapping
+                .then(|| timeline::snap_target(&layout, &self.project, None, self.position, raw))
+                .flatten();
+            cx.notify();
+        }
         if !event.dragging() {
             return;
         }
@@ -197,11 +255,31 @@ impl Editor {
             cx.notify();
             return;
         }
+        self.snap_line = None;
         match &mut self.gesture {
+            Some(TimelineGesture::Pan { x: origin, scroll }) => {
+                self.timeline_scroll =
+                    (*scroll + *origin - x).clamp(0.0, timeline::max_scroll(&layout));
+                cx.notify();
+            }
             Some(TimelineGesture::Drag(drag)) => {
                 let raw = timeline::drag_start(&layout, drag.grab_offset, x);
-                drag.current_start =
-                    timeline::snap_start(&layout, &self.project, drag.clip_id, self.position, raw);
+                drag.current_start = if self.snapping {
+                    timeline::snap_start(&layout, &self.project, drag.clip_id, self.position, raw)
+                } else {
+                    raw
+                };
+                self.snap_line = if self.snapping {
+                    timeline::snap_target(
+                        &layout,
+                        &self.project,
+                        Some(drag.clip_id),
+                        self.position,
+                        raw,
+                    )
+                } else {
+                    None
+                };
                 let max_row = self.project.tracks().len().saturating_sub(1) as f32;
                 let row = ((y - layout.ruler_height) / layout.row_height.max(1.0))
                     .clamp(0.0, max_row) as usize;
@@ -212,8 +290,22 @@ impl Editor {
             }
             Some(TimelineGesture::Trim(trim)) => {
                 let raw = timeline::x_to_time(&layout, x);
-                let snapped =
-                    timeline::snap_start(&layout, &self.project, trim.clip_id, self.position, raw);
+                let snapped = if self.snapping {
+                    timeline::snap_start(&layout, &self.project, trim.clip_id, self.position, raw)
+                } else {
+                    raw
+                };
+                self.snap_line = if self.snapping {
+                    timeline::snap_target(
+                        &layout,
+                        &self.project,
+                        Some(trim.clip_id),
+                        self.position,
+                        raw,
+                    )
+                } else {
+                    None
+                };
                 trim.current = match trim.edge {
                     TrimEdge::Left => Time(snapped.0.clamp(
                         (trim.origin_start.0 - trim.origin_source_offset.0).max(0),
@@ -225,6 +317,9 @@ impl Editor {
                             .clamp(trim.origin_start.0.saturating_add(1), i64::MAX),
                     ),
                 };
+                if self.snap_line.is_some_and(|target| target != trim.current) {
+                    self.snap_line = None;
+                }
                 cx.notify();
             }
             Some(TimelineGesture::Fade(fade)) => {
@@ -256,6 +351,8 @@ impl Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.snap_line = None;
+        cx.notify();
         if let Some(drag) = self.keyframe_drag.take() {
             self.selected_keyframe = Some(KeyframeSelection {
                 clip_id: drag.clip_id,
@@ -292,28 +389,17 @@ impl Editor {
                 );
             }
             Some(TimelineGesture::Trim(trim)) => {
-                let (range, source_offset) = match trim.edge {
-                    TrimEdge::Left => (
-                        TimeRange::new(trim.current, trim.origin_end),
-                        Time(trim.origin_source_offset.0 + (trim.current.0 - trim.origin_start.0)),
-                    ),
-                    TrimEdge::Right => (
-                        TimeRange::new(trim.origin_start, trim.current),
-                        trim.origin_source_offset,
-                    ),
-                };
-                match range {
-                    Ok(range) => self.execute(
-                        &Command::TrimClip {
-                            id: trim.clip_id,
-                            range,
-                            source_offset,
-                        },
-                        cx,
-                    ),
-                    Err(error) => self.error = Some(error.0),
+                if let Some(command) = editing::trim_command(
+                    &self.project,
+                    trim.clip_id,
+                    trim.edge,
+                    trim.current,
+                    trim.ripple,
+                ) {
+                    self.execute(&command, cx);
                 }
             }
+
             Some(TimelineGesture::Fade(fade)) => {
                 if let Some(command) = self
                     .find_clip(fade.clip_id)
@@ -487,6 +573,8 @@ impl Editor {
             position: self.position,
             frame_rate: self.project.frame_rate(),
             row_height: self.dock.track_height.pixels(),
+            marks: self.marks,
+            snap_line: self.snap_line,
             theme: cx.theme().clone(),
         }
     }
@@ -521,6 +609,70 @@ impl Editor {
                     .gap_2()
                     .px_2()
                     .bg(cx.theme().background)
+                    .children(
+                        [
+                            (
+                                Tool::Select,
+                                IconName::MousePointer2,
+                                "Select",
+                                "tool-select",
+                            ),
+                            (
+                                Tool::Blade,
+                                IconName::Scissors,
+                                "Blade; Shift-click all tracks",
+                                "tool-blade",
+                            ),
+                            (
+                                Tool::Ripple,
+                                IconName::FoldHorizontal,
+                                "Ripple trim",
+                                "tool-ripple",
+                            ),
+                            (Tool::Hand, IconName::Hand, "Pan", "tool-hand"),
+                        ]
+                        .map(|(tool, icon, label, id)| {
+                            icon_button(
+                                id,
+                                icons::icon(icon),
+                                label,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.tool = tool;
+                                    this.snap_line = None;
+                                    cx.notify();
+                                }),
+                            )
+                            .selected(self.tool == tool)
+                        }),
+                    )
+                    .child(icon_button(
+                        "mark-in",
+                        icons::icon(IconName::LogIn),
+                        "Set in",
+                        cx.listener(|this, _, _, cx| {
+                            this.marks.set_in(this.position);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(icon_button(
+                        "mark-out",
+                        icons::icon(IconName::LogOut),
+                        "Set out (exclusive)",
+                        cx.listener(|this, _, _, cx| {
+                            this.marks.set_out(this.position);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(icon_button(
+                        "zoom-fit",
+                        icons::icon(IconName::FoldHorizontal),
+                        "Zoom to fit",
+                        cx.listener(|this, _, _, cx| {
+                            this.timeline_zoom = 1.0;
+                            this.timeline_scroll = 0.0;
+                            cx.notify();
+                        }),
+                    ))
                     .child(
                         icon_button(
                             "snap",
@@ -562,11 +714,12 @@ impl Editor {
                             cx.notify();
                         }),
                     ))
-                    .child(
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("{zoom:.1}x")),
-                    )
+                    .child(div().text_color(cx.theme().muted_foreground).child(format!(
+                        "{:.1} s",
+                        timeline::project_duration(&self.project) as f64
+                            / TICKS_PER_SECOND as f64
+                            / f64::from(zoom)
+                    )))
                     .child(icon_button(
                         "zoom-in",
                         icons::icon(IconName::ZoomIn),
@@ -616,6 +769,28 @@ impl Editor {
                                                 cx.listener(Self::on_timeline_mouse_up),
                                             )
                                             .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
+                                            .on_drop::<ExternalPaths>(cx.listener(
+                                                |this, paths: &ExternalPaths, window, cx| {
+                                                    let position = window.mouse_position();
+                                                    let (x, y) = this.timeline_relative(position);
+                                                    let layout = this.current_layout();
+                                                    let placement = timeline::drop_placement(
+                                                        &layout,
+                                                        &this.project,
+                                                        x,
+                                                        y,
+                                                        this.position,
+                                                        this.snapping,
+                                                    );
+                                                    if let Some(placement) = placement {
+                                                        this.import_paths(
+                                                            paths.paths(),
+                                                            Some(placement),
+                                                            cx,
+                                                        );
+                                                    }
+                                                },
+                                            ))
                                             .child(
                                                 canvas(
                                                     move |bounds, _window, cx| {

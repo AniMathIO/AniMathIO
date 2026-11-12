@@ -50,7 +50,8 @@ fn build_plugin(name: &str) -> BuiltPlugin {
         ])
         .env("CARGO_TARGET_DIR", &target_dir)
         .env("CARGO_BUILD_JOBS", "3")
-        .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
+        .env("CARGO_PROFILE_DEV_DEBUG", "0")
+        .env("CARGO_INCREMENTAL", "0")
         .status()
         .expect("failed to spawn cargo build for plugin");
     assert!(status.success(), "failed to build plugin `{name}`");

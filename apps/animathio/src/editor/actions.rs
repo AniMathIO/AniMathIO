@@ -5,6 +5,25 @@ use super::*;
 actions!(
     editor,
     [
+        ShuttleReverse,
+        ShuttleStop,
+        ShuttleForward,
+        PreviousEdit,
+        NextEdit,
+        GoToIn,
+        GoToOut,
+        MarkIn,
+        MarkOut,
+        ClearMarks,
+        SelectTool,
+        BladeTool,
+        RippleTool,
+        HandTool,
+        RippleDelete,
+        Preferences,
+        ImportV1,
+        ImportManim,
+        WriteOn,
         NewProject,
         OpenProject,
         SaveProject,
@@ -79,6 +98,32 @@ fn binding_context(action: &dyn Action, panel: &str) -> KeyBindingContextPredica
 
 fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
     vec![
+        ("j", Box::new(ShuttleReverse), "Timeline"),
+        ("j", Box::new(ShuttleReverse), "Viewer"),
+        ("k", Box::new(ShuttleStop), "Timeline"),
+        ("k", Box::new(ShuttleStop), "Viewer"),
+        ("l", Box::new(ShuttleForward), "Timeline"),
+        ("l", Box::new(ShuttleForward), "Viewer"),
+        ("up", Box::new(PreviousEdit), "Timeline"),
+        ("up", Box::new(PreviousEdit), "Viewer"),
+        ("down", Box::new(NextEdit), "Timeline"),
+        ("down", Box::new(NextEdit), "Viewer"),
+        ("shift-i", Box::new(GoToIn), "Timeline"),
+        ("shift-i", Box::new(GoToIn), "Viewer"),
+        ("shift-o", Box::new(GoToOut), "Timeline"),
+        ("shift-o", Box::new(GoToOut), "Viewer"),
+        ("i", Box::new(MarkIn), "Timeline"),
+        ("i", Box::new(MarkIn), "Viewer"),
+        ("o", Box::new(MarkOut), "Timeline"),
+        ("o", Box::new(MarkOut), "Viewer"),
+        ("alt-x", Box::new(ClearMarks), "Timeline"),
+        ("alt-x", Box::new(ClearMarks), "Viewer"),
+        ("a", Box::new(SelectTool), "Timeline"),
+        ("b", Box::new(BladeTool), "Timeline"),
+        ("t", Box::new(RippleTool), "Timeline"),
+        ("h", Box::new(HandTool), "Timeline"),
+        ("shift-delete", Box::new(RippleDelete), "Timeline"),
+        ("secondary-,", Box::new(Preferences), "Editor"),
         ("secondary-n", Box::new(NewProject), "Editor"),
         ("secondary-o", Box::new(OpenProject), "Editor"),
         ("secondary-s", Box::new(SaveProject), "Editor"),
@@ -128,11 +173,11 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     .on_action(cx.listener(|this, _: &ImportMedia, _window, cx| {
         this.import_media(cx);
     }))
-    .on_action(cx.listener(|this, _: &ExportVideo, _window, cx| {
-        this.open_export_dialog(cx);
+    .on_action(cx.listener(|this, _: &ExportVideo, window, cx| {
+        this.open_export_dialog(window, cx);
     }))
-    .on_action(cx.listener(|this, _: &ProjectSettings, _window, cx| {
-        this.toggle_settings(cx);
+    .on_action(cx.listener(|this, _: &ProjectSettings, window, cx| {
+        this.open_settings(window, cx);
     }))
     .on_action(cx.listener(|this, _: &Undo, window, cx| {
         if this.fields.any_focused(window, cx) {
@@ -287,49 +332,151 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             ));
         cx.notify();
     }))
+    .on_action(cx.listener(|this, _: &ShuttleReverse, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.shuttle(-1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &ShuttleStop, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.shuttle(0, cx);
+    }))
+    .on_action(cx.listener(|this, _: &ShuttleForward, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.shuttle(1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &PreviousEdit, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.step_edit(-1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &NextEdit, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.step_edit(1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &GoToIn, _, cx| {
+        if let Some(time) = this.marks.start {
+            this.seek_to(time, cx);
+        }
+    }))
+    .on_action(cx.listener(|this, _: &GoToOut, _, cx| {
+        if let Some(time) = this.marks.end {
+            this.seek_to(time, cx);
+        }
+    }))
+    .on_action(cx.listener(|this, _: &MarkIn, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.marks.set_in(this.position);
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &MarkOut, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.marks.set_out(this.position);
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &ClearMarks, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.marks = InOut::default();
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &SelectTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::Select;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &BladeTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::Blade;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &RippleTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::Ripple;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &HandTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::Hand;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &RippleDelete, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        let range = this
+            .marks
+            .marked()
+            .then(|| {
+                this.marks
+                    .range(animathio_export::duration(&this.project).0)
+            })
+            .flatten();
+        if let Some(command) = editing::ripple_delete_command(this.selected, range) {
+            this.execute(&command, cx);
+        }
+    }))
+    .on_action(cx.listener(|this, _: &Preferences, window, cx| this.open_preferences(window, cx)))
+    .on_action(cx.listener(|this, _: &ImportV1, _, cx| this.import_legacy(cx)))
+    .on_action(cx.listener(|this, _: &ImportManim, window, cx| this.open_manim_import(window, cx)))
+    .on_action(cx.listener(|this, _: &WriteOn, window, cx| this.open_write_on(window, cx)))
     .on_action(cx.listener(|this, action: &OpenRecent, _, cx| this.open_path(&action.path, cx)))
 }
 
 impl Editor {
     fn show_shortcuts(window: &mut Window, cx: &mut Context<Self>) {
         use gpui_component::{WindowExt, kbd::Kbd};
-        let rows: Vec<(String, Box<dyn Action>, &'static str)> = vec![
-            ("New Project".into(), Box::new(NewProject), "Editor"),
-            ("Open Project".into(), Box::new(OpenProject), "Editor"),
-            ("Save Project".into(), Box::new(SaveProject), "Editor"),
-            ("Import Media".into(), Box::new(ImportMedia), "Editor"),
-            ("Export Video".into(), Box::new(ExportVideo), "Editor"),
-            ("Undo".into(), Box::new(Undo), "Editor"),
-            ("Redo".into(), Box::new(Redo), "Editor"),
-            (
-                "Delete Selection".into(),
-                Box::new(DeleteSelection),
-                "Timeline",
-            ),
-            ("Split Clip".into(), Box::new(SplitClip), "Timeline"),
-            ("Toggle Playback".into(), Box::new(TogglePlayback), "Viewer"),
-            ("Previous Frame".into(), Box::new(PreviousFrame), "Viewer"),
-            ("Next Frame".into(), Box::new(NextFrame), "Viewer"),
-            ("Go To Start".into(), Box::new(GoToStart), "Viewer"),
-            ("Go To End".into(), Box::new(GoToEnd), "Viewer"),
-            ("Toggle Loop".into(), Box::new(ToggleLoop), "Viewer"),
-            (
-                "Toggle Snapping".into(),
-                Box::new(ToggleSnapping),
-                "Timeline",
-            ),
-            ("Zoom In".into(), Box::new(ZoomIn), "Timeline"),
-            ("Zoom Out".into(), Box::new(ZoomOut), "Timeline"),
-            ("Zoom To Fit".into(), Box::new(ZoomToFit), "Timeline"),
-            ("Larger Tracks".into(), Box::new(LargerTracks), "Timeline"),
-            ("Smaller Tracks".into(), Box::new(SmallerTracks), "Timeline"),
-            ("Fit Viewer".into(), Box::new(FitViewer), "Viewer"),
-            (
-                "Keyboard Shortcuts".into(),
-                Box::new(KeyboardShortcuts),
-                "Editor",
-            ),
-        ];
+        let mut seen = BTreeSet::new();
+        let rows: Vec<_> = keymap()
+            .into_iter()
+            .filter_map(|(_, action, context)| {
+                let name = action
+                    .name()
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(action.name())
+                    .to_owned();
+                seen.insert(name.clone()).then_some((name, action, context))
+            })
+            .collect();
         window.open_dialog(cx, move |dialog, window, _cx| {
             dialog.title("Keyboard shortcuts").child(
                 div()

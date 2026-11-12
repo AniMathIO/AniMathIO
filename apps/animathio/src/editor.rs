@@ -22,6 +22,7 @@ use gpui_component::{ActiveTheme, Selectable, Sizable};
 use serde_json::{Value, json};
 
 use crate::control::{ControlMsg, ControlRuntime};
+use crate::editing::{self, InOut, Shuttle, Tool};
 use crate::fades::{self, FadeEdge};
 use crate::icons::{self, IconName};
 use crate::inspector::{self, ParamModel, PluginDescriptor};
@@ -42,6 +43,7 @@ mod media_pool;
 mod menus;
 mod playback_glue;
 mod project_io;
+mod start_screen;
 mod support;
 mod timeline_view;
 mod transport;
@@ -55,7 +57,6 @@ pub(crate) use support::{
 
 const RULER_H: f32 = 28.0;
 const HEADER_W: f32 = 240.0;
-const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
 const DEFAULT_MEDIA_TICKS: i64 = TICKS_PER_SECOND * 2;
 /// Peaks kept per decoded audio asset for timeline waveforms.
@@ -182,32 +183,15 @@ enum InputTarget {
         axis: usize,
     },
     Timecode,
-    SettingsWidth,
-    SettingsHeight,
-    SettingsFps,
-    SettingsBackground,
 }
 
 impl InputTarget {
     fn is_numeric(&self) -> bool {
         matches!(
             self,
-            Self::Field { .. }
-                | Self::PluginNumber { .. }
-                | Self::PluginPoint { .. }
-                | Self::SettingsWidth
-                | Self::SettingsHeight
-                | Self::SettingsFps
+            Self::Field { .. } | Self::PluginNumber { .. } | Self::PluginPoint { .. }
         )
     }
-}
-
-#[derive(Clone, Copy)]
-enum SettingsField {
-    Width,
-    Height,
-    Fps,
-    Background,
 }
 
 struct ClipDrag {
@@ -242,6 +226,7 @@ struct TrimDrag {
     origin_end: Time,
     origin_source_offset: Time,
     current: Time,
+    ripple: bool,
 }
 
 /// Dragging a fade handle: `current` is the fade length in ticks.
@@ -252,6 +237,7 @@ struct FadeDrag {
 }
 
 enum TimelineGesture {
+    Pan { x: f32, scroll: f32 },
     Scrub,
     Drag(ClipDrag),
     Trim(TrimDrag),
@@ -306,6 +292,8 @@ struct TimelineSnapshot {
     position: Time,
     frame_rate: FrameRate,
     row_height: f32,
+    marks: InOut,
+    snap_line: Option<Time>,
     theme: gpui_component::Theme,
 }
 
@@ -369,9 +357,14 @@ pub(crate) struct Editor {
     gesture: Option<TimelineGesture>,
     plugin_host: Option<PluginHost>,
     plugins: Vec<PluginDescriptor>,
-    settings_open: bool,
+    tool: Tool,
+    marks: InOut,
+    shuttle: Shuttle,
+    snap_line: Option<Time>,
+    preferences: crate::preferences::Preferences,
     /// Persisted "GPU preview" toggle.
     preview: crate::preview_settings::PreviewSettings,
+    export_options: Option<dialogs::ExportOptions>,
     export_task: Option<crate::export_worker::ExportTask>,
     confirm_overwrite: Option<PathBuf>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -459,8 +452,13 @@ impl Editor {
             gesture: None,
             plugin_host,
             plugins,
-            settings_open: false,
+            tool: Tool::default(),
+            marks: InOut::default(),
+            shuttle: Shuttle::default(),
+            snap_line: None,
+            preferences: crate::preferences::Preferences::load(),
             preview,
+            export_options: None,
             export_task: None,
             confirm_overwrite: None,
             keyframe_drag: None,
@@ -503,7 +501,14 @@ impl Editor {
                 ));
         }
         this.request_render(Time(0));
-        window.focus(&this.panel_focus[0], cx);
+        window.focus(
+            if this.is_start_screen() {
+                &this.focus_handle
+            } else {
+                &this.panel_focus[0]
+            },
+            cx,
+        );
         // Drain worker/control mailboxes even when there are no pointer events.
         // Only completed work invalidates the view; an idle editor need not redraw.
         cx.spawn_in(window, async move |this, cx| {
@@ -574,7 +579,24 @@ impl Render for Editor {
         self.flush_notices(window, cx);
 
         if self.playing {
-            let now = self.clock.now();
+            let duration = animathio_export::duration(&self.project).0.max(1);
+            let range = if self.loop_playback {
+                self.marks.range(duration)
+            } else {
+                None
+            }
+            .unwrap_or_else(|| TimeRange::new(Time(0), Time(duration)).expect("positive duration"));
+            let raw = self.clock.now();
+            let (now, stopped) =
+                editing::playback_position(raw, range, self.shuttle.0, self.loop_playback);
+            if now != raw {
+                let _ = self.clock.seek(now);
+            }
+            if stopped {
+                let _ = self.clock.pause();
+                self.playing = false;
+                self.shuttle.0 = 0;
+            }
             self.position = now;
             let due = due_frame(&self.project, now);
             if due != self.last_requested
@@ -586,7 +608,11 @@ impl Render for Editor {
         }
 
         self.refresh_menus(cx);
-        let workspace = self.workspace(window, cx);
+        let workspace = if self.is_start_screen() {
+            self.start_screen(cx)
+        } else {
+            self.workspace(window, cx)
+        };
         let gesture_view = cx.entity().downgrade();
         let mut root = div()
             .child(
@@ -622,12 +648,6 @@ impl Render for Editor {
         }
         if let Some(ghost) = self.pool_drag_ghost(cx) {
             root = root.child(ghost);
-        }
-        if self.settings_open {
-            root = root.child(self.settings_dialog(window, cx));
-        }
-        if self.export_task.is_some() || self.confirm_overwrite.is_some() {
-            root = root.child(self.export_dialog(cx));
         }
         actions::attach(root, cx)
     }

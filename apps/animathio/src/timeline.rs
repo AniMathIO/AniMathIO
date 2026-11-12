@@ -73,7 +73,7 @@ pub(crate) struct ClipHit {
 /// Project playback length: the furthest clip end, rounded up to whole seconds
 /// and at least one second so an empty timeline still has a usable ruler.
 pub(crate) fn project_duration(project: &Project) -> i64 {
-    let mut end = TICKS_PER_SECOND;
+    let mut end = project.duration().0.max(TICKS_PER_SECOND);
     for track in project.tracks() {
         for clip in track.clips().values() {
             end = end.max(clip.range.end.0);
@@ -115,33 +115,40 @@ pub(crate) fn snap_start(
     playhead: Time,
     candidate: Time,
 ) -> Time {
+    snap_target(layout, project, Some(exclude), playhead, candidate).unwrap_or(candidate)
+}
+
+/// The engaged snap target, including an exact hit on an edge.
+pub(crate) fn snap_target(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: Option<ClipId>,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
     let threshold = snap_threshold_ticks(layout);
-    let mut best = candidate;
+    let mut best = None;
     let mut best_distance = i64::MAX;
     let mut consider = |edge: Time| {
-        let distance = (edge.0 - candidate.0).abs();
-        if distance <= threshold && distance < best_distance {
-            best = edge;
-            best_distance = distance;
+        let distance = edge.0.abs_diff(candidate.0);
+        if distance <= threshold as u64 && distance < best_distance as u64 {
+            best = Some(edge);
+            best_distance = i64::try_from(distance).expect("bounded by snap threshold");
         }
     };
     consider(playhead);
     for track in project.tracks() {
         for clip in track.clips().values() {
-            if clip.id == exclude {
-                continue;
+            if Some(clip.id) != exclude {
+                consider(clip.range.start);
+                consider(clip.range.end);
             }
-            consider(clip.range.start);
-            consider(clip.range.end);
         }
     }
     best
 }
 
-/// Map a drop onto a track to a clip start time: the canvas x is converted to
-/// a tick, then optionally snapped to the playhead and every existing clip
-/// edge. Unlike [`snap_start`] there is no clip to exclude, since the dropped
-/// clip is new.
+/// Position a newly dropped clip with the same snapping rules as a timeline edit.
 pub(crate) fn drop_start(
     layout: &TimelineLayout,
     project: &Project,
@@ -150,27 +157,28 @@ pub(crate) fn drop_start(
     snap: bool,
 ) -> Time {
     let candidate = x_to_time(layout, x);
-    if !snap {
-        return candidate;
+    if snap {
+        snap_target(layout, project, None, playhead, candidate).unwrap_or(candidate)
+    } else {
+        candidate
     }
-    let threshold = snap_threshold_ticks(layout);
-    let mut best = candidate;
-    let mut best_distance = i64::MAX;
-    let mut consider = |edge: Time| {
-        let distance = (edge.0 - candidate.0).abs();
-        if distance <= threshold && distance < best_distance {
-            best = edge;
-            best_distance = distance;
-        }
-    };
-    consider(playhead);
-    for track in project.tracks() {
-        for clip in track.clips().values() {
-            consider(clip.range.start);
-            consider(clip.range.end);
-        }
+}
+
+/// Resolve OS and internal drops using the same scroll, zoom, ruler and snap geometry.
+pub(crate) fn drop_placement(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+    playhead: Time,
+    snap: bool,
+) -> Option<(TrackId, Time)> {
+    if y < layout.ruler_height || x < 0.0 || x > layout.width {
+        return None;
     }
-    best
+    let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+    let track = project.tracks().get(row)?;
+    Some((track.id(), drop_start(layout, project, x, playhead, snap)))
 }
 
 /// A trim handle at a clip's left or right edge.
@@ -292,6 +300,36 @@ mod tests {
 
     fn snap_tick(layout: &TimelineLayout) -> i64 {
         (8.0 / layout.pixels_per_tick) as i64
+    }
+
+    #[test]
+    fn os_drop_placement_respects_rows_scroll_zoom_and_ruler() {
+        let mut project = Project::new(animathio_core::FrameRate::new(30, 1).unwrap());
+        for (index, id) in [TrackId(1), TrackId(2)].into_iter().enumerate() {
+            animathio_core::Command::AddTrack {
+                track: animathio_core::Track::new(id, "Track"),
+                index,
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let layout = TimelineLayout::zoomed(100., 28., 44., 1000, 2., 50.);
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 73., Time(0), false),
+            Some((TrackId(2), Time(500)))
+        );
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 27., Time(0), false),
+            None
+        );
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 117., Time(0), false),
+            None
+        );
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 73., Time(510), true),
+            Some((TrackId(2), Time(510)))
+        );
     }
 
     #[test]

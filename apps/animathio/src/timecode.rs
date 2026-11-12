@@ -49,7 +49,13 @@ pub fn parse_timecode(text: &str, rate: FrameRate) -> Option<Time> {
     {
         return None;
     }
-    let total_frames = ((hours * 60 + minutes) * 60 + seconds) * fps + frames;
+    let total_frames = hours
+        .checked_mul(60)?
+        .checked_add(minutes)?
+        .checked_mul(60)?
+        .checked_add(seconds)?
+        .checked_mul(fps)?
+        .checked_add(frames)?;
     rate.frame_to_time(total_frames, Rounding::Nearest).ok()
 }
 
@@ -106,6 +112,7 @@ mod tests {
     fn rejects_malformed_timecode() {
         let rate = rate(30);
         assert_eq!(parse_timecode("", rate), None);
+        assert_eq!(parse_timecode("9223372036854775807:59:59:29", rate), None);
         assert_eq!(parse_timecode("00:00:00", rate), None);
         assert_eq!(parse_timecode("00:00:00:00:00", rate), None);
         assert_eq!(parse_timecode("00:00:00:xx", rate), None);

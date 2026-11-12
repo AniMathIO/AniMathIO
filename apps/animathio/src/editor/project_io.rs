@@ -6,6 +6,9 @@ impl Editor {
     pub(super) fn new_project(&mut self, cx: &mut Context<Self>) {
         self.finish_color_edit(cx);
         let _ = self.clock.pause();
+        self.marks = InOut::default();
+        self.shuttle = Shuttle::default();
+        self.export_options = None;
         self.project = Project::new(self.project.frame_rate());
         Command::AddTrack {
             track: Track::new(TrackId(1), "Video 1"),
@@ -113,6 +116,9 @@ impl Editor {
         match read_project_with_recovery(path) {
             Ok((project, assets, recovered)) => {
                 self.audio_generation = self.audio_generation.wrapping_add(1);
+                self.marks = InOut::default();
+                self.shuttle = Shuttle::default();
+                self.export_options = None;
                 self.project = project;
                 self.history = History::default();
                 self.assets = Arc::new(assets.clone());
@@ -158,43 +164,80 @@ impl Editor {
         else {
             return;
         };
+        let track = self.ensure_track(cx);
+        self.import_paths(&paths, Some((track, self.position)), cx);
+    }
+
+    pub(super) fn ensure_track(&mut self, cx: &mut Context<Self>) -> TrackId {
+        if let Some(track) = self.project.tracks().first() {
+            return track.id();
+        }
+        let id = TrackId(self.next_id);
+        self.next_id += 1;
+        self.execute(
+            &Command::AddTrack {
+                track: Track::new(id, "Video 1"),
+                index: 0,
+            },
+            cx,
+        );
+        id
+    }
+
+    pub(super) fn import_paths(
+        &mut self,
+        paths: &[PathBuf],
+        placement: Option<(TrackId, Time)>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut placement = placement;
         let mut changed = false;
         for path in paths {
-            match self.add_media_file(&path) {
-                Ok(()) => changed = true,
+            match self.add_media_file(path, placement) {
+                Ok(end) => {
+                    changed = true;
+                    if let Some((track, _)) = placement {
+                        placement = Some((track, end));
+                    }
+                }
                 Err(error) => self.error = Some(error),
             }
         }
         if changed {
+            self.worker.load(self.assets.clone());
             self.after_edit(cx);
         }
+        cx.notify();
     }
 
-    /// Add one media file as an asset and a clip starting at the playhead. Audio
+    /// Import an asset, optionally placing a clip, as one undoable transaction. Audio
     /// is decoded up front (unsupported audio falls back to a silent source); the
     /// actual clip length is taken from decoded audio when available.
-    pub(super) fn add_media_file(&mut self, path: &Path) -> Result<(), String> {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    pub(super) fn add_media_file(
+        &mut self,
+        path: &Path,
+        placement: Option<(TrackId, Time)>,
+    ) -> Result<Time, String> {
+        if media_type_for(path) == "application/octet-stream" {
+            return Err(format!("Unsupported media: {}", path.display()));
+        }
+        let bytes = read_bounded(path, animathio_format::Limits::default().asset_bytes)
+            .map_err(|e| e.to_string())?;
         let id = AssetId::of(&bytes);
         let media_type = media_type_for(path);
         let name = path
             .file_name()
             .map_or_else(|| "media".into(), |s| s.to_string_lossy().into_owned());
+        let mut commands = Vec::new();
         if !self.project.assets().contains_key(&id) {
-            self.history
-                .execute(
-                    &mut self.project,
-                    &Command::AddAsset {
-                        id: id.clone(),
-                        asset: Asset {
-                            name,
-                            media_type: media_type.to_owned(),
-                        },
-                    },
-                )
-                .map_err(|e| e.0)?;
+            commands.push(Command::AddAsset {
+                id: id.clone(),
+                asset: Asset {
+                    name,
+                    media_type: media_type.to_owned(),
+                },
+            });
         }
-        Arc::make_mut(&mut self.assets).insert(id.clone(), bytes.clone());
         let (kind, duration) = if media_type.starts_with("audio/") {
             if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
                 let duration = frames_to_ticks(source.pcm().frames(), source.pcm().rate())
@@ -215,25 +258,41 @@ impl Editor {
         } else {
             (ClipKind::Video(id.clone()), DEFAULT_MEDIA_TICKS)
         };
-        let start = self.position;
-        let end = start
-            .0
-            .checked_add(duration)
-            .ok_or_else(|| "clip end overflow".to_owned())?;
-        let track = self
-            .project
-            .tracks()
-            .first()
-            .map(Track::id)
-            .ok_or_else(|| "no track to place the clip".to_owned())?;
-        let clip = Clip::new(
-            self.next_clip_id(),
-            kind,
-            TimeRange::new(start, Time(end)).map_err(|e| e.0)?,
-        );
-        self.history
-            .execute(&mut self.project, &Command::AddClip { track, clip })
-            .map_err(|e| e.0)?;
-        Ok(())
+        let mut end = Time(0);
+        if let Some((track, start)) = placement {
+            end = Time(start.0.checked_add(duration).ok_or("clip end overflow")?);
+            let clip = Clip::new(
+                self.next_clip_id(),
+                kind,
+                TimeRange::new(start, end).map_err(|e| e.0)?,
+            );
+            commands.push(Command::AddClip { track, clip });
+        }
+        if !commands.is_empty() {
+            self.history
+                .execute(&mut self.project, &Command::Batch { commands })
+                .map_err(|e| e.0)?;
+        }
+        Arc::make_mut(&mut self.assets).insert(id, bytes);
+        Ok(end)
+    }
+
+    pub(super) fn import_legacy(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("AniMathIO v1", &["animathio"])
+            .pick_file()
+        {
+            match self.import_control_v1(&path) {
+                Ok(()) => {
+                    self.marks = InOut::default();
+                    self.shuttle = Shuttle::default();
+                    self.after_edit(cx);
+                }
+                Err(error) => {
+                    self.error = Some(error.to_string());
+                    cx.notify();
+                }
+            }
+        }
     }
 }

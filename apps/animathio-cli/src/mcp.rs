@@ -321,19 +321,17 @@ pub(crate) struct Batch {
     pub(crate) ops: Vec<serde_json::Value>,
 }
 
-#[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ExportPresetParam {
-    /// 1920x1080, 30 fps.
-    #[serde(rename = "youtube_1080p")]
-    Youtube1080p,
-    /// 3840x2160, 30 fps.
-    #[serde(rename = "youtube_4k")]
-    Youtube4k,
-    /// 1080x1920 vertical, 30 fps (Shorts, Reels, `TikTok`).
-    ShortsVertical,
-    /// 1080x1080, 30 fps.
-    Square,
+/// A schema adapter; the actual names and deserialization come from the shared table.
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub(crate) struct ExportPresetParam(ExportPreset);
+impl JsonSchema for ExportPresetParam {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ExportPreset".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type": "string", "enum": ExportPreset::ALL.map(ExportPreset::name)})
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1355,12 +1353,7 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<SetExportPreset>,
     ) -> Result<CallToolResult, McpError> {
-        let preset = match p.preset {
-            ExportPresetParam::Youtube1080p => ExportPreset::Youtube1080p,
-            ExportPresetParam::Youtube4k => ExportPreset::Youtube4k,
-            ExportPresetParam::ShortsVertical => ExportPreset::ShortsVertical,
-            ExportPresetParam::Square => ExportPreset::Square,
-        };
+        let preset = p.preset.0;
         let mut backend = self.backend.lock().await;
         let state = backend.project_get().map_err(mcp_error)?;
         backend
@@ -1475,5 +1468,23 @@ fn media_kind(media_type: &str) -> Option<MediaKind> {
         Some(MediaKind::Audio)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod preset_tests {
+    use super::*;
+
+    #[test]
+    fn schema_and_deserialization_use_the_shared_preset_table() {
+        let schema = serde_json::to_value(schemars::schema_for!(ExportPresetParam)).unwrap();
+        assert_eq!(
+            schema["enum"],
+            json!(ExportPreset::ALL.map(ExportPreset::name))
+        );
+        for preset in ExportPreset::ALL {
+            let parsed: ExportPresetParam = serde_json::from_value(json!(preset.name())).unwrap();
+            assert_eq!(parsed.0, preset);
+        }
     }
 }
