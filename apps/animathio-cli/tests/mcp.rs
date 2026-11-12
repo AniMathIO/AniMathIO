@@ -282,6 +282,18 @@ fn math_reveal_renders_visible_plugin_outlines_and_graph_is_added() {
     let serialized = state.to_string();
     assert!(serialized.contains("org.animathio.latex"));
     assert!(serialized.contains("org.animathio.graph"));
+    // `export_video` must render the plugin clips through the plugin host,
+    // not as placeholders, and write a playable MP4.
+    let export_path = dir.path().join("math.mp4");
+    let exported = call(
+        &mut stdin,
+        &mut stdout,
+        "export_video",
+        json!({ "path": export_path }),
+    );
+    let written = Path::new(exported["path"].as_str().unwrap());
+    assert!(written.is_file(), "{exported}");
+    assert!(std::fs::metadata(written).unwrap().len() > 0);
     drop(stdin);
     assert!(child.wait().unwrap().success());
 }

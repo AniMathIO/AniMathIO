@@ -36,10 +36,10 @@ fn plugin_parameters_timing_and_clip_local_animations_match_plugins() {
     assert_eq!(params["size"], 36.0);
     assert_eq!(params["color"], json!([1, 2, 3, 255]));
     let scene = evaluate(handler.project(), Time(second + second / 2));
-    assert!((scene.clips[0].params["reveal"] - 0.5).abs() < f64::EPSILON);
+    assert!((scene.clips[0].params["reveal"].as_number().unwrap() - 0.5).abs() < f64::EPSILON);
     invoke(&mut handler, "graph.add", &json!({"items":"plot y=x^2","x_min":-2,"x_max":2,"duration":2*second,"draw_duration":second})).unwrap();
     let scene = evaluate(handler.project(), Time(second / 2));
-    assert!((scene.clips[0].params["draw"] - 0.5).abs() < f64::EPSILON);
+    assert!((scene.clips[0].params["draw"].as_number().unwrap() - 0.5).abs() < f64::EPSILON);
     // Each generated keyframe and clip is an ordinary undoable command.
     for _ in 0..4 {
         assert!(handler.history_undo().unwrap());

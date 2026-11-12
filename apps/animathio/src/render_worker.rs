@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use animathio_core::{AssetId, Scene};
-use animathio_render::{CpuBackend, PlaceholderFrameSource, RenderCtx, render};
+use animathio_render::{RenderCtx, render};
 use gpui::RenderImage;
 
 /// One immutable frame job. The UI thread evaluates and resolves the scene (running
@@ -59,7 +59,7 @@ impl RenderWorker {
 }
 
 fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
-    let mut ctx = RenderCtx::new(CpuBackend::default(), PlaceholderFrameSource::default());
+    let mut ctx = RenderCtx::default();
     while let Ok(msg) = rx.recv() {
         // Drain whatever is queued now, keep only the newest render, and apply any
         // asset load before it. Older requests are discarded unrendered.
@@ -77,9 +77,9 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
         }
         if let Some(assets) = assets {
             // Rebuilding the context drops resources from the previous project.
-            ctx = RenderCtx::new(CpuBackend::default(), PlaceholderFrameSource::default());
-            for (id, bytes) in assets {
-                let _ = ctx.resources.insert(id, bytes);
+            match RenderCtx::from_assets(assets) {
+                Ok(loaded) => ctx = loaded,
+                Err(error) => eprintln!("render resources: {error}"),
             }
         }
         if let Some(request) = latest

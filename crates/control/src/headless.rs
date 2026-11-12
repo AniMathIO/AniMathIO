@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use animathio_core::{AssetId, History, Project, Time, evaluate};
+use animathio_core::{AssetId, History, Project, Scene, Time, evaluate};
 use animathio_format::{Bundle, Limits, read_amio, read_json, write_amio, write_json};
 use animathio_plugin_host::PluginHost;
 use animathio_render::{RenderCtx, render};
@@ -118,23 +118,11 @@ impl HeadlessHandler {
         &mut self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
-        let mut ctx = RenderCtx::default();
-        for (id, bytes) in &self.assets {
-            ctx.resources.insert(id.clone(), bytes.clone())?;
-        }
-        let scene = evaluate(&self.project, params.time);
-        if self.plugins.is_none()
-            && scene
-                .clips
-                .iter()
-                .any(|clip| matches!(clip.kind, animathio_core::ClipKind::Plugin { .. }))
-        {
-            self.plugins = load_plugins();
-        }
-        let scene = match &mut self.plugins {
-            Some(host) => host.resolve(&scene, (params.width, params.height)),
-            None => scene,
-        };
+        let mut ctx = RenderCtx::from_assets(self.assets.clone())?;
+        let scene = self.resolve_scene(
+            evaluate(&self.project, params.time),
+            (params.width, params.height),
+        );
         let frame = render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;
@@ -152,6 +140,30 @@ impl HeadlessHandler {
                 base64: Some(base64::engine::general_purpose::STANDARD.encode(encoded)),
                 path: None,
             })
+        }
+    }
+
+    /// Load the plugin host lazily when the project contains plugin clips.
+    fn ensure_plugins(&mut self) {
+        if self.plugins.is_none()
+            && self
+                .project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .any(|clip| matches!(clip.kind, animathio_core::ClipKind::Plugin { .. }))
+        {
+            self.plugins = load_plugins();
+        }
+    }
+
+    /// Resolve plugin clips in `scene` at `size`, leaving the scene unchanged
+    /// when no plugins are installed (matching headless preview placeholders).
+    fn resolve_scene(&mut self, scene: Scene, size: (u32, u32)) -> Scene {
+        self.ensure_plugins();
+        match &mut self.plugins {
+            Some(host) => host.resolve(&scene, size),
+            None => scene,
         }
     }
 
@@ -218,6 +230,39 @@ impl HeadlessHandler {
 impl ControlHandler for HeadlessHandler {
     fn handle(&mut self, call: Call) -> Result<Value, ControlError> {
         Ok(match call {
+            Call::Export { params } => {
+                let output = validate_output_file(&params.output)?;
+                let range = animathio_core::TimeRange::new(
+                    params.from,
+                    params
+                        .to
+                        .unwrap_or_else(|| animathio_export::duration(&self.project)),
+                )?;
+                // Resolve plugin clips through the plugin host, mirroring the
+                // headless `render.frame` path so MCP `export_video` works with
+                // latex/graph clips when their plugins are installed.
+                self.ensure_plugins();
+                let (width, height) = animathio_export::resolution(&self.project);
+                let project = &self.project;
+                let assets = &self.assets;
+                let plugins = &mut self.plugins;
+                let mut exporter = animathio_export::Exporter::new(project, assets)
+                    .map_err(|e| ControlError::Other(e.to_string()))?;
+                let bytes = exporter
+                    .export(
+                        project,
+                        range,
+                        params.settings,
+                        |_| true,
+                        |scene| match plugins {
+                            Some(host) => host.resolve(&scene, (width, height)),
+                            None => scene,
+                        },
+                    )
+                    .map_err(|e| ControlError::Other(e.to_string()))?;
+                fs::write(&output, bytes)?;
+                serde_json::to_value(output.display().to_string())?
+            }
             Call::ProjectGet => serde_json::to_value(self.state())?,
             Call::ProjectOpen { path } => {
                 self.open(&path)?;

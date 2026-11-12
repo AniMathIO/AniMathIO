@@ -16,6 +16,7 @@
 
 mod control;
 mod editor;
+mod export_worker;
 mod inspector;
 mod playback;
 mod render_worker;

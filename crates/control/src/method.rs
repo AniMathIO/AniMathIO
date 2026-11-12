@@ -57,6 +57,22 @@ pub struct RenderFrameResult {
     pub path: Option<String>,
 }
 
+/// Offline MP4 export arguments. All times are integer timeline ticks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExportParams {
+    /// Destination MP4 file.
+    pub output: PathBuf,
+    /// Inclusive start, default zero.
+    #[serde(default)]
+    pub from: Time,
+    /// Exclusive end, default project duration.
+    #[serde(default)]
+    pub to: Option<Time>,
+    /// Encoding quality and optional rational frame rate.
+    #[serde(default)]
+    pub settings: animathio_export::Settings,
+}
+
 /// A read-only summary of the timeline for `timeline.list`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Timeline {
@@ -246,6 +262,12 @@ pub enum Call {
     RenderFrame {
         /// Rendering arguments.
         params: RenderFrameParams,
+    },
+    /// Export a snapshot offline to H.264/AAC MP4; returns its path after completion.
+    #[serde(rename = "export")]
+    Export {
+        /// Destination, range and encoding choices.
+        params: ExportParams,
     },
     /// Move the playhead to a timeline position.
     #[serde(rename = "playback.seek")]

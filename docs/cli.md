@@ -11,6 +11,7 @@ Usage: animathio-cli <COMMAND>
 Commands:
   render        Render one frame to PNG
   render-seq    Render [from, to) frame indices to `frame_000000.png`, etc
+  export        Export an offline H.264 + AAC MP4
   validate      Check model invariants and all asset content hashes
   import-v1     Convert a v1 `.animathio` project to a `.amio` archive
   import-manim  Convert a Manim Community scene script to a `.amio` archive
@@ -84,6 +85,35 @@ Options:
 ```bash
 animathio-cli render-seq sample.amio --from 0 --to 90 -o frames/
 animathio-cli render-seq sample.amio --from 30 --to 31 --width 1920 --height 1080 -o frames/
+```
+
+## `export`
+
+Export an offline H.264 + AAC MP4. Export steps the preview renderer frame by
+frame and encodes with the FilmCraft backend; it is never a recording of
+playback. `--from`/`--to` accept the same exact decimal-second or `Nticks` forms
+as `render --time`; the end is exclusive and defaults to the project duration.
+`--fps` overrides the project frame rate (e.g. `30` or `30000/1001`); `--crf` is
+the H.264 constant-quality target (0–51, lower is better).
+
+```text
+Usage: animathio-cli export [OPTIONS] --output <OUTPUT> <PROJECT>
+
+Arguments:
+  <PROJECT>  project.json (assets/<hash> alongside it), or a self-contained .amio
+
+Options:
+  -o, --output <OUTPUT>
+      --from <FROM>  Inclusive start in decimal seconds or Nticks [default: 0]
+      --to <TO>      Exclusive end in decimal seconds or Nticks; defaults to project duration
+      --fps <FPS>    Output rate, e.g. 30 or 30000/1001
+      --crf <CRF>    Constant quality, 0..=51; lower is better [default: 23]
+  -h, --help         Print help
+```
+
+```bash
+animathio-cli export sample.amio -o out.mp4
+animathio-cli export sample.amio -o clip.mp4 --from 1.0 --to 3.0 --fps 30000/1001 --crf 18
 ```
 
 ## `validate`

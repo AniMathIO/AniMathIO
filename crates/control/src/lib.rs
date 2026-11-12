@@ -26,9 +26,9 @@ pub use error::ControlError;
 pub use handler::{ControlHandler, dispatch, from_value};
 pub use headless::HeadlessHandler;
 pub use method::{
-    AssetInfo, Call, ClipAdded, ClipInfo, GraphAddParams, ImportManimParams, ImportManimResult,
-    MathAddParams, ProjectState, RenderFrameParams, RenderFrameResult, Timeline, TrackInfo,
-    clip_kind_label, media_type_of, timeline_of,
+    AssetInfo, Call, ClipAdded, ClipInfo, ExportParams, GraphAddParams, ImportManimParams,
+    ImportManimResult, MathAddParams, ProjectState, RenderFrameParams, RenderFrameResult, Timeline,
+    TrackInfo, clip_kind_label, media_type_of, timeline_of,
 };
 pub use path::{read_bounded, validate_existing_file, validate_output_file};
 pub use server::{

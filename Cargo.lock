@@ -124,6 +124,7 @@ dependencies = [
  "animathio-audio",
  "animathio-control",
  "animathio-core",
+ "animathio-export",
  "animathio-format",
  "animathio-import-v1",
  "animathio-plugin-api",
@@ -158,6 +159,7 @@ version = "2.0.0"
 dependencies = [
  "animathio-control",
  "animathio-core",
+ "animathio-export",
  "animathio-format",
  "animathio-import-manim",
  "animathio-import-v1",
@@ -178,6 +180,7 @@ name = "animathio-control"
 version = "2.0.0"
 dependencies = [
  "animathio-core",
+ "animathio-export",
  "animathio-format",
  "animathio-import-manim",
  "animathio-import-v1",
@@ -204,6 +207,20 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "animathio-export"
+version = "2.0.0"
+dependencies = [
+ "animathio-audio",
+ "animathio-core",
+ "animathio-media",
+ "animathio-render",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -245,6 +262,27 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "animathio-media"
+version = "2.0.0"
+dependencies = [
+ "animathio-audio",
+ "animathio-core",
+ "crossbeam-channel",
+ "filmcraft-aac",
+ "filmcraft-bitstream",
+ "filmcraft-codecs",
+ "filmcraft-color",
+ "filmcraft-frame",
+ "filmcraft-h264",
+ "filmcraft-h264enc",
+ "filmcraft-isobmff",
+ "filmcraft-matroska",
+ "filmcraft-media",
+ "filmcraft-time",
  "thiserror 2.0.21",
 ]
 
@@ -292,6 +330,7 @@ version = "2.0.0"
 dependencies = [
  "animathio-core",
  "animathio-format",
+ "animathio-media",
  "fearless_simd 1.2.0",
  "image",
  "parley",
@@ -2046,6 +2085,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98b0cc327b5bc766e7fda9c9260cc0fa81b43a8e240440422dff70788e3f9ef1"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2735,6 +2783,291 @@ checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
 dependencies = [
  "cfg-if",
  "libc",
+]
+
+[[package]]
+name = "filmcraft-aac"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320f035b1c55004b37025f8db667f908bc6fafe98fbe0b1ab8efcdf559c7440a"
+dependencies = [
+ "filmcraft-bitstream",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-ac3"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d17e68e57e0039be2264551c24f22b622079e43c4ec6d736626348220e98b79"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-apv"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63260fc847f802adbf49df511e8974551f9427b13264ab87ace1d85269ffbab8"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-av1"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d744740c41da5bf31222130b3a44e27c8dc6d0bf58fd0dd7174419042d626bdd"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-avi"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a04f391c09865485bc67d8e875064099fc1afffc217c04eea81c0e011ba2ddde"
+
+[[package]]
+name = "filmcraft-bitstream"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08f8be9fae696d78e233591b4d57871c39f15ac0ac7445168356cda705efa499"
+
+[[package]]
+name = "filmcraft-codecs"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1662f6b05897695e17796bf0581ff1a6e8a22943f7210e90b855723509e5afe"
+dependencies = [
+ "filmcraft-aac",
+ "filmcraft-ac3",
+ "filmcraft-apv",
+ "filmcraft-av1",
+ "filmcraft-avi",
+ "filmcraft-bitstream",
+ "filmcraft-color",
+ "filmcraft-dnx",
+ "filmcraft-frame",
+ "filmcraft-h264",
+ "filmcraft-hevc",
+ "filmcraft-isobmff",
+ "filmcraft-matroska",
+ "filmcraft-media",
+ "filmcraft-mpa",
+ "filmcraft-mpeg2v",
+ "filmcraft-mpegts",
+ "filmcraft-mxf",
+ "filmcraft-ogg",
+ "filmcraft-opus",
+ "filmcraft-prores",
+ "filmcraft-time",
+ "filmcraft-vp8",
+ "filmcraft-vp9",
+ "image",
+ "log",
+ "rayon",
+ "symphonia",
+ "thiserror 2.0.21",
+ "web-time",
+]
+
+[[package]]
+name = "filmcraft-color"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da21f037498279fe732c67571e0290a17521791b00d77f53896f5936289b4e9c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "filmcraft-dng"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f28f5106d3ecc86ffb5da472023abb27c6b0c4cb173376ff6e941ed9634e48f"
+dependencies = [
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-dnx"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3a59d559caf74b9281578f06015702bd402192198f71f5d41e7c6a9ec3592ab"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-frame"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62c716d14c5e98d778936f5a464e4995b557c5184354b30d1c07703028cea498"
+dependencies = [
+ "filmcraft-color",
+ "filmcraft-time",
+ "rayon",
+ "serde",
+]
+
+[[package]]
+name = "filmcraft-h264"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df2670e59d7dc442bce44fbf13d29def8c64ae08d30f50b96c65a62399e02994"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-h264enc"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49486dc973601085de3fb78a207d9a749efd6393e1ec8ecb3d6ddd5f4e9b8d9b"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-hevc"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03c01ffef7cbe98b90c50dce88cde418ef37666de46bca5d60214b0a3c15129c"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-isobmff"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "905b55107b8b4c4538315478772babd5190d8ddff9110fcd2755056c612395cf"
+dependencies = [
+ "filmcraft-bitstream",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-matroska"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c13ec1020ffe4d24c2989a3e82e2fee53bea2ef8ec76bf0e57dde2594d069e65"
+
+[[package]]
+name = "filmcraft-media"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c040969f4c39716d2eb5e36c02e4056d808fa7cfba740a897a85329a7ffb0ae"
+dependencies = [
+ "filmcraft-color",
+ "filmcraft-dng",
+ "filmcraft-frame",
+ "filmcraft-time",
+ "image",
+ "rayon",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-mpa"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c802a164c5a51a777ef9469a499fc190ee0614a9944c72416c49034b2947e144"
+dependencies = [
+ "filmcraft-bitstream",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-mpeg2v"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e014fdc8f78eff0f4280a829b78f04a561f0ea5caf4a9d3506adb4b00c7819e"
+dependencies = [
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-mpegts"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18e719e79fd532529c4c41567149f1a94c25c2a44bb1f170619a7cc21d12981d"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-mxf"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4948396d1bfe1196f33653ec90edcafb5a1e9c3a603fbc1e1e2c7d2492ad93d4"
+
+[[package]]
+name = "filmcraft-ogg"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a8915db14f760903031b268344e7955f0369d966f3eecbb460e482a810ff868"
+
+[[package]]
+name = "filmcraft-opus"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75df182b08495634a08ec64bda8afc98af051b713a3648aba77708ea3ef3d305"
+
+[[package]]
+name = "filmcraft-prores"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3c32ba15adf56264cd0039d3185da1243e039bcb16d9a7979f2ac01d9020a9e"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-time"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f975b8ce527517c31b673e143e269cf25e3229ebf81c32c55929785857ae803"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "filmcraft-vp8"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24060c4863c8266f8bc524aa2d11d47e2e75e2f8f9da30d4b6c58bbf37d261de"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-vp9"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a249ac83276e0f3da68570eb7e4956833accb5a99aa87a222ead00591046698"
+dependencies = [
+ "filmcraft-bitstream",
+ "rayon",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
