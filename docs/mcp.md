@@ -12,7 +12,7 @@ AniMathIO 2.0 exposes two related surfaces:
 
 ### Transport and location
 
-- **Unix:** a Unix-domain socket at `$XDG_RUNTIME_DIR/animathio-control.sock`.
+- **Unix:** a Unix-domain socket at `$XDG_RUNTIME_DIR/animathio/animathio-control.sock`.
 - **Windows:** a named pipe anchored at the same per-user location.
 - Never a listening TCP port.
 
@@ -22,7 +22,7 @@ The editor starts the server when launched with `--control` (or
 ### Authentication
 
 On bind, the server generates a random **256-bit token**, writes it to a `0600`
-file next to the socket (`$XDG_RUNTIME_DIR/animathio-control.token`), and removes
+file next to the socket (`$XDG_RUNTIME_DIR/animathio/animathio-control.token`), and removes
 it on drop. Every request must carry the token in a top-level `token` field; the
 server compares it in constant time and answers `-32001 authentication failed` on
 mismatch. `ControlClient::connect` reads the token file automatically.
@@ -49,16 +49,24 @@ gets a JSON-RPC error instead of a result.
 | `project.save` | `{ path? }` | saved path |
 | `command.apply` | `{ command }` | — (applied through the shared history) |
 | `history.undo` / `history.redo` | — | whether an edit was undone/redone |
-| `render.frame` | `{ time, width, height, output? }` | `{ size, base64?, path? }` |
+| `render.frame` | `{ params: { time, width, height, output? } }` | `{ size, base64?, path? }` |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
 | `assets.import` | `{ path }` | `AssetInfo` (id, name, media_type) |
 | `timeline.list` | — | `Timeline` (frame rate, duration, tracks, clips) |
 | `project.import_v1` | `{ path }` | — (replaces the current project) |
+| `math.add` | `{ params: { latex, mode?, size?, color?, x?, y?, start?, duration?, reveal_duration? } }` | `{ track_id, clip_id }` |
+| `graph.add` | `{ params: { x_min?, x_max?, y_min?, y_max?, items?, show_grid?, show_axes?, show_labels?, color?, x?, y?, start?, duration?, draw_duration? } }` | `{ track_id, clip_id }` |
+| `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
 
 `command` is a serialized `animathio_core::Command` — the same enum undo/redo,
 MCP and the UI all use. `time` is integer ticks (705,600,000/s). Paths are
-canonicalized and must resolve to regular files.
+canonicalized and must resolve to regular files; `script_dir` must resolve to a
+directory. Control math/graph positions are normalized canvas fractions and their
+colors are `[r, g, b, a]` bytes. Durations and animation durations are positive
+ticks; `start` defaults to zero. The default clip duration is the project's
+explicit duration, or three seconds when unset. Keyframes use clip-local ticks.
+The three authoring methods work in both the editor and headless handler.
 
 ## MCP
 
@@ -73,7 +81,8 @@ you to pass `--project`. With `--project`, it drives the file through the same
 `ControlHandler` trait, so tools behave identically either way.
 
 Times are milliseconds; coordinates are canvas pixels with the origin top-left.
-All mutations are applied as `Command`s and are undoable.
+Timeline edits are applied as `Command`s and are undoable; replacing a project
+clears its undo history.
 
 ### Tools
 
@@ -81,12 +90,13 @@ All mutations are applied as `Command`s and are undoable.
 | --- | --- | --- |
 | `get_project_state` | Canvas, tracks, clips, playhead, active state | |
 | `add_text` | Add a plain-text clip | font size in pixels; ms times |
-| `add_math` | Add a LaTeX fragment | **Not implemented** — the tool returns `not yet supported` (the latex plugin is not wired into the MCP path) |
+| `add_math` | Add an `org.animathio.latex` plugin clip | `latex`; optional `mode` (`latex`/`typst`), `size` (default 48 px), `color`, `x`/`y`, `start_ms`, `duration_ms`, `reveal_duration_ms` |
+| `add_graph` | Add an `org.animathio.graph` plugin clip | bounds, newline-separated `items`, `show_grid`/`show_axes`/`show_labels`, `color`, `x`/`y`, `start_ms`, `duration_ms`, `draw_duration_ms` |
 | `add_media` | Import image/video/audio by absolute path, add a clip | |
 | `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction` |
 | `update_element` | Update a clip's placement and/or visible time frame | |
 | `remove_element` | Remove a clip by id | |
-| `set_canvas` | Canvas width/height, background color, duration | `#RRGGBB`/`#RRGGBBAA`; ms |
+| `set_canvas` | Canvas width/height, background color, duration | `background_color`: `#RRGGBB`/`#RRGGBBAA`; `max_time_ms`: duration in ms |
 | `set_param` | Set/change a clip's named numeric parameter | |
 | `add_keyframe` | Add a keyframe to a clip | target: `x`, `y`, `scale_x`, `scale_y`, `rotation`, `opacity` or a param name |
 | `undo` / `redo` | Undo / redo the last edit | |
@@ -96,7 +106,56 @@ All mutations are applied as `Command`s and are undoable.
 | `render_frame` | Render one frame to PNG | base64 return, or written to a path |
 | `export_video` | Export to `.mp4`/`.webm` | **Not implemented** — returns `not yet supported` |
 | `import_v1` | Import a v1 `.animathio` project, replacing the current one | |
-| `import_manim_scene` | Build a scene from a Manim script | **Not implemented** — returns `not yet supported` (use `animathio-cli import-manim`) |
+| `import_manim_scene` | Import a supported Manim scene without executing Python | Exactly one of `path` or inline `source`; optional `script_dir`, `scene`, `replace` (default false) |
+
+`add_math` validates source through `crates/typeset` before changing the project;
+malformed math returns an MCP tool error. Math mode defaults to `latex`; `typst`
+accepts Typst math syntax. Math and graphs default to the canvas centre, use
+`#RRGGBB`/`#RRGGBBAA` colors, and return the new track and clip identities. Their
+optional animations run from 0 to 1 on the plugin's `reveal` or `draw` numeric
+parameter, starting at clip-local time zero. Bounds default to -5…5 on each axis;
+items default to `plot y=x^2`. Other item lines include `point x=1 y=2` and
+`circle cx=0 cy=0 r=1`; items may specify `color=#RRGGBB`. Math and graph clips
+each create a new track; generated edits are ordinary
+commands in undo history.
+
+`import_manim_scene` appends imported tracks with remapped identities by default.
+`replace: true` replaces the project, clears its saved path and undo history, and
+resets playback. The returned report contains track/asset counts and `warnings`
+and `infos` arrays. File input uses the canonical script parent for relative
+assets unless `script_dir` is provided; inline input should provide `script_dir`
+when it references relative assets. Source size is limited by the importer.
+
+For example, MCP `tools/call` arguments can be:
+
+```json
+{"name":"add_math","arguments":{"latex":"x^2 + y^2 = z^2","size":48,"duration_ms":3000,"reveal_duration_ms":1000}}
+{"name":"add_graph","arguments":{"x_min":-3,"x_max":3,"items":"plot y=x^2","draw_duration_ms":1000}}
+{"name":"import_manim_scene","arguments":{"path":"/path/to/scene.py","scene":"Demo","replace":false}}
+```
+
+### Headless plugin loading
+
+Plugin clips are rendered through `crates/plugin-host`, with the same sandbox
+and typesetting imports as editor preview. Both applications search, in order:
+
+1. `ANIMATHIO_PLUGIN_DIR`, when explicitly set;
+2. `plugins` next to the executable;
+3. the per-user `directories::BaseDirs::data_dir()/animathio/plugins` directory.
+
+Debug builds also look for `plugins` next to the executable's parent directory
+(for `target/{debug,release}/animathio*` → `target/plugins`). No build searches the
+current working directory. Only executable-relative directories and the explicit
+environment override can supply reserved `org.animathio.*` ids. Packages claiming
+those ids in the user directory are skipped before compilation/instantiation.
+Missing plugins remain preserved in the project and render as placeholders.
+For an in-tree release build, set `ANIMATHIO_PLUGIN_DIR` to the absolute path of
+`target/plugins` produced by `scripts/build-plugins.sh`.
+
+The MCP integration suite builds these bundles with `scripts/build-plugins.sh`
+when `wasm32-wasip2` is installed, then checks a blank initial reveal and visible
+math outlines in the rendered PNG. If the target is unavailable, this render
+test prints a skip message; math validation and Manim round-trip tests still run.
 
 The server advertises protocol `2024-11-05` with tools enabled, and instructions
 noting the ms/pixel conventions.

@@ -2,8 +2,8 @@
 //! rendered frame over the wire.
 
 use animathio_control::{
-    Call, ControlClient, ControlError, ControlServer, HeadlessHandler, ProjectState,
-    RenderFrameParams, RenderFrameResult, SocketSpec, from_value,
+    Call, ControlClient, ControlError, ControlHandler, ControlServer, HeadlessHandler,
+    ProjectState, RenderFrameParams, RenderFrameResult, SocketSpec, from_value,
 };
 use animathio_core::{Command, Time, Track, TrackId};
 
@@ -12,6 +12,34 @@ fn spec(dir: &std::path::Path) -> SocketSpec {
         path: dir.join("control.sock"),
         token_file: dir.join("control.token"),
     }
+}
+
+#[test]
+fn authoring_methods_round_trip_over_the_authenticated_socket() {
+    let dir = private_dir();
+    let spec = spec(dir.path());
+    let server = ControlServer::bind(spec.clone()).unwrap();
+    let mut running = server.spawn(HeadlessHandler::new()).unwrap();
+    let mut client = ControlClient::connect(&spec).unwrap();
+    for (method, params) in [
+        ("math.add", serde_json::json!({"latex":"x^2"})),
+        ("graph.add", serde_json::json!({"items":"plot y=x"})),
+        (
+            "import.manim",
+            serde_json::json!({"source":"from manim import *\nclass Demo(Scene):\n    def construct(self):\n        c = Circle()\n        self.add(c)\n        self.wait(1)\n"}),
+        ),
+    ] {
+        let call =
+            serde_json::from_value(serde_json::json!({"method":method,"params":{"params":params}}))
+                .unwrap();
+        assert!(client.call(call).is_ok(), "{method}");
+    }
+    let state = client.project_get().unwrap();
+    assert_eq!(state.project.tracks().len(), 3);
+    state.project.validate().unwrap();
+    drop(client);
+    running.shutdown();
+    running.join();
 }
 
 fn private_dir() -> tempfile::TempDir {
