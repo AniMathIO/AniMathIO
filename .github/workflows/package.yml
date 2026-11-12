@@ -180,19 +180,32 @@ jobs:
         run: |
           set -euo pipefail
 
+          # cargo-packager builds `AniMathIO.app` in the output directory and
+          # hands it to create-dmg, so both the bundle and the image are there.
+          app='target/packages/AniMathIO.app'
           dmg="$(find target/packages -maxdepth 1 -name '*.dmg' -print -quit)"
+          test -d "$app"
           test -n "$dmg"
-          mountpoint="$(mktemp -d)"
-          hdiutil attach "$dmg" -mountpoint "$mountpoint" -nobrowse -quiet
-          trap 'hdiutil detach "$mountpoint" -quiet || true' EXIT
 
-          app="$(find "$mountpoint" -maxdepth 1 -name '*.app' -print -quit)"
-          test -n "$app"
-          for exe in animathio animathio-cli; do
-            test -x "$app/Contents/MacOS/$exe"
-            "$app/Contents/MacOS/$exe" --version
-          done
-          ls "$app/Contents/Resources/plugins"/*.amplugin >/dev/null
+          check_bundle() {
+            local bundle="$1"
+            for exe in animathio animathio-cli; do
+              test -x "$bundle/Contents/MacOS/$exe"
+              "$bundle/Contents/MacOS/$exe" --version
+            done
+            ls "$bundle/Contents/Resources/plugins"/*.amplugin >/dev/null
+          }
+
+          check_bundle "$app"
+
+          # Repeat against what a user actually gets out of the image.
+          # `-acceptlicense` because the bundled license becomes a dmg EULA.
+          mountroot="$(mktemp -d)"
+          hdiutil attach "$dmg" -nobrowse -readonly -acceptlicense -mountroot "$mountroot" -quiet
+          trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
+          mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
+          test -n "$mounted_app"
+          check_bundle "$mounted_app"
       - name: Attest build provenance
         # `id-token: write` is not granted to pull requests from forks.
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
