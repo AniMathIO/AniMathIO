@@ -23,6 +23,28 @@ pub enum Command {
         /// Finite, nonnegative gain.
         gain: f64,
     },
+    /// Mute or unmute a layer (silent in the mix, hidden from rendering).
+    SetTrackMuted {
+        /// Layer identity.
+        id: TrackId,
+        /// New mute state.
+        muted: bool,
+    },
+    /// Solo or unsolo a layer. While any layer is soloed, only soloed layers
+    /// are audible and visible.
+    SetTrackSolo {
+        /// Layer identity.
+        id: TrackId,
+        /// New solo state.
+        solo: bool,
+    },
+    /// Lock or unlock a layer against clip edits.
+    SetTrackLocked {
+        /// Layer identity.
+        id: TrackId,
+        /// New lock state.
+        locked: bool,
+    },
     /// Remove a layer with all its clips.
     RemoveTrack {
         /// Layer identity.
@@ -213,6 +235,33 @@ impl Command {
                     gain: project.tracks[index].gain,
                 };
                 project.tracks[index].gain = *gain;
+                inverse
+            }
+            Self::SetTrackMuted { id, muted } => {
+                let index = track_index(project, *id)?;
+                let inverse = Self::SetTrackMuted {
+                    id: *id,
+                    muted: project.tracks[index].muted,
+                };
+                project.tracks[index].muted = *muted;
+                inverse
+            }
+            Self::SetTrackSolo { id, solo } => {
+                let index = track_index(project, *id)?;
+                let inverse = Self::SetTrackSolo {
+                    id: *id,
+                    solo: project.tracks[index].solo,
+                };
+                project.tracks[index].solo = *solo;
+                inverse
+            }
+            Self::SetTrackLocked { id, locked } => {
+                let index = track_index(project, *id)?;
+                let inverse = Self::SetTrackLocked {
+                    id: *id,
+                    locked: project.tracks[index].locked,
+                };
+                project.tracks[index].locked = *locked;
                 inverse
             }
             Self::RemoveTrack { id } => {

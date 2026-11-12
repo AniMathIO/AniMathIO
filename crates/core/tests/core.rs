@@ -704,6 +704,98 @@ fn track_gain_is_validated_reversible_and_defaults_for_old_projects() {
 }
 
 #[test]
+fn track_mute_solo_and_lock_are_reversible_and_default_for_old_projects() {
+    let mut project = base();
+    assert!(!project.tracks()[0].is_muted());
+    assert!(!project.tracks()[0].is_solo());
+    assert!(!project.tracks()[0].is_locked());
+    let original = project.clone();
+    for command in [
+        Command::SetTrackMuted {
+            id: TrackId(0),
+            muted: true,
+        },
+        Command::SetTrackSolo {
+            id: TrackId(1),
+            solo: true,
+        },
+        Command::SetTrackLocked {
+            id: TrackId(0),
+            locked: true,
+        },
+    ] {
+        let inverse = command.apply(&mut project).unwrap();
+        assert_ne!(project, original, "{command:?} must change the project");
+        let decoded: Project =
+            serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
+        assert_eq!(decoded, project);
+        inverse.apply(&mut project).unwrap();
+        assert_eq!(project, original);
+    }
+    // Missing fields from pre-flags projects decode to the unlocked defaults.
+    let mut json = serde_json::to_value(&project).unwrap();
+    for track in json["tracks"].as_array_mut().unwrap() {
+        let object = track.as_object_mut().unwrap();
+        object.remove("muted");
+        object.remove("solo");
+        object.remove("locked");
+    }
+    let decoded: Project = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn evaluate_honours_track_mute_and_solo() {
+    let mut project = base();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: plugin(1, 0, 100),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let both = evaluate(&project, Time(50));
+    assert_eq!(both.clips.len(), 2);
+
+    // Muting a track hides its clips from the resolved scene.
+    Command::SetTrackMuted {
+        id: TrackId(0),
+        muted: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(
+        evaluate(&project, Time(50))
+            .clips
+            .iter()
+            .map(|clip| clip.track)
+            .collect::<Vec<_>>(),
+        vec![TrackId(1)]
+    );
+
+    // Solo beats mute: only soloed tracks resolve while any track is soloed.
+    Command::SetTrackMuted {
+        id: TrackId(0),
+        muted: false,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetTrackSolo {
+        id: TrackId(0),
+        solo: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(
+        evaluate(&project, Time(50))
+            .clips
+            .iter()
+            .map(|clip| clip.track)
+            .collect::<Vec<_>>(),
+        vec![TrackId(0)]
+    );
+}
+
+#[test]
 fn move_keyframe_is_reversible_and_rejects_occupied_destinations() {
     let mut project = animated();
     let original = project.clone();

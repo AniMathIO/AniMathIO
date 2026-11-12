@@ -124,8 +124,9 @@ impl Mixer {
             .checked_mul(channels)
             .ok_or_else(|| Error::Invalid("mix too large".into()))?;
         let mut output = vec![0.0_f32; len];
+        let any_solo = project.tracks().iter().any(animathio_core::Track::is_solo);
         for track in project.tracks() {
-            if track.gain() == 0.0 {
+            if track.gain() == 0.0 || track.is_muted() || (any_solo && !track.is_solo()) {
                 continue;
             }
             for clip in track.clips().values() {
