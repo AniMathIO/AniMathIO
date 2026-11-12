@@ -1,6 +1,7 @@
 //! Deterministic, GPU-free rendering of evaluated scenes.
 //! Media bytes and decoded images live in `RenderCtx`, never in the project.
 mod cpu;
+pub mod effects;
 pub mod sample;
 
 use animathio_core::{AssetId, ClipKind, Project, Scene, Time};
@@ -79,6 +80,9 @@ pub enum Error {
     /// A glyph could not be rasterized.
     #[error("glyph rendering failed: {0}")]
     Glyph(String),
+    /// A clip effect could not be applied.
+    #[error("effect error: {0}")]
+    Effect(String),
 }
 
 pub(crate) fn check_size(size: Size) -> Result<(u16, u16), Error> {

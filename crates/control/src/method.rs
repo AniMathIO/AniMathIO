@@ -97,6 +97,9 @@ pub struct ClipInfo {
 }
 
 /// Every protocol method, tagged with its method name.
+// `command.apply` carries a full `animathio_core::Command` by value; the enum
+// is a serialization shape, not a hot path, so indirection is unnecessary here.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params")]
 pub enum Call {

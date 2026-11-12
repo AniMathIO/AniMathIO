@@ -1104,6 +1104,7 @@ fn build_project(
             source_offset: Time(0),
             transform: mob_transform(mob),
             params,
+            effects: Vec::new(),
             animations: Vec::new(),
         };
         Command::AddClip {

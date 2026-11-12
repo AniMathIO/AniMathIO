@@ -15,6 +15,7 @@ fn layer(id: u64, kind: ClipKind, transform: Transform) -> SceneClip {
         source_time: Time(0),
         transform,
         params: std::collections::BTreeMap::new(),
+        effects: Vec::new(),
     }
 }
 fn rect(color: [u8; 4], transform: Transform) -> SceneClip {

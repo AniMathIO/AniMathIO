@@ -199,6 +199,13 @@ pub(crate) fn numeric_base(clip: &Clip, target: &Target) -> f64 {
     match target {
         Target::Param(name) => clip.params.get(name).copied().unwrap_or(0.0),
         Target::Transform(property) => transform_value(&clip.transform, *property),
+        Target::Effect { effect, param } => clip
+            .effects
+            .iter()
+            .find(|instance| instance.id == *effect)
+            .and_then(|instance| instance.params.get(param))
+            .copied()
+            .unwrap_or(0.0),
     }
 }
 
@@ -293,6 +300,12 @@ pub(crate) fn numeric_edit_command(
             Target::Param(name) => Command::SetParam {
                 id: clip.id,
                 name: name.clone(),
+                value: Some(value),
+            },
+            Target::Effect { effect, param } => Command::SetEffectParam {
+                id: clip.id,
+                effect: *effect,
+                name: param.clone(),
                 value: Some(value),
             },
             Target::Transform(property) => Command::SetTransform {

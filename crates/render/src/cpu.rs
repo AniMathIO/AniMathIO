@@ -1,7 +1,7 @@
 use crate::{Backend, Error, Frame, FrameSource, ResourcePool, Size, check_size};
 use animathio_core::{
-    ClipKind, Color as CoreColor, PathVerb, Scene, StrokeCap, StrokeJoin, StrokeStyle, TextElement,
-    Transform, VectorElement, VectorScene,
+    ClipKind, Color as CoreColor, PathVerb, Scene, SceneClip, StrokeCap, StrokeJoin, StrokeStyle,
+    TextElement, Transform, VectorElement, VectorScene,
     builtin::{Builtin, Color, PathElement, Shape},
 };
 use parley::{
@@ -77,60 +77,22 @@ impl Backend for CpuBackend {
                 _ => unit_transform(clip.transform, size)?,
             };
             ctx.set_transform(transform);
-            #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
-            ctx.push_opacity_layer(clip.transform.opacity as f32);
-            match &clip.kind {
-                ClipKind::Image(id) => draw_image(&mut ctx, pool.image(id)?.as_ref())?,
-                ClipKind::Video(id) => {
-                    if let Some(frame) = video.frame_at(id, clip.source_time) {
-                        draw_image(&mut ctx, &frame)?;
-                    } else {
-                        self.placeholder(
-                            &mut ctx,
-                            &mut resources,
-                            size,
-                            &format!("VIDEO {}\n{} ticks", &id.as_str()[..8], clip.source_time.0),
-                        )?;
-                    }
-                }
-                ClipKind::Builtin(Builtin::Text {
-                    text,
-                    font_size,
-                    color,
-                }) => {
-                    self.text(&mut ctx, &mut resources, size, text, *font_size, *color)?;
-                }
-                ClipKind::Builtin(Builtin::Shape {
-                    shape,
-                    fill,
-                    stroke,
-                }) => {
-                    let path = path(shape);
-                    if let Some(fill) = fill {
-                        ctx.set_paint(color(*fill));
-                        ctx.fill_path(&path);
-                    }
-                    if let Some(stroke) = stroke {
-                        ctx.set_paint(color(stroke.color));
-                        ctx.set_stroke(Stroke::new(stroke.width));
-                        ctx.stroke_path(&path);
-                    }
-                }
-                ClipKind::Plugin { plugin_id, .. } => self.placeholder(
-                    &mut ctx,
-                    &mut resources,
-                    size,
-                    &format!("PLUGIN\n{plugin_id}"),
-                )?,
-                ClipKind::Vector(scene) => {
-                    self.vector_scene(&mut ctx, &mut resources, size, scene)?;
-                }
-                ClipKind::Error(message) => {
-                    self.placeholder(&mut ctx, &mut resources, size, &format!("ERROR\n{message}"))?;
-                }
-                ClipKind::Audio(_) => {}
+            if clip.effects.is_empty() {
+                #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
+                ctx.push_opacity_layer(clip.transform.opacity as f32);
+                self.draw_clip(&mut ctx, &mut resources, size, clip, pool, video)?;
+                ctx.pop_layer();
+            } else {
+                // Rasterize the clip into its own layer, apply the effect chain
+                // there, then composite. Effects must not see other clips.
+                let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;
+                crate::effects::apply_chain(&mut layer, &clip.effects)?;
+                ctx.set_transform(Affine::IDENTITY);
+                #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
+                ctx.push_opacity_layer(clip.transform.opacity as f32);
+                composite_layer(&mut ctx, &layer)?;
+                ctx.pop_layer();
             }
-            ctx.pop_layer();
         }
         ctx.flush();
         let mut target = Pixmap::new(width, height);
@@ -249,6 +211,26 @@ fn path(shape: &Shape) -> BezPath {
     }
 }
 
+fn composite_layer(ctx: &mut RenderContext, frame: &Frame) -> Result<(), Error> {
+    frame.validate()?;
+    let (width, height) = check_size(frame.size)?;
+    let pixels = frame.pixels.as_slice().to_vec();
+    let pixmap = Pixmap::from_parts(
+        pixels,
+        width,
+        height,
+        PixelMetadata::new(ImageAlphaType::Alpha, true),
+    );
+    ctx.set_paint(Image {
+        image: ImageSource::Pixmap(Arc::new(pixmap)),
+        sampler: ImageSampler::default(),
+    });
+    ctx.set_paint_transform(Affine::IDENTITY);
+    ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
+    ctx.set_paint_transform(Affine::IDENTITY);
+    Ok(())
+}
+
 fn draw_image(ctx: &mut RenderContext, frame: &Frame) -> Result<(), Error> {
     frame.validate()?;
     let (width, height) = check_size(frame.size)?;
@@ -274,6 +256,95 @@ fn draw_image(ctx: &mut RenderContext, frame: &Frame) -> Result<(), Error> {
 }
 
 impl CpuBackend {
+    fn draw_clip(
+        &mut self,
+        ctx: &mut RenderContext,
+        resources: &mut Resources,
+        size: Size,
+        clip: &SceneClip,
+        pool: &mut ResourcePool,
+        video: &mut dyn FrameSource,
+    ) -> Result<(), Error> {
+        match &clip.kind {
+            ClipKind::Image(id) => draw_image(ctx, pool.image(id)?.as_ref())?,
+            ClipKind::Video(id) => {
+                if let Some(frame) = video.frame_at(id, clip.source_time) {
+                    draw_image(ctx, &frame)?;
+                } else {
+                    self.placeholder(
+                        ctx,
+                        resources,
+                        size,
+                        &format!("VIDEO {}\n{} ticks", &id.as_str()[..8], clip.source_time.0),
+                    )?;
+                }
+            }
+            ClipKind::Builtin(Builtin::Text {
+                text,
+                font_size,
+                color,
+            }) => {
+                self.text(ctx, resources, size, text, *font_size, *color)?;
+            }
+            ClipKind::Builtin(Builtin::Shape {
+                shape,
+                fill,
+                stroke,
+            }) => {
+                let path = path(shape);
+                if let Some(fill) = fill {
+                    ctx.set_paint(color(*fill));
+                    ctx.fill_path(&path);
+                }
+                if let Some(stroke) = stroke {
+                    ctx.set_paint(color(stroke.color));
+                    ctx.set_stroke(Stroke::new(stroke.width));
+                    ctx.stroke_path(&path);
+                }
+            }
+            ClipKind::Plugin { plugin_id, .. } => {
+                self.placeholder(ctx, resources, size, &format!("PLUGIN\n{plugin_id}"))?;
+            }
+            ClipKind::Vector(scene) => {
+                self.vector_scene(ctx, resources, size, scene)?;
+            }
+            ClipKind::Error(message) => {
+                self.placeholder(ctx, resources, size, &format!("ERROR\n{message}"))?;
+            }
+            ClipKind::Audio(_) => {}
+        }
+        Ok(())
+    }
+
+    fn render_effect_layer(
+        &mut self,
+        clip: &SceneClip,
+        pool: &mut ResourcePool,
+        video: &mut dyn FrameSource,
+        size: Size,
+        transform: Affine,
+    ) -> Result<Frame, Error> {
+        let (width, height) = check_size(size)?;
+        let mut ctx = RenderContext::new_with(
+            width,
+            height,
+            RenderSettings {
+                level: Level::fallback(),
+                num_threads: 0,
+            },
+        );
+        let mut resources = Resources::new();
+        ctx.set_transform(transform);
+        self.draw_clip(&mut ctx, &mut resources, size, clip, pool, video)?;
+        ctx.flush();
+        let mut target = Pixmap::new(width, height);
+        ctx.render(&mut target, &mut resources);
+        Ok(Frame {
+            size,
+            pixels: target.take_rgba8(ImageAlphaType::Alpha),
+        })
+    }
+
     pub(crate) fn placeholder_frame(
         &mut self,
         asset: &animathio_core::AssetId,

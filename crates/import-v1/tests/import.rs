@@ -9,7 +9,8 @@
 )]
 
 use animathio_core::{
-    AssetId, ClipKind, FrameRate, Project, TICKS_PER_SECOND, Time, builtin::Builtin,
+    AssetId, ClipKind, EffectId, EffectInstance, EffectKind, FrameRate, Project, TICKS_PER_SECOND,
+    Time, builtin::Builtin,
 };
 use animathio_import_v1::{
     ImportError, ImportLimits, import_v1, import_v1_with_limits, import_v1_with_report,
@@ -219,11 +220,14 @@ fn imports_every_element_type_and_maps_values() {
     assert_eq!(project.assets().len(), 3);
     assert_eq!(assets.iter().map(|a| &a.id).collect::<Vec<_>>().len(), 3);
 
-    // Video: media type from the data URL, mute + effect params, fade-in keys.
+    // Video: media type from the data URL, mute + effect, fade-in keys.
     let video_clip = &clips[0].1;
     assert_eq!(video_clip.kind, ClipKind::Video(video_asset.clone()));
     assert_eq!(video_clip.params["muted"], 1.0);
-    assert_eq!(video_clip.params["effect.sepia"], 1.0);
+    assert_eq!(
+        video_clip.effects,
+        vec![EffectInstance::new(EffectId(1), EffectKind::Sepia)]
+    );
     assert_eq!(video_clip.transform.x, 0.125);
     assert_eq!(video_clip.transform.y, 100.0 / 600.0 / 2.0);
     assert_eq!(video_clip.transform.scale_x, 0.25);
@@ -252,10 +256,13 @@ fn imports_every_element_type_and_maps_values() {
         .unwrap();
     assert_eq!(audio_track.gain(), 0.8);
 
-    // Image: effect param and a slide-in position animation.
+    // Image: effect and a slide-in position animation.
     let image_clip = &clips[2].1;
     assert_eq!(image_clip.kind, ClipKind::Image(png_asset.clone()));
-    assert_eq!(image_clip.params["effect.blackAndWhite"], 1.0);
+    assert_eq!(
+        image_clip.effects,
+        vec![EffectInstance::new(EffectId(1), EffectKind::Grayscale)]
+    );
     assert!(image_clip.animations.iter().any(|a| matches!(
         a.target,
         animathio_core::Target::Transform(animathio_core::TransformProperty::X)
@@ -275,11 +282,14 @@ fn imports_every_element_type_and_maps_values() {
     assert_eq!(*font_size, 24.0 / 600.0);
     assert_eq!(*color, [255, 0, 0, 255]);
 
-    // Mafs: static PNG image with the mafs marker and effect params.
+    // Mafs: static PNG image with the mafs marker and effect.
     let mafs_clip = &clips[4].1;
     assert_eq!(mafs_clip.kind, ClipKind::Image(png_asset.clone()));
     assert_eq!(mafs_clip.params["v1.mafs"], 1.0);
-    assert_eq!(mafs_clip.params["effect.invert"], 1.0);
+    assert_eq!(
+        mafs_clip.effects,
+        vec![EffectInstance::new(EffectId(1), EffectKind::Invert)]
+    );
 
     // Media types come from the data URLs.
     let media_types: Vec<_> = assets.iter().map(|a| a.media_type.as_str()).collect();
@@ -296,9 +306,9 @@ fn imports_every_element_type_and_maps_values() {
     );
     // The genuinely unknown field is reported.
     assert!(report.warnings().iter().any(|w| w.contains("futureField")));
-    // Effects and mafs are reported as pending/static.
+    // Effects are real instances now; only mafs stays a static-image warning.
     assert!(
-        report
+        !report
             .warnings()
             .iter()
             .any(|w| w.contains("rendering is pending"))
