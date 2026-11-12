@@ -105,7 +105,8 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `core::Command` is an exhaustive enum of serializable, invertible edits:
 `AddTrack`, `RemoveTrack`, `SetTrackGain`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
-`MergeClip`, `SetTransform`, `SetParam`, `AddKeyframe`, `RemoveKeyframe`.
+`MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
+`SetEffectParam`, `AddKeyframe`, `RemoveKeyframe`.
 
 `Command::apply(&mut Project) -> Result<Command>` validates the candidate project
 transactionally and returns the exact inverse, so undo/redo, the control protocol,

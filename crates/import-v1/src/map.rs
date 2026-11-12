@@ -8,9 +8,9 @@
 use crate::model::{V1Animation, V1Effect, V1Element, V1Placement, V1Project};
 use crate::{Asset, ImportError, ImportLimits, Report};
 use animathio_core::{
-    Asset as CoreAsset, AssetId, Clip, ClipId, ClipKind, Command, FrameRate, Interpolation,
-    Keyframe, Project, TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform,
-    TransformProperty,
+    Asset as CoreAsset, AssetId, Clip, ClipId, ClipKind, Command, EffectId, EffectInstance,
+    EffectKind, FrameRate, Interpolation, Keyframe, Project, TICKS_PER_SECOND, Target, Time,
+    TimeRange, Track, TrackId, Transform, TransformProperty,
     builtin::{Builtin, Color},
 };
 use base64::Engine;
@@ -18,7 +18,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 
 /// The clip payload each element builder produces.
-type BuiltClip = (ClipKind, Transform, BTreeMap<String, f64>, Option<f64>);
+type BuiltClip = (
+    ClipKind,
+    Transform,
+    BTreeMap<String, f64>,
+    Vec<EffectInstance>,
+    Option<f64>,
+);
 
 /// Resolved bookkeeping for one imported element, used by the animation pass.
 struct ElementMeta {
@@ -221,7 +227,7 @@ pub(crate) fn import_with_report(
                 None
             }
         };
-        let Some((kind, transform, params, track_gain)) = built else {
+        let Some((kind, transform, params, effects, track_gain)) = built else {
             continue;
         };
 
@@ -244,6 +250,7 @@ pub(crate) fn import_with_report(
             source_offset: Time(0),
             transform,
             params,
+            effects,
             animations: Vec::new(),
         };
         Command::AddClip {
@@ -522,25 +529,34 @@ fn asset_name(id: &str, element_name: &str, mime: &str) -> String {
     format!("{stem}.{extension}")
 }
 
-fn effect_params(
+fn element_effects(
     effect: Option<&V1Effect>,
     report: &mut Report,
     element_id: &str,
-) -> BTreeMap<String, f64> {
-    let mut params = BTreeMap::new();
-    let Some(effect) = effect else { return params };
+) -> Vec<EffectInstance> {
+    let Some(effect) = effect else {
+        return Vec::new();
+    };
     let name = effect.kind.as_str();
-    if matches!(name, "blackAndWhite" | "sepia" | "invert" | "saturate") {
-        params.insert(format!("effect.{name}"), 1.0);
-        report.warn(format!(
-            "element {element_id}: effect {name:?} stored as a clip parameter; rendering is pending"
-        ));
-    } else if name != "none" {
-        report.warn(format!(
-            "element {element_id}: unknown effect {name:?} ignored"
-        ));
+    let kind = match name {
+        "blackAndWhite" => EffectKind::Grayscale,
+        "sepia" => EffectKind::Sepia,
+        "invert" => EffectKind::Invert,
+        // v1's preset is `saturate(200%)`, so the multiplier is 2, not 1.
+        "saturate" => EffectKind::Saturate,
+        "none" => return Vec::new(),
+        other => {
+            report.warn(format!(
+                "element {element_id}: unknown effect {other:?} ignored"
+            ));
+            return Vec::new();
+        }
+    };
+    let mut instance = EffectInstance::new(EffectId(1), kind);
+    if kind == EffectKind::Saturate {
+        instance.params.insert("amount".to_owned(), 2.0);
     }
-    params
+    vec![instance]
 }
 
 fn base_geometry(placement: &V1Placement) -> (f64, f64, f64, f64) {
@@ -564,7 +580,8 @@ fn built_media(
 ) -> Option<BuiltClip> {
     let asset = element_assets.get(&element.id)?;
     let placement = element.placement.as_ref()?;
-    let mut params = effect_params(element.properties.effect.as_ref(), report, &element.id);
+    let effects = element_effects(element.properties.effect.as_ref(), report, &element.id);
+    let mut params = BTreeMap::new();
     let muted = element.properties.muted.unwrap_or(false);
     params.insert("muted".to_owned(), f64::from(u8::from(muted)));
     if placement.rotation != 0.0 {
@@ -577,6 +594,7 @@ fn built_media(
         kind(asset.clone()),
         media_transform(placement, canvas_width, canvas_height),
         params,
+        effects,
         None,
     ))
 }
@@ -622,6 +640,7 @@ fn built_audio(
         ClipKind::Audio(asset.clone()),
         media_transform(placement, canvas_width, canvas_height),
         params,
+        Vec::new(),
         track_gain,
     ))
 }
@@ -635,9 +654,10 @@ fn built_mafs(
 ) -> Option<BuiltClip> {
     let asset = element_assets.get(&element.id)?;
     let placement = element.placement.as_ref()?;
-    let mut params = effect_params(element.properties.effect.as_ref(), report, &element.id);
+    let effects = element_effects(element.properties.effect.as_ref(), report, &element.id);
     // v1 rasterized mafs graphs to a PNG and never stored the graph
     // definition, so only a marker survives for a future graph plugin.
+    let mut params = BTreeMap::new();
     params.insert("v1.mafs".to_owned(), 1.0);
     report.warn(format!(
         "element {}: mafs graph imported as a static image; graph definition not stored in v1",
@@ -647,6 +667,7 @@ fn built_mafs(
         ClipKind::Image(asset.clone()),
         media_transform(placement, canvas_width, canvas_height),
         params,
+        effects,
         None,
     ))
 }
@@ -710,6 +731,7 @@ fn built_text(
         }),
         text_transform(placement, canvas_width, canvas_height),
         BTreeMap::new(),
+        Vec::new(),
         None,
     ))
 }

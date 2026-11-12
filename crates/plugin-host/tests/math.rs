@@ -93,6 +93,7 @@ fn vector_clip(scene: VectorScene) -> SceneClip {
         source_time: Time(0),
         transform: Transform::default(),
         params: BTreeMap::new(),
+        effects: Vec::new(),
     }
 }
 

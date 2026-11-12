@@ -1,5 +1,5 @@
 use crate::builtin::Color;
-use crate::{Error, FrameRate, Keyframes, Time, invalid};
+use crate::{EffectId, EffectInstance, Error, FrameRate, Keyframes, Time, invalid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -179,6 +179,13 @@ pub enum Target {
     Transform(TransformProperty),
     /// Named numeric parameter; must exist in the clip's base parameters.
     Param(String),
+    /// Parameter of one effect instance, addressed by its stable effect id.
+    Effect {
+        /// Effect identity within the clip.
+        effect: EffectId,
+        /// Parameter name within that effect.
+        param: String,
+    },
 }
 /// One numeric animation in clip-local ticks (keyframes may extend beyond a trim).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -204,6 +211,9 @@ pub struct Clip {
     pub transform: Transform,
     /// Named base numeric parameters (e.g. gain or a graph coefficient).
     pub params: BTreeMap<String, f64>,
+    /// Ordered visual effects, applied after rasterizing the clip source.
+    #[serde(default)]
+    pub effects: Vec<EffectInstance>,
     /// Numeric curves in clip-local time, sorted by unique target.
     pub animations: Vec<Animation>,
 }
@@ -218,6 +228,7 @@ impl Clip {
             source_offset: Time(0),
             transform: Transform::default(),
             params: BTreeMap::new(),
+            effects: Vec::new(),
             animations: Vec::new(),
         }
     }
@@ -423,32 +434,7 @@ impl Project {
                     ClipKind::Builtin(source) => source.validate()?,
                     ClipKind::Vector(scene) => scene.validate()?,
                 }
-                if clip
-                    .animations
-                    .windows(2)
-                    .any(|pair| pair[0].target >= pair[1].target)
-                {
-                    return Err(invalid("animations must be sorted by target"));
-                }
-                for animation in &clip.animations {
-                    if animation.keys.0.is_empty() {
-                        return Err(invalid("empty animation"));
-                    }
-                    if let Target::Param(name) = &animation.target
-                        && !clip.params.contains_key(name)
-                    {
-                        return Err(invalid("animation parameter missing"));
-                    }
-                    for (time, key) in &animation.keys.0 {
-                        if time.0 < 0
-                            || !key.value.is_finite()
-                            || (animation.target == Target::Transform(TransformProperty::Opacity)
-                                && !(0.0..=1.0).contains(&key.value))
-                        {
-                            return Err(invalid("invalid keyframe"));
-                        }
-                    }
-                }
+                validate_clip_effects_and_animations(clip)?;
                 ranges.push(clip.range);
             }
             ranges.sort_by_key(|r| r.start);
@@ -481,6 +467,9 @@ pub struct SceneClip {
     pub transform: Transform,
     /// Evaluated numeric parameters.
     pub params: BTreeMap<String, f64>,
+    /// Evaluated effect chain, with keyframed parameters resolved.
+    #[serde(default)]
+    pub effects: Vec<EffectInstance>,
 }
 
 /// Resolve active clips at `time`, independently of previous calls or seek order.
@@ -501,6 +490,7 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                 source_time: Time(clip.source_offset.0 + local_time.0),
                 transform: clip.transform,
                 params: clip.params.clone(),
+                effects: clip.effects.clone(),
             };
             for animation in &clip.animations {
                 if let Some(value) = animation.keys.sample(local_time) {
@@ -509,6 +499,15 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                         Target::Param(name) => {
                             resolved.params.insert(name.clone(), value);
                         }
+                        Target::Effect { effect, param } => {
+                            if let Some(instance) = resolved
+                                .effects
+                                .iter_mut()
+                                .find(|instance| instance.id == *effect)
+                            {
+                                instance.params.insert(param.clone(), value);
+                            }
+                        }
                     }
                 }
             }
@@ -516,6 +515,64 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
         }
     }
     scene
+}
+
+fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
+    let mut effect_ids = BTreeSet::new();
+    for effect in &clip.effects {
+        if !effect_ids.insert(effect.id) {
+            return Err(invalid("duplicate effect id"));
+        }
+        effect.validate()?;
+    }
+    if clip
+        .animations
+        .windows(2)
+        .any(|pair| pair[0].target >= pair[1].target)
+    {
+        return Err(invalid("animations must be sorted by target"));
+    }
+    for animation in &clip.animations {
+        if animation.keys.0.is_empty() {
+            return Err(invalid("empty animation"));
+        }
+        let effect_kind = match &animation.target {
+            Target::Param(name) => {
+                if !clip.params.contains_key(name) {
+                    return Err(invalid("animation parameter missing"));
+                }
+                None
+            }
+            Target::Effect { effect, param } => {
+                let instance = clip
+                    .effects
+                    .iter()
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("animation effect missing"))?;
+                if !instance.kind.param_names().contains(&param.as_str()) {
+                    return Err(invalid("animation effect parameter missing"));
+                }
+                Some(instance.kind)
+            }
+            Target::Transform(_) => None,
+        };
+        for (time, key) in &animation.keys.0 {
+            let valid_value = match &animation.target {
+                Target::Transform(TransformProperty::Opacity) => (0.0..=1.0).contains(&key.value),
+                Target::Transform(_) | Target::Param(_) => true,
+                Target::Effect { param, .. } => {
+                    let Some(kind) = effect_kind else {
+                        return Err(invalid("animation effect missing"));
+                    };
+                    kind.validate_param(param, key.value).is_ok()
+                }
+            };
+            if time.0 < 0 || !key.value.is_finite() || !valid_value {
+                return Err(invalid("invalid keyframe"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn unity_gain() -> f64 {

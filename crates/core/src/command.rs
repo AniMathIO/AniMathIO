@@ -1,7 +1,7 @@
 use crate::builtin::Color;
 use crate::{
-    Animation, Asset, AssetId, Clip, ClipId, Error, Keyframe, Keyframes, Project, Target, Time,
-    TimeRange, Track, TrackId, Transform, invalid,
+    Animation, Asset, AssetId, Clip, ClipId, EffectId, EffectInstance, Error, Keyframe, Keyframes,
+    Project, Target, Time, TimeRange, Track, TrackId, Transform, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +108,33 @@ pub enum Command {
     SetParam {
         /// Clip identity.
         id: ClipId,
+        /// Parameter name.
+        name: String,
+        /// New value; `None` removes it (only if not animated).
+        value: Option<f64>,
+    },
+    /// Insert an effect into a clip's ordered effect chain.
+    AddEffect {
+        /// Clip identity.
+        id: ClipId,
+        /// Position in the effect chain.
+        index: usize,
+        /// Effect instance (with a unique id within the clip).
+        effect: EffectInstance,
+    },
+    /// Remove an effect by id; fails if any animation targets it.
+    RemoveEffect {
+        /// Clip identity.
+        id: ClipId,
+        /// Effect identity.
+        effect: EffectId,
+    },
+    /// Set or remove an effect parameter.
+    SetEffectParam {
+        /// Clip identity.
+        id: ClipId,
+        /// Effect identity.
+        effect: EffectId,
         /// Parameter name.
         name: String,
         /// New value; `None` removes it (only if not animated).
@@ -365,6 +392,63 @@ impl Command {
                 };
                 Self::SetParam {
                     id: *id,
+                    name: name.clone(),
+                    value: previous,
+                }
+            }
+            Self::AddEffect { id, index, effect } => {
+                let clip = clip_mut(project, *id)?;
+                if *index > clip.effects.len() {
+                    return Err(invalid("effect index out of bounds"));
+                }
+                if clip.effects.iter().any(|existing| existing.id == effect.id) {
+                    return Err(invalid("effect already exists"));
+                }
+                clip.effects.insert(*index, effect.clone());
+                Self::RemoveEffect {
+                    id: *id,
+                    effect: effect.id,
+                }
+            }
+            Self::RemoveEffect { id, effect } => {
+                let clip = clip_mut(project, *id)?;
+                let index = clip
+                    .effects
+                    .iter()
+                    .position(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("effect missing"))?;
+                if clip.animations.iter().any(|animation| {
+                    matches!(&animation.target, Target::Effect { effect: target, .. } if target == effect)
+                }) {
+                    return Err(invalid("effect is animated"));
+                }
+                let removed = clip.effects.remove(index);
+                Self::AddEffect {
+                    id: *id,
+                    index,
+                    effect: removed,
+                }
+            }
+            Self::SetEffectParam {
+                id,
+                effect,
+                name,
+                value,
+            } => {
+                let clip = clip_mut(project, *id)?;
+                let instance = clip
+                    .effects
+                    .iter_mut()
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("effect missing"))?;
+                let previous = if let Some(value) = value {
+                    instance.params.insert(name.clone(), *value)
+                } else {
+                    instance.params.remove(name)
+                };
+                Self::SetEffectParam {
+                    id: *id,
+                    effect: *effect,
                     name: name.clone(),
                     value: previous,
                 }

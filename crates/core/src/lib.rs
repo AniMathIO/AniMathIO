@@ -2,12 +2,14 @@
 //! No decoder, filesystem, GPU or UI resources belong in this crate.
 pub mod builtin;
 mod command;
+mod effects;
 mod keyframes;
 mod model;
 mod time;
 mod vector;
 
 pub use command::*;
+pub use effects::*;
 pub use keyframes::*;
 pub use model::*;
 pub use time::*;
