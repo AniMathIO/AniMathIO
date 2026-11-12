@@ -337,10 +337,10 @@ fn windows_pipe_name(path: &Path) -> String {
     // (FNV-1a over the encoded path bytes). Distinct socket paths — the
     // per-user default and each test's temp dir — must not share a pipe, and
     // both client and server derive the same name from the same path.
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in path.as_os_str().as_encoded_bytes() {
         hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(0x1_0000_0001_b3);
     }
     format!("animathio-control-{hash:016x}")
 }
