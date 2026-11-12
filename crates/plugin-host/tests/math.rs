@@ -160,6 +160,7 @@ fn vector_clip(scene: VectorScene) -> SceneClip {
         transform: Transform::default(),
         params: BTreeMap::new(),
         effects: Vec::new(),
+        transition: None,
     }
 }
 
