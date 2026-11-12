@@ -117,6 +117,7 @@ pub(crate) fn snap_start(
 /// a tick, then optionally snapped to the playhead and every existing clip
 /// edge. Unlike [`snap_start`] there is no clip to exclude, since the dropped
 /// clip is new.
+#[allow(dead_code)] // Exercised by tests; media-pool drag wiring is deferred.
 pub(crate) fn drop_start(
     layout: &TimelineLayout,
     project: &Project,

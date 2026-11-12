@@ -85,7 +85,13 @@ mod tests {
     fn round_trips_integer_rates() {
         for fps in [24, 25, 30, 50, 60] {
             let rate = rate(fps);
-            for frame in [0, 1, (fps - 1) as i64, fps as i64, fps as i64 * 59 + 12] {
+            for frame in [
+                0,
+                1,
+                i64::from(fps - 1),
+                i64::from(fps),
+                i64::from(fps) * 59 + 12,
+            ] {
                 let time = rate
                     .frame_to_time(frame, Rounding::Nearest)
                     .expect("valid frame");

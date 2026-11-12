@@ -40,8 +40,8 @@ impl Default for DockLayout {
 impl DockLayout {
     /// Round-trip through the JSON string form used for the on-disk file.
     #[must_use]
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("dock layout serializes")
+    pub fn to_json(self) -> String {
+        serde_json::to_string(&self).expect("dock layout serializes")
     }
 
     /// Parse from the on-disk JSON form, falling back to the default layout.

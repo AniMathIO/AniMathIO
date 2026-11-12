@@ -47,6 +47,7 @@ fn main() {
     };
     gpui_platform::application().run(move |cx: &mut App| {
         gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
                 cx.quit();
