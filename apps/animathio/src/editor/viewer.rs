@@ -43,6 +43,8 @@ impl Editor {
             viewport.child(empty_state("rendering…", cx))
         };
         let viewer_root = div()
+            .w_full()
+            .min_w_0()
             .key_context("Viewer")
             .track_focus(&self.panel_focus[1])
             .on_mouse_down(

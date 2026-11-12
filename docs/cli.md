@@ -94,7 +94,11 @@ frame and encodes with the FilmCraft backend; it is never a recording of
 playback. `--from`/`--to` accept the same exact decimal-second or `Nticks` forms
 as `render --time`; the end is exclusive and defaults to the project duration.
 `--fps` overrides the project frame rate (e.g. `30` or `30000/1001`); `--crf` is
-the H.264 constant-quality target (0–51, lower is better).
+the H.264 constant-quality target (0–51, lower is better). `--preset` uses the same
+`youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square` table as the editor and
+MCP. It sets the export snapshot to the preset resolution and 30 fps without writing
+the project file. Quality defaults to CRF 18 with a preset or 23 otherwise;
+`--fps` and `--crf` override those defaults.
 
 Missing parent directories of `--output` are created. An existing file is never
 replaced silently: without `--overwrite` the command fails with an
@@ -103,23 +107,27 @@ temporary file in the destination directory and renamed into place only after a
 successful export, so a failed or interrupted run leaves no partial output.
 
 ```text
+Export an offline H.264 + AAC MP4
+
 Usage: animathio-cli export [OPTIONS] --output <OUTPUT> <PROJECT>
 
 Arguments:
-  <PROJECT>  project.json (assets/<hash> alongside it), or a self-contained .amio
+  <PROJECT>
 
 Options:
   -o, --output <OUTPUT>
-      --from <FROM>  Inclusive start in decimal seconds or Nticks [default: 0]
-      --to <TO>      Exclusive end in decimal seconds or Nticks; defaults to project duration
-      --fps <FPS>    Output rate, e.g. 30 or 30000/1001
-      --crf <CRF>    Constant quality, 0..=51; lower is better [default: 23]
-      --overwrite    Replace an existing output file instead of failing
-  -h, --help         Print help
+      --from <FROM>      Inclusive start in decimal seconds or Nticks [default: 0]
+      --to <TO>          Exclusive end in decimal seconds or Nticks; defaults to project duration
+      --fps <FPS>        Output rate, e.g. 30 or 30000/1001
+      --preset <PRESET>  Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical` or square
+      --crf <CRF>        Constant quality, 0..=51; lower is better (defaults to preset quality or 23)
+      --overwrite        Replace an existing output file instead of failing
+  -h, --help             Print help
 ```
 
 ```bash
 animathio-cli export sample.amio -o out.mp4
+animathio-cli export sample.amio -o shorts.mp4 --preset shorts_vertical
 animathio-cli export sample.amio -o clip.mp4 --from 1.0 --to 3.0 --fps 30000/1001 --crf 18
 animathio-cli export sample.amio -o renders/out.mp4 --overwrite
 ```

@@ -42,6 +42,7 @@ impl Editor {
 
     /// Finish a media-pool drag at a window position over the timeline.
     pub(super) fn drop_on_timeline(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.snap_line = None;
         let Some(drag) = self.pool_drag.take() else {
             return;
         };

@@ -54,6 +54,7 @@ impl Editor {
 
     pub(super) fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.dirty = true;
+        self.next_id = self.next_id.max(next_id(&self.project));
         self.selected = self.selected.filter(|id| self.find_clip(*id).is_some());
         self.sync_audio(cx);
         let time = self.current_render_time();

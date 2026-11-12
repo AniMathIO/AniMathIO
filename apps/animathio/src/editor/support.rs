@@ -33,6 +33,13 @@ pub(super) fn icon_button(
         "step-fwd" => Some((Box::new(actions::NextFrame), "Viewer")),
         "jump-end" => Some((Box::new(actions::GoToEnd), "Viewer")),
         "loop" => Some((Box::new(actions::ToggleLoop), "Viewer")),
+        "tool-select" => Some((Box::new(actions::SelectTool), "Timeline")),
+        "tool-blade" => Some((Box::new(actions::BladeTool), "Timeline")),
+        "tool-ripple" => Some((Box::new(actions::RippleTool), "Timeline")),
+        "tool-hand" => Some((Box::new(actions::HandTool), "Timeline")),
+        "mark-in" => Some((Box::new(actions::MarkIn), "Timeline")),
+        "mark-out" => Some((Box::new(actions::MarkOut), "Timeline")),
+        "zoom-fit" => Some((Box::new(actions::ZoomToFit), "Timeline")),
         "snap" => Some((Box::new(actions::ToggleSnapping), "Timeline")),
         "zoom-in" => Some((Box::new(actions::ZoomIn), "Timeline")),
         "zoom-out" => Some((Box::new(actions::ZoomOut), "Timeline")),
@@ -126,13 +133,6 @@ pub(super) fn paint_timeline(
             ));
         }
     }
-    if let Some(time) = snapshot.snap_line {
-        let x = bounds.origin.x + px(timeline::time_to_x(&layout, time));
-        window.paint_quad(fill(
-            Bounds::new(point(x, bounds.origin.y), size(px(2.), px(height))),
-            gpui::rgb(0xffd43b),
-        ));
-    }
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let head = Bounds::from_corners(
         point(head_x, bounds.origin.y),
@@ -146,6 +146,13 @@ pub(super) fn paint_timeline(
         ),
         cx.theme().danger,
     ));
+    if let Some(time) = snapshot.snap_line {
+        let x = bounds.origin.x + px(timeline::time_to_x(&layout, time));
+        window.paint_quad(fill(
+            Bounds::new(point(x, bounds.origin.y), size(px(2.), px(height))),
+            gpui::rgb(0xffd43b),
+        ));
+    }
 }
 
 /// Paint one clip block: kind-coloured body, waveform, fade ramps, outline, trim

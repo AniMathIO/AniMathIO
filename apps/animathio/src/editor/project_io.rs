@@ -207,9 +207,10 @@ impl Editor {
             self.worker.load(self.assets.clone());
             self.after_edit(cx);
         }
+        cx.notify();
     }
 
-    /// Add one media file as an asset and a clip starting at the playhead. Audio
+    /// Import an asset, optionally placing a clip, as one undoable transaction. Audio
     /// is decoded up front (unsupported audio falls back to a silent source); the
     /// actual clip length is taken from decoded audio when available.
     pub(super) fn add_media_file(
@@ -227,21 +228,16 @@ impl Editor {
         let name = path
             .file_name()
             .map_or_else(|| "media".into(), |s| s.to_string_lossy().into_owned());
+        let mut commands = Vec::new();
         if !self.project.assets().contains_key(&id) {
-            self.history
-                .execute(
-                    &mut self.project,
-                    &Command::AddAsset {
-                        id: id.clone(),
-                        asset: Asset {
-                            name,
-                            media_type: media_type.to_owned(),
-                        },
-                    },
-                )
-                .map_err(|e| e.0)?;
+            commands.push(Command::AddAsset {
+                id: id.clone(),
+                asset: Asset {
+                    name,
+                    media_type: media_type.to_owned(),
+                },
+            });
         }
-        Arc::make_mut(&mut self.assets).insert(id.clone(), bytes.clone());
         let (kind, duration) = if media_type.starts_with("audio/") {
             if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
                 let duration = frames_to_ticks(source.pcm().frames(), source.pcm().rate())
@@ -262,20 +258,25 @@ impl Editor {
         } else {
             (ClipKind::Video(id.clone()), DEFAULT_MEDIA_TICKS)
         };
-        let Some((track, start)) = placement else {
-            return Ok(Time(0));
-        };
-        let end = start.0.checked_add(duration).ok_or("clip end overflow")?;
-        let clip = Clip::new(
-            self.next_clip_id(),
-            kind,
-            TimeRange::new(start, Time(end)).map_err(|e| e.0)?,
-        );
-        self.history
-            .execute(&mut self.project, &Command::AddClip { track, clip })
-            .map_err(|e| e.0)?;
-        Ok(Time(end))
+        let mut end = Time(0);
+        if let Some((track, start)) = placement {
+            end = Time(start.0.checked_add(duration).ok_or("clip end overflow")?);
+            let clip = Clip::new(
+                self.next_clip_id(),
+                kind,
+                TimeRange::new(start, end).map_err(|e| e.0)?,
+            );
+            commands.push(Command::AddClip { track, clip });
+        }
+        if !commands.is_empty() {
+            self.history
+                .execute(&mut self.project, &Command::Batch { commands })
+                .map_err(|e| e.0)?;
+        }
+        Arc::make_mut(&mut self.assets).insert(id, bytes);
+        Ok(end)
     }
+
     pub(super) fn import_legacy(&mut self, cx: &mut Context<Self>) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("AniMathIO v1", &["animathio"])

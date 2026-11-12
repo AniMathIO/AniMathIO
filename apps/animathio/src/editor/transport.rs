@@ -109,6 +109,7 @@ impl Editor {
 
     pub(super) fn toggle_snapping(&mut self, cx: &mut Context<Self>) {
         self.snapping = !self.snapping;
+        self.snap_line = None;
         cx.notify();
     }
 
@@ -209,67 +210,84 @@ impl Editor {
             .child(
                 div()
                     .w(px(124.))
+                    .flex_shrink_0()
                     .font_family(cx.theme().mono_font_family.clone())
                     .child(gpui_component::input::Input::new(&state).small()),
             )
-            .child(div().flex_1())
-            .child(icon_button(
-                "jump-start",
-                icons::icon(IconName::SkipBack),
-                "Go to start",
-                cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_start(cx)),
-            ))
-            .child(icon_button(
-                "step-back",
-                icons::icon(IconName::StepBack),
-                "Step back one frame",
-                cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(-1, cx)),
-            ))
             .child(
-                icon_button(
-                    "play",
-                    play_icon,
-                    play_tooltip,
-                    cx.listener(Self::on_play_click),
-                )
-                .when(self.playing, ButtonVariants::primary),
-            )
-            .child(icon_button(
-                "step-fwd",
-                icons::icon(IconName::StepForward),
-                "Step forward one frame",
-                cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(1, cx)),
-            ))
-            .child(icon_button(
-                "jump-end",
-                icons::icon(IconName::SkipForward),
-                "Go to end",
-                cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_end(cx)),
-            ))
-            .child(
-                icon_button(
-                    "loop",
-                    icons::icon(IconName::Repeat),
-                    if self.loop_playback {
-                        "Loop: on"
-                    } else {
-                        "Loop: off"
-                    },
-                    cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_loop(cx)),
-                )
-                .selected(self.loop_playback)
-                .toggled(self.loop_playback),
-            )
-            .child(div().flex_1())
-            .child(div().text_color(cx.theme().muted_foreground).child(
-                if self.playing && self.shuttle.0 != 1 {
-                    format!("{}x (silent)", self.shuttle.0)
-                } else {
-                    timecode::format_timecode(
-                        Time(timeline::project_duration(&self.project)),
-                        self.project.frame_rate(),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap_1()
+                    .child(icon_button(
+                        "jump-start",
+                        icons::icon(IconName::SkipBack),
+                        "Go to start",
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_start(cx)),
+                    ))
+                    .child(icon_button(
+                        "step-back",
+                        icons::icon(IconName::StepBack),
+                        "Step back one frame",
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(-1, cx)),
+                    ))
+                    .child(
+                        icon_button(
+                            "play",
+                            play_icon,
+                            play_tooltip,
+                            cx.listener(Self::on_play_click),
+                        )
+                        .when(self.playing, ButtonVariants::primary),
                     )
-                },
-            ))
+                    .child(icon_button(
+                        "step-fwd",
+                        icons::icon(IconName::StepForward),
+                        "Step forward one frame",
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(1, cx)),
+                    ))
+                    .child(icon_button(
+                        "jump-end",
+                        icons::icon(IconName::SkipForward),
+                        "Go to end",
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_end(cx)),
+                    ))
+                    .child(
+                        icon_button(
+                            "loop",
+                            icons::icon(IconName::Repeat),
+                            if self.loop_playback {
+                                "Loop: on"
+                            } else {
+                                "Loop: off"
+                            },
+                            cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_loop(cx)),
+                        )
+                        .selected(self.loop_playback)
+                        .toggled(self.loop_playback),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(110.))
+                    .flex_shrink_0()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if self.playing && self.shuttle.0 != 1 {
+                        format!("{}x (silent)", self.shuttle.0)
+                    } else {
+                        timecode::format_timecode(
+                            Time(timeline::project_duration(&self.project)),
+                            self.project.frame_rate(),
+                        )
+                    }),
+            )
     }
 }

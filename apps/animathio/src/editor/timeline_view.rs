@@ -223,6 +223,21 @@ impl Editor {
             self.hovered_clip = hovered;
             cx.notify();
         }
+        if self.pool_drag.is_some() {
+            self.snap_line = if self.snapping {
+                timeline::snap_target(
+                    &layout,
+                    &self.project,
+                    None,
+                    self.position,
+                    timeline::x_to_time(&layout, x),
+                )
+            } else {
+                None
+            };
+            cx.notify();
+            return;
+        }
         if self.tool == Tool::Blade && !event.dragging() {
             let raw = timeline::x_to_time(&layout, x);
             self.snap_line = self
@@ -302,6 +317,9 @@ impl Editor {
                             .clamp(trim.origin_start.0.saturating_add(1), i64::MAX),
                     ),
                 };
+                if self.snap_line.is_some_and(|target| target != trim.current) {
+                    self.snap_line = None;
+                }
                 cx.notify();
             }
             Some(TimelineGesture::Fade(fade)) => {
@@ -596,22 +614,22 @@ impl Editor {
                             (
                                 Tool::Select,
                                 IconName::MousePointer2,
-                                "Select (A)",
+                                "Select",
                                 "tool-select",
                             ),
                             (
                                 Tool::Blade,
                                 IconName::Scissors,
-                                "Blade (B); Shift-click all tracks",
+                                "Blade; Shift-click all tracks",
                                 "tool-blade",
                             ),
                             (
                                 Tool::Ripple,
                                 IconName::FoldHorizontal,
-                                "Ripple trim (T)",
+                                "Ripple trim",
                                 "tool-ripple",
                             ),
-                            (Tool::Hand, IconName::Hand, "Pan (H)", "tool-hand"),
+                            (Tool::Hand, IconName::Hand, "Pan", "tool-hand"),
                         ]
                         .map(|(tool, icon, label, id)| {
                             icon_button(
@@ -620,6 +638,7 @@ impl Editor {
                                 label,
                                 cx.listener(move |this, _, _, cx| {
                                     this.tool = tool;
+                                    this.snap_line = None;
                                     cx.notify();
                                 }),
                             )
@@ -629,7 +648,7 @@ impl Editor {
                     .child(icon_button(
                         "mark-in",
                         icons::icon(IconName::LogIn),
-                        "Set in (I)",
+                        "Set in",
                         cx.listener(|this, _, _, cx| {
                             this.marks.set_in(this.position);
                             cx.notify();
@@ -638,7 +657,7 @@ impl Editor {
                     .child(icon_button(
                         "mark-out",
                         icons::icon(IconName::LogOut),
-                        "Set out (O)",
+                        "Set out (exclusive)",
                         cx.listener(|this, _, _, cx| {
                             this.marks.set_out(this.position);
                             cx.notify();
@@ -647,7 +666,7 @@ impl Editor {
                     .child(icon_button(
                         "zoom-fit",
                         icons::icon(IconName::FoldHorizontal),
-                        "Zoom to fit (Shift+Z)",
+                        "Zoom to fit",
                         cx.listener(|this, _, _, cx| {
                             this.timeline_zoom = 1.0;
                             this.timeline_scroll = 0.0;

@@ -407,6 +407,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         this.tool = Tool::Select;
+        this.snap_line = None;
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &BladeTool, window, cx| {
@@ -415,6 +416,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         this.tool = Tool::Blade;
+        this.snap_line = None;
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &RippleTool, window, cx| {
@@ -423,6 +425,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         this.tool = Tool::Ripple;
+        this.snap_line = None;
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &HandTool, window, cx| {
@@ -431,6 +434,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         this.tool = Tool::Hand;
+        this.snap_line = None;
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &RippleDelete, window, cx| {

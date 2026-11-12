@@ -501,7 +501,14 @@ impl Editor {
                 ));
         }
         this.request_render(Time(0));
-        window.focus(&this.panel_focus[0], cx);
+        window.focus(
+            if this.is_start_screen() {
+                &this.focus_handle
+            } else {
+                &this.panel_focus[0]
+            },
+            cx,
+        );
         // Drain worker/control mailboxes even when there are no pointer events.
         // Only completed work invalidates the view; an idle editor need not redraw.
         cx.spawn_in(window, async move |this, cx| {
