@@ -12,7 +12,7 @@ animathio-core.workspace = true
 animathio-control = { path = "../../crates/control" }
 animathio-format = { path = "../../crates/format" }
 animathio-import-v1 = { path = "../../crates/import-v1" }
-animathio-render = { path = "../../crates/render" }
+animathio-render = { path = "../../crates/render", features = ["gpu"] }
 animathio-audio = { path = "../../crates/audio" }
 animathio-plugin-api = { path = "../../crates/plugin-api" }
 animathio-plugin-host = { path = "../../crates/plugin-host" }

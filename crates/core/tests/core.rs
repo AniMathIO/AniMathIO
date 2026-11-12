@@ -626,7 +626,7 @@ fn split_and_merge_are_single_step_inverses() {
     inverse.apply(&mut project).unwrap();
     assert_eq!(project, original);
     let inverse = split.apply(&mut project).unwrap();
-    assert!(matches!(inverse, Command::MergeClip { .. }));
+    assert!(matches!(inverse, Command::RestoreClips { .. }));
     inverse.apply(&mut project).unwrap();
     assert_eq!(project, original);
 }
@@ -745,7 +745,7 @@ fn track_mute_solo_and_lock_are_reversible_and_default_for_old_projects() {
 }
 
 #[test]
-fn batch_is_atomic_one_undo_step_and_rejects_nesting() {
+fn batch_is_atomic_one_undo_step_and_allows_nesting() {
     let mut project = base();
     Command::AddClip {
         track: TrackId(0),
@@ -784,11 +784,11 @@ fn batch_is_atomic_one_undo_step_and_rejects_nesting() {
     };
     assert!(failing.apply(&mut project).is_err());
     assert_eq!(project, before);
-    // Nesting is rejected.
+    // Nesting is allowed: inverses of compound edits are themselves batches.
     let nested = Command::Batch {
         commands: vec![Command::Batch { commands: vec![] }],
     };
-    assert!(nested.apply(&mut project).is_err());
+    assert!(nested.apply(&mut project).is_ok());
     // A batch touching a locked layer is rejected.
     Command::SetTrackLocked {
         id: TrackId(0),
@@ -988,4 +988,67 @@ fn set_plugin_param_preserves_opaque_json_and_is_reversible() {
     assert_eq!(project, original);
     inverse.apply(&mut project).unwrap();
     assert_eq!(project, original);
+}
+
+#[test]
+fn animated_split_preserves_boundary_and_exact_undo_redo() {
+    let mut project = base();
+    for (time, value) in [(0, 0.0), (100, 1.0)] {
+        Command::AddKeyframe {
+            id: ClipId(0),
+            target: Target::Transform(TransformProperty::Opacity),
+            time: Time(time),
+            keyframe: Keyframe {
+                value: ParamValue::Number(value),
+                interpolation: Interpolation::Linear,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let original = project.clone();
+    let undo = Command::SplitClip {
+        id: ClipId(0),
+        right_id: ClipId(9),
+        at: Time(50),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let split = project.clone();
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(9)].animations[0]
+            .keys
+            .sample(Time(0)),
+        Some(ParamValue::Number(0.5))
+    );
+    let redo = undo.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+    redo.apply(&mut project).unwrap();
+    assert_eq!(project, split);
+}
+
+#[test]
+fn merge_undo_restores_independent_clip_data() {
+    let mut project = base();
+    let mut right = plugin(9, 100, 200);
+    right.source_offset = Time(500);
+    right.transform.opacity = 0.25;
+    Command::AddClip {
+        track: TrackId(0),
+        clip: right,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let original = project.clone();
+    let undo = Command::MergeClip {
+        left: ClipId(0),
+        right: ClipId(9),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let merged = project.clone();
+    let redo = undo.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+    redo.apply(&mut project).unwrap();
+    assert_eq!(project, merged);
 }

@@ -15,6 +15,12 @@ vello_cpu = { version = "0.4", default-features = false, features = ["std", "tex
 thiserror.workspace = true
 # Keep CPU reference frames independent of the host SIMD feature set.
 fearless_simd = { version = "1.2", features = ["force_support_fallback"] }
+# Optional GPU preview backend (Vello compute on wgpu). CPU stays the reference.
+vello = { version = "0.12", optional = true }
+pollster = { version = "0.4", optional = true }
+
+[features]
+gpu = ["dep:vello", "dep:pollster"]
 
 [dev-dependencies]
 animathio-format = { path = "../format" }

@@ -314,6 +314,12 @@ pub enum Call {
         /// Import parameters.
         params: ImportManimParams,
     },
+    /// Detect silent audio and ripple-remove it from every track as one undo step.
+    #[serde(rename = "timeline.trim_silence")]
+    TrimSilence {
+        /// Detection parameters.
+        params: crate::TrimSilenceParams,
+    },
 }
 
 /// Build a read-only timeline summary from a project.

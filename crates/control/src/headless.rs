@@ -10,7 +10,7 @@ use std::{
 };
 
 use animathio_core::{AssetId, History, Project, Scene, Time, evaluate};
-use animathio_format::{Bundle, Limits, read_amio, read_json, write_amio, write_json};
+use animathio_format::{Bundle, Limits, read_amio, read_json, save_amio, save_json};
 use animathio_plugin_host::PluginHost;
 use animathio_render::{RenderCtx, render};
 use base64::Engine as _;
@@ -181,16 +181,14 @@ impl HeadlessHandler {
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("json"))
         {
-            let file = fs::File::create(&target)?;
-            write_json(file, &self.project)?;
+            save_json(&target, &self.project)?;
             let assets_dir = target.parent().unwrap_or(Path::new(".")).join("assets");
             fs::create_dir_all(&assets_dir)?;
             for (id, bytes) in &self.assets {
                 fs::write(assets_dir.join(id.as_str()), bytes)?;
             }
         } else {
-            let file = fs::File::create(&target)?;
-            write_amio(file, &self.project, &self.assets)?;
+            save_amio(&target, &self.project, &self.assets)?;
         }
         self.path = Some(target.clone());
         Ok(target.display().to_string())
@@ -295,6 +293,12 @@ impl ControlHandler for HeadlessHandler {
                 self.import_v1(&path)?;
                 serde_json::to_value(())?
             }
+            Call::TrimSilence { params } => serde_json::to_value(crate::trim_silence(
+                &mut self.project,
+                &mut self.history,
+                &self.assets,
+                &params,
+            )?)?,
             call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
                 let replace = matches!(&call, Call::ImportManim { params } if params.replace);
                 let result = crate::apply_authoring_call(
