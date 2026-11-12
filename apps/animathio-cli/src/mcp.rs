@@ -18,8 +18,8 @@
 use std::{path::PathBuf, sync::Arc};
 
 use animathio_control::{
-    AssetInfo, ControlClient, ControlHandler, HeadlessHandler, ProjectState, RenderFrameParams,
-    default_socket_spec,
+    AssetInfo, ControlClient, ControlHandler, GraphAddParams, HeadlessHandler, ImportManimParams,
+    MathAddParams, ProjectState, RenderFrameParams, default_socket_spec,
 };
 use animathio_core::{
     Asset, Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Project, Rounding,
@@ -86,12 +86,34 @@ pub(crate) struct AddText {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[allow(dead_code)] // schema-only placeholder until the latex plugin lands
 pub(crate) struct AddMath {
     pub(crate) latex: String,
+    pub(crate) mode: Option<String>,
+    pub(crate) size: Option<f64>,
+    pub(crate) color: Option<String>,
     pub(crate) x: Option<f64>,
     pub(crate) y: Option<f64>,
+    pub(crate) start_ms: Option<f64>,
+    pub(crate) duration_ms: Option<f64>,
+    pub(crate) reveal_duration_ms: Option<f64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddGraph {
+    pub(crate) x_min: Option<f64>,
+    pub(crate) x_max: Option<f64>,
+    pub(crate) y_min: Option<f64>,
+    pub(crate) y_max: Option<f64>,
+    pub(crate) items: Option<String>,
+    pub(crate) show_grid: Option<bool>,
+    pub(crate) show_axes: Option<bool>,
+    pub(crate) show_labels: Option<bool>,
     pub(crate) color: Option<String>,
+    pub(crate) x: Option<f64>,
+    pub(crate) y: Option<f64>,
+    pub(crate) start_ms: Option<f64>,
+    pub(crate) duration_ms: Option<f64>,
+    pub(crate) draw_duration_ms: Option<f64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -196,9 +218,13 @@ pub(crate) struct ImportV1 {
 }
 
 #[derive(Deserialize, JsonSchema)]
-#[allow(dead_code)] // schema-only placeholder until manim-import lands
 pub(crate) struct ManimScene {
-    pub(crate) script: String,
+    pub(crate) path: Option<String>,
+    pub(crate) source: Option<String>,
+    pub(crate) script_dir: Option<String>,
+    pub(crate) scene: Option<String>,
+    #[serde(default)]
+    pub(crate) replace: bool,
 }
 
 // ---- helpers --------------------------------------------------------------
@@ -286,6 +312,9 @@ fn parse_clip_id(id: &str) -> Result<ClipId, McpError> {
 
 fn parse_color(value: &str) -> Option<[u8; 4]> {
     let hex = value.trim().strip_prefix('#')?;
+    if !hex.is_ascii() {
+        return None;
+    }
     let byte = |i: usize, j: usize| u8::from_str_radix(&hex[i..j], 16).ok();
     match hex.len() {
         6 => Some([byte(0, 2)?, byte(2, 4)?, byte(4, 6)?, 255]),
@@ -387,12 +416,90 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Add a LaTeX fragment. The v2 latex plugin is not implemented yet, so this tool currently fails."
+        description = "Add a LaTeX fragment as an org.animathio.latex plugin clip, with an optional Write-style reveal animation. Coordinates are pixels, times are milliseconds."
     )]
-    async fn add_math(&self, _: Parameters<AddMath>) -> Result<CallToolResult, McpError> {
-        Err(unsupported(
-            "add_math requires the latex plugin, which is not implemented yet",
-        ))
+    async fn add_math(
+        &self,
+        Parameters(p): Parameters<AddMath>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        let (width, height) = canvas(&state);
+        let start = p.start_ms.map(ms_to_ticks).transpose()?.unwrap_or(Time(0));
+        let duration = match p.duration_ms {
+            Some(ms) => ms_to_ticks(ms)?,
+            None => project_duration(&state),
+        };
+        let reveal_duration = p.reveal_duration_ms.map(ms_to_ticks).transpose()?;
+        let result = backend.math_add(MathAddParams {
+            latex: p.latex,
+            mode: p.mode.unwrap_or_else(|| "latex".to_owned()),
+            size: p.size.unwrap_or(48.0),
+            color: p
+                .color
+                .as_deref()
+                .map(|color| {
+                    parse_color(color).ok_or_else(|| invalid("color must be #RRGGBB or #RRGGBBAA"))
+                })
+                .transpose()?,
+            x: p.x.map(|x| x / f64::from(width)),
+            y: p.y.map(|y| y / f64::from(height)),
+            start,
+            duration: Some(duration),
+            reveal_duration,
+        });
+        match result {
+            Ok(result) => tool_text(result),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
+    #[tool(
+        description = "Add an org.animathio.graph coordinate plane (bounds, items) with an optional draw animation. Coordinates are pixels, times are milliseconds."
+    )]
+    async fn add_graph(
+        &self,
+        Parameters(p): Parameters<AddGraph>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        let (width, height) = canvas(&state);
+        let start = p.start_ms.map(ms_to_ticks).transpose()?.unwrap_or(Time(0));
+        let duration = match p.duration_ms {
+            Some(ms) => ms_to_ticks(ms)?,
+            None => project_duration(&state),
+        };
+        let draw_duration = p.draw_duration_ms.map(ms_to_ticks).transpose()?;
+        let result = backend.graph_add(GraphAddParams {
+            x_min: p.x_min,
+            x_max: p.x_max,
+            y_min: p.y_min,
+            y_max: p.y_max,
+            items: p.items.unwrap_or_else(|| "plot y=x^2".to_owned()),
+            show_grid: p.show_grid,
+            show_axes: p.show_axes,
+            show_labels: p.show_labels,
+            color: p
+                .color
+                .as_deref()
+                .map(|color| {
+                    parse_color(color).ok_or_else(|| invalid("color must be #RRGGBB or #RRGGBBAA"))
+                })
+                .transpose()?,
+            x: p.x.map(|x| x / f64::from(width)),
+            y: p.y.map(|y| y / f64::from(height)),
+            start,
+            duration: Some(duration),
+            draw_duration,
+        });
+        match result {
+            Ok(result) => tool_text(result),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
     }
 
     #[tool(
@@ -848,13 +955,28 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Build a whole scene from a Manim Community script. Not implemented yet in v2."
+        description = "Import a Manim Community scene from a script path or inline source, appending to (or replacing) the current project. Returns warnings and embedded-file info."
     )]
     async fn import_manim_scene(
         &self,
-        _: Parameters<ManimScene>,
+        Parameters(p): Parameters<ManimScene>,
     ) -> Result<CallToolResult, McpError> {
-        Err(unsupported("manim import is not implemented yet in v2"))
+        let mut backend = self.backend.lock().await;
+        let result = backend
+            .import_manim(ImportManimParams {
+                path: p.path.map(PathBuf::from),
+                source: p.source,
+                script_dir: p.script_dir.map(PathBuf::from),
+                scene: p.scene,
+                replace: p.replace,
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({
+            "tracks": result.tracks,
+            "assets": result.assets,
+            "warnings": result.warnings,
+            "infos": result.infos,
+        }))
     }
 }
 

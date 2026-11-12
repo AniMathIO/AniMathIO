@@ -3,7 +3,10 @@
 
 use crate::{
     ControlError,
-    method::{AssetInfo, Call, ProjectState, RenderFrameParams, RenderFrameResult, Timeline},
+    method::{
+        AssetInfo, Call, ClipAdded, GraphAddParams, ImportManimParams, ImportManimResult,
+        MathAddParams, ProjectState, RenderFrameParams, RenderFrameResult, Timeline,
+    },
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -97,6 +100,24 @@ pub trait ControlHandler {
     fn project_import_v1(&mut self, path: std::path::PathBuf) -> Result<(), ControlError> {
         let () = from_value(self.handle(Call::ProjectImportV1 { path })?)?;
         Ok(())
+    }
+
+    /// Add a LaTeX plugin clip.
+    fn math_add(&mut self, params: MathAddParams) -> Result<ClipAdded, ControlError> {
+        from_value(self.handle(Call::MathAdd { params })?)
+    }
+
+    /// Add a graph plugin clip.
+    fn graph_add(&mut self, params: GraphAddParams) -> Result<ClipAdded, ControlError> {
+        from_value(self.handle(Call::GraphAdd { params })?)
+    }
+
+    /// Import a Manim scene, appending to or replacing the current project.
+    fn import_manim(
+        &mut self,
+        params: ImportManimParams,
+    ) -> Result<ImportManimResult, ControlError> {
+        from_value(self.handle(Call::ImportManim { params })?)
     }
 }
 

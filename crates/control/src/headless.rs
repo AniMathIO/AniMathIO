@@ -9,8 +9,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use animathio_core::{AssetId, History, Project, Time, evaluate};
+use animathio_core::{AssetId, History, Project, Scene, Time, evaluate};
 use animathio_format::{Bundle, Limits, read_amio, read_json, write_amio, write_json};
+use animathio_plugin_host::PluginHost;
 use animathio_render::{RenderCtx, render};
 use base64::Engine as _;
 use serde_json::Value;
@@ -25,7 +26,10 @@ use crate::{
 };
 
 /// A headless [`ControlHandler`] over an in-memory project.
-#[derive(Clone, Debug)]
+///
+/// Plugin clips are resolved through a lazily loaded [`PluginHost`]; LaTeX is
+/// validated up front through `animathio_typeset::TypesetEngine`.
+#[derive(Default)]
 pub struct HeadlessHandler {
     project: Project,
     history: History,
@@ -33,29 +37,17 @@ pub struct HeadlessHandler {
     path: Option<PathBuf>,
     playhead: Time,
     playing: bool,
-}
-
-impl Default for HeadlessHandler {
-    fn default() -> Self {
-        Self {
-            project: Project::default(),
-            history: History::default(),
-            assets: BTreeMap::new(),
-            path: None,
-            playhead: Time(0),
-            playing: false,
-        }
-    }
+    plugins: Option<PluginHost>,
 }
 
 impl HeadlessHandler {
-    /// Empty project at the default frame rate.
+    /// Empty project at the default frame rate, with no plugins loaded.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Build a handler from an already-loaded bundle.
+    /// Build a handler from an already-loaded bundle, with no plugins loaded.
     #[must_use]
     pub fn from_bundle(bundle: Bundle, path: Option<PathBuf>) -> Self {
         Self {
@@ -65,19 +57,19 @@ impl HeadlessHandler {
             path,
             playhead: Time(0),
             playing: false,
+            plugins: None,
         }
     }
 
-    /// Load a `.amio` archive or a `project.json` with adjacent assets.
+    /// Load a `.amio` archive or a `project.json` with adjacent assets, plus
+    /// plugins from the shared trusted discovery locations.
     pub fn load(path: &Path) -> Result<Self, ControlError> {
         let (project, assets) = load_project(path)?;
         Ok(Self {
             project,
-            history: History::default(),
             assets,
             path: Some(path.to_owned()),
-            playhead: Time(0),
-            playing: false,
+            ..Self::default()
         })
     }
 
@@ -123,11 +115,14 @@ impl HeadlessHandler {
     }
 
     fn render_frame_inner(
-        &self,
+        &mut self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
         let mut ctx = RenderCtx::from_assets(self.assets.clone())?;
-        let scene = evaluate(&self.project, params.time);
+        let scene = self.resolve_scene(
+            evaluate(&self.project, params.time),
+            (params.width, params.height),
+        );
         let frame = render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;
@@ -145,6 +140,30 @@ impl HeadlessHandler {
                 base64: Some(base64::engine::general_purpose::STANDARD.encode(encoded)),
                 path: None,
             })
+        }
+    }
+
+    /// Load the plugin host lazily when the project contains plugin clips.
+    fn ensure_plugins(&mut self) {
+        if self.plugins.is_none()
+            && self
+                .project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .any(|clip| matches!(clip.kind, animathio_core::ClipKind::Plugin { .. }))
+        {
+            self.plugins = load_plugins();
+        }
+    }
+
+    /// Resolve plugin clips in `scene` at `size`, leaving the scene unchanged
+    /// when no plugins are installed (matching headless preview placeholders).
+    fn resolve_scene(&mut self, scene: Scene, size: (u32, u32)) -> Scene {
+        self.ensure_plugins();
+        match &mut self.plugins {
+            Some(host) => host.resolve(&scene, size),
+            None => scene,
         }
     }
 
@@ -219,14 +238,28 @@ impl ControlHandler for HeadlessHandler {
                         .to
                         .unwrap_or_else(|| animathio_export::duration(&self.project)),
                 )?;
-                let bytes = animathio_export::export(
-                    &self.project,
-                    &self.assets,
-                    range,
-                    params.settings,
-                    |_| true,
-                )
-                .map_err(|e| ControlError::Other(e.to_string()))?;
+                // Resolve plugin clips through the plugin host, mirroring the
+                // headless `render.frame` path so MCP `export_video` works with
+                // latex/graph clips when their plugins are installed.
+                self.ensure_plugins();
+                let (width, height) = animathio_export::resolution(&self.project);
+                let project = &self.project;
+                let assets = &self.assets;
+                let plugins = &mut self.plugins;
+                let mut exporter = animathio_export::Exporter::new(project, assets)
+                    .map_err(|e| ControlError::Other(e.to_string()))?;
+                let bytes = exporter
+                    .export(
+                        project,
+                        range,
+                        params.settings,
+                        |_| true,
+                        |scene| match plugins {
+                            Some(host) => host.resolve(&scene, (width, height)),
+                            None => scene,
+                        },
+                    )
+                    .map_err(|e| ControlError::Other(e.to_string()))?;
                 fs::write(&output, bytes)?;
                 serde_json::to_value(output.display().to_string())?
             }
@@ -261,6 +294,21 @@ impl ControlHandler for HeadlessHandler {
             Call::ProjectImportV1 { path } => {
                 self.import_v1(&path)?;
                 serde_json::to_value(())?
+            }
+            call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
+                let replace = matches!(&call, Call::ImportManim { params } if params.replace);
+                let result = crate::apply_authoring_call(
+                    &mut self.project,
+                    &mut self.history,
+                    &mut self.assets,
+                    &call,
+                )?;
+                if replace {
+                    self.path = None;
+                    self.playhead = Time(0);
+                    self.playing = false;
+                }
+                result
             }
         })
     }
@@ -306,6 +354,47 @@ fn load_project(path: &Path) -> Result<(Project, BTreeMap<AssetId, Vec<u8>>), Co
 
 fn animathio_import_v1_limits() -> u64 {
     animathio_import_v1::ImportLimits::default().inflated_bytes
+}
+
+fn plugin_cache_dir() -> PathBuf {
+    directories::BaseDirs::new().map_or_else(
+        || std::env::temp_dir().join("animathio-plugin-cache"),
+        |base| base.cache_dir().join("animathio").join("plugins"),
+    )
+}
+
+/// Load bundles from explicit, executable-relative and per-user locations.
+fn load_plugins() -> Option<PluginHost> {
+    let dirs = animathio_plugin_host::plugin_search_dirs();
+    let has_plugins = dirs.iter().any(|dir| {
+        fs::read_dir(&dir.path).is_ok_and(|entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "amplugin")
+            })
+        })
+    });
+    if !has_plugins {
+        return None;
+    }
+    let mut host = match PluginHost::new(plugin_cache_dir()) {
+        Ok(host) => host,
+        Err(error) => {
+            eprintln!("plugin host unavailable: {error}");
+            return None;
+        }
+    };
+    for dir in dirs {
+        if let Err(error) = host.load_plugin_directory(&dir) {
+            eprintln!(
+                "failed to load plugins from {}: {error}",
+                dir.path.display()
+            );
+        }
+    }
+    Some(host)
 }
 
 #[cfg(test)]

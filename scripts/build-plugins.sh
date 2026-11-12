@@ -9,17 +9,30 @@ rustup target add wasm32-wasip2
 
 mkdir -p target/plugins
 
+# Linux development machines are shared; keep builds at background priority.
+# Git Bash on Windows has no ionice, so retain the portable build path there.
+cargo_command=(cargo)
+if [[ "$OSTYPE" == linux* ]]; then
+    cargo_command=(nice -n 19 ionice -c3 cargo)
+elif [[ "$OSTYPE" == darwin* ]]; then
+    cargo_command=(nice -n 19 cargo)
+fi
+python_command=python3
+if ! python3 --version >/dev/null 2>&1; then
+    python_command=python
+fi
+
 build_plugin() {
     local name="$1"
     echo ">> building plugin: ${name}"
-    cargo build \
+    CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only "${cargo_command[@]}" build \
         --manifest-path "plugins/${name}/Cargo.toml" \
         --target wasm32-wasip2 \
         --target-dir "$PWD/target" \
         --release \
         --locked
 
-    python3 - "${name}" <<'PY'
+    "$python_command" - "${name}" <<'PY'
 import sys, zipfile
 
 name = sys.argv[1]
