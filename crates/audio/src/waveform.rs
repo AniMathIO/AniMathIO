@@ -48,7 +48,12 @@ impl Waveform {
     /// when it lies outside the asset.
     #[must_use]
     pub fn peak_between(&self, start: i64, end: i64) -> f32 {
-        if self.duration_ticks <= 0 || self.peaks.is_empty() || end <= start || start < 0 {
+        if self.duration_ticks <= 0
+            || self.peaks.is_empty()
+            || end <= start
+            || start < 0
+            || start >= self.duration_ticks
+        {
             return 0.0;
         }
         let len = self.peaks.len() as i128;

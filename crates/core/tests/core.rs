@@ -749,7 +749,7 @@ fn batch_is_atomic_one_undo_step_and_rejects_nesting() {
     let mut project = base();
     Command::AddClip {
         track: TrackId(0),
-        clip: plugin(1, 0, 100),
+        clip: plugin(1, 200, 300),
     }
     .apply(&mut project)
     .unwrap();
@@ -764,7 +764,7 @@ fn batch_is_atomic_one_undo_step_and_rejects_nesting() {
         .execute(
             &mut project,
             &Command::Batch {
-                commands: vec![move_clip(10), move_clip(20)],
+                commands: vec![move_clip(210), move_clip(220)],
             },
         )
         .unwrap();
@@ -774,13 +774,13 @@ fn batch_is_atomic_one_undo_step_and_rejects_nesting() {
     assert!(history.redo(&mut project).unwrap());
     assert_eq!(
         project.tracks()[0].clips()[&ClipId(1)].range.start,
-        Time(20)
+        Time(220)
     );
 
     // A failing member rolls the whole batch back.
     let before = project.clone();
     let failing = Command::Batch {
-        commands: vec![move_clip(5), Command::RemoveClip { id: ClipId(99) }],
+        commands: vec![move_clip(400), Command::RemoveClip { id: ClipId(99) }],
     };
     assert!(failing.apply(&mut project).is_err());
     assert_eq!(project, before);
@@ -807,7 +807,7 @@ fn locked_tracks_reject_clip_edits_but_can_be_unlocked() {
     let mut project = base();
     Command::AddClip {
         track: TrackId(0),
-        clip: plugin(1, 0, 100),
+        clip: plugin(1, 200, 300),
     }
     .apply(&mut project)
     .unwrap();
@@ -827,7 +827,7 @@ fn locked_tracks_reject_clip_edits_but_can_be_unlocked() {
         },
         Command::AddClip {
             track: TrackId(0),
-            clip: plugin(2, 200, 300),
+            clip: plugin(2, 400, 500),
         },
     ] {
         let error = command.apply(&mut project).unwrap_err();
