@@ -239,26 +239,43 @@ pub(crate) fn parse(
     if let Some(construct) = find_construct(&class, source)
         && let Some(body) = construct.child_by_field_name("body")
     {
-        walk_block(&body, source, &mut statements);
+        walk_block(&body, source, &mut statements, &mut warnings);
     }
     Ok((Scene { name, statements }, warnings))
 }
 
 fn collect_errors(node: &Node<'_>, source: &str, warnings: &mut Vec<Warning>) {
-    if node.is_error() || node.is_missing() {
-        let pos = node.start_position();
-        warnings.push(Warning {
-            line: pos.row + 1,
-            column: pos.column + 1,
-            message: "parse error".to_owned(),
-            snippet: snippet_at(node, source),
-        });
-        return;
+    let mut pending = vec![*node];
+    while let Some(node) = pending.pop() {
+        if node.is_error() || node.is_missing() {
+            let pos = node.start_position();
+            warnings.push(Warning {
+                line: pos.row + 1,
+                column: pos.column + 1,
+                message: "parse error".to_owned(),
+                snippet: snippet_at(&node, source),
+            });
+        } else {
+            let mut cursor = node.walk();
+            pending.extend(node.children(&mut cursor));
+        }
     }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_errors(&child, source, warnings);
+}
+
+/// Bound the whole construct before any recursive parsing or evaluation begins.
+fn excessive_depth<'tree>(node: &Node<'tree>) -> Option<Node<'tree>> {
+    let mut pending = vec![(*node, 0)];
+    while let Some((node, depth)) = pending.pop() {
+        if depth > 64 {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        pending.extend(
+            node.named_children(&mut cursor)
+                .map(|child| (child, depth + 1)),
+        );
     }
+    None
 }
 
 fn find_scene_class<'t>(
@@ -330,9 +347,19 @@ fn find_construct<'t>(class: &Node<'t>, source: &str) -> Option<Node<'t>> {
     None
 }
 
-fn walk_block(block: &Node<'_>, source: &str, out: &mut Vec<Stmt>) {
+fn walk_block(block: &Node<'_>, source: &str, out: &mut Vec<Stmt>, warnings: &mut Vec<Warning>) {
     let mut cursor = block.walk();
     for statement in block.named_children(&mut cursor) {
+        if let Some(deep) = excessive_depth(&statement) {
+            let pos = deep.start_position();
+            warnings.push(Warning {
+                line: pos.row + 1,
+                column: pos.column + 1,
+                message: "construct exceeds maximum AST depth of 64; skipped".to_owned(),
+                snippet: snippet_at(&statement, source),
+            });
+            continue;
+        }
         if let Some(stmt) = parse_statement(&statement, source) {
             out.push(stmt);
         }
@@ -1210,5 +1237,27 @@ class S(Scene):
         assert!(unsupported.iter().any(|m| m.contains("for_statement")));
         let play = &plays(&scene)[0];
         assert!(matches!(&play.0[0], Anim::Unsupported { .. }));
+    }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    #[test]
+    fn deeply_nested_constructs_are_skipped() {
+        for expression in [
+            format!("{}1", "-".repeat(100_000)),
+            format!("{}1{}", "(".repeat(10_000), ")".repeat(10_000)),
+        ] {
+            let source = format!(
+                "class S(Scene):\n    def construct(self):\n        c = Circle(radius={expression})\n        self.wait(1)\n"
+            );
+            let (scene, warnings) = super::parse(&source, None).unwrap();
+            assert!(
+                warnings
+                    .iter()
+                    .any(|w| w.message.contains("depth") && w.line == 3 && w.column > 0)
+            );
+            assert_eq!(scene.statements.len(), 1);
+        }
     }
 }
