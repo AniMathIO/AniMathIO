@@ -26,7 +26,7 @@ fn authoring_methods_round_trip_over_the_authenticated_socket() {
         ("graph.add", serde_json::json!({"items":"plot y=x"})),
         (
             "import.manim",
-            serde_json::json!({"source":"from manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.add(Circle())\n"}),
+            serde_json::json!({"source":"from manim import *\nclass Demo(Scene):\n    def construct(self):\n        c = Circle()\n        self.add(c)\n        self.wait(1)\n"}),
         ),
     ] {
         let call =

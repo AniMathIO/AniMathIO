@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 fn invoke(
     handler: &mut HeadlessHandler,
     method: &str,
-    params: Value,
+    params: &Value,
 ) -> Result<Value, animathio_control::ControlError> {
     handler.handle(
         serde_json::from_value(json!({"method":method,"params":{"params":params}})).unwrap(),
@@ -18,7 +18,7 @@ fn invoke(
 fn plugin_parameters_timing_and_clip_local_animations_match_plugins() {
     let mut handler = HeadlessHandler::new();
     let second = TICKS_PER_SECOND;
-    invoke(&mut handler, "math.add", json!({"latex":"x^2","size":36,"color":[1,2,3,255],"x":0.25,"y":0.75,"start":second,"duration":2*second,"reveal_duration":second})).unwrap();
+    invoke(&mut handler, "math.add", &json!({"latex":"x^2","size":36,"color":[1,2,3,255],"x":0.25,"y":0.75,"start":second,"duration":2*second,"reveal_duration":second})).unwrap();
     let clip = handler.project().tracks()[0]
         .clips()
         .values()
@@ -37,7 +37,7 @@ fn plugin_parameters_timing_and_clip_local_animations_match_plugins() {
     assert_eq!(params["color"], json!([1, 2, 3, 255]));
     let scene = evaluate(handler.project(), Time(second + second / 2));
     assert!((scene.clips[0].params["reveal"] - 0.5).abs() < f64::EPSILON);
-    invoke(&mut handler, "graph.add", json!({"items":"plot y=x^2","x_min":-2,"x_max":2,"duration":2*second,"draw_duration":second})).unwrap();
+    invoke(&mut handler, "graph.add", &json!({"items":"plot y=x^2","x_min":-2,"x_max":2,"duration":2*second,"draw_duration":second})).unwrap();
     let scene = evaluate(handler.project(), Time(second / 2));
     assert!((scene.clips[0].params["draw"] - 0.5).abs() < f64::EPSILON);
     // Each generated keyframe and clip is an ordinary undoable command.
@@ -67,7 +67,7 @@ fn invalid_authoring_calls_preserve_project_and_history() {
         ("import.manim", json!({"path":"missing.py","source":"x"})),
     ] {
         let before = handler.project().clone();
-        assert!(invoke(&mut handler, method, params).is_err(), "{method}");
+        assert!(invoke(&mut handler, method, &params).is_err(), "{method}");
         assert_eq!(handler.project(), &before);
         assert!(!handler.history_undo().unwrap());
     }
@@ -77,9 +77,9 @@ fn invalid_authoring_calls_preserve_project_and_history() {
 fn manim_paths_and_script_directories_follow_filesystem_rules() {
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("scene.py");
-    std::fs::write(&script, "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.add(Circle())\n").unwrap();
+    std::fs::write(&script, "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        c = Circle()\n        self.add(c)\n        self.wait(1)\n").unwrap();
     let mut handler = HeadlessHandler::new();
-    let report = invoke(&mut handler, "import.manim", json!({"path":script})).unwrap();
+    let report = invoke(&mut handler, "import.manim", &json!({"path":script})).unwrap();
     assert_eq!(report["tracks"], 1);
     let before = handler.project().clone();
     for params in [
@@ -87,11 +87,11 @@ fn manim_paths_and_script_directories_follow_filesystem_rules() {
         json!({"path":script,"script_dir":script}),
         json!({"path":dir.path().join("missing.py")}),
     ] {
-        assert!(invoke(&mut handler, "import.manim", params).is_err());
+        assert!(invoke(&mut handler, "import.manim", &params).is_err());
         assert_eq!(handler.project(), &before);
     }
     // Appending does not collide with existing identities.
-    invoke(&mut handler, "import.manim", json!({"path":script})).unwrap();
+    invoke(&mut handler, "import.manim", &json!({"path":script})).unwrap();
     handler.project().validate().unwrap();
     assert_eq!(handler.project().tracks().len(), 2);
     handler.handle(Call::HistoryUndo).unwrap();
@@ -103,9 +103,9 @@ fn replacing_with_manim_resets_session_and_embeds_relative_assets() {
     // The importer probes magic bytes; the bundle preserves the original bytes.
     let png = b"\x89PNG\r\n\x1a\nembedded image";
     std::fs::write(dir.path().join("image.png"), png).unwrap();
-    let source = "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        self.add(ImageMobject(\"image.png\"))\n        self.wait(1)\n";
+    let source = "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        img = ImageMobject(\"image.png\")\n        self.add(img)\n        self.wait(1)\n";
     let mut handler = HeadlessHandler::new();
-    invoke(&mut handler, "graph.add", json!({})).unwrap();
+    invoke(&mut handler, "graph.add", &json!({})).unwrap();
     handler
         .project_save(Some(dir.path().join("old.amio")))
         .unwrap();
@@ -114,11 +114,11 @@ fn replacing_with_manim_resets_session_and_embeds_relative_assets() {
     let report = invoke(
         &mut handler,
         "import.manim",
-        json!({"source":source,"script_dir":dir.path(),"replace":true}),
+        &json!({"source":source,"script_dir":dir.path(),"replace":true}),
     )
     .unwrap();
     assert_eq!(report["assets"], 1);
-    assert!(report["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(report["warnings"].as_array().unwrap().len(), 0);
     assert_eq!(report["infos"].as_array().unwrap().len(), 1);
     let state = handler.project_get().unwrap();
     assert!(state.path.is_none());

@@ -307,7 +307,7 @@ fn bad_latex_is_a_tool_error_without_mutating_the_project() {
     let state = call(&mut stdin, &mut stdout, "get_project_state", json!({}));
     assert_eq!(
         state["project"]["tracks"].as_array().unwrap().as_slice(),
-        []
+        Vec::<Value>::new().as_slice()
     );
     drop(stdin);
     assert!(child.wait().unwrap().success());
