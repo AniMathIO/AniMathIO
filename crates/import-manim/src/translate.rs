@@ -1016,6 +1016,7 @@ fn build_project(
     Command::SetSettings {
         width: CANVAS_WIDTH,
         height: CANVAS_HEIGHT,
+        frame_rate: project.frame_rate(),
         background: [0, 0, 0, 255],
         duration: secs_to_ticks(scene_end),
     }

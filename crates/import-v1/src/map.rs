@@ -67,6 +67,7 @@ pub(crate) fn import_with_report(
     Command::SetSettings {
         width,
         height,
+        frame_rate: fps,
         background,
         duration,
     }

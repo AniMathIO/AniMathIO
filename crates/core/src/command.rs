@@ -1,7 +1,7 @@
 use crate::builtin::Color;
 use crate::{
-    Animation, Asset, AssetId, Clip, ClipId, Error, Keyframe, Keyframes, Project, Target, Time,
-    TimeRange, Track, TrackId, Transform, invalid,
+    Animation, Asset, AssetId, Clip, ClipId, ClipKind, Error, FrameRate, Keyframe, Keyframes,
+    Project, Target, Time, TimeRange, Track, TrackId, Transform, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -40,12 +40,14 @@ pub enum Command {
         /// Asset identity.
         id: AssetId,
     },
-    /// Set project-level output settings (resolution, background, duration).
+    /// Set project-level output settings (resolution, frame rate, background, duration).
     SetSettings {
         /// Output width in pixels, or `0` for no explicit resolution.
         width: u32,
         /// Output height in pixels, or `0` for no explicit resolution.
         height: u32,
+        /// Output frame rate.
+        frame_rate: FrameRate,
         /// Straight-alpha sRGB canvas background.
         background: Color,
         /// Explicit project duration in ticks; `0` means derive from clips.
@@ -113,6 +115,16 @@ pub enum Command {
         /// New value; `None` removes it (only if not animated).
         value: Option<f64>,
     },
+    /// Set or remove an opaque, non-numeric plugin parameter stored in
+    /// `ClipKind::Plugin::params`.
+    SetPluginParam {
+        /// Clip identity.
+        id: ClipId,
+        /// Parameter name.
+        name: String,
+        /// New JSON value; `None` removes it.
+        value: Option<serde_json::Value>,
+    },
     /// Insert or replace a numeric keyframe.
     AddKeyframe {
         /// Clip identity.
@@ -132,6 +144,17 @@ pub enum Command {
         target: Target,
         /// Clip-local ticks.
         time: Time,
+    },
+    /// Move a numeric keyframe to a new clip-local time.
+    MoveKeyframe {
+        /// Clip identity.
+        id: ClipId,
+        /// Property being animated.
+        target: Target,
+        /// Current clip-local ticks.
+        from: Time,
+        /// Destination clip-local ticks; must be free.
+        to: Time,
     },
 }
 
@@ -191,17 +214,20 @@ impl Command {
             Self::SetSettings {
                 width,
                 height,
+                frame_rate,
                 background,
                 duration,
             } => {
                 let inverse = Self::SetSettings {
                     width: project.width,
                     height: project.height,
+                    frame_rate: project.frame_rate,
                     background: project.background,
                     duration: project.duration,
                 };
                 project.width = *width;
                 project.height = *height;
+                project.frame_rate = *frame_rate;
                 project.background = *background;
                 project.duration = *duration;
                 inverse
@@ -369,6 +395,25 @@ impl Command {
                     value: previous,
                 }
             }
+            Self::SetPluginParam { id, name, value } => {
+                let clip = clip_mut(project, *id)?;
+                let ClipKind::Plugin { params, .. } = &mut clip.kind else {
+                    return Err(invalid("plugin parameter on a non-plugin clip"));
+                };
+                let object = params
+                    .as_object_mut()
+                    .ok_or_else(|| invalid("plugin parameters must be a JSON object"))?;
+                let previous = if let Some(value) = value {
+                    object.insert(name.clone(), value.clone())
+                } else {
+                    object.remove(name)
+                };
+                Self::SetPluginParam {
+                    id: *id,
+                    name: name.clone(),
+                    value: previous,
+                }
+            }
             Self::AddKeyframe {
                 id,
                 target,
@@ -427,6 +472,38 @@ impl Command {
                     target: target.clone(),
                     time: *time,
                     keyframe,
+                }
+            }
+            Self::MoveKeyframe {
+                id,
+                target,
+                from,
+                to,
+            } => {
+                if from == to {
+                    return Err(invalid("move keyframe to its current time"));
+                }
+                if to.0 < 0 {
+                    return Err(invalid("keyframe time must be nonnegative"));
+                }
+                let clip = clip_mut(project, *id)?;
+                let index = clip
+                    .animations
+                    .binary_search_by(|a| a.target.cmp(target))
+                    .map_err(|_| invalid("animation missing"))?;
+                let keys = &mut clip.animations[index].keys.0;
+                if keys.contains_key(to) {
+                    return Err(invalid("keyframe destination occupied"));
+                }
+                let keyframe = keys
+                    .remove(from)
+                    .ok_or_else(|| invalid("keyframe missing"))?;
+                keys.insert(*to, keyframe);
+                Self::MoveKeyframe {
+                    id: *id,
+                    target: target.clone(),
+                    from: *to,
+                    to: *from,
                 }
             }
         })
