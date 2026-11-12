@@ -7,6 +7,7 @@ mod keyframes;
 mod model;
 mod params;
 mod time;
+mod transition;
 mod vector;
 
 pub use command::*;
@@ -15,6 +16,7 @@ pub use keyframes::*;
 pub use model::*;
 pub use params::*;
 pub use time::*;
+pub use transition::*;
 pub use vector::*;
 
 /// Invalid data, an unavailable edit target or arithmetic outside the timeline domain.
