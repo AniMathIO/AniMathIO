@@ -5,10 +5,19 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Largest number of edits in one [`Command::Batch`].
+const MAX_BATCH: usize = 1024;
+
 /// Exhaustive serializable edits. Applying one returns the exact inverse.
 /// A failed edit leaves the project unchanged. IDs are supplied by callers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
+    /// Several edits applied atomically as one undo step. Nesting is rejected and
+    /// the length is capped so untrusted control input cannot recurse or flood.
+    Batch {
+        /// Edits applied in order; all or none take effect.
+        commands: Vec<Command>,
+    },
     /// Insert a layer at a back-to-front compositing index.
     AddTrack {
         /// Layer data (also restores removed clips).
@@ -210,6 +219,9 @@ impl Command {
     /// Apply transactionally, validating the resulting project and returning its inverse.
     /// Cloning for rollback is deliberately simple for the initial prototype.
     pub fn apply(&self, project: &mut Project) -> Result<Self, Error> {
+        if let Some(track) = self.locked_track(project) {
+            return Err(Error(format!("track {} is locked", track.0)));
+        }
         let mut candidate = project.clone();
         let inverse = self.apply_inner(&mut candidate)?;
         candidate.validate()?;
@@ -217,10 +229,64 @@ impl Command {
         Ok(inverse)
     }
 
+    /// The locked layer this command would edit, if any. Layer-level commands
+    /// (gain, mute, solo, lock, add/remove layer) and project-level commands are
+    /// never blocked, so a locked layer can always be unlocked.
+    #[must_use]
+    pub fn locked_track(&self, project: &Project) -> Option<TrackId> {
+        let of_clip = |id: ClipId| {
+            project
+                .tracks
+                .iter()
+                .find(|t| t.locked && t.clips.contains_key(&id))
+                .map(|t| t.id)
+        };
+        match self {
+            Self::AddClip { track, .. } => project
+                .tracks
+                .iter()
+                .find(|t| t.id == *track && t.locked)
+                .map(|t| t.id),
+            Self::RemoveClip { id }
+            | Self::MoveClip { id, .. }
+            | Self::TrimClip { id, .. }
+            | Self::SplitClip { id, .. }
+            | Self::SetTransform { id, .. }
+            | Self::SetParam { id, .. }
+            | Self::AddEffect { id, .. }
+            | Self::RemoveEffect { id, .. }
+            | Self::SetEffectParam { id, .. }
+            | Self::SetPluginParam { id, .. }
+            | Self::AddKeyframe { id, .. }
+            | Self::RemoveKeyframe { id, .. }
+            | Self::MoveKeyframe { id, .. } => of_clip(*id),
+            Self::MergeClip { left, right } => of_clip(*left).or_else(|| of_clip(*right)),
+            Self::Batch { commands } => commands
+                .iter()
+                .filter(|command| !matches!(command, Self::Batch { .. }))
+                .find_map(|command| command.locked_track(project)),
+            _ => None,
+        }
+    }
+
     // Keep the exhaustive command/inverse pairs together for review.
     #[allow(clippy::too_many_lines)]
     fn apply_inner(&self, project: &mut Project) -> Result<Self, Error> {
         Ok(match self {
+            Self::Batch { commands } => {
+                if commands.len() > MAX_BATCH {
+                    return Err(invalid("batch too large"));
+                }
+                let mut inverses = Vec::with_capacity(commands.len());
+                for command in commands {
+                    if matches!(command, Self::Batch { .. }) {
+                        return Err(invalid("nested batches are not allowed"));
+                    }
+                    inverses.push(command.apply_inner(project)?);
+                }
+                inverses.reverse();
+                Self::Batch { commands: inverses }
+            }
             Self::AddTrack { track, index } => {
                 if *index > project.tracks.len() {
                     return Err(invalid("track index out of bounds"));

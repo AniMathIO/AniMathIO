@@ -24,7 +24,7 @@ const MAX_SINC_INPUT_FRAMES: usize = MAX_SAMPLE_RATE as usize + SINC_LEN + 1;
 /// Engine-owned native decoded resources, keyed by the project's asset identities.
 #[derive(Default)]
 pub struct AudioPool {
-    sources: BTreeMap<AssetId, Pcm>,
+    pub(crate) sources: BTreeMap<AssetId, Pcm>,
 }
 impl AudioPool {
     /// Decode once, outside the real-time callback. Replacement is explicit by identity.

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use animathio_audio::{AudioPool, Pcm, SymphoniaSource};
+use animathio_audio::{AudioPool, Pcm, SymphoniaSource, Waveform};
 use animathio_control::{
     AssetInfo, Call, ControlError, ProjectState, RenderFrameParams, RenderFrameResult,
     media_type_of, read_bounded, timeline_of, validate_existing_file, validate_output_file,
@@ -22,6 +22,7 @@ use gpui_component::{ActiveTheme, Selectable, Sizable};
 use serde_json::{Value, json};
 
 use crate::control::{ControlMsg, ControlRuntime};
+use crate::fades::{self, FadeEdge};
 use crate::icons::{self, IconName};
 use crate::inspector::{self, ParamModel, PluginDescriptor};
 use crate::layout::DockLayout;
@@ -30,6 +31,8 @@ use crate::render_worker::{RenderRequest, RenderWorker};
 use crate::timecode;
 use crate::timeline::{self, TimelineLayout, TrimEdge};
 
+mod fields;
+
 const RULER_H: f32 = 28.0;
 const ROW_H: f32 = 44.0;
 const TIMELINE_H: f32 = 260.0;
@@ -37,6 +40,10 @@ const HEADER_W: f32 = 220.0;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
 const DEFAULT_MEDIA_TICKS: i64 = TICKS_PER_SECOND * 2;
+/// Peaks kept per decoded audio asset for timeline waveforms.
+const WAVEFORM_BUCKETS: usize = 4096;
+/// Distance of a fade handle's centre from its clip edge and top, in pixels.
+const FADE_HANDLE_INSET: f32 = 7.0;
 
 /// Viewport benchmark: warm up for two seconds, then scrub to a deterministic
 /// random tick at a 60 Hz request cadence for ten seconds and report the p50/p95
@@ -159,11 +166,6 @@ enum EditTarget {
         id: ClipId,
         name: String,
     },
-    /// Plugin color parameter, edited as `#RRGGBB` / `#RRGGBBAA`.
-    PluginColor {
-        id: ClipId,
-        name: String,
-    },
     /// One axis of a plugin point parameter.
     PluginPoint {
         id: ClipId,
@@ -196,21 +198,6 @@ enum SettingsField {
     Height,
     Fps,
     Background,
-}
-
-struct Scrub {
-    field: Field,
-    start_x: f32,
-    start_value: f64,
-    current: f64,
-}
-
-struct PluginScrub {
-    id: ClipId,
-    name: String,
-    start_x: f32,
-    start_value: f64,
-    current: f64,
 }
 
 struct TextEdit {
@@ -252,10 +239,18 @@ struct TrimDrag {
     current: Time,
 }
 
+/// Dragging a fade handle: `current` is the fade length in ticks.
+struct FadeDrag {
+    clip_id: ClipId,
+    edge: FadeEdge,
+    current: i64,
+}
+
 enum TimelineGesture {
     Scrub,
     Drag(ClipDrag),
     Trim(TrimDrag),
+    Fade(FadeDrag),
 }
 
 /// A right-click context menu target on the timeline.
@@ -286,8 +281,17 @@ struct ClipPaint {
     hovered: bool,
     label: SharedString,
     kind: animathio_core::ClipKind,
-    error: bool,
+    icon: IconName,
     keyframes: Vec<KeyframePaint>,
+    /// Downsampled peaks for audio clips, once the asset is decoded.
+    waveform: Option<Arc<Waveform>>,
+    source_offset: i64,
+    fade_in: i64,
+    fade_out: i64,
+    /// The clip's track is locked.
+    locked: bool,
+    /// The clip's track is muted or silenced by another track's solo.
+    silenced: bool,
 }
 
 struct TimelineSnapshot {
@@ -354,8 +358,6 @@ pub(crate) struct Editor {
     timeline_zoom: f32,
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
-    scrub: Option<Scrub>,
-    plugin_scrub: Option<PluginScrub>,
     editing: Option<TextEdit>,
     plugin_host: Option<PluginHost>,
     plugins: Vec<PluginDescriptor>,
@@ -385,6 +387,9 @@ pub(crate) struct Editor {
     context_menu: Option<ContextMenu>,
     context_menu_pos: Option<Point<Pixels>>,
     pool_drag: Option<PoolDrag>,
+    pool_drag_pos: Point<Pixels>,
+    fields: fields::FieldPool,
+    waveforms: std::cell::RefCell<BTreeMap<AssetId, Arc<Waveform>>>,
 }
 
 impl Editor {
@@ -432,8 +437,6 @@ impl Editor {
             timeline_zoom: 1.0,
             timeline_scroll: 0.0,
             gesture: None,
-            scrub: None,
-            plugin_scrub: None,
             editing: None,
             plugin_host,
             plugins,
@@ -463,6 +466,9 @@ impl Editor {
             context_menu: None,
             context_menu_pos: None,
             pool_drag: None,
+            pool_drag_pos: Point::default(),
+            fields: fields::FieldPool::default(),
+            waveforms: std::cell::RefCell::default(),
         };
         if recovered {
             this.error = Some("recovered from autosave".into());
@@ -666,9 +672,6 @@ impl Editor {
                 serde_json::to_value(target.display().to_string())?
             }
             Call::CommandApply { command } => {
-                if let Some(track) = locked_track_blocks(&self.project, &command) {
-                    return Err(ControlError::Other(format!("track {} is locked", track.0)));
-                }
                 self.history
                     .execute(&mut self.project, &command)
                     .map_err(|error| ControlError::Other(error.0))?;
@@ -866,11 +869,6 @@ impl Editor {
     }
 
     fn execute(&mut self, command: &Command, cx: &mut Context<Self>) {
-        if let Some(track) = locked_track_blocks(&self.project, command) {
-            self.error = Some(format!("track {} is locked", track.0));
-            cx.notify();
-            return;
-        }
         match self.history.execute(&mut self.project, command) {
             Ok(()) => self.after_edit(cx),
             Err(error) => self.error = Some(error.0),
@@ -892,6 +890,9 @@ impl Editor {
     fn sync_audio(&mut self) {
         self.pool.collect(&self.project);
         let live = audio_asset_ids(&self.project);
+        self.waveforms
+            .borrow_mut()
+            .retain(|id, _| live.contains(id));
         let Some((rate, channels)) = self.clock.mixer_format() else {
             self.clock.set_project(Arc::new(self.project.clone()));
             return;
@@ -930,7 +931,17 @@ impl Editor {
         cx.notify();
     }
 
-    pub(crate) fn handle_keystroke(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
+    pub(crate) fn handle_keystroke(
+        &mut self,
+        event: &KeystrokeEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A focused inspector input owns the keyboard: shortcuts such as Delete
+        // or Space must edit its text, not the timeline.
+        if self.fields.any_focused(window, cx) {
+            return;
+        }
         if self.timecode_buffer.is_some() {
             self.handle_timecode_key(event, cx);
             cx.stop_propagation();
@@ -1086,17 +1097,6 @@ impl Editor {
                 let value = edit.buffer;
                 self.execute(&self.plugin_param_command(id, name, json!(value)), cx);
             }
-            EditTarget::PluginColor { id, name } => match parse_hex_color(edit.buffer.trim()) {
-                Some(color) => self.execute(
-                    &self.plugin_param_command(
-                        id,
-                        name,
-                        json!([color[0], color[1], color[2], color[3]]),
-                    ),
-                    cx,
-                ),
-                None => self.error = Some("invalid color (use #RRGGBB or #RRGGBBAA)".into()),
-            },
             EditTarget::PluginPoint { id, name, axis } => {
                 let Ok(value) = edit.buffer.trim().parse::<f64>() else {
                     self.error = Some("invalid number".into());
@@ -1147,13 +1147,6 @@ impl Editor {
         self.plugin_opaque(id, name)
             .and_then(|value| value.as_f64())
             .unwrap_or(0.0)
-    }
-
-    fn editing_display(&self, target: &EditTarget) -> Option<String> {
-        self.editing
-            .as_ref()
-            .filter(|edit| &edit.target == target)
-            .map(|edit| edit.buffer.clone())
     }
 
     fn plugin_model(&self, id: ClipId, name: &str) -> Option<ParamModel> {
@@ -1519,7 +1512,8 @@ impl Editor {
         };
         let (x, y) = self.timeline_relative(position);
         let layout = self.current_layout();
-        if y < layout.ruler_height {
+        // Releasing outside the track area cancels the drag.
+        if y < layout.ruler_height || !self.timeline_bounds.contains(&position) {
             cx.notify();
             return;
         }
@@ -1659,6 +1653,29 @@ impl Editor {
             },
             cx,
         );
+    }
+
+    /// Set one fade of a clip to `ticks` (0 clears it) as a single undo step.
+    fn set_fade(&mut self, id: ClipId, edge: FadeEdge, ticks: i64, cx: &mut Context<Self>) {
+        if let Some(command) = self
+            .find_clip(id)
+            .and_then(|clip| fades::fade_command(clip, edge, ticks))
+        {
+            self.execute(&command, cx);
+        }
+    }
+
+    fn fade_in_one_second(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_fade(id, FadeEdge::In, TICKS_PER_SECOND, cx);
+    }
+
+    fn fade_out_one_second(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_fade(id, FadeEdge::Out, TICKS_PER_SECOND, cx);
+    }
+
+    fn clear_fades(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_fade(id, FadeEdge::In, 0, cx);
+        self.set_fade(id, FadeEdge::Out, 0, cx);
     }
 
     /// Delete a specific clip.
@@ -1914,12 +1931,28 @@ impl Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.context_menu = None;
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
         if y < layout.ruler_height {
             self.selected_keyframe = None;
             self.gesture = Some(TimelineGesture::Scrub);
             self.scrub_to(x, cx);
+            return;
+        }
+        if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
+            self.selected = Some(clip_id);
+            self.selected_field = None;
+            self.selected_keyframe = None;
+            let current = self
+                .find_clip(clip_id)
+                .map_or(0, |clip| fades::fade_len(clip, edge));
+            self.gesture = Some(TimelineGesture::Fade(FadeDrag {
+                clip_id,
+                edge,
+                current,
+            }));
+            cx.notify();
             return;
         }
         if let Some(selection) = self.hit_keyframe(&layout, x, y) {
@@ -1981,6 +2014,44 @@ impl Editor {
             self.scrub_to(x, cx);
         }
         cx.notify();
+    }
+
+    /// The fade handle under a canvas-relative point, for the selected or hovered
+    /// clip only (the same clips that draw handles).
+    fn hit_fade_handle(
+        &self,
+        layout: &TimelineLayout,
+        x: f32,
+        y: f32,
+    ) -> Option<(ClipId, FadeEdge)> {
+        for (row, track) in self.project.tracks().iter().enumerate() {
+            let top = layout.ruler_height + row as f32 * layout.row_height + 3.0;
+            if (y - (top + FADE_HANDLE_INSET)).abs() > 7.0 {
+                continue;
+            }
+            for clip in track.clips().values() {
+                if self.selected != Some(clip.id) && self.hovered_clip != Some(clip.id) {
+                    continue;
+                }
+                let x0 = timeline::time_to_x(layout, clip.range.start);
+                let x1 = timeline::time_to_x(layout, clip.range.end);
+                if x1 - x0 < 40.0 {
+                    continue;
+                }
+                let ppt = layout.pixels_per_tick as f32;
+                let in_x =
+                    x0 + fades::fade_len(clip, FadeEdge::In) as f32 * ppt + FADE_HANDLE_INSET;
+                let out_x =
+                    x1 - fades::fade_len(clip, FadeEdge::Out) as f32 * ppt - FADE_HANDLE_INSET;
+                if (x - in_x).abs() <= 7.0 {
+                    return Some((clip.id, FadeEdge::In));
+                }
+                if (x - out_x).abs() <= 7.0 {
+                    return Some((clip.id, FadeEdge::Out));
+                }
+            }
+        }
+        None
     }
 
     fn hit_keyframe(&self, layout: &TimelineLayout, x: f32, y: f32) -> Option<KeyframeSelection> {
@@ -2072,6 +2143,24 @@ impl Editor {
                 };
                 cx.notify();
             }
+            Some(TimelineGesture::Fade(fade)) => {
+                let Some(clip) = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .find_map(|track| track.clips().get(&fade.clip_id))
+                else {
+                    return;
+                };
+                let pointer = timeline::x_to_time(&layout, x).0;
+                let inset = (f64::from(FADE_HANDLE_INSET) / layout.pixels_per_tick) as i64;
+                let raw = match fade.edge {
+                    FadeEdge::In => pointer - clip.range.start.0 - inset,
+                    FadeEdge::Out => clip.range.end.0 - pointer - inset,
+                };
+                fade.current = raw.clamp(0, fades::max_fade(clip, fade.edge));
+                cx.notify();
+            }
             Some(TimelineGesture::Scrub) => self.scrub_to(x, cx),
             None => {}
         }
@@ -2141,6 +2230,15 @@ impl Editor {
                     Err(error) => self.error = Some(error.0),
                 }
             }
+            Some(TimelineGesture::Fade(fade)) => {
+                if let Some(command) = self
+                    .find_clip(fade.clip_id)
+                    .and_then(|clip| fades::fade_command(clip, fade.edge, fade.current))
+                {
+                    self.execute(&command, cx);
+                }
+                cx.notify();
+            }
             _ => {}
         }
     }
@@ -2200,69 +2298,6 @@ impl Editor {
         cx.notify();
     }
 
-    fn on_field_mouse_down(
-        &mut self,
-        id: ClipId,
-        field: &Field,
-        event: &MouseDownEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let value = self.find_clip(id).map_or(0.0, |c| field_value(c, field));
-        self.selected = Some(id);
-        self.selected_field = Some(field.clone());
-        if event.click_count >= 2 {
-            self.editing = Some(TextEdit {
-                target: EditTarget::Field(field.clone()),
-                buffer: format!("{value}"),
-            });
-            self.scrub = None;
-        } else {
-            self.scrub = Some(Scrub {
-                field: field.clone(),
-                start_x: f32::from(event.position.x),
-                start_value: value,
-                current: value,
-            });
-            self.editing = None;
-        }
-        cx.notify();
-    }
-
-    fn on_field_mouse_move(
-        &mut self,
-        _id: ClipId,
-        field: &Field,
-        event: &MouseMoveEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if !event.dragging() {
-            return;
-        }
-        if let Some(scrub) = &mut self.scrub
-            && &scrub.field == field
-        {
-            let delta = f32::from(event.position.x) - scrub.start_x;
-            scrub.current = scrub.start_value + f64::from(delta) * field_scrub_scale(field);
-            cx.notify();
-        }
-    }
-
-    fn on_field_mouse_up(
-        &mut self,
-        _id: ClipId,
-        field: &Field,
-        _event: &MouseUpEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(scrub) = self.scrub.take()
-            && &scrub.field == field
-            && let Some(id) = self.selected
-        {
-            self.commit_field(id, field, scrub.current, cx);
-        }
-        cx.notify();
-    }
-
     fn add_plugin_clip(&mut self, descriptor: &PluginDescriptor, cx: &mut Context<Self>) {
         let models = descriptor.models();
         let (numeric, opaque) = inspector::default_params(&models);
@@ -2308,10 +2343,22 @@ impl Editor {
         self.toggle_play(cx);
     }
 
+    /// Cached downsampled peaks for a decoded audio asset.
+    fn waveform_for(&self, id: &AssetId) -> Option<Arc<Waveform>> {
+        if let Some(wave) = self.waveforms.borrow().get(id) {
+            return Some(wave.clone());
+        }
+        let wave = Arc::new(self.pool.waveform(id, WAVEFORM_BUCKETS)?);
+        self.waveforms.borrow_mut().insert(id.clone(), wave.clone());
+        Some(wave)
+    }
+
     fn build_timeline_snapshot(&self) -> TimelineSnapshot {
         let duration = timeline::project_duration(&self.project);
         let mut clips = Vec::new();
+        let any_solo = self.project.tracks().iter().any(Track::is_solo);
         for (row, track) in self.project.tracks().iter().enumerate() {
+            let silenced = track.is_muted() || (any_solo && !track.is_solo());
             for clip in track.clips().values() {
                 let (start, end) = if let Some(TimelineGesture::Drag(drag)) = &self.gesture
                     && drag.clip_id == clip.id
@@ -2356,6 +2403,22 @@ impl Editor {
                         }
                     }
                 }
+                let (mut fade_in, mut fade_out) = (
+                    fades::fade_len(clip, FadeEdge::In),
+                    fades::fade_len(clip, FadeEdge::Out),
+                );
+                if let Some(TimelineGesture::Fade(drag)) = &self.gesture
+                    && drag.clip_id == clip.id
+                {
+                    match drag.edge {
+                        FadeEdge::In => fade_in = drag.current,
+                        FadeEdge::Out => fade_out = drag.current,
+                    }
+                }
+                let waveform = match &clip.kind {
+                    ClipKind::Audio(asset) => self.waveform_for(asset),
+                    _ => None,
+                };
                 clips.push(ClipPaint {
                     row,
                     start,
@@ -2364,8 +2427,14 @@ impl Editor {
                     hovered: self.hovered_clip == Some(clip.id),
                     label: clip_label(&self.project, clip).into(),
                     kind: clip.kind.clone(),
-                    error: matches!(clip.kind, ClipKind::Error(_)),
+                    icon: icons::kind_icon(&clip.kind),
                     keyframes,
+                    waveform,
+                    source_offset: clip.source_offset.0,
+                    fade_in,
+                    fade_out,
+                    locked: track.is_locked(),
+                    silenced,
                 });
             }
         }
@@ -2376,120 +2445,6 @@ impl Editor {
             position: self.position,
             frame_rate: self.project.frame_rate(),
         }
-    }
-
-    fn transform_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id) else {
-            return Vec::new();
-        };
-        let transform = [
-            (Field::Transform(TransformProperty::X), "x"),
-            (Field::Transform(TransformProperty::Y), "y"),
-            (Field::Transform(TransformProperty::ScaleX), "scale x"),
-            (Field::Transform(TransformProperty::ScaleY), "scale y"),
-            (Field::Transform(TransformProperty::Rotation), "rotation"),
-            (Field::Transform(TransformProperty::Opacity), "opacity"),
-        ];
-        let mut rows = Vec::new();
-        for (field, label) in transform {
-            let value = field_value(clip, &field);
-            rows.push(self.field_row(id, &field, label, value, cx));
-        }
-        rows
-    }
-
-    fn numeric_param_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id) else {
-            return Vec::new();
-        };
-        let mut rows = Vec::new();
-        for (name, value) in &clip.params {
-            let field = Field::Param(name.clone());
-            if let Some(value) = value.as_number() {
-                rows.push(self.field_row(id, &field, name, value, cx));
-            }
-        }
-        rows
-    }
-
-    fn plugin_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id) else {
-            return Vec::new();
-        };
-        let ClipKind::Plugin { plugin_id, .. } = &clip.kind else {
-            return Vec::new();
-        };
-        let Some(descriptor) = self.plugins.iter().find(|plugin| &plugin.id == plugin_id) else {
-            return vec![div().px_2().child("plugin not loaded")];
-        };
-        let models = descriptor.models();
-        let mut rows = Vec::new();
-        for model in &models {
-            rows.push(self.plugin_row(id, model, cx));
-        }
-        rows
-    }
-
-    fn plugin_row(&self, id: ClipId, model: &ParamModel, cx: &mut Context<Self>) -> Div {
-        let name = model.id().to_owned();
-        let diamond = self.keyframe_diamond(id, Target::Param(name.clone()), cx);
-        let control = match model {
-            ParamModel::Number { .. } => self.plugin_number_control(id, name.clone(), cx),
-            ParamModel::Color { default, .. } => self.plugin_color_control(
-                id,
-                name.clone(),
-                [default.r, default.g, default.b, default.a],
-                cx,
-            ),
-            ParamModel::Text { default, .. } => {
-                self.plugin_text_control(id, name.clone(), default, cx)
-            }
-            ParamModel::Enum {
-                options, default, ..
-            } => self.plugin_enum_control(id, name.clone(), options.clone(), default, cx),
-            ParamModel::Bool { default, .. } => {
-                self.plugin_bool_control(id, name.clone(), *default, cx)
-            }
-            ParamModel::Point { default, .. } => {
-                self.plugin_point_control(id, name.clone(), *default, cx)
-            }
-            ParamModel::Asset { media_type, .. } => {
-                self.plugin_asset_control(id, name.clone(), media_type, cx)
-            }
-        };
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .child(diamond)
-            .child(div().flex_1().child(model.label().to_owned()))
-            .child(control)
-    }
-
-    fn keyframe_diamond(
-        &self,
-        id: ClipId,
-        target: Target,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let active = self
-            .find_clip(id)
-            .is_some_and(|clip| inspector::keyframed(clip, &target, self.position));
-        div()
-            .w(px(18.))
-            .h(px(18.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .child(icons::diamond(active).small())
-            .id("keyframe-diamond")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                this.toggle_keyframe(id, target.clone(), cx);
-            }))
     }
 
     fn toggle_keyframe(&mut self, id: ClipId, target: Target, cx: &mut Context<Self>) {
@@ -2555,7 +2510,11 @@ impl Editor {
                 div()
                     .px_2()
                     .cursor_pointer()
-                    .bg(if active { rgb(0x2a3342) } else { rgb(0x151a22) })
+                    .bg(if active {
+                        cx.theme().list_active
+                    } else {
+                        cx.theme().popover
+                    })
                     .child(label)
                     .id("keyframe-interp")
                     .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
@@ -2567,318 +2526,6 @@ impl Editor {
             );
         }
         rows
-    }
-
-    fn plugin_number_control(
-        &self,
-        id: ClipId,
-        name: String,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let value = self.plugin_number_value(id, &name);
-        let target = EditTarget::PluginNumber {
-            id,
-            name: name.clone(),
-        };
-        let display = if let Some(buffer) = self.editing_display(&target) {
-            buffer
-        } else if let Some(scrub) = &self.plugin_scrub
-            && scrub.id == id
-            && scrub.name == name
-        {
-            format!("{:.4}", scrub.current)
-        } else {
-            format!("{value:.4}")
-        };
-
-        let down = name.clone();
-        let move_name = name.clone();
-        let up = name.clone();
-        div()
-            .cursor(CursorStyle::ResizeLeftRight)
-            .child(display)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    this.on_plugin_number_down(id, &down, event, cx);
-                }),
-            )
-            .on_mouse_move(
-                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.on_plugin_number_move(id, &move_name, event, cx);
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
-                    this.on_plugin_number_up(id, &up, event, cx);
-                }),
-            )
-            .id("plugin-number")
-    }
-
-    fn on_plugin_number_down(
-        &mut self,
-        id: ClipId,
-        name: &str,
-        event: &MouseDownEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let value = self.plugin_number_value(id, name);
-        if event.click_count >= 2 {
-            self.editing = Some(TextEdit {
-                target: EditTarget::PluginNumber {
-                    id,
-                    name: name.to_owned(),
-                },
-                buffer: format!("{value}"),
-            });
-            self.plugin_scrub = None;
-        } else {
-            self.plugin_scrub = Some(PluginScrub {
-                id,
-                name: name.to_owned(),
-                start_x: f32::from(event.position.x),
-                start_value: value,
-                current: value,
-            });
-            self.editing = None;
-        }
-        cx.notify();
-    }
-
-    fn on_plugin_number_move(
-        &mut self,
-        id: ClipId,
-        name: &str,
-        event: &MouseMoveEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if !event.dragging() {
-            return;
-        }
-        let step = self
-            .plugin_model(id, name)
-            .and_then(|model| match model {
-                ParamModel::Number { step, .. } => Some(step),
-                _ => None,
-            })
-            .unwrap_or(0.1);
-        let Some(scrub) = &mut self.plugin_scrub else {
-            return;
-        };
-        if scrub.id != id || scrub.name != name {
-            return;
-        }
-        let delta = f64::from(f32::from(event.position.x) - scrub.start_x);
-        scrub.current = scrub.start_value + delta * step * 0.05;
-        cx.notify();
-    }
-
-    fn on_plugin_number_up(
-        &mut self,
-        id: ClipId,
-        name: &str,
-        _event: &MouseUpEvent,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(scrub) = self.plugin_scrub.take()
-            && scrub.id == id
-            && scrub.name == name
-            && let Some(command) = self.plugin_number_command(id, name, scrub.current)
-        {
-            self.execute(&command, cx);
-        }
-        cx.notify();
-    }
-
-    fn plugin_text_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: &str,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let value = self.plugin_text_value(id, &name, default);
-        let target = EditTarget::PluginText {
-            id,
-            name: name.clone(),
-        };
-        let display = self
-            .editing_display(&target)
-            .unwrap_or_else(|| value.clone());
-        let current = value.clone();
-        div()
-            .cursor_pointer()
-            .child(display)
-            .id("plugin-text")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                this.editing = Some(TextEdit {
-                    target: EditTarget::PluginText {
-                        id,
-                        name: name.clone(),
-                    },
-                    buffer: current.clone(),
-                });
-                cx.notify();
-            }))
-    }
-
-    fn plugin_enum_control(
-        &self,
-        id: ClipId,
-        name: String,
-        options: Vec<String>,
-        default: &str,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let current = self.plugin_text_value(id, &name, default);
-        let options_for_click = options.clone();
-        div()
-            .cursor_pointer()
-            .child(current.clone())
-            .id("plugin-enum")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                let next = cycle_option(&options_for_click, &current);
-                this.execute(
-                    &this.plugin_param_command(id, name.clone(), json!(next)),
-                    cx,
-                );
-            }))
-    }
-
-    fn plugin_bool_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: bool,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let value = self.plugin_bool_value(id, &name, default);
-        let label = if value { "on" } else { "off" };
-        div()
-            .cursor_pointer()
-            .child(label)
-            .id("plugin-bool")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                this.execute(
-                    &this.plugin_param_command(id, name.clone(), json!(!value)),
-                    cx,
-                );
-            }))
-    }
-
-    fn plugin_color_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: [u8; 4],
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let color = self.plugin_color_value(id, &name, default);
-        let hex = format!(
-            "#{:02x}{:02x}{:02x}{:02x}",
-            color[0], color[1], color[2], color[3]
-        );
-        let target = EditTarget::PluginColor {
-            id,
-            name: name.clone(),
-        };
-        let display = self.editing_display(&target).unwrap_or_else(|| hex.clone());
-        let swatch =
-            rgb(u32::from(color[0]) << 16 | u32::from(color[1]) << 8 | u32::from(color[2]));
-        let name_for_click = name.clone();
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_1()
-            .child(div().w(px(16.)).h(px(12.)).bg(swatch))
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child(display)
-                    .id("plugin-color")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.editing = Some(TextEdit {
-                            target: EditTarget::PluginColor {
-                                id,
-                                name: name.clone(),
-                            },
-                            buffer: hex.clone(),
-                        });
-                        cx.notify();
-                    })),
-            )
-            .child(icon_button(
-                "plugin-color-cycle",
-                icons::icon(IconName::RotateCw),
-                "Cycle colour preset",
-                cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                    let next = cycle_color(color);
-                    this.execute(
-                        &this.plugin_param_command(
-                            id,
-                            name_for_click.clone(),
-                            json!([next[0], next[1], next[2], next[3]]),
-                        ),
-                        cx,
-                    );
-                }),
-            ))
-            .id("plugin-color-row")
-    }
-
-    fn plugin_point_control(
-        &self,
-        id: ClipId,
-        name: String,
-        default: animathio_plugin_api::PointValue,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let point = self.plugin_point_value(id, &name);
-        let x_name = name.clone();
-        let y_name = name.clone();
-        div()
-            .flex()
-            .flex_row()
-            .gap_1()
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child(format!("x {:.2}", point[0]))
-                    .id("plugin-point-x")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.editing = Some(TextEdit {
-                            target: EditTarget::PluginPoint {
-                                id,
-                                name: x_name.clone(),
-                                axis: 0,
-                            },
-                            buffer: format!("{:.2}", point[0]),
-                        });
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child(format!("y {:.2}", point[1]))
-                    .id("plugin-point-y")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.editing = Some(TextEdit {
-                            target: EditTarget::PluginPoint {
-                                id,
-                                name: y_name.clone(),
-                                axis: 1,
-                            },
-                            buffer: format!("{:.2}", point[1]),
-                        });
-                        cx.notify();
-                    })),
-            )
-            .child(div().px_1().child(format!("({} {})", default.x, default.y)))
-            .id("plugin-point-row")
     }
 
     fn plugin_asset_control(
@@ -2933,15 +2580,15 @@ impl Editor {
             "#{:02x}{:02x}{:02x}{:02x}",
             background[0], background[1], background[2], background[3]
         );
-        let swatch = rgb(u32::from(background[0]) << 16
-            | u32::from(background[1]) << 8
-            | u32::from(background[2]));
+        let swatch = fields::to_hsla(background);
         div()
             .absolute()
             .top(px(52.))
             .right(px(12.))
             .w(px(280.))
-            .bg(rgb(0x1f2430))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
             .p_3()
             .flex()
             .flex_col()
@@ -3030,58 +2677,6 @@ impl Editor {
         ids
     }
 
-    fn field_row(
-        &self,
-        id: ClipId,
-        field: &Field,
-        label: &str,
-        value: f64,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let display = if let Some(edit) = &self.editing
-            && edit.target == EditTarget::Field(field.clone())
-        {
-            edit.buffer.clone()
-        } else if let Some(scrub) = &self.scrub
-            && &scrub.field == field
-        {
-            format!("{:.4}", scrub.current)
-        } else {
-            format!("{value:.4}")
-        };
-
-        let down = field.clone();
-        let move_field = field.clone();
-        let up = field.clone();
-        div()
-            .flex()
-            .flex_row()
-            .justify_between()
-            .px_2()
-            .py_1()
-            .child(label.to_owned())
-            .child(
-                div()
-                    .cursor(CursorStyle::ResizeLeftRight)
-                    .child(display)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            this.on_field_mouse_down(id, &down, event, cx);
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                        this.on_field_mouse_move(id, &move_field, event, cx);
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseUpEvent, _, cx| {
-                            this.on_field_mouse_up(id, &up, event, cx);
-                        }),
-                    ),
-            )
-    }
-
     fn start_export(&mut self, cx: &mut Context<Self>) {
         if self.export_task.is_some() {
             return;
@@ -3134,7 +2729,9 @@ impl Editor {
             .left(px(30.))
             .w(px(280.))
             .p_3()
-            .bg(rgb(0x1f2430))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
             .flex()
             .flex_col()
             .gap_2()
@@ -3144,8 +2741,8 @@ impl Editor {
                 div()
                     .w(px(240.))
                     .h(px(8.))
-                    .bg(rgb(0x394354))
-                    .child(div().w(px(width)).h(px(8.)).bg(rgb(0x5eabff))),
+                    .bg(cx.theme().muted)
+                    .child(div().w(px(width)).h(px(8.)).bg(cx.theme().progress_bar)),
             )
             .child(button(
                 "cancel-export",
@@ -3276,7 +2873,9 @@ impl Editor {
             .top(px(34.))
             .left(px(2.))
             .w(px(220.))
-            .bg(rgb(0x1f2633))
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().border)
             .p_1()
             .flex()
             .flex_col()
@@ -3287,7 +2886,7 @@ impl Editor {
                     .px_2()
                     .py_1()
                     .cursor_pointer()
-                    .hover(|this| this.bg(rgb(0x2a3446)))
+                    .hover(|this| this.bg(cx.theme().list_hover))
                     .child(label)
                     .id("menu-item")
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -3331,7 +2930,7 @@ impl Editor {
         match self.left_tab {
             LeftTab::Assets => {
                 if self.project.assets().is_empty() {
-                    body = body.child(empty_state("Drop media here"));
+                    body = body.child(empty_state("Drop media here", cx));
                 }
                 for (id, asset) in self.project.assets() {
                     let asset_id = id.clone();
@@ -3375,7 +2974,7 @@ impl Editor {
             }
             LeftTab::Plugins => {
                 if self.plugins.is_empty() {
-                    body = body.child(empty_state("No clip plugins loaded"));
+                    body = body.child(empty_state("No clip plugins loaded", cx));
                 }
                 for descriptor in &self.plugins {
                     let id = descriptor.id.clone();
@@ -3498,7 +3097,7 @@ impl Editor {
                     },
                 ))
         } else {
-            viewport.child(empty_state("rendering…"))
+            viewport.child(empty_state("rendering…", cx))
         };
         let viewer_root = div()
             .flex_1()
@@ -3572,13 +3171,25 @@ impl Editor {
         });
         match target {
             ContextMenu::Clip { id } => {
-                let actions: Vec<(&str, ClipAction)> = vec![
-                    ("Split at playhead", Self::split_clip),
-                    ("Duplicate", Self::duplicate_clip),
-                    ("Delete", Self::delete_clip),
+                let actions: Vec<(IconName, &str, ClipAction)> = vec![
+                    (IconName::Scissors, "Split at playhead", Self::split_clip),
+                    (IconName::Copy, "Duplicate", Self::duplicate_clip),
+                    (IconName::Trash, "Delete", Self::delete_clip),
+                    (
+                        IconName::TrendingUp,
+                        "Fade in 1 s",
+                        Self::fade_in_one_second,
+                    ),
+                    (
+                        IconName::TrendingDown,
+                        "Fade out 1 s",
+                        Self::fade_out_one_second,
+                    ),
+                    (IconName::Eraser, "Clear fades", Self::clear_fades),
                 ];
-                for (label, action) in actions {
+                for (icon, label, action) in actions {
                     menu = menu.child(context_item(
+                        icon,
                         label,
                         cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
                             action(this, id, cx);
@@ -3597,6 +3208,7 @@ impl Editor {
                 );
                 for kind in effect_kinds() {
                     menu = menu.child(context_item(
+                        IconName::Sparkles,
                         effect_label(kind),
                         cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
                             this.add_effect_to_clip(id, kind, cx);
@@ -3608,7 +3220,27 @@ impl Editor {
                 }
             }
             ContextMenu::Keyframe(selection) => {
-                menu = menu.children(self.keyframe_menu(&selection, cx));
+                let remove = selection.clone();
+                menu = menu
+                    .child(context_item(
+                        IconName::DiamondMinus,
+                        "Remove keyframe",
+                        cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
+                            this.execute(
+                                &Command::RemoveKeyframe {
+                                    id: remove.clip_id,
+                                    target: remove.target.clone(),
+                                    time: remove.time,
+                                },
+                                cx,
+                            );
+                            this.selected_keyframe = None;
+                            this.context_menu = None;
+                            cx.notify();
+                        }),
+                        cx,
+                    ))
+                    .children(self.keyframe_menu(&selection, cx));
             }
         }
         menu = menu.child(
@@ -3623,6 +3255,51 @@ impl Editor {
                 .on_click(close),
         );
         Some(menu)
+    }
+
+    /// A small chip that follows the pointer while an item is dragged from the
+    /// media pool toward the timeline.
+    fn pool_drag_ghost(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let drag = self.pool_drag.as_ref()?;
+        let (icon, label) = match drag {
+            PoolDrag::Asset(id) => (
+                IconName::Film,
+                self.project
+                    .assets()
+                    .get(id)
+                    .map_or_else(|| "media".to_owned(), |asset| asset.name.clone()),
+            ),
+            PoolDrag::Plugin(id) => (
+                IconName::Sparkles,
+                self.plugins
+                    .iter()
+                    .find(|plugin| &plugin.id == id)
+                    .map_or_else(|| id.clone(), |plugin| plugin.name.clone()),
+            ),
+            PoolDrag::Effect(kind) => (IconName::Sparkles, effect_label(*kind).to_owned()),
+        };
+        let over_timeline = self.timeline_bounds.contains(&self.pool_drag_pos);
+        Some(
+            div()
+                .absolute()
+                .left(self.pool_drag_pos.x + px(12.))
+                .top(self.pool_drag_pos.y + px(12.))
+                .px_2()
+                .py_1()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_1()
+                .bg(cx.theme().popover)
+                .border_1()
+                .border_color(if over_timeline {
+                    cx.theme().drag_border
+                } else {
+                    cx.theme().border
+                })
+                .child(icons::icon(icon).small())
+                .child(label),
+        )
     }
 
     /// Fit/zoom options shown under the viewer's fit button.
@@ -3989,134 +3666,6 @@ impl Editor {
         header
     }
 
-    fn inspector(&self, cx: &mut Context<Self>) -> Div {
-        let mut pane = div()
-            .w(px(self.dock.right_width))
-            .h_full()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .bg(cx.theme().popover);
-        let Some(id) = self.selected else {
-            pane = pane
-                .child(
-                    div()
-                        .px_2()
-                        .py_1()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("No clip selected"),
-                )
-                .child(
-                    self.section(
-                        "recent",
-                        "Recent projects",
-                        div()
-                            .flex()
-                            .flex_col()
-                            .children(self.recent.paths.iter().map(|path| {
-                                let open = path.clone();
-                                div()
-                                    .px_2()
-                                    .py_1()
-                                    .cursor_pointer()
-                                    .hover(|this| this.bg(cx.theme().muted))
-                                    .child(path.display().to_string())
-                                    .id("recent-item")
-                                    .on_click(cx.listener(
-                                        move |this, _event: &ClickEvent, _window, cx| {
-                                            this.open_path(&open, cx);
-                                        },
-                                    ))
-                            })),
-                        cx,
-                    ),
-                );
-            return pane;
-        };
-        let Some(clip) = self.find_clip(id) else {
-            return pane.child("No clip selected");
-        };
-        let kind = kind_label(&clip.kind);
-        pane = pane.child(
-            div()
-                .px_2()
-                .py_1()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .child(icons::icon(icons::kind_icon(&clip.kind)).small())
-                .child(format!("Clip {}", id.0))
-                .child(div().text_color(cx.theme().muted_foreground).child(kind)),
-        );
-        if let ClipKind::Error(message) = &clip.kind {
-            pane = pane.child(
-                div()
-                    .px_2()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_1()
-                    .text_color(cx.theme().danger)
-                    .child(icons::icon(IconName::TriangleAlert).small())
-                    .child(message.clone()),
-            );
-        }
-        pane = pane.child(
-            self.section(
-                "transform",
-                "Transform",
-                div()
-                    .flex()
-                    .flex_col()
-                    .children(self.transform_rows(id, cx)),
-                cx,
-            ),
-        );
-        if matches!(clip.kind, ClipKind::Plugin { .. }) {
-            pane = pane.child(self.section(
-                "params",
-                "Plugin parameters",
-                div().flex().flex_col().children(self.plugin_rows(id, cx)),
-                cx,
-            ));
-        } else {
-            pane = pane.child(
-                self.section(
-                    "params",
-                    "Parameters",
-                    div()
-                        .flex()
-                        .flex_col()
-                        .children(self.numeric_param_rows(id, cx)),
-                    cx,
-                ),
-            );
-        }
-        if !clip.effects.is_empty() {
-            pane = pane.child(self.section(
-                "effects",
-                "Effects",
-                div().flex().flex_col().children(self.effect_rows(id, cx)),
-                cx,
-            ));
-        }
-        if matches!(clip.kind, ClipKind::Audio(_)) {
-            pane = pane.child(self.section(
-                "audio",
-                "Audio",
-                div().flex().flex_col().children(self.audio_rows(id, cx)),
-                cx,
-            ));
-        }
-        if let Some(selection) = &self.selected_keyframe
-            && selection.clip_id == id
-        {
-            pane = pane.children(self.keyframe_menu(selection, cx));
-        }
-        pane
-    }
-
     /// A collapsible inspector group with a themed header and chevron.
     fn section(
         &self,
@@ -4182,21 +3731,14 @@ impl Editor {
             .collect()
     }
 
-    /// Gain and mute rows for audio clips.
-    fn audio_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let mut rows = Vec::new();
-        for name in ["gain", "muted"] {
-            let field = Field::Param(name.to_owned());
-            let value = self
-                .find_clip(id)
-                .map_or(0.0, |clip| field_value(clip, &field));
-            rows.push(self.field_row(id, &field, name, value, cx));
-        }
-        rows
-    }
-
-    fn status_line(&self) -> Div {
+    fn status_line(&self, cx: &App) -> Div {
         let error = self.error.clone().unwrap_or_default();
+        // Completed-work notices are not errors, so they never use the danger colour.
+        let notice_color = if error.starts_with("Exported") {
+            cx.theme().success
+        } else {
+            cx.theme().danger
+        };
         let path = self
             .path
             .as_ref()
@@ -4208,7 +3750,11 @@ impl Editor {
             .flex_row()
             .justify_between()
             .px_2()
-            .bg(rgb(0x1f2430))
+            .bg(cx.theme().status_bar)
+            .border_t_1()
+            .border_color(cx.theme().status_bar_border)
+            .text_color(cx.theme().muted_foreground)
+            .items_center()
             .child(format!(
                 "{path} | tracks {} | clips {}",
                 self.project.tracks().len(),
@@ -4218,7 +3764,7 @@ impl Editor {
                     .map(|t| t.clips().len())
                     .sum::<usize>()
             ))
-            .child(div().text_color(rgb(0xff6b6b)).child(error))
+            .child(div().text_color(notice_color).child(error))
     }
 }
 
@@ -4270,28 +3816,37 @@ impl Render for Editor {
         }
         middle = middle.child(self.viewer(cx));
         if self.dock.right_open {
-            middle = middle.child(self.inspector(cx));
+            middle = middle.child(self.inspector(window, cx));
         }
 
         let mut root = div()
             .size_full()
             .relative()
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                if this.pool_drag.is_some() {
+                    this.pool_drag_pos = event.position;
+                    cx.notify();
+                }
+            }))
             .flex()
             .flex_col()
-            .bg(rgb(0x0b0e13))
-            .text_color(rgb(0xffffff))
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
             .track_focus(&self.focus_handle)
             .child(self.menu_bar(cx))
             .child(middle);
         if self.dock.bottom_open {
             root = root.child(self.timeline_panel(cx));
         }
-        root = root.child(self.status_line());
+        root = root.child(self.status_line(cx));
         if let Some(dropdown) = self.menu_dropdown(cx) {
             root = root.child(dropdown);
         }
         if let Some(menu) = self.context_menu_dropdown(cx) {
             root = root.child(menu);
+        }
+        if let Some(ghost) = self.pool_drag_ghost(cx) {
+            root = root.child(ghost);
         }
         if self.settings_open {
             root = root.child(self.settings_dialog(cx));
@@ -4368,79 +3923,7 @@ fn paint_timeline(
         ));
     }
     for clip in &snapshot.clips {
-        let x0 = bounds.origin.x + px(timeline::time_to_x(&layout, clip.start));
-        let x1 = bounds.origin.x + px(timeline::time_to_x(&layout, clip.end));
-        let y0 = bounds.origin.y + px(RULER_H + clip.row as f32 * ROW_H + 3.0);
-        let y1 = bounds.origin.y + px(RULER_H + (clip.row as f32 + 1.0) * ROW_H - 3.0);
-        let block = Bounds::from_corners(point(x0, y0), point(x1, y1));
-        let color = clip_color(&clip.kind, cx);
-        window.paint_quad(fill(block, color));
-        if clip.selected {
-            window.paint_quad(outline(block, cx.theme().foreground, BorderStyle::Solid));
-            window.paint_quad(outline(
-                Bounds::from_corners(
-                    point(x0 + px(1.0), y0 + px(1.0)),
-                    point(x1 - px(1.0), y1 - px(1.0)),
-                ),
-                cx.theme().primary,
-                BorderStyle::Solid,
-            ));
-        }
-        // Trim handles only on the hovered or selected clip.
-        if clip.selected || clip.hovered {
-            let handle_w = px(3.0);
-            for edge_x in [x0, x1] {
-                let handle = Bounds::from_corners(
-                    point(edge_x - handle_w, y0),
-                    point(edge_x + handle_w, y1),
-                );
-                window.paint_quad(fill(handle, cx.theme().foreground));
-            }
-        }
-        // Kind glyph and label, only when the block is wide enough to hold them.
-        if x1 - x0 > px(24.0) {
-            let glyph_center = point(
-                x0 + px(12.0),
-                bounds.origin.y + px(RULER_H + (clip.row as f32 + 0.5) * ROW_H),
-            );
-            paint_kind_glyph(&clip.kind, glyph_center, 8.0, window, cx);
-            if !clip.label.is_empty() {
-                paint_clip_label(
-                    clip.label.clone(),
-                    point(x0 + px(22.0), y0 + px(16.0)),
-                    x1,
-                    window,
-                    cx,
-                );
-            }
-        }
-        if clip.error {
-            paint_kind_glyph(
-                &animathio_core::ClipKind::Error("badge".into()),
-                point(x0 + px(8.0), y0 + px(8.0)),
-                7.0,
-                window,
-                cx,
-            );
-        }
-        for keyframe in &clip.keyframes {
-            let kx = bounds.origin.x + px(timeline::time_to_x(&layout, keyframe.time));
-            let cy = y0 + px((ROW_H - 6.0) / 2.0);
-            let half = px(4.0);
-            let mut path = gpui::Path::new(point(kx, cy - half));
-            path.line_to(point(kx + half, cy));
-            path.line_to(point(kx, cy + half));
-            path.line_to(point(kx - half, cy));
-            path.line_to(point(kx, cy - half));
-            window.paint_path(
-                path,
-                if keyframe.selected {
-                    cx.theme().foreground
-                } else {
-                    cx.theme().warning
-                },
-            );
-        }
+        paint_clip(bounds, &layout, clip, window, cx);
     }
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let head = Bounds::from_corners(
@@ -4448,6 +3931,209 @@ fn paint_timeline(
         point(head_x + px(1.5), bounds.origin.y + px(height)),
     );
     window.paint_quad(fill(head, cx.theme().foreground));
+}
+
+/// Paint one clip block: kind-coloured body, waveform, fade ramps, outline, trim
+/// handles, kind icon, label, lock badge and keyframe diamonds.
+#[allow(clippy::too_many_lines)]
+fn paint_clip(
+    bounds: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    clip: &ClipPaint,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let x0 = bounds.origin.x + px(timeline::time_to_x(layout, clip.start));
+    let x1 = bounds.origin.x + px(timeline::time_to_x(layout, clip.end));
+    let y0 = bounds.origin.y + px(RULER_H + clip.row as f32 * ROW_H + 3.0);
+    let y1 = bounds.origin.y + px(RULER_H + (clip.row as f32 + 1.0) * ROW_H - 3.0);
+    let block = Bounds::from_corners(point(x0, y0), point(x1, y1));
+    let kind_color = clip_color(&clip.kind, cx);
+    let dim = if clip.silenced { 0.5 } else { 1.0 };
+    window.paint_quad(fill(block, kind_color.opacity(0.45 * dim)));
+    window.paint_quad(outline(block, kind_color.opacity(dim), BorderStyle::Solid));
+
+    if let Some(wave) = &clip.waveform {
+        paint_waveform(bounds, layout, clip, wave, (x0, x1, y0, y1), window, cx);
+    }
+    paint_fades(clip, (x0, x1, y0, y1), window, cx);
+
+    if clip.selected {
+        window.paint_quad(outline(block, cx.theme().ring, BorderStyle::Solid));
+        window.paint_quad(outline(
+            Bounds::from_corners(
+                point(x0 + px(1.0), y0 + px(1.0)),
+                point(x1 - px(1.0), y1 - px(1.0)),
+            ),
+            cx.theme().ring,
+            BorderStyle::Solid,
+        ));
+    }
+    // Trim handles only on the hovered or selected clip.
+    if clip.selected || clip.hovered {
+        let handle_w = px(3.0);
+        for edge_x in [x0, x1] {
+            let handle =
+                Bounds::from_corners(point(edge_x - handle_w, y0), point(edge_x + handle_w, y1));
+            window.paint_quad(
+                fill(handle, cx.theme().foreground.opacity(0.85)).corner_radii(px(1.5)),
+            );
+        }
+    }
+    // Kind icon and label, only when the block is wide enough to hold them.
+    if x1 - x0 > px(28.0) {
+        let icon_bounds = Bounds::new(point(x0 + px(5.0), y0 + px(3.0)), size(px(12.0), px(12.0)));
+        paint_icon(clip.icon, icon_bounds, cx.theme().foreground, window, cx);
+        if !clip.label.is_empty() {
+            paint_clip_label(
+                clip.label.clone(),
+                point(x0 + px(20.0), y0 + px(3.0)),
+                x1 - px(4.0),
+                window,
+                cx,
+            );
+        }
+    }
+    if clip.locked && x1 - x0 > px(48.0) {
+        let lock = Bounds::new(
+            point(x1 - px(18.0), y1 - px(15.0)),
+            size(px(12.0), px(12.0)),
+        );
+        paint_icon(IconName::Lock, lock, cx.theme().foreground, window, cx);
+    }
+    for keyframe in &clip.keyframes {
+        let kx = bounds.origin.x + px(timeline::time_to_x(layout, keyframe.time));
+        let cy = y1 - px(10.0);
+        let half = px(4.0);
+        let mut path = gpui::Path::new(point(kx, cy - half));
+        path.line_to(point(kx + half, cy));
+        path.line_to(point(kx, cy + half));
+        path.line_to(point(kx - half, cy));
+        path.line_to(point(kx, cy - half));
+        window.paint_path(
+            path,
+            if keyframe.selected {
+                cx.theme().foreground
+            } else {
+                cx.theme().warning
+            },
+        );
+    }
+}
+
+/// Paint a Lucide icon (from the registered asset source) into `bounds`.
+fn paint_icon(
+    icon: IconName,
+    bounds: Bounds<Pixels>,
+    color: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let _ = window.paint_svg(
+        bounds,
+        icon.path(),
+        None,
+        TransformationMatrix::default(),
+        color,
+        cx,
+    );
+}
+
+/// Mirrored peak bars across the visible part of an audio clip, one every two
+/// pixels, sampled from the cached downsampled peaks.
+fn paint_waveform(
+    bounds: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    clip: &ClipPaint,
+    wave: &Waveform,
+    (x0, x1, y0, y1): (Pixels, Pixels, Pixels, Pixels),
+    window: &mut Window,
+    cx: &mut App,
+) {
+    const STEP: f32 = 2.0;
+    let left = f32::from(x0).max(f32::from(bounds.origin.x));
+    let right = f32::from(x1).min(f32::from(bounds.origin.x) + f32::from(bounds.size.width));
+    if right <= left || layout.pixels_per_tick <= 0.0 {
+        return;
+    }
+    let mid = (f32::from(y0) + f32::from(y1)) / 2.0 + 5.0;
+    let half_max = (f32::from(y1) - f32::from(y0)) / 2.0 - 8.0;
+    if half_max <= 1.0 {
+        return;
+    }
+    let ticks_per_px = 1.0 / layout.pixels_per_tick;
+    let color = cx.theme().foreground.opacity(0.6);
+    let mut x = left;
+    // Bounded by the canvas width: at most `width / STEP` bars.
+    while x < right {
+        let source_start = ((f64::from(x - f32::from(x0)) * ticks_per_px) as i64)
+            .saturating_add(clip.source_offset);
+        let source_end =
+            source_start.saturating_add((f64::from(STEP) * ticks_per_px).ceil() as i64);
+        let peak = wave.peak_between(source_start, source_end.max(source_start + 1));
+        let half = (peak * half_max).max(0.5);
+        let bar = Bounds::from_corners(
+            point(px(x), px(mid - half)),
+            point(px((x + 1.0).min(right)), px(mid + half)),
+        );
+        window.paint_quad(fill(bar, color));
+        x += STEP;
+    }
+}
+
+/// Fade ramps (a darkened triangle over the attenuated region) and, on the
+/// hovered or selected clip, the circular fade handles.
+fn paint_fades(
+    clip: &ClipPaint,
+    (x0, x1, y0, y1): (Pixels, Pixels, Pixels, Pixels),
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let width = f32::from(x1 - x0);
+    if width < 40.0 {
+        return;
+    }
+    let shade = cx.theme().background.opacity(0.45);
+    let ppt = width / (clip.end.0 - clip.start.0).max(1) as f32;
+    let fade_in_px = (clip.fade_in as f32 * ppt).min(width);
+    let fade_out_px = (clip.fade_out as f32 * ppt).min(width);
+    if fade_in_px > 1.0 {
+        let mut path = gpui::Path::new(point(x0, y0));
+        path.line_to(point(x0 + px(fade_in_px), y0));
+        path.line_to(point(x0, y1));
+        path.line_to(point(x0, y0));
+        window.paint_path(path, shade);
+    }
+    if fade_out_px > 1.0 {
+        let mut path = gpui::Path::new(point(x1, y0));
+        path.line_to(point(x1 - px(fade_out_px), y0));
+        path.line_to(point(x1, y1));
+        path.line_to(point(x1, y0));
+        window.paint_path(path, shade);
+    }
+    if clip.selected || clip.hovered {
+        let radius = px(4.0);
+        for (cx_pos, active) in [
+            (x0 + px(fade_in_px + FADE_HANDLE_INSET), clip.fade_in > 0),
+            (x1 - px(fade_out_px + FADE_HANDLE_INSET), clip.fade_out > 0),
+        ] {
+            let handle = Bounds::from_corners(
+                point(cx_pos - radius, y0 + px(FADE_HANDLE_INSET) - radius),
+                point(cx_pos + radius, y0 + px(FADE_HANDLE_INSET) + radius),
+            );
+            window.paint_quad(
+                fill(
+                    handle,
+                    if active {
+                        cx.theme().warning
+                    } else {
+                        cx.theme().foreground
+                    },
+                )
+                .corner_radii(radius),
+            );
+        }
+    }
 }
 
 /// Paint timecode ticks and labels on the ruler, adapting the interval to the zoom.
@@ -4468,8 +4154,7 @@ fn paint_ruler(
         snapshot.frame_rate,
     );
     let minor = (step / 2).max(1);
-    let mut tick = 0;
-    while tick <= snapshot.duration {
+    for tick in timeline::ruler_ticks(layout, minor) {
         let x = bounds.origin.x + px(timeline::time_to_x(layout, Time(tick)));
         let is_major = tick % step == 0;
         let mark_top = bounds.origin.y + px(if is_major { 8.0 } else { 16.0 });
@@ -4488,7 +4173,6 @@ fn paint_ruler(
                 cx,
             );
         }
-        tick += minor;
     }
 }
 
@@ -4540,77 +4224,6 @@ fn clip_color(kind: &animathio_core::ClipKind, cx: &App) -> Hsla {
         }
         animathio_core::ClipKind::Vector(_) => cx.theme().accent,
         animathio_core::ClipKind::Error(_) => cx.theme().danger,
-    }
-}
-
-/// Paint a tiny vector pictogram for a clip kind (no Unicode glyphs).
-fn paint_kind_glyph(
-    kind: &animathio_core::ClipKind,
-    center: Point<Pixels>,
-    half: f32,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    use animathio_core::builtin::Builtin;
-    let color = cx.theme().foreground;
-    let c = center;
-    match kind {
-        animathio_core::ClipKind::Video(_) => {
-            let mut path = gpui::Path::new(point(c.x - px(half * 0.7), c.y - px(half)));
-            path.line_to(point(c.x + px(half), c.y));
-            path.line_to(point(c.x - px(half * 0.7), c.y + px(half)));
-            path.line_to(point(c.x - px(half * 0.7), c.y - px(half)));
-            window.paint_path(path, color);
-        }
-        animathio_core::ClipKind::Image(_) => {
-            let rect = Bounds::from_corners(
-                point(c.x - px(half), c.y - px(half)),
-                point(c.x + px(half), c.y + px(half)),
-            );
-            window.paint_quad(outline(rect, color, BorderStyle::Solid));
-        }
-        animathio_core::ClipKind::Audio(_) => {
-            for (offset, height) in [(-1.0, 0.5), (0.0, 1.0), (1.0, 0.7)] {
-                let bar_h = px(half * height);
-                let bar = Bounds::from_corners(
-                    point(c.x + px(offset * half) - px(1.0), c.y - bar_h),
-                    point(c.x + px(offset * half) + px(1.0), c.y + bar_h),
-                );
-                window.paint_quad(fill(bar, color));
-            }
-        }
-        animathio_core::ClipKind::Builtin(Builtin::Text { .. }) => {
-            for (offset, width) in [(-0.8, 1.0), (0.0, 0.8), (0.8, 0.9)] {
-                let line_w = px(half * width);
-                let bar = Bounds::from_corners(
-                    point(c.x - line_w, c.y + px(offset * half) - px(1.0)),
-                    point(c.x + line_w, c.y + px(offset * half) + px(1.0)),
-                );
-                window.paint_quad(fill(bar, color));
-            }
-        }
-        animathio_core::ClipKind::Builtin(Builtin::Shape { .. }) => {
-            let mut path = gpui::Path::new(point(c.x, c.y - px(half)));
-            path.line_to(point(c.x + px(half), c.y));
-            path.line_to(point(c.x, c.y + px(half)));
-            path.line_to(point(c.x - px(half), c.y));
-            path.line_to(point(c.x, c.y - px(half)));
-            window.paint_path(path, color);
-        }
-        animathio_core::ClipKind::Plugin { .. } | animathio_core::ClipKind::Vector(_) => {
-            let rect = Bounds::from_corners(
-                point(c.x - px(half), c.y - px(half)),
-                point(c.x + px(half), c.y + px(half)),
-            );
-            window.paint_quad(fill(rect, color));
-        }
-        animathio_core::ClipKind::Error(_) => {
-            let mut path = gpui::Path::new(point(c.x, c.y - px(half)));
-            path.line_to(point(c.x + px(half), c.y + px(half)));
-            path.line_to(point(c.x - px(half), c.y + px(half)));
-            path.line_to(point(c.x, c.y - px(half)));
-            window.paint_path(path, color);
-        }
     }
 }
 
@@ -4684,13 +4297,6 @@ fn field_step(field: &Field) -> f64 {
     }
 }
 
-fn field_scrub_scale(field: &Field) -> f64 {
-    match field {
-        Field::Transform(_) => 0.001,
-        Field::Param(_) => 0.01,
-    }
-}
-
 fn frame_rate_label(rate: FrameRate) -> String {
     if rate.denominator() == 1 {
         format!("{} fps", rate.numerator())
@@ -4746,6 +4352,7 @@ fn effect_kinds() -> [animathio_core::EffectKind; 8] {
 
 /// A themed context-menu item.
 fn context_item(
+    icon: IconName,
     label: &str,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut Context<Editor>,
@@ -4753,10 +4360,15 @@ fn context_item(
     div()
         .px_2()
         .py_1()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
         .cursor_pointer()
-        .hover(|this| this.bg(cx.theme().muted))
+        .hover(|this| this.bg(cx.theme().list_hover))
+        .child(icons::icon(icon).small())
         .child(label.to_owned())
-        .id("context-item")
+        .id(SharedString::from(format!("context-item-{label}")))
         .on_click(listener)
 }
 
@@ -4775,13 +4387,13 @@ fn effect_label(kind: animathio_core::EffectKind) -> &'static str {
 }
 
 /// Dim placeholder text used for empty panels and unloaded viewports.
-fn empty_state(label: &'static str) -> Div {
+fn empty_state(label: &'static str, cx: &App) -> Div {
     div()
         .w_full()
         .py_4()
         .flex()
         .justify_center()
-        .text_color(rgb(0x5a6474))
+        .text_color(cx.theme().muted_foreground)
         .child(label)
 }
 
@@ -4818,7 +4430,8 @@ fn paint_checkerboard(bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App)
 }
 
 /// Paint title-safe and action-safe guides over the viewer.
-fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, _cx: &mut App) {
+fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+    let guide = cx.theme().border;
     let width = f32::from(bounds.size.width);
     let height = f32::from(bounds.size.height);
     let origin = bounds.origin;
@@ -4832,48 +4445,13 @@ fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, _cx: &mut App) 
                 origin.y + px(height * (1.0 - inset)),
             ),
         );
-        window.paint_quad(outline(frame_bounds, rgb(0x3a4658), BorderStyle::Solid));
+        window.paint_quad(outline(frame_bounds, guide, BorderStyle::Solid));
     };
     paint_frame(0.05); // action-safe
     paint_frame(0.10); // title-safe
 }
 
 /// The locked track that a clip-mutating command would edit, if any.
-fn locked_track_blocks(project: &Project, command: &Command) -> Option<TrackId> {
-    match command {
-        Command::AddClip { track, .. } => project
-            .tracks()
-            .iter()
-            .find(|t| t.id() == *track && t.is_locked())
-            .map(Track::id),
-        Command::RemoveClip { id }
-        | Command::MoveClip { id, .. }
-        | Command::TrimClip { id, .. }
-        | Command::SplitClip { id, .. }
-        | Command::SetTransform { id, .. }
-        | Command::SetParam { id, .. }
-        | Command::AddEffect { id, .. }
-        | Command::RemoveEffect { id, .. }
-        | Command::SetEffectParam { id, .. }
-        | Command::SetPluginParam { id, .. }
-        | Command::AddKeyframe { id, .. }
-        | Command::RemoveKeyframe { id, .. }
-        | Command::MoveKeyframe { id, .. } => clip_locked_track(project, *id),
-        Command::MergeClip { left, right } => {
-            clip_locked_track(project, *left).or_else(|| clip_locked_track(project, *right))
-        }
-        _ => None,
-    }
-}
-
-fn clip_locked_track(project: &Project, id: ClipId) -> Option<TrackId> {
-    project
-        .tracks()
-        .iter()
-        .find(|t| t.is_locked() && t.clips().contains_key(&id))
-        .map(Track::id)
-}
-
 fn clip_label(project: &Project, clip: &Clip) -> String {
     let kind = match &clip.kind {
         ClipKind::Video(id) | ClipKind::Image(id) | ClipKind::Audio(id) => {
@@ -5047,39 +4625,6 @@ pub(crate) fn point_from_json(value: &Value) -> Option<[f32; 2]> {
 
 fn asset_id_from(value: &str) -> AssetId {
     AssetId::try_from(value.to_owned()).unwrap_or_else(|_| AssetId::of(value.as_bytes()))
-}
-
-fn cycle_option(options: &[String], current: &str) -> String {
-    options
-        .iter()
-        .position(|option| option == current)
-        .and_then(|index| options.get(index + 1).or_else(|| options.first()))
-        .cloned()
-        .unwrap_or_else(|| current.to_owned())
-}
-
-const COLOR_PRESETS: [[u8; 4]; 8] = [
-    [255, 255, 255, 255],
-    [0, 0, 0, 255],
-    [239, 68, 68, 255],
-    [34, 197, 94, 255],
-    [59, 130, 246, 255],
-    [234, 179, 8, 255],
-    [168, 85, 247, 255],
-    [90, 170, 255, 255],
-];
-
-fn cycle_color(current: [u8; 4]) -> [u8; 4] {
-    COLOR_PRESETS
-        .iter()
-        .position(|color| color[0..3] == current[0..3])
-        .and_then(|index| {
-            COLOR_PRESETS
-                .get(index + 1)
-                .or_else(|| COLOR_PRESETS.first())
-        })
-        .copied()
-        .unwrap_or(COLOR_PRESETS[0])
 }
 
 fn media_type_for(path: &Path) -> &'static str {
