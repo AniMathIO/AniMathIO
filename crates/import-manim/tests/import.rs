@@ -135,9 +135,15 @@ class LatexScene(Scene):
     let keys: Vec<_> = reveal.keys.keys().keys().collect();
     assert_eq!(keys.len(), 2);
     assert_eq!(keys[0], &Time(0));
-    assert_eq!(reveal.keys.keys()[&Time(0)].value, 0.0);
+    assert_eq!(reveal.keys.keys()[&Time(0)].value.as_number().unwrap(), 0.0);
     assert_eq!(keys[1], &Time(ticks(2.0)));
-    assert_eq!(reveal.keys.keys()[&Time(ticks(2.0))].value, 1.0);
+    assert_eq!(
+        reveal.keys.keys()[&Time(ticks(2.0))]
+            .value
+            .as_number()
+            .unwrap(),
+        1.0
+    );
 
     // FadeOut: opacity 1 -> 0 over the third second.
     let opacity = animation(
@@ -149,9 +155,21 @@ class LatexScene(Scene):
     let keys: Vec<_> = opacity.keys.keys().keys().collect();
     assert_eq!(keys.len(), 2);
     assert_eq!(keys[0], &Time(ticks(2.0)));
-    assert_eq!(opacity.keys.keys()[&Time(ticks(2.0))].value, 1.0);
+    assert_eq!(
+        opacity.keys.keys()[&Time(ticks(2.0))]
+            .value
+            .as_number()
+            .unwrap(),
+        1.0
+    );
     assert_eq!(keys[1], &Time(ticks(3.0)));
-    assert_eq!(opacity.keys.keys()[&Time(ticks(3.0))].value, 0.0);
+    assert_eq!(
+        opacity.keys.keys()[&Time(ticks(3.0))]
+            .value
+            .as_number()
+            .unwrap(),
+        0.0
+    );
 }
 
 #[test]
@@ -186,10 +204,10 @@ class ShiftScene(Scene):
     let keys: Vec<_> = x.keys.keys().keys().collect();
     assert_eq!(keys.len(), 2);
     assert_eq!(keys[0], &Time(0));
-    assert_close(x.keys.keys()[&Time(0)].value, 0.5);
+    assert_close(x.keys.keys()[&Time(0)].value.as_number().unwrap(), 0.5);
     assert_eq!(keys[1], &Time(ticks(2.0)));
     assert_close(
-        x.keys.keys()[&Time(ticks(2.0))].value,
+        x.keys.keys()[&Time(ticks(2.0))].value.as_number().unwrap(),
         0.5 + 2.0 / FRAME_WIDTH,
     );
 

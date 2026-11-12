@@ -1834,11 +1834,7 @@ impl Editor {
 
     fn plugin_row(&self, id: ClipId, model: &ParamModel, cx: &mut Context<Self>) -> Div {
         let name = model.id().to_owned();
-        let diamond = if model.is_keyframeable() {
-            self.keyframe_diamond(id, Target::Param(name.clone()), cx)
-        } else {
-            div().w(px(14.)).h(px(14.)).id("no-keyframe")
-        };
+        let diamond = self.keyframe_diamond(id, Target::Param(name.clone()), cx);
         let control = match model {
             ParamModel::Number { .. } => self.plugin_number_control(id, name.clone(), cx),
             ParamModel::Color { default, .. } => self.plugin_color_control(

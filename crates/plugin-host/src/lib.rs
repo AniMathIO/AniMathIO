@@ -1392,6 +1392,111 @@ mod tests {
     use super::*;
     use wasmtime::{Instance, Module};
 
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn typed_parameters_map_through_every_schema_kind() {
+        use animathio_core::ParamValue as CoreValue;
+        use wit_types::*;
+        let cases = vec![
+            (
+                "n",
+                ParamKind::Number(NumberRange {
+                    min: 0.0,
+                    max: 10.0,
+                    default: 0.0,
+                    step: 1.0,
+                }),
+                CoreValue::Number(2.5),
+            ),
+            (
+                "c",
+                ParamKind::Color(ColorParam {
+                    default: Color {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        a: 255,
+                    },
+                }),
+                CoreValue::Color([0.5, 0.5, 0.5, 1.0]),
+            ),
+            (
+                "p",
+                ParamKind::Point(PointParam {
+                    default: Point { x: 0.0, y: 0.0 },
+                }),
+                CoreValue::Point([0.25, 0.75]),
+            ),
+            (
+                "b",
+                ParamKind::Bool(BoolParam { default: false }),
+                CoreValue::Bool(true),
+            ),
+            (
+                "s",
+                ParamKind::String(StringParam {
+                    default: String::new(),
+                }),
+                CoreValue::String("hello".into()),
+            ),
+            (
+                "e",
+                ParamKind::EnumChoice(EnumParam {
+                    options: vec!["a".into(), "b".into()],
+                    default: "a".into(),
+                }),
+                CoreValue::Enum("b".into()),
+            ),
+            (
+                "a",
+                ParamKind::AssetRef(AssetRefParam {
+                    media_type: "image/*".into(),
+                    default_asset: None,
+                }),
+                CoreValue::AssetRef(Some(animathio_core::AssetId::of(b"image"))),
+            ),
+        ];
+        let manifest = Manifest {
+            name: "test".into(),
+            version: "1".into(),
+            description: String::new(),
+            kinds: vec![],
+            params: cases
+                .iter()
+                .map(|(id, kind, _)| ParamSpec {
+                    id: (*id).into(),
+                    label: (*id).into(),
+                    kind: kind.clone(),
+                })
+                .collect(),
+        };
+        let params = cases
+            .into_iter()
+            .map(|(id, _, value)| (id.to_owned(), value))
+            .collect();
+        let entries = build_wit_params(
+            &manifest,
+            &params,
+            &serde_json::json!({"c":[255,0,0,255], "e":"a", "legacy": true}),
+        );
+        assert_eq!(entries.len(), 8);
+        let get = |id: &str| &entries.iter().find(|e| e.id == id).unwrap().value;
+        assert!(matches!(get("n"), ParamValue::Number(v) if *v == 2.5));
+        assert!(matches!(get("c"), ParamValue::Color(v) if (v.r,v.g,v.b,v.a) == (188,188,188,255)));
+        assert!(matches!(get("p"), ParamValue::Point(v) if v.x == 0.25 && v.y == 0.75));
+        assert!(matches!(get("b"), ParamValue::Bool(true)));
+        assert!(matches!(get("s"), ParamValue::String(v) if v == "hello"));
+        assert!(matches!(get("e"), ParamValue::EnumChoice(v) if v == "b"));
+        assert!(
+            matches!(get("a"), ParamValue::AssetRef(v) if v == animathio_core::AssetId::of(b"image").as_str())
+        );
+        assert!(matches!(get("legacy"), ParamValue::Bool(true)));
+        let cleared = BTreeMap::from([("a".to_owned(), CoreValue::AssetRef(None))]);
+        assert!(
+            matches!(&build_wit_params(&manifest, &cleared, &serde_json::Value::Null)[0].value, ParamValue::AssetRef(v) if v.is_empty())
+        );
+    }
+
     struct LimiterState {
         limiter: StoreLimits,
     }

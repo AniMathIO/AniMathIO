@@ -508,10 +508,9 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                                 .effects
                                 .iter_mut()
                                 .find(|instance| instance.id == *effect)
+                                && let Some(number) = value.as_number()
                             {
-                                if let Some(number) = value.as_number() {
-                                    instance.params.insert(param.clone(), number);
-                                }
+                                instance.params.insert(param.clone(), number);
                             }
                         }
                     }

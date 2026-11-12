@@ -82,11 +82,6 @@ impl ParamModel {
             | Self::Asset { label, .. } => label,
         }
     }
-
-    /// Every declared parameter kind supports keyframes.
-    pub(crate) fn is_keyframeable(&self) -> bool {
-        true
-    }
 }
 
 /// A clip-source plugin the Add menu and inspector can render.
@@ -212,8 +207,9 @@ pub(crate) fn model_value(model: &ParamModel, value: Option<&serde_json::Value>)
         ParamModel::Point { default, .. } => ParamValue::Point(
             value
                 .and_then(crate::editor::point_from_json)
-                .map(|v| v.map(f64::from))
-                .unwrap_or([f64::from(default.x), f64::from(default.y)]),
+                .map_or([f64::from(default.x), f64::from(default.y)], |v| {
+                    v.map(f64::from)
+                }),
         ),
         ParamModel::Bool { default, .. } => ParamValue::Bool(
             value
@@ -458,7 +454,7 @@ pub(crate) fn interpolation_command(
         target,
         time: local,
         keyframe: Keyframe {
-            value: value.into(),
+            value,
             interpolation,
         },
     })
@@ -665,7 +661,6 @@ mod typed_tests {
             .with_point("point", "Point", PointValue { x: 0.25, y: 0.75 })
             .with_asset_ref("asset", "Asset", "image/*", None);
         for model in models_from_schema(&schema) {
-            assert!(model.is_keyframeable());
             let mut project = Project::default();
             Command::AddTrack {
                 track: Track::new(TrackId(0), "t"),
