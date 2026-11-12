@@ -219,7 +219,7 @@ mod tests {
         history.execute(&mut project, &command).unwrap();
         let command = fade_command(&current(&project), FadeEdge::In, 0).unwrap();
         history.execute(&mut project, &command).unwrap();
-        assert!(current(&project).animations.is_empty());
+        assert_eq!(current(&project).animations.len(), 0);
         assert!(fade_command(&current(&project), FadeEdge::In, 0).is_none());
     }
 

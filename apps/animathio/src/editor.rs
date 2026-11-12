@@ -4077,7 +4077,7 @@ fn paint_waveform(
     if right <= left || layout.pixels_per_tick <= 0.0 {
         return;
     }
-    let mid = (f32::from(y0) + f32::from(y1)) / 2.0 + 5.0;
+    let mid = f32::midpoint(f32::from(y0), f32::from(y1)) + 5.0;
     let half_max = (f32::from(y1) - f32::from(y0)) / 2.0 - 8.0;
     if half_max <= 1.0 {
         return;

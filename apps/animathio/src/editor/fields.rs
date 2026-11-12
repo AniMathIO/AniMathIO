@@ -168,7 +168,7 @@ impl Editor {
         if buffer == field.synced {
             return;
         }
-        field.synced = buffer.clone();
+        field.synced.clone_from(&buffer);
         let target = field.target.clone();
         self.editing = Some(TextEdit { target, buffer });
         self.commit_editing(cx);
@@ -200,7 +200,7 @@ impl Editor {
         field
             .state
             .update(cx, |state, cx| state.set_value(text.clone(), window, cx));
-        field.synced = text.clone();
+        field.synced.clone_from(&text);
         let target = field.target.clone();
         self.editing = Some(TextEdit {
             target,
@@ -368,13 +368,13 @@ impl Editor {
         let wanted = current.to_owned();
         if field.state.read(cx).selected_value() != Some(&wanted) {
             field.state.update(cx, |state, cx| {
-                state.set_selected_value(&wanted, window, cx)
+                state.set_selected_value(&wanted, window, cx);
             });
         }
         div().w(px(CONTROL_W)).child(Select::new(&field.state))
     }
 
-    fn bool_control(&self, id: ClipId, name: &str, value: bool, cx: &mut Context<Self>) -> Div {
+    fn bool_control(id: ClipId, name: &str, value: bool, cx: &mut Context<Self>) -> Div {
         let param = name.to_owned();
         div().w(px(CONTROL_W)).child(
             Switch::new(SharedString::from(format!("switch-{}-{name}", id.0)))
@@ -412,7 +412,6 @@ impl Editor {
 
     /// One `[diamond] label ........ control` inspector row.
     fn param_row(
-        &self,
         diamond: Option<Button>,
         label: &str,
         control: impl IntoElement,
@@ -464,7 +463,7 @@ impl Editor {
             cx,
         );
         let diamond = self.row_diamond(id, &target, cx);
-        self.param_row(Some(diamond), label, control, cx)
+        Self::param_row(Some(diamond), label, control, cx)
     }
 
     pub(super) fn transform_rows(
@@ -539,7 +538,7 @@ impl Editor {
                             );
                         })),
                 );
-                rows.push(self.param_row(None, label, control, cx));
+                rows.push(Self::param_row(None, label, control, cx));
             } else {
                 rows.push(self.number_row(id, field, label, value, window, cx));
             }
@@ -622,7 +621,7 @@ impl Editor {
             }
             ParamModel::Bool { default, .. } => {
                 let value = self.plugin_bool_value(id, &name, *default);
-                self.bool_control(id, &name, value, cx)
+                Self::bool_control(id, &name, value, cx)
             }
             ParamModel::Point { .. } => {
                 let point = self.plugin_point_value(id, &name);
@@ -652,7 +651,7 @@ impl Editor {
                 .w(px(CONTROL_W))
                 .child(self.plugin_asset_control(id, name.clone(), media_type, cx)),
         };
-        self.param_row(Some(diamond), model.label(), control, cx)
+        Self::param_row(Some(diamond), model.label(), control, cx)
     }
 
     /// Inspector panel: header, collapsible sections and widgets for the

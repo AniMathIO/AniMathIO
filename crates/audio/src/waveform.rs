@@ -53,8 +53,11 @@ impl Waveform {
         }
         let len = self.peaks.len() as i128;
         let duration = i128::from(self.duration_ticks);
-        let first = (i128::from(start) * len / duration).clamp(0, len - 1) as usize;
-        let last = ((i128::from(end) * len + duration - 1) / duration).clamp(1, len) as usize;
+        let first =
+            usize::try_from((i128::from(start) * len / duration).clamp(0, len - 1)).unwrap_or(0);
+        let last =
+            usize::try_from(((i128::from(end) * len + duration - 1) / duration).clamp(1, len))
+                .unwrap_or(1);
         self.peaks[first..last.max(first + 1)]
             .iter()
             .fold(0.0_f32, |acc, p| acc.max(*p))

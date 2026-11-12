@@ -258,7 +258,7 @@ mod tests {
              fn f<'a>(x: &'a str) -> &'static str {{ \"plain {}\" }}",
             char::from_u32(0x2014).unwrap()
         );
-        assert!(offenders_in(&source).is_empty());
+        assert_eq!(offenders_in(&source).len(), 0);
         // The lifetime above must not swallow the string that follows it.
         let lits = literals(&source);
         assert_eq!(lits.len(), 1);
