@@ -575,7 +575,9 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(Path::new(&written), output);
+        // The control surface returns the canonicalized parent with the
+        // requested tail, which equals the file's canonical path.
+        assert_eq!(Path::new(&written), output.canonicalize().unwrap());
         assert!(output.is_file());
         let entries: Vec<_> = fs::read_dir(output.parent().unwrap()).unwrap().collect();
         assert_eq!(

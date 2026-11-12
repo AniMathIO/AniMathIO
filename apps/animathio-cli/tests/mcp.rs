@@ -405,7 +405,9 @@ fn export_video_creates_parents_and_requires_overwrite() {
         "export_video",
         json!({"path": path}),
     );
-    assert_eq!(exported["path"], path);
+    // The tool reports the canonical path it wrote.
+    let canonical = std::fs::canonicalize(&output).unwrap();
+    assert_eq!(exported["path"], canonical.to_str().unwrap());
     assert!(output.is_file());
     let entries: Vec<_> = std::fs::read_dir(output.parent().unwrap())
         .unwrap()
