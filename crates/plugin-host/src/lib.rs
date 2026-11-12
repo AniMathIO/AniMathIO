@@ -1415,6 +1415,13 @@ fn typeset_verb_to_wit(verb: &TypesetVerb) -> wit_types::PathVerb {
     }
 }
 
+fn check_plugin_id(id: &str, allow_reserved: bool) -> Result<(), HostError> {
+    if !allow_reserved && id.starts_with("org.animathio.") {
+        return Err(HostError::ReservedId(id.to_owned()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1621,11 +1628,4 @@ mod tests {
         assert!(!cache.is_enabled());
         assert!(!real.join("key").exists());
     }
-}
-
-fn check_plugin_id(id: &str, allow_reserved: bool) -> Result<(), HostError> {
-    if !allow_reserved && id.starts_with("org.animathio.") {
-        return Err(HostError::ReservedId(id.to_owned()));
-    }
-    Ok(())
 }

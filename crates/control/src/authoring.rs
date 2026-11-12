@@ -25,11 +25,11 @@ pub fn apply_authoring_call(
     project: &mut Project,
     history: &mut History,
     assets: &mut BTreeMap<AssetId, Vec<u8>>,
-    call: Call,
+    call: &Call,
 ) -> Result<Value, ControlError> {
     let mut candidate = project.clone();
     let mut candidate_history = history.clone();
-    let mut candidate_assets = assets.clone();
+    let mut candidate_assets = BTreeMap::new();
     let mut session = AuthoringSession {
         project: &mut candidate,
         history: &mut candidate_history,
@@ -47,7 +47,13 @@ pub fn apply_authoring_call(
     };
     *project = candidate;
     *history = candidate_history;
-    *assets = candidate_assets;
+    if matches!(call, Call::ImportManim { params } if params.replace) {
+        *assets = candidate_assets;
+    } else {
+        for (id, bytes) in candidate_assets {
+            assets.entry(id).or_insert(bytes);
+        }
+    }
     Ok(result)
 }
 
@@ -58,7 +64,7 @@ struct AuthoringSession<'a> {
 }
 
 impl AuthoringSession<'_> {
-    fn math_add(&mut self, params: MathAddParams) -> Result<ClipAdded, ControlError> {
+    fn math_add(&mut self, params: &MathAddParams) -> Result<ClipAdded, ControlError> {
         let mode = match params.mode.as_str() {
             "latex" => MathMode::Latex,
             "typst" => MathMode::Typst,
@@ -79,7 +85,7 @@ impl AuthoringSession<'_> {
         let start = params.start;
         let duration = params
             .duration
-            .unwrap_or_else(|| project_duration(&self.project));
+            .unwrap_or_else(|| project_duration(self.project));
         let range = clip_range(start, duration)?;
 
         let reveal = params.reveal_duration.filter(|d| d.0 > 0);
@@ -109,52 +115,15 @@ impl AuthoringSession<'_> {
         };
         clip.params = numeric;
 
-        let index = self.project.tracks().len();
-        self.history.execute(
-            &mut self.project,
-            &Command::AddTrack {
-                track: Track::new(track_id, "Math"),
-                index,
-            },
-        )?;
-        self.history.execute(
-            &mut self.project,
-            &Command::AddClip {
-                track: track_id,
-                clip,
-            },
-        )?;
-        if let Some(duration) = reveal {
-            self.history.execute(
-                &mut self.project,
-                &Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Param("reveal".to_owned()),
-                    time: Time(0),
-                    keyframe: Keyframe {
-                        value: 0.0,
-                        interpolation: Interpolation::Linear,
-                    },
-                },
-            )?;
-            self.history.execute(
-                &mut self.project,
-                &Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Param("reveal".to_owned()),
-                    time: duration,
-                    keyframe: Keyframe {
-                        value: 1.0,
-                        interpolation: Interpolation::Linear,
-                    },
-                },
-            )?;
-        }
-
-        Ok(ClipAdded { track_id, clip_id })
+        self.add_plugin_clip(
+            track_id,
+            clip,
+            "Math",
+            reveal.map(|duration| ("reveal", duration)),
+        )
     }
 
-    fn graph_add(&mut self, params: GraphAddParams) -> Result<ClipAdded, ControlError> {
+    fn graph_add(&mut self, params: &GraphAddParams) -> Result<ClipAdded, ControlError> {
         validate_placement(params.x, params.y)?;
         validate_animation(params.draw_duration)?;
         for (min, max) in [
@@ -173,7 +142,7 @@ impl AuthoringSession<'_> {
         let start = params.start;
         let duration = params
             .duration
-            .unwrap_or_else(|| project_duration(&self.project));
+            .unwrap_or_else(|| project_duration(self.project));
         let range = clip_range(start, duration)?;
 
         let draw = params.draw_duration.filter(|d| d.0 > 0);
@@ -223,54 +192,59 @@ impl AuthoringSession<'_> {
         };
         clip.params = numeric;
 
+        self.add_plugin_clip(
+            track_id,
+            clip,
+            "Graph",
+            draw.map(|duration| ("draw", duration)),
+        )
+    }
+
+    fn add_plugin_clip(
+        &mut self,
+        track_id: TrackId,
+        clip: Clip,
+        label: &str,
+        animation: Option<(&str, Time)>,
+    ) -> Result<ClipAdded, ControlError> {
+        let clip_id = clip.id;
         let index = self.project.tracks().len();
         self.history.execute(
-            &mut self.project,
+            self.project,
             &Command::AddTrack {
-                track: Track::new(track_id, "Graph"),
+                track: Track::new(track_id, label),
                 index,
             },
         )?;
         self.history.execute(
-            &mut self.project,
+            self.project,
             &Command::AddClip {
                 track: track_id,
                 clip,
             },
         )?;
-        if let Some(duration) = draw {
-            self.history.execute(
-                &mut self.project,
-                &Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Param("draw".to_owned()),
-                    time: Time(0),
-                    keyframe: Keyframe {
-                        value: 0.0,
-                        interpolation: Interpolation::Linear,
+        if let Some((param, duration)) = animation {
+            for (time, value) in [(Time(0), 0.0), (duration, 1.0)] {
+                self.history.execute(
+                    self.project,
+                    &Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Param(param.to_owned()),
+                        time,
+                        keyframe: Keyframe {
+                            value,
+                            interpolation: Interpolation::Linear,
+                        },
                     },
-                },
-            )?;
-            self.history.execute(
-                &mut self.project,
-                &Command::AddKeyframe {
-                    id: clip_id,
-                    target: Target::Param("draw".to_owned()),
-                    time: duration,
-                    keyframe: Keyframe {
-                        value: 1.0,
-                        interpolation: Interpolation::Linear,
-                    },
-                },
-            )?;
+                )?;
+            }
         }
-
         Ok(ClipAdded { track_id, clip_id })
     }
 
     fn import_manim(
         &mut self,
-        params: ImportManimParams,
+        params: &ImportManimParams,
     ) -> Result<ImportManimResult, ControlError> {
         let (source, script_dir) = match (params.path.as_deref(), params.source.as_deref()) {
             (Some(path), None) => {
@@ -352,10 +326,10 @@ impl AuthoringSession<'_> {
         imported: &Project,
         imported_assets: Vec<animathio_import_manim::Asset>,
     ) -> Result<(), ControlError> {
-        for asset in &imported_assets {
+        for asset in imported_assets {
             if !self.project.assets().contains_key(&asset.id) {
                 self.history.execute(
-                    &mut self.project,
+                    self.project,
                     &Command::AddAsset {
                         id: asset.id.clone(),
                         asset: animathio_core::Asset {
@@ -365,9 +339,7 @@ impl AuthoringSession<'_> {
                     },
                 )?;
             }
-            self.assets
-                .entry(asset.id.clone())
-                .or_insert_with(|| asset.bytes.clone());
+            self.assets.entry(asset.id.clone()).or_insert(asset.bytes);
         }
 
         let mut next_track = self
@@ -395,15 +367,15 @@ impl AuthoringSession<'_> {
                 .ok_or_else(|| ControlError::InvalidParams("identity overflow".to_owned()))?;
             let index = self.project.tracks().len();
             self.history.execute(
-                &mut self.project,
+                self.project,
                 &Command::AddTrack {
                     track: Track::new(track_id, track.name().to_owned()),
                     index,
                 },
             )?;
-            if track.gain() != 1.0 {
+            if track.gain().to_bits() != 1.0_f64.to_bits() {
                 self.history.execute(
-                    &mut self.project,
+                    self.project,
                     &Command::SetTrackGain {
                         id: track_id,
                         gain: track.gain(),
@@ -418,7 +390,7 @@ impl AuthoringSession<'_> {
                 let mut clip = clip.clone();
                 clip.id = clip_id;
                 self.history.execute(
-                    &mut self.project,
+                    self.project,
                     &Command::AddClip {
                         track: track_id,
                         clip,

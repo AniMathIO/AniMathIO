@@ -482,7 +482,7 @@ impl Editor {
                     &mut self.project,
                     &mut self.history,
                     &mut self.assets,
-                    call,
+                    &call,
                 )?;
                 if replace {
                     self.path = None;

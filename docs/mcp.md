@@ -49,7 +49,7 @@ gets a JSON-RPC error instead of a result.
 | `project.save` | `{ path? }` | saved path |
 | `command.apply` | `{ command }` | — (applied through the shared history) |
 | `history.undo` / `history.redo` | — | whether an edit was undone/redone |
-| `render.frame` | `{ time, width, height, output? }` | `{ size, base64?, path? }` |
+| `render.frame` | `{ params: { time, width, height, output? } }` | `{ size, base64?, path? }` |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
 | `assets.import` | `{ path }` | `AssetInfo` (id, name, media_type) |
@@ -81,7 +81,8 @@ you to pass `--project`. With `--project`, it drives the file through the same
 `ControlHandler` trait, so tools behave identically either way.
 
 Times are milliseconds; coordinates are canvas pixels with the origin top-left.
-All mutations are applied as `Command`s and are undoable.
+Timeline edits are applied as `Command`s and are undoable; replacing a project
+clears its undo history.
 
 ### Tools
 
@@ -113,8 +114,9 @@ accepts Typst math syntax. Math and graphs default to the canvas centre, use
 `#RRGGBB`/`#RRGGBBAA` colors, and return the new track and clip identities. Their
 optional animations run from 0 to 1 on the plugin's `reveal` or `draw` numeric
 parameter, starting at clip-local time zero. Bounds default to -5…5 on each axis;
-items default to `plot y=x^2`. See [plugin authoring](plugins.md) for graph item
-syntax. Math and graph clips each create a new track; generated edits are ordinary
+items default to `plot y=x^2`. Other item lines include `point x=1 y=2` and
+`circle cx=0 cy=0 r=1`; items may specify `color=#RRGGBB`. Math and graph clips
+each create a new track; generated edits are ordinary
 commands in undo history.
 
 `import_manim_scene` appends imported tracks with remapped identities by default.

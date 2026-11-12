@@ -26,7 +26,8 @@ fn plugin_parameters_timing_and_clip_local_animations_match_plugins() {
         .unwrap();
     assert_eq!(clip.range.start, Time(second));
     assert_eq!(clip.range.end, Time(3 * second));
-    assert_eq!((clip.transform.x, clip.transform.y), (0.25, 0.75));
+    assert!((clip.transform.x - 0.25).abs() < f64::EPSILON);
+    assert!((clip.transform.y - 0.75).abs() < f64::EPSILON);
     let ClipKind::Plugin { plugin_id, params } = &clip.kind else {
         panic!("expected plugin");
     };

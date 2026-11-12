@@ -29,6 +29,7 @@ use crate::{
 ///
 /// Plugin clips are resolved through a lazily loaded [`PluginHost`]; LaTeX is
 /// validated up front through `animathio_typeset::TypesetEngine`.
+#[derive(Default)]
 pub struct HeadlessHandler {
     project: Project,
     history: History,
@@ -37,20 +38,6 @@ pub struct HeadlessHandler {
     playhead: Time,
     playing: bool,
     plugins: Option<PluginHost>,
-}
-
-impl Default for HeadlessHandler {
-    fn default() -> Self {
-        Self {
-            project: Project::default(),
-            history: History::default(),
-            assets: BTreeMap::new(),
-            path: None,
-            playhead: Time(0),
-            playing: false,
-            plugins: None,
-        }
-    }
 }
 
 impl HeadlessHandler {
@@ -78,11 +65,12 @@ impl HeadlessHandler {
     /// plugins from the shared trusted discovery locations.
     pub fn load(path: &Path) -> Result<Self, ControlError> {
         let (project, assets) = load_project(path)?;
-        let mut handler = Self::default();
-        handler.project = project;
-        handler.assets = assets;
-        handler.path = Some(path.to_owned());
-        Ok(handler)
+        Ok(Self {
+            project,
+            assets,
+            path: Some(path.to_owned()),
+            ..Self::default()
+        })
     }
 
     /// Read access to the current project.
@@ -268,7 +256,7 @@ impl ControlHandler for HeadlessHandler {
                     &mut self.project,
                     &mut self.history,
                     &mut self.assets,
-                    call,
+                    &call,
                 )?;
                 if replace {
                     self.path = None;
@@ -324,9 +312,10 @@ fn animathio_import_v1_limits() -> u64 {
 }
 
 fn plugin_cache_dir() -> PathBuf {
-    directories::BaseDirs::new()
-        .map(|base| base.cache_dir().join("animathio").join("plugins"))
-        .unwrap_or_else(|| std::env::temp_dir().join("animathio-plugin-cache"))
+    directories::BaseDirs::new().map_or_else(
+        || std::env::temp_dir().join("animathio-plugin-cache"),
+        |base| base.cache_dir().join("animathio").join("plugins"),
+    )
 }
 
 /// Load bundles from explicit, executable-relative and per-user locations.
