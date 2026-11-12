@@ -25,7 +25,7 @@ impl Drop for ExportTask {
 impl ExportTask {
     pub(crate) fn spawn(
         project: Project,
-        assets: BTreeMap<AssetId, Vec<u8>>,
+        assets: Arc<BTreeMap<AssetId, Vec<u8>>>,
         params: ExportParams,
         reply: Option<SyncSender<Result<Value, ControlError>>>,
     ) -> Result<Self, String> {

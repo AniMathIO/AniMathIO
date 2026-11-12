@@ -251,3 +251,8 @@ For Cursor, Windsurf, and similar clients, configure an MCP stdio server with th
 same `command`/`args` pair. Use the absolute path to the built `animathio-cli`
 binary (or add it to `PATH`); if you want to drive the live editor instead of a
 file, drop the `--project` argument and run `animathio --control`.
+
+The local server accepts up to eight simultaneous connections. Idle clients do not
+block other clients, and disconnect errors are logged without stopping the listener.
+The editor drains calls on a timer even while its window is occluded. Frame renders,
+asset reads and saves run on workers against project snapshots.

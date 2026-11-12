@@ -10,7 +10,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
@@ -89,25 +89,59 @@ impl ControlServer {
 
     /// Serve connections until `shutdown` is set. The listener is nonblocking
     /// so shutdown is observed promptly between connections.
-    pub fn serve<H: ControlHandler>(
+    pub fn serve<H: ControlHandler + Send + 'static>(
         &mut self,
-        handler: &mut H,
-        shutdown: &AtomicBool,
+        handler: H,
+        shutdown: &Arc<AtomicBool>,
     ) -> io::Result<()> {
         self.listener
             .set_nonblocking(ListenerNonblockingMode::Accept)?;
-        loop {
-            if shutdown.load(Ordering::Relaxed) {
-                return Ok(());
-            }
+        let handler = Arc::new(Mutex::new(handler));
+        let mut clients: Vec<JoinHandle<()>> = Vec::new();
+        while !shutdown.load(Ordering::Relaxed) {
+            clients.retain(|client| !client.is_finished());
             match self.listener.accept() {
-                Ok(stream) => self.serve_connection(stream, handler)?,
+                Ok(stream) if clients.len() < 8 => {
+                    stream.set_nonblocking(true)?;
+                    let handler = Arc::clone(&handler);
+                    let shutdown = Arc::clone(shutdown);
+                    let token = self.token.clone();
+                    clients.push(thread::spawn(move || {
+                        let mut stream = InterruptibleStream { stream, shutdown };
+                        let result = (|| -> io::Result<()> {
+                            while let Some(message) = read_message(&mut stream, MAX_REQUEST_BYTES)?
+                            {
+                                let response = respond(
+                                    &mut *handler.lock().map_err(|_| {
+                                        io::Error::other("control handler poisoned")
+                                    })?,
+                                    &token,
+                                    &message,
+                                );
+                                stream.write_all(&response)?;
+                                stream.write_all(b"\n")?;
+                                stream.flush()?;
+                            }
+                            Ok(())
+                        })();
+                        if let Err(error) = result {
+                            eprintln!("control connection: {error}");
+                        }
+                    }));
+                }
+                Ok(_) => eprintln!("control connection rejected: eight clients already connected"),
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    eprintln!("control accept: {error}");
+                    thread::sleep(Duration::from_millis(10));
+                }
             }
         }
+        // Client I/O observes shutdown. Do not wait for application handlers:
+        // the UI may already have stopped servicing their replies.
+        Ok(())
     }
 
     /// Serve exactly one connection, blocking until it closes.
@@ -128,9 +162,10 @@ impl ControlServer {
         let handle = thread::Builder::new()
             .name("animathio-control".to_owned())
             .spawn(move || {
-                let mut handler = handler;
                 let mut server = self;
-                let _ = server.serve(&mut handler, &flag);
+                if let Err(error) = server.serve(handler, &flag) {
+                    eprintln!("control server: {error}");
+                }
             })?;
         Ok(RunningServer {
             handle: Some(handle),
@@ -155,6 +190,47 @@ impl ControlServer {
             stream.write_all(b"\n")?;
             stream.flush()?;
         }
+    }
+}
+
+// Preserve partially received messages while polling shutdown on nonblocking I/O.
+struct InterruptibleStream {
+    stream: LocalSocketStream,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl InterruptibleStream {
+    fn retry<T>(
+        &mut self,
+        mut operation: impl FnMut(&mut LocalSocketStream) -> io::Result<T>,
+    ) -> io::Result<T> {
+        loop {
+            if self.shutdown.load(Ordering::Relaxed) {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "control server shut down",
+                ));
+            }
+            match operation(&mut self.stream) {
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+    }
+}
+impl Read for InterruptibleStream {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.retry(|stream| stream.read(bytes))
+    }
+}
+impl Write for InterruptibleStream {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.retry(|stream| stream.write(bytes))
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.retry(Write::flush)
     }
 }
 
