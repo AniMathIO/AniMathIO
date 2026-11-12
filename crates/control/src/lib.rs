@@ -12,6 +12,7 @@
 
 mod authoring;
 mod client;
+mod edit;
 mod error;
 mod handler;
 mod headless;
@@ -22,6 +23,10 @@ mod token;
 
 pub use authoring::apply_authoring_call;
 pub use client::ControlClient;
+pub use edit::{
+    ExportPreset, TitleStyle, TrimSilenceParams, TrimSilenceResult, content_end, describe_timeline,
+    detect_silence, timecode, title_command, trim_silence,
+};
 pub use error::ControlError;
 pub use handler::{ControlHandler, dispatch, from_value};
 pub use headless::HeadlessHandler;

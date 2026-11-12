@@ -18,8 +18,9 @@
 use std::{path::PathBuf, sync::Arc};
 
 use animathio_control::{
-    AssetInfo, ControlClient, ControlHandler, GraphAddParams, HeadlessHandler, ImportManimParams,
-    MathAddParams, ProjectState, RenderFrameParams, default_socket_spec,
+    AssetInfo, ControlClient, ControlHandler, ExportPreset, GraphAddParams, HeadlessHandler,
+    ImportManimParams, MathAddParams, ProjectState, RenderFrameParams, TitleStyle,
+    TrimSilenceParams, default_socket_spec,
 };
 use animathio_core::{
     Asset, Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Project, Rounding,
@@ -61,12 +62,15 @@ pub(crate) fn build_backend(project: Option<PathBuf>) -> Result<Backend, String>
 /// The MCP server: all tool state is the shared control backend.
 pub(crate) struct McpServer {
     backend: Arc<Mutex<Backend>>,
+    /// Encoder preset chosen by `set_export_preset`, used by `export_video`.
+    export_preset: std::sync::Mutex<Option<ExportPreset>>,
 }
 
 impl McpServer {
     pub(crate) fn new(backend: Backend) -> Self {
         Self {
             backend: Arc::new(Mutex::new(backend)),
+            export_preset: std::sync::Mutex::new(None),
         }
     }
 }
@@ -227,7 +231,120 @@ pub(crate) struct ManimScene {
     pub(crate) replace: bool,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct CutAt {
+    /// Timeline times in milliseconds. Every clip on every track that strictly
+    /// contains one of these times is split there.
+    pub(crate) times_ms: Vec<f64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct RemoveRange {
+    /// Inclusive start of the removed range, in timeline milliseconds.
+    pub(crate) from_ms: f64,
+    /// Exclusive end of the removed range, in timeline milliseconds.
+    pub(crate) to_ms: f64,
+    /// Shift everything after the range left to close the gap (default true).
+    #[serde(default = "default_true")]
+    pub(crate) ripple: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct TrimSilence {
+    /// Audio quieter than this RMS level (dBFS) counts as silence. Default -40;
+    /// use -35 for noisy rooms, -50 for very clean recordings.
+    #[serde(default = "default_threshold_db")]
+    pub(crate) threshold_db: f64,
+    /// Only pauses at least this long (milliseconds) are removed. Default 400.
+    #[serde(default = "default_min_silence_ms")]
+    pub(crate) min_silence_ms: f64,
+    /// Silence kept on each side of every cut (milliseconds). Default 100.
+    #[serde(default = "default_padding_ms")]
+    pub(crate) padding_ms: f64,
+    /// Numeric track id whose audio is analysed; omit to analyse the mix of all tracks.
+    pub(crate) track: Option<u64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TitleStyleParam {
+    /// Large centred title.
+    Title,
+    /// Medium text in the lower-left third.
+    LowerThird,
+    /// Small subtitle near the bottom; consecutive captions share one track.
+    Caption,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddTitle {
+    /// Text to show; use \n for line breaks.
+    pub(crate) text: String,
+    /// Timeline start in milliseconds.
+    pub(crate) start_ms: f64,
+    /// How long the text stays on screen, in milliseconds.
+    pub(crate) duration_ms: f64,
+    /// Placement and size preset (default `title`).
+    pub(crate) style: Option<TitleStyleParam>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct Batch {
+    /// Core commands in serde's externally tagged JSON form, applied in order as one
+    /// undo step. Times are integer ticks (705600000 per second); ids are numbers.
+    /// Examples: `{"RemoveClip":{"id":3}}`, `{"MoveClip":{"id":3,"track":1,"start":0}}`,
+    /// `{"SplitAt":{"times":[705600000]}}`,
+    /// `{"RemoveRange":{"range":{"start":0,"end":352800000},"ripple":true}}`,
+    /// `{"RippleDelete":{"clip":4}}`, `{"SetTrackGain":{"id":1,"gain":0.5}}`.
+    pub(crate) ops: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ExportPresetParam {
+    /// 1920x1080, 30 fps.
+    Youtube1080p,
+    /// 3840x2160, 30 fps.
+    Youtube4k,
+    /// 1080x1920 vertical, 30 fps (Shorts, Reels, TikTok).
+    ShortsVertical,
+    /// 1080x1080, 30 fps.
+    Square,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct SetExportPreset {
+    /// Delivery preset.
+    pub(crate) preset: ExportPresetParam,
+}
+
 // ---- helpers --------------------------------------------------------------
+
+fn default_true() -> bool {
+    true
+}
+fn default_threshold_db() -> f64 {
+    -40.0
+}
+fn default_min_silence_ms() -> f64 {
+    400.0
+}
+fn default_padding_ms() -> f64 {
+    100.0
+}
+
+fn ticks_to_ms(time: Time) -> f64 {
+    time.0 as f64 * 1000.0 / TICKS_PER_SECOND as f64
+}
+
+fn range_ms(from_ms: f64, to_ms: f64) -> Result<TimeRange, McpError> {
+    TimeRange::new(ms_to_ticks(from_ms)?, ms_to_ticks(to_ms)?)
+        .map_err(|_| invalid("range end must be after its start"))
+}
+
+fn clip_count(project: &Project) -> usize {
+    project.tracks().iter().map(|t| t.clips().len()).sum()
+}
 
 fn default_font_size() -> f64 {
     32.0
@@ -921,6 +1038,180 @@ impl McpServer {
         }))
     }
 
+    #[tool(
+        description = "Describe the timeline as concise text: resolution, frame rate, duration, then every track with its clips (id, start - end in HH:MM:SS.mmm, kind, name, source offset) and the gaps between them. Call this first, and again after edits, to reason about the timeline. Other tools take milliseconds: 00:01:02.500 is 62500 ms."
+    )]
+    async fn describe_timeline(&self) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            animathio_control::describe_timeline(&state.project),
+        )]))
+    }
+
+    #[tool(
+        description = "Split (razor) every clip on every track at each given time, as one undo step. Clips are only split where a time falls strictly inside them. Use with remove_element, or prefer remove_range to cut a section out directly."
+    )]
+    async fn cut_at(&self, Parameters(p): Parameters<CutAt>) -> Result<CallToolResult, McpError> {
+        let times = p
+            .times_ms
+            .iter()
+            .map(|ms| ms_to_ticks(*ms))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut backend = self.backend.lock().await;
+        let before = clip_count(&backend.project_get().map_err(mcp_error)?.project);
+        backend
+            .command_apply(Command::SplitAt { times })
+            .map_err(mcp_error)?;
+        let after = clip_count(&backend.project_get().map_err(mcp_error)?.project);
+        tool_text(json!({"new_clips": after - before}))
+    }
+
+    #[tool(
+        description = "Remove everything between from_ms and to_ms on all tracks, as one undo step: clips inside are deleted and clips crossing the edges are trimmed or split. With ripple=true (default) later content moves left so no gap is left; with ripple=false a gap remains."
+    )]
+    async fn remove_range(
+        &self,
+        Parameters(p): Parameters<RemoveRange>,
+    ) -> Result<CallToolResult, McpError> {
+        let range = range_ms(p.from_ms, p.to_ms)?;
+        let mut backend = self.backend.lock().await;
+        backend
+            .command_apply(Command::RemoveRange {
+                range,
+                ripple: p.ripple,
+            })
+            .map_err(mcp_error)?;
+        tool_text(
+            json!({"removed_ms": ticks_to_ms(Time(range.end.0 - range.start.0)), "ripple": p.ripple}),
+        )
+    }
+
+    #[tool(
+        description = "Delete one clip and close the gap it leaves on its own track (later clips on that track move left). Other tracks are not shifted; use remove_range to keep tracks in sync."
+    )]
+    async fn ripple_delete(
+        &self,
+        Parameters(p): Parameters<ElementId>,
+    ) -> Result<CallToolResult, McpError> {
+        let clip = parse_clip_id(&p.id)?;
+        let mut backend = self.backend.lock().await;
+        backend
+            .command_apply(Command::RippleDelete { clip })
+            .map_err(mcp_error)?;
+        tool_text(json!({"deleted": clip.0}))
+    }
+
+    #[tool(
+        description = "Cut pauses out of a recording: detect silent stretches in the decoded audio (RMS in 10 ms windows below threshold_db for at least min_silence_ms), keep padding_ms of silence on each side, and ripple-remove them from ALL tracks so video and audio stay in sync. One undo step. Returns the removed ranges in pre-edit timeline milliseconds. Only audio clips are analysed; import the recording's audio as an audio clip."
+    )]
+    async fn trim_silence(
+        &self,
+        Parameters(p): Parameters<TrimSilence>,
+    ) -> Result<CallToolResult, McpError> {
+        if !p.threshold_db.is_finite() {
+            return Err(invalid("threshold_db must be finite"));
+        }
+        let params = TrimSilenceParams {
+            threshold_db: p.threshold_db,
+            min_silence: ms_to_ticks(p.min_silence_ms)?,
+            padding: ms_to_ticks(p.padding_ms)?,
+            track: p.track.map(TrackId),
+        };
+        let mut backend = self.backend.lock().await;
+        let result = backend.trim_silence(params).map_err(mcp_error)?;
+        let removed: Vec<_> = result
+            .removed
+            .iter()
+            .map(|r| {
+                json!({
+                    "from_ms": ticks_to_ms(r.start),
+                    "to_ms": ticks_to_ms(r.end),
+                    "from": animathio_control::timecode(r.start),
+                    "to": animathio_control::timecode(r.end),
+                })
+            })
+            .collect();
+        tool_text(json!({
+            "removed": removed,
+            "total_removed_ms": ticks_to_ms(result.total_removed),
+        }))
+    }
+
+    #[tool(
+        description = "Add white on-screen text from start_ms for duration_ms, as one undo step. style: `title` (large, centred), `lower_third` (medium, lower left, e.g. a speaker name) or `caption` (small subtitle at the bottom; consecutive captions share one track). Returns the clip id for update_element/add_animation."
+    )]
+    async fn add_title(
+        &self,
+        Parameters(p): Parameters<AddTitle>,
+    ) -> Result<CallToolResult, McpError> {
+        let start = ms_to_ticks(p.start_ms)?;
+        let end = ms_to_ticks(p.start_ms + p.duration_ms)?;
+        let range =
+            TimeRange::new(start, end).map_err(|_| invalid("duration_ms must be positive"))?;
+        let style = match p.style.unwrap_or(TitleStyleParam::Title) {
+            TitleStyleParam::Title => TitleStyle::Title,
+            TitleStyleParam::LowerThird => TitleStyle::LowerThird,
+            TitleStyleParam::Caption => TitleStyle::Caption,
+        };
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        let (command, track_id, clip_id) =
+            animathio_control::title_command(&state.project, &p.text, range, style)
+                .map_err(mcp_error)?;
+        backend.command_apply(command).map_err(mcp_error)?;
+        tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))
+    }
+
+    #[tool(
+        description = "Apply several low-level core commands atomically as ONE undo step; if any fails, nothing changes. Each op is a core Command in externally tagged JSON, e.g. {\"RemoveClip\":{\"id\":3}} or {\"MoveClip\":{\"id\":3,\"track\":1,\"start\":0}}. Times inside ops are integer ticks (705600000 per second), not milliseconds."
+    )]
+    async fn batch(&self, Parameters(p): Parameters<Batch>) -> Result<CallToolResult, McpError> {
+        let commands = p
+            .ops
+            .into_iter()
+            .enumerate()
+            .map(|(index, op)| {
+                serde_json::from_value::<Command>(op)
+                    .map_err(|error| invalid(&format!("op {index}: {error}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let count = commands.len();
+        let mut backend = self.backend.lock().await;
+        backend
+            .command_apply(Command::Batch { commands })
+            .map_err(mcp_error)?;
+        tool_text(json!({"applied": count}))
+    }
+
+    #[tool(
+        description = "Choose a delivery format: sets the project resolution and 30 fps (one undo step) and makes export_video use high-quality H.264 (CRF 18). Presets: youtube_1080p (1920x1080), youtube_4k (3840x2160), shorts_vertical (1080x1920), square (1080x1080). Positions are canvas fractions, so existing clips keep their relative layout."
+    )]
+    async fn set_export_preset(
+        &self,
+        Parameters(p): Parameters<SetExportPreset>,
+    ) -> Result<CallToolResult, McpError> {
+        let preset = match p.preset {
+            ExportPresetParam::Youtube1080p => ExportPreset::Youtube1080p,
+            ExportPresetParam::Youtube4k => ExportPreset::Youtube4k,
+            ExportPresetParam::ShortsVertical => ExportPreset::ShortsVertical,
+            ExportPresetParam::Square => ExportPreset::Square,
+        };
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        backend
+            .command_apply(preset.command(&state.project).map_err(mcp_error)?)
+            .map_err(mcp_error)?;
+        *self
+            .export_preset
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(preset);
+        let (width, height) = preset.resolution();
+        tool_text(
+            json!({"width": width, "height": height, "fps": 30, "crf": preset.export_settings().crf}),
+        )
+    }
+
     #[tool(description = "Export an offline H.264 + AAC MP4 snapshot of the project.")]
     async fn export_video(
         &self,
@@ -935,7 +1226,12 @@ impl McpServer {
                 output: PathBuf::from(p.path),
                 from: Time(0),
                 to: None,
-                settings: animathio_export::Settings::default(),
+                settings: self
+                    .export_preset
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .map(ExportPreset::export_settings)
+                    .unwrap_or_default(),
             })
             .map_err(mcp_error)?;
         tool_text(json!({ "path": path }))

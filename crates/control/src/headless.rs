@@ -295,6 +295,12 @@ impl ControlHandler for HeadlessHandler {
                 self.import_v1(&path)?;
                 serde_json::to_value(())?
             }
+            Call::TrimSilence { params } => serde_json::to_value(crate::trim_silence(
+                &mut self.project,
+                &mut self.history,
+                &self.assets,
+                &params,
+            )?)?,
             call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
                 let replace = matches!(&call, Call::ImportManim { params } if params.replace);
                 let result = crate::apply_authoring_call(
