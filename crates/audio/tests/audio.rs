@@ -162,7 +162,7 @@ fn gain_and_mute_keyframes_use_clip_local_time() {
                 target: Target::Param(name.into()),
                 time: Time(time),
                 keyframe: Keyframe {
-                    value,
+                    value: value.into(),
                     interpolation: if name == "gain" {
                         Interpolation::Linear
                     } else {
@@ -340,8 +340,8 @@ proptest! {
         let pcm = sine(44_100);
         let (mut project,pool) = project(&pcm, 17_321, TICKS_PER_SECOND);
         Command::SetParam { id:ClipId(0), name:"gain".into(),value:Some(0.5) }.apply(&mut project).unwrap();
-        Command::AddKeyframe { id:ClipId(0), target:Target::Param("gain".into()),time:Time(0),keyframe:Keyframe {value:0.,interpolation:Interpolation::Linear} }.apply(&mut project).unwrap();
-        Command::AddKeyframe { id:ClipId(0), target:Target::Param("gain".into()),time:Time(TICKS_PER_SECOND),keyframe:Keyframe {value:1.,interpolation:Interpolation::Linear} }.apply(&mut project).unwrap();
+        Command::AddKeyframe { id:ClipId(0), target:Target::Param("gain".into()),time:Time(0),keyframe:Keyframe {value:(0.0).into(),interpolation:Interpolation::Linear} }.apply(&mut project).unwrap();
+        Command::AddKeyframe { id:ClipId(0), target:Target::Param("gain".into()),time:Time(TICKS_PER_SECOND),keyframe:Keyframe {value:(1.0).into(),interpolation:Interpolation::Linear} }.apply(&mut project).unwrap();
         let mixer = pool.prepare(output_rate,2).unwrap();
         let b = a+width;
         let c = b+tail;

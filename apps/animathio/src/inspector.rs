@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use animathio_core::{
-    Clip, Command, Interpolation, Keyframe, Target, Time, Transform, TransformProperty,
+    Clip, Command, Interpolation, Keyframe, ParamValue, Target, Time, Transform, TransformProperty,
 };
 use animathio_plugin_api::{
     ColorValue, ControlWidget, InspectorParam, InspectorSchema, PointValue,
@@ -15,7 +15,7 @@ use serde_json::json;
 /// A resolved, UI-agnostic description of one inspectable plugin parameter.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ParamModel {
-    /// Continuous numeric value; the only kind the core can keyframe today.
+    /// Continuous numeric value.
     Number {
         id: String,
         label: String,
@@ -81,12 +81,6 @@ impl ParamModel {
             | Self::Point { label, .. }
             | Self::Asset { label, .. } => label,
         }
-    }
-
-    /// Whether the model maps onto the numeric, keyframe-capable parameter path.
-    /// Non-numeric keyframes need a core model extension and are deferred.
-    pub(crate) fn is_keyframeable(&self) -> bool {
-        matches!(self, Self::Number { .. })
     }
 }
 
@@ -158,13 +152,15 @@ fn model_from_param(param: &InspectorParam) -> ParamModel {
 }
 
 /// Default numeric base params and opaque JSON params for a freshly inserted clip.
-pub(crate) fn default_params(models: &[ParamModel]) -> (BTreeMap<String, f64>, serde_json::Value) {
+pub(crate) fn default_params(
+    models: &[ParamModel],
+) -> (BTreeMap<String, ParamValue>, serde_json::Value) {
     let mut numeric = BTreeMap::new();
     let mut opaque = serde_json::Map::new();
     for model in models {
         match model {
             ParamModel::Number { id, default, .. } => {
-                numeric.insert(id.clone(), *default);
+                numeric.insert(id.clone(), (*default).into());
             }
             ParamModel::Color { id, default, .. } => {
                 opaque.insert(
@@ -194,10 +190,128 @@ pub(crate) fn default_params(models: &[ParamModel]) -> (BTreeMap<String, f64>, s
     (numeric, serde_json::Value::Object(opaque))
 }
 
+/// Interpret legacy opaque JSON with the schema, retaining enum/asset identity.
+pub(crate) fn model_value(model: &ParamModel, value: Option<&serde_json::Value>) -> ParamValue {
+    match model {
+        ParamModel::Number { default, .. } => value
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(*default)
+            .into(),
+        ParamModel::Color { default, .. } => {
+            let fallback = [default.r, default.g, default.b, default.a];
+            let rgba = value
+                .and_then(crate::editor::color_from_json)
+                .unwrap_or(fallback);
+            ParamValue::from_srgba(rgba)
+        }
+        ParamModel::Point { default, .. } => ParamValue::Point(
+            value
+                .and_then(crate::editor::point_from_json)
+                .map_or([f64::from(default.x), f64::from(default.y)], |v| {
+                    v.map(f64::from)
+                }),
+        ),
+        ParamModel::Bool { default, .. } => ParamValue::Bool(
+            value
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(*default),
+        ),
+        ParamModel::Text { default, .. } => ParamValue::String(
+            value
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(default)
+                .to_owned(),
+        ),
+        ParamModel::Enum { default, .. } => ParamValue::Enum(
+            value
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(default)
+                .to_owned(),
+        ),
+        ParamModel::Asset { default, .. } => ParamValue::AssetRef(
+            value
+                .map_or(default.as_deref(), serde_json::Value::as_str)
+                .and_then(|v| v.to_owned().try_into().ok()),
+        ),
+    }
+}
+
+pub(crate) fn sampled_param(
+    clip: &Clip,
+    name: &str,
+    playhead: Time,
+    base: ParamValue,
+) -> ParamValue {
+    clip.animations
+        .iter()
+        .find(|a| a.target == Target::Param(name.to_owned()))
+        .and_then(|a| a.keys.sample(clip_local_time(clip, playhead)))
+        .or_else(|| clip.params.get(name).cloned())
+        .unwrap_or(base)
+}
+
+pub(crate) fn param_edit_command(
+    clip: &Clip,
+    name: String,
+    value: ParamValue,
+    playhead: Time,
+) -> Command {
+    let target = Target::Param(name.clone());
+    let local = clip_local_time(clip, playhead);
+    if clip.animations.iter().any(|a| a.target == target) {
+        Command::AddKeyframe {
+            id: clip.id,
+            target: target.clone(),
+            time: local,
+            keyframe: Keyframe {
+                value,
+                interpolation: keyframe_interpolation(clip, &target, local)
+                    .unwrap_or(Interpolation::Linear),
+            },
+        }
+    } else {
+        Command::SetPluginParam {
+            id: clip.id,
+            name,
+            value: Some(value),
+        }
+    }
+}
+
+pub(crate) fn param_toggle_command(
+    clip: &Clip,
+    name: String,
+    playhead: Time,
+    base: ParamValue,
+) -> Command {
+    let target = Target::Param(name.clone());
+    if keyframed(clip, &target, playhead) {
+        Command::RemoveKeyframe {
+            id: clip.id,
+            target,
+            time: clip_local_time(clip, playhead),
+        }
+    } else {
+        Command::AddKeyframe {
+            id: clip.id,
+            target,
+            time: clip_local_time(clip, playhead),
+            keyframe: Keyframe {
+                value: sampled_param(clip, &name, playhead, base),
+                interpolation: Interpolation::Linear,
+            },
+        }
+    }
+}
+
 /// The base numeric value for a target without applying keyframes.
 pub(crate) fn numeric_base(clip: &Clip, target: &Target) -> f64 {
     match target {
-        Target::Param(name) => clip.params.get(name).copied().unwrap_or(0.0),
+        Target::Param(name) => clip
+            .params
+            .get(name)
+            .and_then(ParamValue::as_number)
+            .unwrap_or(0.0),
         Target::Transform(property) => transform_value(&clip.transform, *property),
         Target::Effect { effect, param } => clip
             .effects
@@ -216,7 +330,7 @@ pub(crate) fn sampled_numeric(clip: &Clip, target: &Target, playhead: Time, base
         if &animation.target == target
             && let Some(value) = animation.keys.sample(local)
         {
-            return value;
+            return value.as_number().unwrap_or(base);
         }
     }
     base
@@ -266,16 +380,15 @@ pub(crate) fn keyframe_toggle_command(clip: &Clip, target: Target, playhead: Tim
             target,
             time: local,
             keyframe: Keyframe {
-                value,
+                value: value.into(),
                 interpolation: Interpolation::Linear,
             },
         }
     }
 }
 
-/// Build the command for editing a numeric value. When the target is keyframed at
-/// the playhead the edit updates or creates that keyframe; otherwise it sets the
-/// base value.
+/// Build the command for editing a numeric value. When the target has an animation,
+/// the edit updates or creates a keyframe at the playhead; otherwise it sets the base.
 pub(crate) fn numeric_edit_command(
     clip: &Clip,
     target: Target,
@@ -283,7 +396,7 @@ pub(crate) fn numeric_edit_command(
     playhead: Time,
 ) -> Command {
     let local = clip_local_time(clip, playhead);
-    if keyframed(clip, &target, playhead) {
+    if clip.animations.iter().any(|a| a.target == target) {
         let interpolation =
             keyframe_interpolation(clip, &target, local).unwrap_or(Interpolation::Linear);
         Command::AddKeyframe {
@@ -291,7 +404,7 @@ pub(crate) fn numeric_edit_command(
             target,
             time: local,
             keyframe: Keyframe {
-                value,
+                value: value.into(),
                 interpolation,
             },
         }
@@ -325,7 +438,13 @@ pub(crate) fn interpolation_command(
 ) -> Option<Command> {
     let value = clip.animations.iter().find_map(|animation| {
         (animation.target == target)
-            .then(|| animation.keys.keys().get(&local).map(|key| key.value))
+            .then(|| {
+                animation
+                    .keys
+                    .keys()
+                    .get(&local)
+                    .map(|key| key.value.clone())
+            })
             .flatten()
     })?;
     Some(Command::AddKeyframe {
@@ -382,7 +501,7 @@ mod tests {
             },
             TimeRange::new(Time(0), Time(100)).unwrap(),
         );
-        clip.params.insert("radius".into(), 5.0);
+        clip.params.insert("radius".into(), 5.0.into());
         clip
     }
 
@@ -445,7 +564,7 @@ mod tests {
             },
         ];
         let (numeric, opaque) = default_params(&models);
-        assert_eq!(numeric.get("radius"), Some(&10.0));
+        assert_eq!(numeric.get("radius"), Some(&ParamValue::Number(10.0)));
         assert_eq!(opaque["text"], json!("hi"));
         assert!(opaque.get("radius").is_none());
     }
@@ -474,7 +593,7 @@ mod tests {
                 target: target.clone(),
                 time: Time(50),
                 keyframe: Keyframe {
-                    value: 5.0,
+                    value: (5.0).into(),
                     interpolation: Interpolation::Linear,
                 },
             }
@@ -507,10 +626,158 @@ mod tests {
                 target: target.clone(),
                 time: Time(50),
                 keyframe: Keyframe {
-                    value: 30.0,
+                    value: (30.0).into(),
                     interpolation: Interpolation::Linear,
                 },
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod typed_tests {
+    use super::*;
+    use animathio_core::{ClipId, ClipKind, Project, TimeRange, Track, TrackId};
+
+    #[test]
+    fn every_widget_toggles_and_edits_a_typed_key_between_existing_keys() {
+        let schema = InspectorSchema::new()
+            .with_number("number", "Number", 0.0, 1.0, 0.5, 0.1)
+            .with_color(
+                "color",
+                "Color",
+                ColorValue {
+                    r: 128,
+                    g: 64,
+                    b: 32,
+                    a: 255,
+                },
+            )
+            .with_string("text", "Text", "hello")
+            .with_enum("enum", "Enum", vec!["a".into(), "b".into()], "a")
+            .with_bool("bool", "Bool", true)
+            .with_point("point", "Point", PointValue { x: 0.25, y: 0.75 })
+            .with_asset_ref("asset", "Asset", "image/*", None);
+        for model in models_from_schema(&schema) {
+            let mut project = Project::default();
+            Command::AddTrack {
+                track: Track::new(TrackId(0), "t"),
+                index: 0,
+            }
+            .apply(&mut project)
+            .unwrap();
+            let mut clip = Clip::new(
+                ClipId(0),
+                ClipKind::Plugin {
+                    plugin_id: "test".into(),
+                    params: json!({}),
+                },
+                TimeRange::new(Time(100), Time(300)).unwrap(),
+            );
+            let base = model_value(&model, None);
+            // Older clips can omit a parameter and use the plugin schema default.
+            if matches!(model, ParamModel::Number { .. }) {
+                clip.params.insert(model.id().to_owned(), base.clone());
+            }
+            Command::AddClip {
+                track: TrackId(0),
+                clip,
+            }
+            .apply(&mut project)
+            .unwrap();
+            let clip = &project.tracks()[0].clips()[&ClipId(0)];
+            param_toggle_command(clip, model.id().to_owned(), Time(110), base.clone())
+                .apply(&mut project)
+                .unwrap();
+            let clip = &project.tracks()[0].clips()[&ClipId(0)];
+            let edited = match &base {
+                ParamValue::Number(_) => ParamValue::Number(0.75),
+                ParamValue::Color(_) => ParamValue::Color([0.25, 0.5, 0.75, 1.0]),
+                ParamValue::Point(_) => ParamValue::Point([0.5, 0.25]),
+                ParamValue::Bool(v) => ParamValue::Bool(!v),
+                ParamValue::String(_) => ParamValue::String("edited".into()),
+                ParamValue::Enum(_) => ParamValue::Enum("b".into()),
+                ParamValue::AssetRef(_) => {
+                    ParamValue::AssetRef(Some(animathio_core::AssetId::of(b"edited")))
+                }
+            };
+            let command =
+                param_edit_command(clip, model.id().to_owned(), edited.clone(), Time(150));
+            let Command::AddKeyframe { time, keyframe, .. } = &command else {
+                panic!("animated edit must insert a key")
+            };
+            assert_eq!(*time, Time(50));
+            assert_eq!(keyframe.value, edited);
+            command.apply(&mut project).unwrap();
+            let clip = &project.tracks()[0].clips()[&ClipId(0)];
+            assert!(keyframed(
+                clip,
+                &Target::Param(model.id().to_owned()),
+                Time(150)
+            ));
+            assert_eq!(
+                sampled_param(clip, model.id(), Time(150), base.clone()),
+                edited
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_empty_asset_overrides_a_schema_default() {
+        let asset = animathio_core::AssetId::of(b"default");
+        let model = ParamModel::Asset {
+            id: "a".into(),
+            label: "Asset".into(),
+            media_type: "image/*".into(),
+            default: Some(asset.as_str().to_owned()),
+        };
+        assert_eq!(model_value(&model, None), ParamValue::AssetRef(Some(asset)));
+        assert_eq!(
+            model_value(&model, Some(&serde_json::Value::Null)),
+            ParamValue::AssetRef(None)
+        );
+    }
+
+    #[test]
+    fn numeric_edit_between_keys_creates_key_and_preserves_existing_interpolation() {
+        let mut project = Project::default();
+        Command::AddTrack {
+            track: Track::new(TrackId(0), "t"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let mut clip = Clip::new(
+            ClipId(0),
+            ClipKind::Error("fixture".into()),
+            TimeRange::new(Time(0), Time(100)).unwrap(),
+        );
+        clip.params.insert("n".into(), 0.0.into());
+        Command::AddClip {
+            track: TrackId(0),
+            clip,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let target = Target::Param("n".into());
+        Command::AddKeyframe {
+            id: ClipId(0),
+            target: target.clone(),
+            time: Time(10),
+            keyframe: Keyframe {
+                value: 1.0.into(),
+                interpolation: Interpolation::EaseInOut,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+        for (time, expected) in [(10, Interpolation::EaseInOut), (50, Interpolation::Linear)] {
+            let clip = &project.tracks()[0].clips()[&ClipId(0)];
+            let command = numeric_edit_command(clip, target.clone(), 2.0, Time(time));
+            assert!(
+                matches!(&command, Command::AddKeyframe { keyframe, .. } if keyframe.interpolation == expected)
+            );
+            command.apply(&mut project).unwrap();
+        }
     }
 }

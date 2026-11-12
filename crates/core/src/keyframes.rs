@@ -58,6 +58,9 @@ impl<T: Interpolate> Keyframes<T> {
     #[allow(clippy::cast_precision_loss)] // Relative integer ticks become a dimensionless blend only.
     #[must_use]
     pub fn sample(&self, time: Time) -> Option<T> {
+        if let Some(key) = self.0.get(&time) {
+            return Some(key.value.clone());
+        }
         let Some((left_time, left)) = self.0.range(..=time).next_back() else {
             return self.0.first_key_value().map(|(_, key)| key.value.clone());
         };

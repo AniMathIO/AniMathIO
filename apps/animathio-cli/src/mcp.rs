@@ -469,7 +469,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::Opacity),
                         time: Time(0),
                         keyframe: Keyframe {
-                            value: 0.0,
+                            value: (0.0).into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -480,7 +480,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::Opacity),
                         time: duration,
                         keyframe: Keyframe {
-                            value: opacity,
+                            value: opacity.into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -493,7 +493,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::Opacity),
                         time: Time(0),
                         keyframe: Keyframe {
-                            value: opacity,
+                            value: opacity.into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -504,7 +504,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::Opacity),
                         time: duration,
                         keyframe: Keyframe {
-                            value: 0.0,
+                            value: (0.0).into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -531,7 +531,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::X),
                         time: Time(0),
                         keyframe: Keyframe {
-                            value: from.0,
+                            value: from.0.into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -542,7 +542,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::X),
                         time: duration,
                         keyframe: Keyframe {
-                            value: to.0,
+                            value: to.0.into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -553,7 +553,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::Y),
                         time: Time(0),
                         keyframe: Keyframe {
-                            value: from.1,
+                            value: from.1.into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -564,7 +564,7 @@ impl McpServer {
                         target: Target::Transform(TransformProperty::Y),
                         time: duration,
                         keyframe: Keyframe {
-                            value: to.1,
+                            value: to.1.into(),
                             interpolation: Interpolation::Linear,
                         },
                     })
@@ -723,7 +723,7 @@ impl McpServer {
                 target,
                 time: ms_to_ticks(p.time_ms)?,
                 keyframe: Keyframe {
-                    value: p.value,
+                    value: p.value.into(),
                     interpolation,
                 },
             })

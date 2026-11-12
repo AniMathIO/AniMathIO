@@ -153,7 +153,7 @@ fn effect_parameters_are_keyframeable_in_the_evaluated_scene() {
             },
             time,
             keyframe: Keyframe {
-                value,
+                value: value.into(),
                 interpolation: Interpolation::Linear,
             },
         }
@@ -187,7 +187,7 @@ fn removing_an_animated_effect_is_rejected() {
         },
         time: Time(0),
         keyframe: Keyframe {
-            value: 0.5,
+            value: (0.5).into(),
             interpolation: Interpolation::Linear,
         },
     }

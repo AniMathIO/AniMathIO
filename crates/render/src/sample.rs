@@ -176,7 +176,7 @@ pub fn build() -> Result<Sample, Error> {
                 target: Target::Transform(property),
                 time,
                 keyframe: Keyframe {
-                    value,
+                    value: value.into(),
                     interpolation: Interpolation::EaseInOut,
                 },
             }

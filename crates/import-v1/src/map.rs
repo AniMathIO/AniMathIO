@@ -250,7 +250,7 @@ pub(crate) fn import_with_report(
             range,
             source_offset: Time(0),
             transform,
-            params,
+            params: params.into_iter().map(|(k, v)| (k, v.into())).collect(),
             effects,
             animations: Vec::new(),
         };
@@ -1022,7 +1022,7 @@ fn add_key(
         target: Target::Transform(property),
         time: Time(time),
         keyframe: Keyframe {
-            value,
+            value: value.into(),
             interpolation: Interpolation::Linear,
         },
     }
