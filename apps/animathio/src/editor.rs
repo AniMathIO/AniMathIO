@@ -10,31 +10,119 @@ use animathio_control::{
 };
 use animathio_core::{
     Asset, AssetId, Clip, ClipId, ClipKind, Command, FrameRate, History, Interpolation, Project,
-    Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform, TransformProperty,
-    evaluate,
+    Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform,
+    TransformProperty, evaluate,
 };
 use animathio_plugin_api::PluginKind;
 use animathio_plugin_host::PluginHost;
 use base64::Engine as _;
 use gpui::{prelude::*, *};
+use gpui_component::button::{Button, ButtonVariants};
 use serde_json::{Value, json};
 
 use crate::control::{ControlMsg, ControlRuntime};
 use crate::inspector::{self, ParamModel, PluginDescriptor};
+use crate::layout::DockLayout;
 use crate::playback::{Clock, due_frame, make_clock};
 use crate::render_worker::{RenderRequest, RenderWorker};
+use crate::timecode;
 use crate::timeline::{self, TimelineLayout, TrimEdge};
 
 const RULER_H: f32 = 28.0;
 const ROW_H: f32 = 44.0;
 const TIMELINE_H: f32 = 260.0;
+const HEADER_W: f32 = 150.0;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
 const DEFAULT_MEDIA_TICKS: i64 = TICKS_PER_SECOND * 2;
 
+/// Viewport benchmark: warm up for two seconds, then scrub to a deterministic
+/// random tick at a 60 Hz request cadence for ten seconds and report the p50/p95
+/// cadence of delivered frames before quitting.
+const BENCH_WARMUP: Duration = Duration::from_secs(2);
+const BENCH_DURATION: Duration = Duration::from_secs(10);
+const BENCH_SIZE: (u32, u32) = (1920, 1080);
+
+/// State for the `--bench-viewport` flag. It drives the render worker with a
+/// deterministic xorshift sequence and measures the cadence of frames that make
+/// it through the full presentation path (worker render → BGRA → `RenderImage`
+/// upload → draw).
+struct ViewportBench {
+    rng: u64,
+    warmup_started: Instant,
+    active_start: Option<Instant>,
+    last_delivery: Option<Instant>,
+    next_request: Option<Instant>,
+    cadence_ms: Vec<f64>,
+    done: bool,
+}
+
+impl ViewportBench {
+    fn new() -> Self {
+        Self {
+            rng: 0x9e37_79b9_7f4a_7c15,
+            warmup_started: Instant::now(),
+            active_start: None,
+            last_delivery: None,
+            next_request: None,
+            cadence_ms: Vec::new(),
+            done: false,
+        }
+    }
+
+    /// Deterministic xorshift64* tick in `[0, duration_ticks)`.
+    fn next_tick(&mut self, duration_ticks: i64) -> i64 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        let span = duration_ticks.max(1) as u64;
+        i64::try_from(x % span).expect("tick modulus fits in i64")
+    }
+}
+
+/// Return the value at the nearest-rank percentile `p` (in `[0, 1]`).
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let index = ((sorted.len() as f64 - 1.0) * p).round() as usize;
+    sorted[index.min(sorted.len() - 1)]
+}
+
 /// A project loaded from disk together with its asset bytes and the autosave
 /// recovery flag.
 type LoadedProject = (Project, BTreeMap<AssetId, Vec<u8>>, bool);
+
+/// A menu-bar action: a closure mutating the editor in its window context.
+type MenuAction = Box<dyn Fn(&mut Editor, &mut Context<Editor>)>;
+
+/// Tabs in the left media-pool panel.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LeftTab {
+    Assets,
+    Plugins,
+    Effects,
+}
+
+/// Top menu-bar menus.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MenuId {
+    File,
+    Edit,
+    View,
+    Clip,
+    Help,
+}
+
+/// Dockable panel sides, mirroring [`DockLayout`] flags.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PanelSide {
+    Left,
+    Right,
+    Bottom,
+}
 
 /// An editable value on the selected clip: a transform component or a named
 /// numeric parameter.
@@ -241,7 +329,6 @@ pub(crate) struct Editor {
     editing: Option<TextEdit>,
     plugin_host: Option<PluginHost>,
     plugins: Vec<PluginDescriptor>,
-    add_menu_open: bool,
     settings_open: bool,
     export_task: Option<crate::export_worker::ExportTask>,
     confirm_overwrite: Option<PathBuf>,
@@ -250,10 +337,17 @@ pub(crate) struct Editor {
     error: Option<String>,
     focus_handle: FocusHandle,
     control: Option<ControlRuntime>,
+    bench: Option<ViewportBench>,
     dirty: bool,
     last_autosave: Instant,
     next_id: u64,
     recent: RecentFiles,
+    dock: DockLayout,
+    left_tab: LeftTab,
+    menu_open: Option<MenuId>,
+    loop_playback: bool,
+    snapping: bool,
+    timecode_buffer: Option<String>,
 }
 
 impl Editor {
@@ -265,6 +359,7 @@ impl Editor {
         path: Option<PathBuf>,
         recovered: bool,
         control: Option<ControlRuntime>,
+        bench: bool,
     ) -> Self {
         let mut pool = AudioPool::default();
         let mut error = None;
@@ -305,7 +400,6 @@ impl Editor {
             editing: None,
             plugin_host,
             plugins,
-            add_menu_open: false,
             settings_open: false,
             export_task: None,
             confirm_overwrite: None,
@@ -314,16 +408,23 @@ impl Editor {
             error,
             focus_handle: cx.focus_handle(),
             control,
+            bench: bench.then(ViewportBench::new),
             dirty: recovered,
             last_autosave: Instant::now(),
             next_id: initial_next_id,
             recent: RecentFiles::load(),
+            dock: DockLayout::load(),
+            left_tab: LeftTab::Assets,
+            menu_open: None,
+            loop_playback: false,
+            snapping: true,
+            timecode_buffer: None,
         };
         if recovered {
             this.error = Some("recovered from autosave".into());
         }
         this.request_render(Time(0));
-        window.focus(&this.focus_handle);
+        window.focus(&this.focus_handle, cx);
         cx.spawn(async move |this, cx| {
             loop {
                 let timer = cx.background_executor().timer(Duration::from_secs(1));
@@ -339,9 +440,17 @@ impl Editor {
     }
 
     fn request_render(&mut self, time: Time) {
+        let size = if self.bench.is_some() {
+            BENCH_SIZE
+        } else {
+            project_size(&self.project)
+        };
+        self.request_render_at(time, size);
+    }
+
+    fn request_render_at(&mut self, time: Time, size: (u32, u32)) {
         self.request_generation = self.request_generation.wrapping_add(1);
         self.last_requested = Some(time);
-        let size = project_size(&self.project);
         let scene = evaluate(&self.project, time);
         let scene = self.resolve_scene(scene, size);
         self.worker.request(RenderRequest {
@@ -362,12 +471,78 @@ impl Editor {
 
     fn pump_results(&mut self, window: &mut Window) {
         while let Some(result) = self.worker.try_result() {
-            if result.generation == self.request_generation
-                && let Some(old) = self.image.replace(result.image)
-            {
-                let _ = window.drop_image(old);
+            if result.generation == self.request_generation {
+                if let Some(bench) = &mut self.bench {
+                    let now = Instant::now();
+                    if let Some(last) = bench.last_delivery.replace(now) {
+                        bench.cadence_ms.push((now - last).as_secs_f64() * 1000.0);
+                    }
+                }
+                if let Some(old) = self.image.replace(result.image) {
+                    let _ = window.drop_image(old);
+                }
             }
         }
+    }
+
+    /// Drive the viewport benchmark when `--bench-viewport` is set: warm up,
+    /// then scrub at 60 Hz for ten seconds and report the delivered-frame
+    /// cadence before quitting.
+    fn bench_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bench = self
+            .bench
+            .as_mut()
+            .expect("bench tick only runs with a bench");
+        if bench.done {
+            return;
+        }
+        let now = Instant::now();
+        if bench.active_start.is_none() {
+            if now.duration_since(bench.warmup_started) < BENCH_WARMUP {
+                window.request_animation_frame();
+                return;
+            }
+            bench.active_start = Some(now);
+            bench.last_delivery = Some(now);
+            bench.next_request = Some(now);
+        }
+        let elapsed = now.duration_since(bench.active_start.expect("active start set"));
+        if elapsed >= BENCH_DURATION {
+            bench.done = true;
+            let mut samples = std::mem::take(&mut bench.cadence_ms);
+            samples.sort_by(f64::total_cmp);
+            let p50 = percentile(&samples, 0.50);
+            let p95 = percentile(&samples, 0.95);
+            eprintln!(
+                "viewport bench: samples={} p50={:.3}ms p95={:.3}ms ({:.2} fps p50)",
+                samples.len(),
+                p50,
+                p95,
+                if p50 > 0.0 { 1000.0 / p50 } else { 0.0 }
+            );
+            cx.quit();
+            return;
+        }
+        // Request a new deterministic random frame at a 60 Hz cadence so the
+        // worker (latest-request-wins) is neither starved nor flooded.
+        let due = {
+            let bench = self
+                .bench
+                .as_mut()
+                .expect("bench tick only runs with a bench");
+            if bench.next_request.is_some_and(|next| now >= next) {
+                let duration = timeline::project_duration(&self.project).max(1);
+                let tick = bench.next_tick(duration);
+                bench.next_request = Some(now + Duration::from_micros(16_667));
+                Some(tick)
+            } else {
+                None
+            }
+        };
+        if let Some(tick) = due {
+            self.request_render_at(Time(tick), BENCH_SIZE);
+        }
+        window.request_animation_frame();
     }
 
     fn drain_control(&mut self, cx: &mut Context<Self>) {
@@ -704,6 +879,11 @@ impl Editor {
     }
 
     pub(crate) fn handle_keystroke(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
+        if self.timecode_buffer.is_some() {
+            self.handle_timecode_key(event, cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.editing.is_some() {
             self.handle_text_key(event, cx);
             cx.stop_propagation();
@@ -753,6 +933,33 @@ impl Editor {
         };
         if handled {
             cx.stop_propagation();
+        }
+    }
+
+    fn handle_timecode_key(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
+        let key = event.keystroke.key.as_str();
+        match key {
+            "enter" => self.commit_timecode(cx),
+            "escape" => {
+                self.timecode_buffer = None;
+                cx.notify();
+            }
+            "backspace" => {
+                if let Some(buffer) = &mut self.timecode_buffer {
+                    buffer.pop();
+                }
+                cx.notify();
+            }
+            _ => {
+                let allowed = key.len() == 1
+                    && (key
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || c == ':' || c == '.'));
+                if allowed && let Some(buffer) = &mut self.timecode_buffer {
+                    buffer.push_str(key);
+                    cx.notify();
+                }
+            }
         }
     }
 
@@ -1096,6 +1303,146 @@ impl Editor {
         let layout = self.current_layout();
         let time = timeline::x_to_time(&layout, x);
         self.seek_to(time, cx);
+    }
+
+    /// Step the playhead by a whole number of frames.
+    fn step_frame(&mut self, delta: i64, cx: &mut Context<Self>) {
+        let rate = self.project.frame_rate();
+        let Some(frame) = rate
+            .time_to_frame(self.position, Rounding::Nearest)
+            .ok()
+            .and_then(|frame| frame.checked_add(delta))
+            .map(|frame| frame.max(0))
+        else {
+            return;
+        };
+        let Some(time) = rate.frame_to_time(frame, Rounding::Nearest).ok() else {
+            return;
+        };
+        self.seek_to(time, cx);
+    }
+
+    fn jump_to_start(&mut self, cx: &mut Context<Self>) {
+        self.seek_to(Time(0), cx);
+    }
+
+    fn jump_to_end(&mut self, cx: &mut Context<Self>) {
+        let end = timeline::project_duration(&self.project);
+        self.seek_to(Time(end), cx);
+    }
+
+    fn toggle_loop(&mut self, cx: &mut Context<Self>) {
+        self.loop_playback = !self.loop_playback;
+        cx.notify();
+    }
+
+    fn toggle_snapping(&mut self, cx: &mut Context<Self>) {
+        self.snapping = !self.snapping;
+        cx.notify();
+    }
+
+    fn toggle_panel(&mut self, side: PanelSide, cx: &mut Context<Self>) {
+        match side {
+            PanelSide::Left => self.dock.left_open = !self.dock.left_open,
+            PanelSide::Right => self.dock.right_open = !self.dock.right_open,
+            PanelSide::Bottom => self.dock.bottom_open = !self.dock.bottom_open,
+        }
+        self.dock.save();
+        cx.notify();
+    }
+
+    fn select_left_tab(&mut self, tab: LeftTab, cx: &mut Context<Self>) {
+        self.left_tab = tab;
+        cx.notify();
+    }
+
+    fn toggle_menu(&mut self, menu: MenuId, cx: &mut Context<Self>) {
+        self.menu_open = if self.menu_open == Some(menu) {
+            None
+        } else {
+            Some(menu)
+        };
+        cx.notify();
+    }
+
+    fn begin_timecode_edit(&mut self, cx: &mut Context<Self>) {
+        self.timecode_buffer = Some(timecode::format_timecode(
+            self.position,
+            self.project.frame_rate(),
+        ));
+        cx.notify();
+    }
+
+    fn commit_timecode(&mut self, cx: &mut Context<Self>) {
+        let Some(buffer) = self.timecode_buffer.take() else {
+            return;
+        };
+        if let Some(time) = timecode::parse_timecode(&buffer, self.project.frame_rate()) {
+            self.seek_to(time, cx);
+        } else {
+            self.error = Some("invalid timecode (HH:MM:SS:FF)".into());
+            cx.notify();
+        }
+    }
+
+    fn nudge_track_gain(&mut self, track: TrackId, delta: f64, cx: &mut Context<Self>) {
+        let Some(current) = self
+            .project
+            .tracks()
+            .iter()
+            .find(|t| t.id() == track)
+            .map(Track::gain)
+        else {
+            return;
+        };
+        let gain = (current + delta).clamp(0.0, 2.0);
+        self.execute(&Command::SetTrackGain { id: track, gain }, cx);
+    }
+
+    /// Place an already-registered asset onto the first track at the playhead.
+    fn add_asset_at_playhead(&mut self, asset_id: AssetId, cx: &mut Context<Self>) {
+        let Some(asset) = self.project.assets().get(&asset_id).cloned() else {
+            return;
+        };
+        let kind = if asset.media_type.starts_with("video/") {
+            ClipKind::Video(asset_id.clone())
+        } else if asset.media_type.starts_with("image/") {
+            ClipKind::Image(asset_id.clone())
+        } else if asset.media_type.starts_with("audio/") {
+            ClipKind::Audio(asset_id.clone())
+        } else {
+            self.error = Some(format!("cannot place {}", asset.media_type));
+            cx.notify();
+            return;
+        };
+        let Some(track) = self.project.tracks().first().map(Track::id) else {
+            self.error = Some("no track to place the clip".into());
+            cx.notify();
+            return;
+        };
+        let start = self.position;
+        let Some(end) = start.0.checked_add(DEFAULT_MEDIA_TICKS) else {
+            return;
+        };
+        let Ok(range) = TimeRange::new(start, Time(end)) else {
+            return;
+        };
+        let clip = Clip::new(self.next_clip_id(), kind, range);
+        self.execute(&Command::AddClip { track, clip }, cx);
+    }
+
+    /// Add a built-in effect to the selected clip's chain.
+    fn add_effect_to_selected(&mut self, kind: animathio_core::EffectKind, cx: &mut Context<Self>) {
+        let Some(id) = self.selected else {
+            self.error = Some("select a clip to add an effect".into());
+            cx.notify();
+            return;
+        };
+        let index = self.find_clip(id).map_or(0, |clip| clip.effects.len());
+        let effect =
+            animathio_core::EffectInstance::new(animathio_core::EffectId(self.next_id), kind);
+        self.next_id = self.next_id.saturating_add(1);
+        self.execute(&Command::AddEffect { id, index, effect }, cx);
     }
 
     fn undo(&mut self, cx: &mut Context<Self>) {
@@ -1543,7 +1890,7 @@ impl Editor {
 
     fn on_timeline_scroll_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1552,7 +1899,7 @@ impl Editor {
             ScrollDelta::Pixels(point) => (f32::from(point.x), f32::from(point.y)),
             ScrollDelta::Lines(point) => (point.x * 20.0, point.y * 20.0),
         };
-        if event.control {
+        if event.modifiers.control {
             let layout = self.current_layout();
             let anchor = timeline::x_to_time(&layout, x);
             let factor = (dy * 0.002).exp();
@@ -1636,27 +1983,7 @@ impl Editor {
         cx.notify();
     }
 
-    fn on_open_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        self.open(cx);
-    }
-
-    fn on_add_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        self.add_menu_open = !self.add_menu_open;
-        cx.notify();
-    }
-
-    fn on_settings_click(
-        &mut self,
-        _event: &ClickEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.settings_open = !self.settings_open;
-        cx.notify();
-    }
-
     fn add_plugin_clip(&mut self, descriptor: &PluginDescriptor, cx: &mut Context<Self>) {
-        self.add_menu_open = false;
         let models = descriptor.models();
         let (numeric, opaque) = inspector::default_params(&models);
         let Some(track) = self.project.tracks().first() else {
@@ -1689,68 +2016,12 @@ impl Editor {
         self.execute(&Command::AddClip { track, clip }, cx);
     }
 
-    fn add_menu(&self, cx: &mut Context<Self>) -> Div {
-        let mut menu = div()
-            .absolute()
-            .top(px(48.))
-            .left(px(8.))
-            .w(px(220.))
-            .bg(rgb(0x1f2430))
-            .p_1()
-            .flex()
-            .flex_col();
-        if self.plugins.is_empty() {
-            menu = menu.child(div().px_2().child("No clip plugins loaded"));
-        }
-        for descriptor in &self.plugins {
-            let id = descriptor.id.clone();
-            menu = menu.child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .cursor_pointer()
-                    .child(descriptor.name.clone())
-                    .id("add-plugin-item")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.add_plugin_clip_by_id(&id, cx);
-                    })),
-            );
-        }
-        menu
-    }
-
     fn add_plugin_clip_by_id(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(descriptor) = self.plugins.iter().find(|plugin| plugin.id == id) else {
             return;
         };
         let descriptor = descriptor.clone();
         self.add_plugin_clip(&descriptor, cx);
-    }
-
-    fn on_save_click(
-        &mut self,
-        _event: &ClickEvent,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        self.save();
-    }
-
-    fn on_import_click(
-        &mut self,
-        _event: &ClickEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.import_media(cx);
-    }
-
-    fn on_undo_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        self.undo(cx);
-    }
-
-    fn on_redo_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        self.redo(cx);
     }
 
     fn on_play_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -2527,7 +2798,7 @@ impl Editor {
             )
     }
 
-    fn on_export_click(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn open_export_dialog(&mut self, cx: &mut Context<Self>) {
         if self.export_task.is_some() {
             return;
         }
@@ -2547,6 +2818,8 @@ impl Editor {
         self.start_export(output, false, cx);
     }
 
+    /// Spawn the export worker; the export dialog shows progress and carries the
+    /// confirm-overwrite prompt.
     fn start_export(&mut self, output: PathBuf, overwrite: bool, cx: &mut Context<Self>) {
         if self.export_task.is_some() {
             return;
@@ -2567,6 +2840,11 @@ impl Editor {
             Ok(task) => self.export_task = Some(task),
             Err(error) => self.error = Some(error),
         }
+        cx.notify();
+    }
+
+    fn toggle_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_open = !self.settings_open;
         cx.notify();
     }
 
@@ -2655,50 +2933,488 @@ impl Editor {
             ))
     }
 
-    fn top_bar(&self, cx: &mut Context<Self>) -> Div {
-        let play_label = if self.playing { "Pause" } else { "Play" };
+    fn menu_bar(&self, cx: &mut Context<Self>) -> Div {
         let dirty = if self.dirty { " ●" } else { "" };
+        let title = self.path.as_ref().map_or_else(
+            || "Untitled".to_owned(),
+            |p| {
+                p.file_name().map_or_else(
+                    || p.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                )
+            },
+        );
         div()
-            .h(px(44.))
+            .h(px(34.))
             .w_full()
             .flex()
             .flex_row()
             .items_center()
-            .gap_2()
-            .px_2()
-            .bg(rgb(0x1f2430))
-            .child(button("open", "Open", cx.listener(Self::on_open_click)))
-            .child(button("save", "Save", cx.listener(Self::on_save_click)))
+            .px_1()
+            .bg(rgb(0x171c26))
+            .child(
+                Button::new("menu-file")
+                    .ghost()
+                    .compact()
+                    .label("File")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::File, cx))),
+            )
+            .child(
+                Button::new("menu-edit")
+                    .ghost()
+                    .compact()
+                    .label("Edit")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::Edit, cx))),
+            )
+            .child(
+                Button::new("menu-view")
+                    .ghost()
+                    .compact()
+                    .label("View")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::View, cx))),
+            )
+            .child(
+                Button::new("menu-clip")
+                    .ghost()
+                    .compact()
+                    .label("Clip")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::Clip, cx))),
+            )
+            .child(
+                Button::new("menu-help")
+                    .ghost()
+                    .compact()
+                    .label("Help")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::Help, cx))),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text_color(rgb(0xc6cedb))
+                    .child(format!("{title}{dirty}")),
+            )
+    }
+
+    /// A dropdown listing the actions of the open menu, or `None` when closed.
+    fn menu_dropdown(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let menu = self.menu_open?;
+        let items: Vec<(&str, MenuAction)> = match menu {
+            MenuId::File => vec![
+                ("Open… Ctrl+O", Box::new(Self::open)),
+                ("Save Ctrl+S", Box::new(|this, _cx| this.save())),
+                ("Import media…", Box::new(Self::import_media)),
+                ("Export…", Box::new(Self::open_export_dialog)),
+                ("Settings", Box::new(Self::toggle_settings)),
+            ],
+            MenuId::Edit => vec![
+                ("Undo Ctrl+Z", Box::new(Self::undo)),
+                ("Redo Ctrl+Shift+Z", Box::new(Self::redo)),
+                ("Delete selection Del", Box::new(Self::delete_selected)),
+            ],
+            MenuId::View => vec![
+                (
+                    "Toggle media pool",
+                    Box::new(|this, cx| this.toggle_panel(PanelSide::Left, cx)),
+                ),
+                (
+                    "Toggle inspector",
+                    Box::new(|this, cx| this.toggle_panel(PanelSide::Right, cx)),
+                ),
+                (
+                    "Toggle timeline",
+                    Box::new(|this, cx| this.toggle_panel(PanelSide::Bottom, cx)),
+                ),
+            ],
+            MenuId::Clip => vec![
+                ("Split at playhead S", Box::new(Self::split_at_playhead)),
+                (
+                    "Add effect",
+                    Box::new(|this, cx| this.select_left_tab(LeftTab::Effects, cx)),
+                ),
+            ],
+            MenuId::Help => vec![("AniMathIO 2.0 — DaVinci-style editor", Box::new(|_, _| {}))],
+        };
+        let mut dropdown = div()
+            .absolute()
+            .top(px(34.))
+            .left(px(2.))
+            .w(px(220.))
+            .bg(rgb(0x1f2633))
+            .p_1()
+            .flex()
+            .flex_col()
+            .shadow_lg();
+        for (label, action) in items {
+            dropdown = dropdown.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .cursor_pointer()
+                    .hover(|this| this.bg(rgb(0x2a3446)))
+                    .child(label)
+                    .id("menu-item")
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.menu_open = None;
+                        action(this, cx);
+                    })),
+            );
+        }
+        Some(dropdown)
+    }
+
+    fn media_pool(&self, cx: &mut Context<Self>) -> Div {
+        let tabs = [
+            (LeftTab::Assets, "Assets"),
+            (LeftTab::Plugins, "Plugins"),
+            (LeftTab::Effects, "Effects"),
+        ];
+        let mut tab_row = div().flex().flex_row().w_full().bg(rgb(0x12161e));
+        for (tab, label) in tabs {
+            let selected = self.left_tab == tab;
+            tab_row = tab_row.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .cursor_pointer()
+                    .text_color(if selected {
+                        rgb(0xffffff)
+                    } else {
+                        rgb(0x8a94a6)
+                    })
+                    .bg(if selected {
+                        rgb(0x232c3a)
+                    } else {
+                        rgb(0x12161e)
+                    })
+                    .child(label)
+                    .id("media-tab")
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.select_left_tab(tab, cx);
+                    })),
+            );
+        }
+
+        let mut body = div()
+            .flex_1()
+            .w_full()
+            .p_1()
+            .id("media-body")
+            .overflow_y_scroll();
+        match self.left_tab {
+            LeftTab::Assets => {
+                if self.project.assets().is_empty() {
+                    body = body.child(empty_state("Drop media here"));
+                }
+                for (id, asset) in self.project.assets() {
+                    let asset_id = id.clone();
+                    let name = asset.name.clone();
+                    let kind = asset_kind_label(&asset.media_type);
+                    body = body.child(
+                        div()
+                            .px_2()
+                            .py_1()
+                            .cursor_pointer()
+                            .hover(|this| this.bg(rgb(0x232c3a)))
+                            .flex()
+                            .flex_row()
+                            .justify_between()
+                            .child(name)
+                            .child(div().text_color(rgb(0x8a94a6)).child(kind))
+                            .id("asset-item")
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.add_asset_at_playhead(asset_id.clone(), cx);
+                            })),
+                    );
+                }
+            }
+            LeftTab::Plugins => {
+                if self.plugins.is_empty() {
+                    body = body.child(empty_state("No clip plugins loaded"));
+                }
+                for descriptor in &self.plugins {
+                    let id = descriptor.id.clone();
+                    let name = descriptor.name.clone();
+                    body = body.child(
+                        div()
+                            .px_2()
+                            .py_1()
+                            .cursor_pointer()
+                            .hover(|this| this.bg(rgb(0x232c3a)))
+                            .child(name)
+                            .id("plugin-item")
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.add_plugin_clip_by_id(&id, cx);
+                            })),
+                    );
+                }
+            }
+            LeftTab::Effects => {
+                let kinds = [
+                    animathio_core::EffectKind::Grayscale,
+                    animathio_core::EffectKind::Sepia,
+                    animathio_core::EffectKind::Invert,
+                    animathio_core::EffectKind::Saturate,
+                    animathio_core::EffectKind::Brightness,
+                    animathio_core::EffectKind::Contrast,
+                    animathio_core::EffectKind::Blur,
+                    animathio_core::EffectKind::Opacity,
+                ];
+                for kind in kinds {
+                    body = body.child(
+                        div()
+                            .px_2()
+                            .py_1()
+                            .cursor_pointer()
+                            .hover(|this| this.bg(rgb(0x232c3a)))
+                            .child(effect_label(kind))
+                            .id("effect-item")
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.add_effect_to_selected(kind, cx);
+                            })),
+                    );
+                }
+            }
+        }
+        div()
+            .w(px(self.dock.left_width))
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(0x151a22))
+            .child(tab_row)
+            .child(body)
+    }
+
+    fn viewer(&self, cx: &mut Context<Self>) -> Div {
+        let image = self.image.clone();
+        let viewport = div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgb(0x0b0e13))
+            .relative();
+        let viewport = if let Some(image) = image {
+            viewport
+                .child(img(image).w_full().h_full().object_fit(ObjectFit::Contain))
+                .child(canvas(
+                    move |_bounds, _window, _cx| {},
+                    move |bounds, (), window, cx| paint_safe_areas(bounds, window, cx),
+                ))
+        } else {
+            viewport.child(empty_state("rendering…"))
+        };
+        div()
+            .flex_1()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(0x0b0e13))
+            .child(viewport)
+            .child(self.transport_controls(cx))
+    }
+
+    fn transport_controls(&self, cx: &mut Context<Self>) -> Div {
+        let play_label = if self.playing { "⏸" } else { "▶" };
+        let loop_label = if self.loop_playback {
+            "🔁 on"
+        } else {
+            "🔁 off"
+        };
+        let timecode_text = self
+            .timecode_buffer
+            .clone()
+            .unwrap_or_else(|| timecode::format_timecode(self.position, self.project.frame_rate()));
+        let timecode_editing = self.timecode_buffer.is_some();
+        div()
+            .h(px(36.))
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .px_1()
+            .bg(rgb(0x151a22))
             .child(button(
-                "export",
-                "Export…",
-                cx.listener(Self::on_export_click),
+                "jump-start",
+                "⏮",
+                cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_start(cx)),
             ))
             .child(button(
-                "import",
-                "Add media…",
-                cx.listener(Self::on_import_click),
+                "step-back",
+                "◀",
+                cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(-1, cx)),
             ))
-            .child(button("add", "Add clip…", cx.listener(Self::on_add_click)))
-            .child(button(
-                "settings",
-                "Settings",
-                cx.listener(Self::on_settings_click),
-            ))
-            .child(button("undo", "Undo", cx.listener(Self::on_undo_click)))
-            .child(button("redo", "Redo", cx.listener(Self::on_redo_click)))
             .child(button("play", play_label, cx.listener(Self::on_play_click)))
+            .child(button(
+                "step-fwd",
+                "▶",
+                cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(1, cx)),
+            ))
+            .child(button(
+                "jump-end",
+                "⏭",
+                cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_end(cx)),
+            ))
+            .child(button(
+                "loop",
+                loop_label,
+                cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_loop(cx)),
+            ))
             .child(
                 div()
                     .px_2()
-                    .child(format!("{:.3} s", seconds(self.position))),
+                    .py_1()
+                    .cursor_text()
+                    .bg(rgb(0x232c3a))
+                    .text_color(if timecode_editing {
+                        rgb(0xffd166)
+                    } else {
+                        rgb(0xffffff)
+                    })
+                    .child(timecode_text)
+                    .id("timecode")
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.begin_timecode_edit(cx);
+                    })),
             )
-            .child(div().text_color(rgb(0x8a94a6)).child(dirty))
+    }
+
+    fn timeline_panel(&self, cx: &mut Context<Self>) -> Div {
+        let snapshot = self.build_timeline_snapshot();
+        let zoom = self.timeline_zoom;
+        let scroll = self.timeline_scroll;
+        let weak = cx.entity().downgrade();
+        let snapping = self.snapping;
+        let snap_label = if snapping { "Snap: on" } else { "Snap: off" };
+
+        div()
+            .h(px(TIMELINE_H))
+            .w_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(0x12161e))
+            .child(
+                div()
+                    .h(px(30.))
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .bg(rgb(0x171c26))
+                    .child(button(
+                        "snap",
+                        snap_label,
+                        cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_snapping(cx)),
+                    ))
+                    .child(button(
+                        "zoom-out",
+                        "−",
+                        cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.timeline_zoom = (this.timeline_zoom / 1.25).clamp(1.0, 64.0);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(div().text_color(rgb(0x8a94a6)).child(format!("{zoom:.1}×")))
+                    .child(button(
+                        "zoom-in",
+                        "+",
+                        cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.timeline_zoom = (this.timeline_zoom * 1.25).clamp(1.0, 64.0);
+                            cx.notify();
+                        }),
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .child(self.track_header(cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(Self::on_timeline_mouse_down),
+                            )
+                            .on_mouse_move(cx.listener(Self::on_timeline_mouse_move))
+                            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
+                            .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
+                            .child(
+                                canvas(
+                                    move |bounds, _window, cx| {
+                                        let _ = weak
+                                            .update(cx, |this, _| this.timeline_bounds = bounds);
+                                    },
+                                    move |bounds, (), window, cx| {
+                                        paint_timeline(bounds, &snapshot, zoom, scroll, window, cx);
+                                    },
+                                )
+                                .size_full(),
+                            ),
+                    ),
+            )
+    }
+
+    fn track_header(&self, cx: &mut Context<Self>) -> Div {
+        let mut header = div()
+            .w(px(HEADER_W))
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(rgb(0x151a22));
+        header = header.child(
+            div()
+                .h(px(RULER_H))
+                .w_full()
+                .border_b_1()
+                .border_color(rgb(0x2a3342)),
+        );
+        for track in self.project.tracks() {
+            let id = track.id();
+            let name = track.name().to_owned();
+            let gain = track.gain();
+            header = header.child(
+                div()
+                    .h(px(ROW_H))
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .px_1()
+                    .border_b_1()
+                    .border_color(rgb(0x2a3342))
+                    .child(div().flex_1().child(name))
+                    .child(div().text_color(rgb(0x8a94a6)).child(format!("{gain:.1}")))
+                    .child(button(
+                        "gain-",
+                        "−",
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.nudge_track_gain(id, -0.1, cx);
+                        }),
+                    ))
+                    .child(button(
+                        "gain+",
+                        "+",
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.nudge_track_gain(id, 0.1, cx);
+                        }),
+                    )),
+            );
+        }
+        header
     }
 
     fn inspector(&self, cx: &mut Context<Self>) -> Div {
         let mut pane = div()
-            .w(px(260.))
+            .w(px(self.dock.right_width))
             .h_full()
             .flex()
             .flex_col()
@@ -2785,6 +3501,9 @@ impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.pump_results(window);
         self.drain_control(cx);
+        if self.bench.is_some() {
+            self.bench_tick(window, cx);
+        }
         if let Some(task) = &self.export_task {
             match task.result.try_recv() {
                 Ok(result) => {
@@ -2814,43 +3533,14 @@ impl Render for Editor {
             window.request_animation_frame();
         }
 
-        let image = self.image.clone();
-        let snapshot = self.build_timeline_snapshot();
-        let zoom = self.timeline_zoom;
-        let scroll = self.timeline_scroll;
-        let weak = cx.entity().downgrade();
-
-        let viewport = div()
-            .flex_1()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgb(0x0b0e13));
-        let viewport = if let Some(image) = image {
-            viewport.child(img(image).w_full().h_full().object_fit(ObjectFit::Contain))
-        } else {
-            viewport.child("rendering…")
-        };
-
-        let timeline = div()
-            .h(px(TIMELINE_H))
-            .w_full()
-            .bg(rgb(0x12161e))
-            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_timeline_mouse_down))
-            .on_mouse_move(cx.listener(Self::on_timeline_mouse_move))
-            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
-            .on_scroll_wheel(cx.listener(Self::on_timeline_scroll_wheel))
-            .child(
-                canvas(
-                    move |bounds, _window, cx| {
-                        let _ = weak.update(cx, |this, _| this.timeline_bounds = bounds);
-                    },
-                    move |bounds, (), window, cx| {
-                        paint_timeline(bounds, &snapshot, zoom, scroll, window, cx);
-                    },
-                )
-                .size_full(),
-            );
+        let mut middle = div().flex_1().flex().flex_row();
+        if self.dock.left_open {
+            middle = middle.child(self.media_pool(cx));
+        }
+        middle = middle.child(self.viewer(cx));
+        if self.dock.right_open {
+            middle = middle.child(self.inspector(cx));
+        }
 
         let mut root = div()
             .size_full()
@@ -2860,19 +3550,14 @@ impl Render for Editor {
             .bg(rgb(0x0b0e13))
             .text_color(rgb(0xffffff))
             .track_focus(&self.focus_handle)
-            .child(self.top_bar(cx))
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_row()
-                    .child(viewport)
-                    .child(self.inspector(cx)),
-            )
-            .child(timeline)
-            .child(self.status_line());
-        if self.add_menu_open {
-            root = root.child(self.add_menu(cx));
+            .child(self.menu_bar(cx))
+            .child(middle);
+        if self.dock.bottom_open {
+            root = root.child(self.timeline_panel(cx));
+        }
+        root = root.child(self.status_line());
+        if let Some(dropdown) = self.menu_dropdown(cx) {
+            root = root.child(dropdown);
         }
         if self.settings_open {
             root = root.child(self.settings_dialog(cx));
@@ -2965,7 +3650,14 @@ fn paint_timeline(
             let line = window
                 .text_system()
                 .shape_line(clip.label.clone(), px(11.0), &[run], None);
-            let _ = line.paint(point(x0 + px(4.0), y0 + px(16.0)), px(14.0), window, cx);
+            let _ = line.paint(
+                point(x0 + px(4.0), y0 + px(16.0)),
+                px(14.0),
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
         }
         if clip.error {
             let badge = Bounds::from_corners(
@@ -2984,7 +3676,14 @@ fn paint_timeline(
             let line = window
                 .text_system()
                 .shape_line("!".into(), px(9.0), &[run], None);
-            let _ = line.paint(point(x0 + px(3.0), y0 + px(2.0)), px(9.0), window, cx);
+            let _ = line.paint(
+                point(x0 + px(3.0), y0 + px(2.0)),
+                px(9.0),
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
         }
         for keyframe in &clip.keyframes {
             let kx = bounds.origin.x + px(timeline::time_to_x(&layout, keyframe.time));
@@ -3058,10 +3757,6 @@ fn field_scrub_scale(field: &Field) -> f64 {
     }
 }
 
-fn seconds(time: Time) -> f64 {
-    time.0 as f64 / TICKS_PER_SECOND as f64
-}
-
 fn frame_rate_label(rate: FrameRate) -> String {
     if rate.denominator() == 1 {
         format!("{} fps", rate.numerator())
@@ -3086,6 +3781,65 @@ fn kind_label(kind: &ClipKind) -> String {
         ClipKind::Vector(_) => "vector".into(),
         ClipKind::Error(_) => "error".into(),
     }
+}
+
+/// Human-readable media-pool label for an asset's declared media type.
+fn asset_kind_label(media_type: &str) -> &'static str {
+    if media_type.starts_with("video/") {
+        "video"
+    } else if media_type.starts_with("image/") {
+        "image"
+    } else if media_type.starts_with("audio/") {
+        "audio"
+    } else {
+        "asset"
+    }
+}
+
+/// Human-readable effect name for the effects tab and inspector.
+fn effect_label(kind: animathio_core::EffectKind) -> &'static str {
+    match kind {
+        animathio_core::EffectKind::Grayscale => "Grayscale",
+        animathio_core::EffectKind::Sepia => "Sepia",
+        animathio_core::EffectKind::Invert => "Invert",
+        animathio_core::EffectKind::Saturate => "Saturate",
+        animathio_core::EffectKind::Brightness => "Brightness",
+        animathio_core::EffectKind::Contrast => "Contrast",
+        animathio_core::EffectKind::Blur => "Blur",
+        animathio_core::EffectKind::Opacity => "Opacity",
+    }
+}
+
+/// Dim placeholder text used for empty panels and unloaded viewports.
+fn empty_state(label: &'static str) -> Div {
+    div()
+        .w_full()
+        .py_4()
+        .flex()
+        .justify_center()
+        .text_color(rgb(0x5a6474))
+        .child(label)
+}
+
+/// Paint title-safe and action-safe guides over the viewer.
+fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, _cx: &mut App) {
+    let width = f32::from(bounds.size.width);
+    let height = f32::from(bounds.size.height);
+    let origin = bounds.origin;
+    let mut paint_frame = |inset: f32| {
+        let left = origin.x + px(width * inset);
+        let top = origin.y + px(height * inset);
+        let frame_bounds = Bounds::from_corners(
+            point(left, top),
+            point(
+                origin.x + px(width * (1.0 - inset)),
+                origin.y + px(height * (1.0 - inset)),
+            ),
+        );
+        window.paint_quad(outline(frame_bounds, rgb(0x3a4658), BorderStyle::Solid));
+    };
+    paint_frame(0.05); // action-safe
+    paint_frame(0.10); // title-safe
 }
 
 fn clip_label(project: &Project, clip: &Clip) -> String {

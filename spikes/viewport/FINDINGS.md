@@ -77,3 +77,66 @@ Raw benchmark output lives in `results/`. The table uses final runs with compila
 ## Reproduce
 
 See [README.md](README.md) for exact resource-limited build/run/cleanup commands. Keep the benchmark window visible, use the committed lockfile, and record the GPU/backend/driver from stdout. Compare full cadence to the 16.667 ms budget, not the pipeline-only number. Build artifacts are cleaned after pushing as requested.
+
+## gpui-component migration (2026-11-12)
+
+The editor migrated off crates.io `gpui = "=0.2.2"` onto the GPUI distribution
+pinned by **gpui-component 0.9.1** (Longbridge / GPUI Kit). `gpui-component`
+depends on `gpui-pre = "=0.3.12"`, which is GPUI Kit's maintained fork of Zed's
+`gpui 0.2.2` (same `zed-version = "0.2.2"`, so the application API is nearly
+identical). The workspace now pins the matching crate family:
+
+- `gpui-pre` (lib name `gpui`) — the core, platform-agnostic API.
+- `gpui-pre-platform` (lib `gpui_platform`) — the desktop entry point
+  (`gpui_platform::application()`); it in turn pulls `gpui-pre-linux`
+  (pure-Rust `x11rb` + `wayland-client` + system `libxkbcommon`) and
+  `gpui-pre-wgpu` (Blade is gone; Linux renders through **wgpu 30.0.1**, the
+  same wgpu major the Vello spike uses).
+- `gpui-component` — the widget kit (Phase 2 redesign; only `init(cx)` is
+  called in Phase 1).
+
+### API deltas found during the port
+
+All confirmed by the compiler, none behavioural:
+
+| gpui 0.2.2 | gpui-pre 0.3.12 |
+| --- | --- |
+| `Application::new().run(…)` | `gpui_platform::application().run(…)` (desktop platform moved out of `gpui`) |
+| `on_window_closed(\|cx\| …)` | `on_window_closed(\|cx, _window_id\| …)` |
+| `window.focus(&handle)` | `window.focus(&handle, cx)` |
+| `Line::paint(origin, height, window, cx)` | `Line::paint(origin, height, TextAlign, Option<Pixels>, window, cx)` |
+| `ScrollWheelEvent` / `.on_scroll_wheel` | `ScrollEvent` / `.on_scroll` (modifiers now `event.modifiers.control`) |
+
+`RenderImage::new`, `Window::drop_image`, `img(Arc<RenderImage>)` and
+`ObjectFit` are unchanged, so the presentation path compiled as-is.
+
+### xattr patch removed
+
+`gpui 0.2.2` pulled `xattr 0.2.3` (broken against libc 0.2.191). `gpui-pre`
+does not depend on `xattr`, so the `vendor/xattr` patch and the
+`[patch.crates-io]` entry were deleted after `cargo fetch` re-resolved cleanly.
+
+### Viewport re-verification on gpui-pre
+
+Added `--bench-viewport` to the editor: it renders the shared sample project at
+**1920×1080**, warms up for 2 s, then scrubs to a deterministic xorshift tick at
+a 60 Hz request cadence for 10 s and prints the p50/p95 cadence of frames that
+complete the full path (worker render → BGRA swap → `RenderImage` → `img` upload
+→ `drop_image`), then quits.
+
+Release / Wayland: **550 samples, p50 18.182 ms, p95 18.222 ms ≈ 55 fps**.
+
+This is the **whole editor preview pipeline**, not the synthetic GPU-Vello path
+from the original spike. Two deliberate differences from the 164 fps result:
+
+1. **The editor rasterizes with `vello_cpu`** (scalar, SIMD disabled via
+   `fearless_simd::force_support_fallback` for deterministic golden frames), not
+   the GPU Vello + wgpu-readback pipeline the spike benchmarked. Rasterization,
+   not the GPUI upload path, dominates.
+2. Rendering runs on a background worker with a channel round-trip and a
+   `request_animation_frame` pump, adding ~2–3 ms of hand-off latency per frame.
+
+The presentation path itself (`RenderImage` BGRA + `img()` + `Window::drop_image`)
+survived the migration unchanged and is not the limiter. Reaching a strict
+60 fps at 1080p in the editor needs either SIMD-enabled rasterization (breaks
+golden-frame determinism) or a preview resolution proxy; both are deferred.
