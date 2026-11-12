@@ -190,6 +190,14 @@ cargo build \
 The plugin host loads `.amplugin` files via `PluginHost::load_plugin_file` or a
 whole directory via `PluginHost::load_plugins_dir`.
 
+Installed packages bundle these files under the packager's `resources` target
+`plugins`, and `animathio_plugin_host::plugin_search_dirs()` finds them relative
+to the running executable: `plugins/` beside the binary (Windows and the in-tree
+`target/release` layout), `../lib/<binary>/plugins` (deb and AppImage, where
+cargo-packager puts resources under `usr/lib/animathio/`) and
+`../Resources/plugins` (the macOS app bundle). `ANIMATHIO_PLUGIN_DIR` overrides
+all of them.
+
 ## Sandbox limits
 
 Plugins run with no ambient authority. Defaults (in `plugin-host`,
