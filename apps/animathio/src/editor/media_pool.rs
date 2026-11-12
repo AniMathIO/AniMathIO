@@ -293,6 +293,15 @@ impl Editor {
                 }
             }
             LeftTab::Plugins => {
+                body = body.child(
+                    Button::new("write-on-preset")
+                        .icon(icons::icon(IconName::PenLine))
+                        .label("Write on…")
+                        .tooltip("Animate the selected LaTeX clip")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_write_on(window, cx)),
+                        ),
+                );
                 if self.plugins.is_empty() {
                     body = body.child(empty_state("No clip plugins loaded", cx));
                 }
@@ -382,6 +391,9 @@ impl Editor {
             .flex()
             .flex_col()
             .bg(cx.theme().popover)
+            .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                this.import_paths(paths.paths(), None, cx)
+            }))
             .child(tab_row)
             .child(body)
     }

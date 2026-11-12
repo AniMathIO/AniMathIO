@@ -109,7 +109,11 @@ impl Editor {
     }
 
     pub(super) fn autosave_tick(&mut self, cx: &mut Context<Self>) {
-        if !self.dirty || self.path.is_none() || self.last_autosave.elapsed() < AUTOSAVE_INTERVAL {
+        if !self.dirty
+            || self.path.is_none()
+            || self.preferences.autosave_seconds == 0
+            || self.last_autosave.elapsed() < Duration::from_secs(self.preferences.autosave_seconds)
+        {
             return;
         }
         let path = autosave_path(self.path.as_ref().expect("checked above"));
@@ -173,18 +177,6 @@ impl Editor {
                     &self.plugin_param_command(id, name, json!([point[0], point[1]])),
                     cx,
                 );
-            }
-            InputTarget::SettingsWidth => {
-                self.commit_settings_edit(&buffer, SettingsField::Width, cx);
-            }
-            InputTarget::SettingsHeight => {
-                self.commit_settings_edit(&buffer, SettingsField::Height, cx);
-            }
-            InputTarget::SettingsFps => {
-                self.commit_settings_edit(&buffer, SettingsField::Fps, cx);
-            }
-            InputTarget::SettingsBackground => {
-                self.commit_settings_edit(&buffer, SettingsField::Background, cx);
             }
         }
         cx.notify();
@@ -285,59 +277,6 @@ impl Editor {
                 .map(str::to_owned)
                 .filter(|value| self.project.assets().contains_key(&asset_id_from(value)))
         })
-    }
-
-    pub(super) fn commit_settings_edit(
-        &mut self,
-        buffer: &str,
-        field: SettingsField,
-        cx: &mut Context<Self>,
-    ) {
-        let mut width = self.project.width();
-        let mut height = self.project.height();
-        let mut frame_rate = self.project.frame_rate();
-        let mut background = self.project.background();
-        match field {
-            SettingsField::Width => match buffer.trim().parse::<u32>() {
-                Ok(value) if value <= 65_535 => width = value,
-                _ => {
-                    self.error = Some("invalid width".into());
-                    return;
-                }
-            },
-            SettingsField::Height => match buffer.trim().parse::<u32>() {
-                Ok(value) if value <= 65_535 => height = value,
-                _ => {
-                    self.error = Some("invalid height".into());
-                    return;
-                }
-            },
-            SettingsField::Fps => match parse_fps(buffer.trim()) {
-                Ok(value) => frame_rate = value,
-                Err(message) => {
-                    self.error = Some(message);
-                    return;
-                }
-            },
-            SettingsField::Background => {
-                if let Some(value) = parse_hex_color(buffer.trim()) {
-                    background = value;
-                } else {
-                    self.error = Some("invalid color (use #RRGGBB or #RRGGBBAA)".into());
-                    return;
-                }
-            }
-        }
-        self.execute(
-            &Command::SetSettings {
-                width,
-                height,
-                frame_rate,
-                background,
-                duration: self.project.duration(),
-            },
-            cx,
-        );
     }
 
     pub(super) fn commit_field(

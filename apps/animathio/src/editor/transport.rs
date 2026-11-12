@@ -9,8 +9,11 @@ impl Editor {
                 self.error = Some(error);
             }
             self.playing = false;
+            self.shuttle.0 = 0;
             self.position = self.clock.now();
         } else {
+            self.shuttle.0 = 1;
+            let _ = self.clock.set_rate(1);
             if let Err(error) = self.clock.seek(self.position) {
                 self.error = Some(error);
             }
@@ -22,8 +25,40 @@ impl Editor {
         cx.notify();
     }
 
+    pub(super) fn shuttle(&mut self, direction: i32, cx: &mut Context<Self>) {
+        if direction == 0 {
+            self.seek_to(self.clock.now(), cx);
+            return;
+        }
+        let rate = self.shuttle.press(direction);
+        if let Err(error) = self.clock.set_rate(rate).and_then(|()| self.clock.play()) {
+            self.error = Some(error);
+            return;
+        }
+        self.playing = true;
+        cx.notify();
+    }
+
+    pub(super) fn step_edit(&mut self, direction: i32, cx: &mut Context<Self>) {
+        let edges = self
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .flat_map(|c| [c.range.start, c.range.end]);
+        let time = if direction < 0 {
+            edges.filter(|t| *t < self.position).max()
+        } else {
+            edges.filter(|t| *t > self.position).min()
+        };
+        if let Some(time) = time {
+            self.seek_to(time, cx);
+        }
+    }
+
     pub(super) fn seek_to(&mut self, time: Time, cx: &mut Context<Self>) {
         self.playing = false;
+        self.shuttle.0 = 0;
         if let Err(error) = self.clock.pause() {
             self.error = Some(error);
         }
@@ -163,7 +198,7 @@ impl Editor {
         let value = timecode::format_timecode(self.position, self.project.frame_rate());
         let state = self.input_state("timecode", InputTarget::Timecode, value, 0.0, window, cx);
         div()
-            .h(px(36.))
+            .h(px(40.))
             .w_full()
             .flex()
             .flex_row()
@@ -171,6 +206,13 @@ impl Editor {
             .gap_1()
             .px_1()
             .bg(cx.theme().background)
+            .child(
+                div()
+                    .w(px(124.))
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .child(gpui_component::input::Input::new(&state).small()),
+            )
+            .child(div().flex_1())
             .child(icon_button(
                 "jump-start",
                 icons::icon(IconName::SkipBack),
@@ -183,12 +225,15 @@ impl Editor {
                 "Step back one frame",
                 cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(-1, cx)),
             ))
-            .child(icon_button(
-                "play",
-                play_icon,
-                play_tooltip,
-                cx.listener(Self::on_play_click),
-            ))
+            .child(
+                icon_button(
+                    "play",
+                    play_icon,
+                    play_tooltip,
+                    cx.listener(Self::on_play_click),
+                )
+                .when(self.playing, |button| button.primary()),
+            )
             .child(icon_button(
                 "step-fwd",
                 icons::icon(IconName::StepForward),
@@ -215,11 +260,16 @@ impl Editor {
                 .selected(self.loop_playback)
                 .toggled(self.loop_playback),
             )
-            .child(
-                div()
-                    .w(px(124.))
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .child(gpui_component::input::Input::new(&state).small()),
-            )
+            .child(div().flex_1())
+            .child(div().text_color(cx.theme().muted_foreground).child(
+                if self.playing && self.shuttle.0 != 1 {
+                    format!("{}x (silent)", self.shuttle.0)
+                } else {
+                    timecode::format_timecode(
+                        Time(timeline::project_duration(&self.project)),
+                        self.project.frame_rate(),
+                    )
+                },
+            ))
     }
 }

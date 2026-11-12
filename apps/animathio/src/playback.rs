@@ -8,6 +8,9 @@ use animathio_core::{Project, Rounding, TICKS_PER_SECOND, Time};
 /// is due now" once per UI frame; video is never drift-corrected on its own.
 pub(crate) trait Clock {
     fn now(&self) -> Time;
+    fn set_rate(&mut self, _rate: i32) -> Result<(), String> {
+        Ok(())
+    }
     fn has_error(&self) -> bool {
         false
     }
@@ -86,6 +89,7 @@ impl Clock for AudioClock {
 /// Wall-clock fallback used when no audio device is available. It implements the
 /// same trait so the rest of the editor is indifferent to which clock is driving.
 pub(crate) struct MonotonicClock {
+    rate: i32,
     base: Time,
     playing: bool,
     started: Instant,
@@ -94,6 +98,7 @@ pub(crate) struct MonotonicClock {
 impl MonotonicClock {
     pub(crate) fn new() -> Self {
         Self {
+            rate: 1,
             base: Time(0),
             playing: false,
             started: Instant::now(),
@@ -102,9 +107,20 @@ impl MonotonicClock {
 }
 
 impl Clock for MonotonicClock {
+    fn set_rate(&mut self, rate: i32) -> Result<(), String> {
+        self.base = self.now();
+        self.started = Instant::now();
+        self.rate = rate;
+        Ok(())
+    }
+
     fn now(&self) -> Time {
         if self.playing {
-            Time(self.base.0.saturating_add(ticks(self.started.elapsed())))
+            Time(
+                self.base.0.saturating_add(
+                    ticks(self.started.elapsed()).saturating_mul(i64::from(self.rate)),
+                ),
+            )
         } else {
             self.base
         }
@@ -135,9 +151,74 @@ impl Clock for MonotonicClock {
 
 /// Choose the audio clock, falling back to a monotonic clock with no device.
 pub(crate) fn make_clock(project: &Project, pool: &AudioPool) -> Box<dyn Clock> {
-    match AudioClock::open(project, pool) {
+    let normal: Box<dyn Clock> = match AudioClock::open(project, pool) {
         Ok(clock) => Box::new(clock),
         Err(_) => Box::new(MonotonicClock::new()),
+    };
+    Box::new(RateClock {
+        normal,
+        shuttle: MonotonicClock::new(),
+        rate: 1,
+        playing: false,
+    })
+}
+
+/// Audio remains the master at 1x. Reverse and accelerated shuttle use a silent
+/// signed monotonic clock; switching back seeks audio to the same timeline tick.
+struct RateClock {
+    normal: Box<dyn Clock>,
+    shuttle: MonotonicClock,
+    rate: i32,
+    playing: bool,
+}
+impl Clock for RateClock {
+    fn now(&self) -> Time {
+        if self.rate == 1 {
+            self.normal.now()
+        } else {
+            self.shuttle.now()
+        }
+    }
+    fn set_rate(&mut self, rate: i32) -> Result<(), String> {
+        let time = self.now();
+        self.normal.pause()?;
+        self.shuttle.pause()?;
+        self.rate = rate;
+        self.shuttle.set_rate(rate)?;
+        self.seek(time)?;
+        if self.playing {
+            self.play()?;
+        }
+        Ok(())
+    }
+    fn play(&mut self) -> Result<(), String> {
+        self.playing = true;
+        if self.rate == 1 {
+            self.normal.play()
+        } else {
+            self.shuttle.play()
+        }
+    }
+    fn pause(&mut self) -> Result<(), String> {
+        self.playing = false;
+        self.normal.pause()?;
+        self.shuttle.pause()
+    }
+    fn seek(&mut self, time: Time) -> Result<(), String> {
+        self.normal.seek(time)?;
+        self.shuttle.seek(time)
+    }
+    fn has_error(&self) -> bool {
+        self.rate == 1 && self.normal.has_error()
+    }
+    fn set_project(&mut self, project: Arc<Project>) {
+        self.normal.set_project(project);
+    }
+    fn set_mixer(&mut self, mixer: Arc<Mixer>) {
+        self.normal.set_mixer(mixer);
+    }
+    fn mixer_format(&self) -> Option<(u32, u16)> {
+        self.normal.mixer_format()
     }
 }
 

@@ -37,9 +37,12 @@ impl Editor {
                 MenuItem::action("Save", SaveProject),
                 MenuItem::separator(),
                 MenuItem::action("Import media…", ImportMedia),
+                MenuItem::action("Import v1…", ImportV1),
+                MenuItem::action("Import Manim scene…", ImportManim),
                 MenuItem::action("Export…", ExportVideo).disabled(self.export_task.is_some()),
                 MenuItem::separator(),
                 MenuItem::action("Project settings…", ProjectSettings),
+                MenuItem::action("Preferences…", Preferences),
             ]),
             Menu::new("Edit").items([
                 MenuItem::action("Undo", Undo),
@@ -56,9 +59,32 @@ impl Editor {
                 MenuItem::action("GPU preview", ToggleGpuPreview).checked(self.preview.gpu),
                 MenuItem::action("Zoom to fit", ZoomToFit),
             ]),
+            Menu::new("Playback").items([
+                MenuItem::action("Shuttle reverse", ShuttleReverse),
+                MenuItem::action("Stop", ShuttleStop),
+                MenuItem::action("Shuttle forward", ShuttleForward),
+                MenuItem::action("Previous frame", PreviousFrame),
+                MenuItem::action("Next frame", NextFrame),
+                MenuItem::action("Previous edit", PreviousEdit),
+                MenuItem::action("Next edit", NextEdit),
+                MenuItem::action("Start", GoToStart),
+                MenuItem::action("End", GoToEnd),
+                MenuItem::action("Set in", MarkIn),
+                MenuItem::action("Set out (exclusive)", MarkOut),
+                MenuItem::action("Clear in/out", ClearMarks),
+                MenuItem::action("Loop", ToggleLoop),
+            ]),
+            Menu::new("Tools").items([
+                MenuItem::action("Select", SelectTool),
+                MenuItem::action("Blade", BladeTool),
+                MenuItem::action("Ripple", RippleTool),
+                MenuItem::action("Hand", HandTool),
+            ]),
             Menu::new("Clip").items([
                 MenuItem::action("Split at playhead", SplitClip).disabled(self.selected.is_none()),
                 MenuItem::action("Add effect", ShowEffects),
+                MenuItem::action("Ripple delete", RippleDelete),
+                MenuItem::action("Write on…", WriteOn),
             ]),
             Menu::new("Help").items([
                 MenuItem::action("Keyboard shortcuts…", KeyboardShortcuts),
@@ -83,7 +109,7 @@ impl Editor {
                 .w_full()
                 .child(
                     div()
-                        .w(px(300.))
+                        .w(px(460.))
                         .flex_shrink_0()
                         .h_full()
                         .child(self.app_menu.clone()),
@@ -128,7 +154,9 @@ impl Editor {
                         .label("Export")
                         .disabled(self.export_task.is_some())
                         .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
-                        .on_click(cx.listener(|this, _, _, cx| this.open_export_dialog(cx))),
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_export_dialog(window, cx)),
+                        ),
                 ),
         )
     }

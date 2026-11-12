@@ -16,6 +16,7 @@
 )]
 
 mod control;
+mod editing;
 mod editor;
 mod export_worker;
 mod fades;
@@ -24,6 +25,7 @@ mod icons;
 mod inspector;
 mod layout;
 mod playback;
+mod preferences;
 mod preview_settings;
 mod render_worker;
 mod timecode;
@@ -63,7 +65,12 @@ fn main() {
 
             let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
             editor::actions::init(cx);
-            cx.global_mut::<gpui_component::Theme>().font_size = px(12.);
+            cx.global_mut::<gpui_component::Theme>().font_size =
+                px(if preferences::Preferences::load().compact {
+                    12.
+                } else {
+                    14.
+                });
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -102,12 +109,17 @@ fn bench_viewport_enabled() -> bool {
 /// `animathio [--control] [--bench-viewport] [file.amio]` opens a project; no
 /// argument opens the shared sample.
 fn initial_project() -> (Project, BTreeMap<AssetId, Vec<u8>>, Option<PathBuf>, bool) {
-    let Some(arg) = std::env::args()
-        .skip(1)
-        .find(|arg| arg != "--control" && arg != "--bench-viewport")
-    else {
-        let sample = sample::build().expect("build sample project");
-        return (sample.project, sample.assets, None, false);
+    let Some(arg) = std::env::args().skip(1).find(|arg| !arg.starts_with("--")) else {
+        if std::env::args().any(|arg| arg == "--sample" || arg == "--bench-viewport") {
+            let sample = sample::build().expect("build sample project");
+            return (sample.project, sample.assets, None, false);
+        }
+        return (
+            Project::new(animathio_core::FrameRate::new(30, 1).expect("30 fps")),
+            BTreeMap::new(),
+            None,
+            false,
+        );
     };
     let path = PathBuf::from(arg);
     match editor::read_project_with_recovery(&path) {

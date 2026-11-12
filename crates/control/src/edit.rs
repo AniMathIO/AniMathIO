@@ -475,6 +475,25 @@ pub enum ExportPreset {
 }
 
 impl ExportPreset {
+    /// Shared delivery preset table for the editor, CLI and MCP.
+    pub const ALL: [Self; 4] = [
+        Self::Youtube1080p,
+        Self::Youtube4k,
+        Self::ShortsVertical,
+        Self::Square,
+    ];
+
+    /// Stable name used in JSON and user-facing preset selectors.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Youtube1080p => "youtube_1080p",
+            Self::Youtube4k => "youtube_4k",
+            Self::ShortsVertical => "shorts_vertical",
+            Self::Square => "square",
+        }
+    }
+
     /// Output `(width, height)`.
     #[must_use]
     pub const fn resolution(self) -> (u32, u32) {

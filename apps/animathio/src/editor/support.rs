@@ -103,12 +103,49 @@ pub(super) fn paint_timeline(
     for clip in &snapshot.clips {
         paint_clip(bounds, &layout, clip, window, cx);
     }
+    if snapshot.marks.marked()
+        && let Some(range) = snapshot.marks.range(snapshot.duration)
+    {
+        let x0 = bounds.origin.x + px(timeline::time_to_x(&layout, range.start));
+        let x1 = bounds.origin.x + px(timeline::time_to_x(&layout, range.end));
+        window.paint_quad(fill(
+            Bounds::from_corners(
+                point(x0, bounds.origin.y),
+                point(x1, bounds.origin.y + px(RULER_H)),
+            ),
+            snapshot.theme.primary.opacity(0.25),
+        ));
+        for x in [x0, x1] {
+            window.paint_quad(fill(
+                Bounds::new(point(x, bounds.origin.y), size(px(2.), px(height))),
+                snapshot.theme.primary.opacity(0.65),
+            ));
+            window.paint_quad(fill(
+                Bounds::new(point(x, bounds.origin.y), size(px(8.), px(6.))),
+                snapshot.theme.primary,
+            ));
+        }
+    }
+    if let Some(time) = snapshot.snap_line {
+        let x = bounds.origin.x + px(timeline::time_to_x(&layout, time));
+        window.paint_quad(fill(
+            Bounds::new(point(x, bounds.origin.y), size(px(2.), px(height))),
+            gpui::rgb(0xffd43b),
+        ));
+    }
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let head = Bounds::from_corners(
         point(head_x, bounds.origin.y),
         point(head_x + px(1.5), bounds.origin.y + px(height)),
     );
-    window.paint_quad(fill(head, cx.theme().foreground));
+    window.paint_quad(fill(head, cx.theme().danger));
+    window.paint_quad(fill(
+        Bounds::new(
+            point(head_x - px(4.), bounds.origin.y),
+            size(px(10.), px(8.)),
+        ),
+        cx.theme().danger,
+    ));
 }
 
 /// Paint one clip block: kind-coloured body, waveform, fade ramps, outline, trim
@@ -755,6 +792,14 @@ pub(super) fn parse_hex_color(value: &str) -> Option<[u8; 4]> {
 }
 
 pub(super) fn parse_fps(value: &str) -> Result<FrameRate, String> {
+    if let Some((numerator, denominator)) = value.split_once('/') {
+        return FrameRate::new(
+            numerator.parse().map_err(|_| "invalid numerator")?,
+            denominator.parse().map_err(|_| "invalid denominator")?,
+        )
+        .map_err(|e| e.0);
+    }
+
     let fps = value
         .parse::<f64>()
         .map_err(|_| "invalid frame rate".to_owned())?;

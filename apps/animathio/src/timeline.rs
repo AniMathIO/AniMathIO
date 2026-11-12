@@ -173,6 +173,23 @@ pub(crate) fn drop_start(
     best
 }
 
+/// Resolve OS and internal drops using the same scroll, zoom, ruler and snap geometry.
+pub(crate) fn drop_placement(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+    playhead: Time,
+    snap: bool,
+) -> Option<(TrackId, Time)> {
+    if y < layout.ruler_height || x < 0.0 || x > layout.width {
+        return None;
+    }
+    let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+    let track = project.tracks().get(row)?;
+    Some((track.id(), drop_start(layout, project, x, playhead, snap)))
+}
+
 /// A trim handle at a clip's left or right edge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TrimEdge {

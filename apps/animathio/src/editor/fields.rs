@@ -776,31 +776,12 @@ impl Editor {
             .border_color(cx.theme().sidebar_border)
             .text_color(cx.theme().sidebar_foreground);
         let Some(id) = self.selected else {
-            let recent = div()
-                .flex()
-                .flex_col()
-                .children(self.recent.paths.iter().map(|path| {
-                    let open = path.clone();
-                    div()
-                        .px_2()
-                        .py_1()
-                        .cursor_pointer()
-                        .hover(|this| this.bg(cx.theme().list_hover))
-                        .child(path.display().to_string())
-                        .id("recent-item")
-                        .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                            this.open_path(&open, cx);
-                        }))
-                }));
-            return pane
-                .child(
-                    div()
-                        .px_2()
-                        .py_2()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Select a clip to edit its properties"),
-                )
-                .child(self.section("recent", "Recent projects", recent, cx));
+            return pane.child(
+                div()
+                    .p_3()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("Select a clip to edit its properties"),
+            );
         };
         self.fields.retain_clip(id);
         let Some(clip) = self.find_clip(id).cloned() else {
