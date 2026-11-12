@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use animathio_core::{AssetId, Scene};
-use animathio_render::{RenderCtx, render};
+use animathio_render::{BackendKind, RenderCtx, preview_backend, render};
 use gpui::RenderImage;
 
 /// One immutable frame job. The UI thread evaluates and resolves the scene (running
@@ -24,6 +24,8 @@ pub(crate) struct RenderResult {
 
 pub(crate) enum WorkerMsg {
     Load(BTreeMap<AssetId, Vec<u8>>),
+    /// Switch the preview backend; GPU falls back to CPU when unavailable.
+    Backend(BackendKind),
     Render(RenderRequest),
 }
 
@@ -49,6 +51,10 @@ impl RenderWorker {
         let _ = self.tx.send(WorkerMsg::Load(assets));
     }
 
+    pub(crate) fn set_backend(&self, kind: BackendKind) {
+        let _ = self.tx.send(WorkerMsg::Backend(kind));
+    }
+
     pub(crate) fn request(&self, request: RenderRequest) {
         let _ = self.tx.send(WorkerMsg::Render(request));
     }
@@ -68,19 +74,34 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
             pending.push(next);
         }
         let mut assets = None;
+        let mut backend = None;
         let mut latest = None;
         for msg in pending {
             match msg {
                 WorkerMsg::Load(loaded) => assets = Some(loaded),
+                WorkerMsg::Backend(kind) => backend = Some(kind),
                 WorkerMsg::Render(request) => latest = Some(request),
             }
         }
         if let Some(assets) = assets {
-            // Rebuilding the context drops resources from the previous project.
+            // Rebuilding the context drops resources from the previous project but
+            // keeps the (possibly GPU) backend and its device.
             match RenderCtx::from_assets(assets) {
-                Ok(loaded) => ctx = loaded,
+                Ok(mut loaded) => {
+                    let current = ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
+                    loaded.set_backend(current);
+                    ctx = loaded;
+                }
                 Err(error) => eprintln!("render resources: {error}"),
             }
+        }
+        if let Some(requested) = backend {
+            let selected = preview_backend(requested);
+            match (&selected.fallback, selected.kind) {
+                (Some(error), _) => eprintln!("preview renderer: CPU ({error})"),
+                (None, kind) => eprintln!("preview renderer: {kind:?}"),
+            }
+            ctx.set_backend(selected.backend);
         }
         if let Some(request) = latest
             && let Some(image) = render_image(&mut ctx, &request)
@@ -94,7 +115,16 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
 }
 
 fn render_image(ctx: &mut RenderCtx, request: &RenderRequest) -> Option<Arc<RenderImage>> {
-    let frame = render(&request.scene, ctx, request.size).ok()?;
+    let frame = match render(&request.scene, ctx, request.size) {
+        Ok(frame) => frame,
+        Err(animathio_render::Error::Gpu(error)) => {
+            // A GPU failure mid-session (device lost, size limit): fall back to CPU.
+            eprintln!("preview renderer: GPU failed ({error}); using CPU");
+            ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
+            render(&request.scene, ctx, request.size).ok()?
+        }
+        Err(_) => return None,
+    };
     let mut pixels = frame.pixels;
     // GPUI's RenderImage path expects BGRA bytes despite image::RgbaImage's name.
     for pixel in pixels.as_chunks_mut::<4>().0 {
