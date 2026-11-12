@@ -1,5 +1,5 @@
 //! Versioned project JSON and content-addressed `.amio` ZIP containers.
-//! Reader/writer APIs leave filesystem policy (atomic replacement, autosave) to callers.
+//! Stream APIs support custom storage; save helpers atomically replace filesystem targets.
 use animathio_core::{AssetId, Project};
 use serde::Serialize;
 use serde_json::Value;
@@ -155,6 +155,41 @@ pub fn write_amio<W: Write + Seek>(
     Ok(archive.finish()?)
 }
 
+/// Atomically replace a project only after validation and a durable temporary write.
+pub fn save_amio(
+    path: impl AsRef<std::path::Path>,
+    project: &Project,
+    assets: &BTreeMap<AssetId, Vec<u8>>,
+) -> Result<(), Error> {
+    project.validate()?;
+    check_assets(project, assets)?;
+    atomic_write(path.as_ref(), |file| {
+        write_amio(file, project, assets)?;
+        Ok(())
+    })
+}
+
+/// Atomically replace a JSON project.
+pub fn save_json(path: impl AsRef<std::path::Path>, project: &Project) -> Result<(), Error> {
+    project.validate()?;
+    atomic_write(path.as_ref(), |file| write_json(file, project))
+}
+
+fn atomic_write(
+    path: &std::path::Path,
+    write: impl FnOnce(&mut std::fs::File) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    write(temporary.as_file_mut())?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|e| e.error)?;
+    Ok(())
+}
+
 /// Load an archive with conservative, configurable in-memory resource limits.
 /// Unknown entries, missing media and hash mismatches are rejected.
 /// Duplicate ZIP names follow the ZIP library's last-entry-wins semantics.
@@ -224,4 +259,42 @@ fn read_limited(reader: impl Read, limit: u64) -> Result<Vec<u8>, Error> {
         return Err(invalid("uncompressed byte limit exceeded"));
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod atomic_tests {
+    use super::*;
+
+    #[test]
+    fn failed_write_preserves_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("project.amio");
+        std::fs::write(&path, b"original").unwrap();
+        let result = atomic_write(&path, |file| {
+            file.write_all(b"partial ZIP")?;
+            Err(std::io::Error::other("simulated disk full").into())
+        });
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"original");
+    }
+
+    #[test]
+    fn missing_asset_preserves_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("project.amio");
+        std::fs::write(&path, b"original").unwrap();
+        let mut bundle = animathio_core::Project::default();
+        animathio_core::Command::AddAsset {
+            id: AssetId::of(b"missing"),
+            asset: animathio_core::Asset {
+                name: "missing".into(),
+                media_type: "image/png".into(),
+            },
+        }
+        .apply(&mut bundle)
+        .unwrap();
+        let assets = BTreeMap::new();
+        assert!(save_amio(&path, &bundle, &assets).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"original");
+    }
 }

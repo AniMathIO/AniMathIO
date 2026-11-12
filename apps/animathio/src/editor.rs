@@ -4087,7 +4087,6 @@ fn write_project(
         .filter(|(id, _)| project.assets().contains_key(id))
         .map(|(id, bytes)| (id.clone(), bytes.clone()))
         .collect();
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    animathio_format::write_amio(file, project, &referenced).map_err(|e| e.to_string())?;
+    animathio_format::save_amio(path, project, &referenced).map_err(|e| e.to_string())?;
     Ok(())
 }
