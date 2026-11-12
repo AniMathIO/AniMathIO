@@ -151,7 +151,7 @@ fn call(
     stdin: &mut ChildStdin,
     stdout: &mut BufReader<ChildStdout>,
     name: &str,
-    arguments: Value,
+    arguments: impl serde::Serialize,
 ) -> Value {
     send(
         stdin,
@@ -193,7 +193,16 @@ fn build_plugins() -> Option<std::path::PathBuf> {
         .unwrap()
         .parent()
         .unwrap();
-    let status = Command::new("bash")
+    // Prefer Git Bash over the unrelated WSL launcher on Windows runners.
+    #[cfg(windows)]
+    let bash = std::env::var_os("ProgramFiles")
+        .map(std::path::PathBuf::from)
+        .map(|dir| dir.join("Git/bin/bash.exe"))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| "bash".into());
+    #[cfg(not(windows))]
+    let bash = "bash";
+    let status = Command::new(bash)
         .arg("scripts/build-plugins.sh")
         .current_dir(root)
         .env("CARGO_BUILD_JOBS", "3")
@@ -296,7 +305,10 @@ fn bad_latex_is_a_tool_error_without_mutating_the_project() {
         "{text}"
     );
     let state = call(&mut stdin, &mut stdout, "get_project_state", json!({}));
-    assert!(state["project"]["tracks"].as_array().unwrap().is_empty());
+    assert_eq!(
+        state["project"]["tracks"].as_array().unwrap().as_slice(),
+        []
+    );
     drop(stdin);
     assert!(child.wait().unwrap().success());
 }

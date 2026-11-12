@@ -12,10 +12,14 @@ mkdir -p target/plugins
 # Linux development machines are shared; keep builds at background priority.
 # Git Bash on Windows has no ionice, so retain the portable build path there.
 cargo_command=(cargo)
-if command -v ionice >/dev/null 2>&1; then
+if [[ "$OSTYPE" == linux* ]]; then
     cargo_command=(nice -n 19 ionice -c3 cargo)
-elif command -v nice >/dev/null 2>&1; then
+elif [[ "$OSTYPE" == darwin* ]]; then
     cargo_command=(nice -n 19 cargo)
+fi
+python_command=python3
+if ! python3 --version >/dev/null 2>&1; then
+    python_command=python
 fi
 
 build_plugin() {
@@ -28,7 +32,7 @@ build_plugin() {
         --release \
         --locked
 
-    python3 - "${name}" <<'PY'
+    "$python_command" - "${name}" <<'PY'
 import sys, zipfile
 
 name = sys.argv[1]
