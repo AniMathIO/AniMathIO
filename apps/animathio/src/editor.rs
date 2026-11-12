@@ -35,7 +35,7 @@ mod fields;
 
 const RULER_H: f32 = 28.0;
 const ROW_H: f32 = 44.0;
-const TIMELINE_H: f32 = 372.0;
+const TIMELINE_H: f32 = 340.0;
 const HEADER_W: f32 = 240.0;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
@@ -3584,6 +3584,7 @@ impl Editor {
             let locked = track.is_locked();
             let controls = div()
                 .w_full()
+                .h(px(24.))
                 .flex()
                 .flex_row()
                 .items_center()
@@ -3593,7 +3594,7 @@ impl Editor {
                         .text_color(cx.theme().muted_foreground)
                         .child(format!("{gain:.1}")),
                 )
-                .child(icon_button(
+                .child(header_button(
                     "gain-",
                     icons::icon(IconName::Minus),
                     "Lower track gain",
@@ -3601,7 +3602,7 @@ impl Editor {
                         this.nudge_track_gain(id, -0.1, cx);
                     }),
                 ))
-                .child(icon_button(
+                .child(header_button(
                     "gain+",
                     icons::icon(IconName::Plus),
                     "Raise track gain",
@@ -3611,7 +3612,7 @@ impl Editor {
                 ))
                 .child(div().flex_1())
                 .child(
-                    icon_button(
+                    header_button(
                         "track-mute",
                         icons::icon(if muted {
                             IconName::VolumeX
@@ -3627,7 +3628,7 @@ impl Editor {
                     .toggled(muted),
                 )
                 .child(
-                    icon_button(
+                    header_button(
                         "track-solo",
                         icons::icon(IconName::Headphones),
                         if solo { "Unsolo track" } else { "Solo track" },
@@ -3639,7 +3640,7 @@ impl Editor {
                     .toggled(solo),
                 )
                 .child(
-                    icon_button(
+                    header_button(
                         "track-lock",
                         icons::icon(if locked {
                             IconName::Lock
@@ -3675,6 +3676,7 @@ impl Editor {
                     .child(
                         div()
                             .w_full()
+                            .h(px(14.))
                             .truncate()
                             .text_xs()
                             .text_color(cx.theme().foreground)
@@ -3841,7 +3843,7 @@ impl Render for Editor {
             window.request_animation_frame();
         }
 
-        let mut middle = div().flex_1().flex().flex_row();
+        let mut middle = div().flex_1().min_h_0().flex().flex_row();
         if self.dock.left_open {
             middle = middle.child(self.media_pool(cx));
         }
@@ -3914,6 +3916,16 @@ fn icon_button(
         .icon(icon)
         .tooltip(tooltip)
         .on_click(listener)
+}
+
+/// A track-header icon button: the extra-small size keeps two lines in a row.
+fn header_button(
+    id: &'static str,
+    icon: gpui_component::Icon,
+    tooltip: impl Into<SharedString>,
+    listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Button {
+    icon_button(id, icon, tooltip, listener).xsmall()
 }
 
 fn paint_timeline(
@@ -4229,7 +4241,7 @@ fn ruler_step(duration: i64, pixels_per_tick: f64, rate: FrameRate) -> i64 {
     ];
     let step = candidates
         .into_iter()
-        .find(|candidate| candidate * pixels_per_tick >= 64.0)
+        .find(|candidate| candidate * pixels_per_tick >= 96.0)
         .unwrap_or(tps * 300.0);
     (step as i64).clamp(1, duration.max(1))
 }
