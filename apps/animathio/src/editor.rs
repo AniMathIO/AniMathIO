@@ -4016,18 +4016,7 @@ fn media_type_for(path: &Path) -> &'static str {
 }
 
 fn project_size(project: &Project) -> (u32, u32) {
-    (
-        if project.width() == 0 {
-            1280
-        } else {
-            project.width()
-        },
-        if project.height() == 0 {
-            720
-        } else {
-            project.height()
-        },
-    )
+    animathio_export::resolution(project)
 }
 
 fn next_id(project: &Project) -> u64 {
