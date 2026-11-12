@@ -32,6 +32,61 @@ const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
 const DEFAULT_MEDIA_TICKS: i64 = TICKS_PER_SECOND * 2;
 
+/// Viewport benchmark: warm up for two seconds, then scrub to a deterministic
+/// random tick at a 60 Hz request cadence for ten seconds and report the p50/p95
+/// cadence of delivered frames before quitting.
+const BENCH_WARMUP: Duration = Duration::from_secs(2);
+const BENCH_DURATION: Duration = Duration::from_secs(10);
+const BENCH_SIZE: (u32, u32) = (1920, 1080);
+
+/// State for the `--bench-viewport` flag. It drives the render worker with a
+/// deterministic xorshift sequence and measures the cadence of frames that make
+/// it through the full presentation path (worker render → BGRA → `RenderImage`
+/// upload → draw).
+struct ViewportBench {
+    rng: u64,
+    warmup_started: Instant,
+    active_start: Option<Instant>,
+    last_delivery: Option<Instant>,
+    next_request: Option<Instant>,
+    cadence_ms: Vec<f64>,
+    done: bool,
+}
+
+impl ViewportBench {
+    fn new() -> Self {
+        Self {
+            rng: 0x9e37_79b9_7f4a_7c15,
+            warmup_started: Instant::now(),
+            active_start: None,
+            last_delivery: None,
+            next_request: None,
+            cadence_ms: Vec::new(),
+            done: false,
+        }
+    }
+
+    /// Deterministic xorshift64* tick in `[0, duration_ticks)`.
+    fn next_tick(&mut self, duration_ticks: i64) -> i64 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        let span = duration_ticks.max(1) as u64;
+        i64::try_from(x % span).expect("tick modulus fits in i64")
+    }
+}
+
+/// Return the value at the nearest-rank percentile `p` (in `[0, 1]`).
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let index = ((sorted.len() as f64 - 1.0) * p).round() as usize;
+    sorted[index.min(sorted.len() - 1)]
+}
+
 /// A project loaded from disk together with its asset bytes and the autosave
 /// recovery flag.
 type LoadedProject = (Project, BTreeMap<AssetId, Vec<u8>>, bool);
@@ -249,6 +304,7 @@ pub(crate) struct Editor {
     error: Option<String>,
     focus_handle: FocusHandle,
     control: Option<ControlRuntime>,
+    bench: Option<ViewportBench>,
     dirty: bool,
     last_autosave: Instant,
     next_id: u64,
@@ -264,6 +320,7 @@ impl Editor {
         path: Option<PathBuf>,
         recovered: bool,
         control: Option<ControlRuntime>,
+        bench: bool,
     ) -> Self {
         let mut pool = AudioPool::default();
         let mut error = None;
@@ -312,6 +369,7 @@ impl Editor {
             error,
             focus_handle: cx.focus_handle(),
             control,
+            bench: bench.then(ViewportBench::new),
             dirty: recovered,
             last_autosave: Instant::now(),
             next_id: initial_next_id,
@@ -321,7 +379,7 @@ impl Editor {
             this.error = Some("recovered from autosave".into());
         }
         this.request_render(Time(0));
-        window.focus(&this.focus_handle);
+        window.focus(&this.focus_handle, cx);
         cx.spawn(async move |this, cx| {
             loop {
                 let timer = cx.background_executor().timer(Duration::from_secs(1));
@@ -337,9 +395,17 @@ impl Editor {
     }
 
     fn request_render(&mut self, time: Time) {
+        let size = if self.bench.is_some() {
+            BENCH_SIZE
+        } else {
+            project_size(&self.project)
+        };
+        self.request_render_at(time, size);
+    }
+
+    fn request_render_at(&mut self, time: Time, size: (u32, u32)) {
         self.request_generation = self.request_generation.wrapping_add(1);
         self.last_requested = Some(time);
-        let size = project_size(&self.project);
         let scene = evaluate(&self.project, time);
         let scene = self.resolve_scene(scene, size);
         self.worker.request(RenderRequest {
@@ -360,12 +426,78 @@ impl Editor {
 
     fn pump_results(&mut self, window: &mut Window) {
         while let Some(result) = self.worker.try_result() {
-            if result.generation == self.request_generation
-                && let Some(old) = self.image.replace(result.image)
-            {
-                let _ = window.drop_image(old);
+            if result.generation == self.request_generation {
+                if let Some(bench) = &mut self.bench {
+                    let now = Instant::now();
+                    if let Some(last) = bench.last_delivery.replace(now) {
+                        bench.cadence_ms.push((now - last).as_secs_f64() * 1000.0);
+                    }
+                }
+                if let Some(old) = self.image.replace(result.image) {
+                    let _ = window.drop_image(old);
+                }
             }
         }
+    }
+
+    /// Drive the viewport benchmark when `--bench-viewport` is set: warm up,
+    /// then scrub at 60 Hz for ten seconds and report the delivered-frame
+    /// cadence before quitting.
+    fn bench_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bench = self
+            .bench
+            .as_mut()
+            .expect("bench tick only runs with a bench");
+        if bench.done {
+            return;
+        }
+        let now = Instant::now();
+        if bench.active_start.is_none() {
+            if now.duration_since(bench.warmup_started) < BENCH_WARMUP {
+                window.request_animation_frame();
+                return;
+            }
+            bench.active_start = Some(now);
+            bench.last_delivery = Some(now);
+            bench.next_request = Some(now);
+        }
+        let elapsed = now.duration_since(bench.active_start.expect("active start set"));
+        if elapsed >= BENCH_DURATION {
+            bench.done = true;
+            let mut samples = std::mem::take(&mut bench.cadence_ms);
+            samples.sort_by(f64::total_cmp);
+            let p50 = percentile(&samples, 0.50);
+            let p95 = percentile(&samples, 0.95);
+            eprintln!(
+                "viewport bench: samples={} p50={:.3}ms p95={:.3}ms ({:.2} fps p50)",
+                samples.len(),
+                p50,
+                p95,
+                if p50 > 0.0 { 1000.0 / p50 } else { 0.0 }
+            );
+            cx.quit();
+            return;
+        }
+        // Request a new deterministic random frame at a 60 Hz cadence so the
+        // worker (latest-request-wins) is neither starved nor flooded.
+        let due = {
+            let bench = self
+                .bench
+                .as_mut()
+                .expect("bench tick only runs with a bench");
+            if bench.next_request.is_some_and(|next| now >= next) {
+                let duration = timeline::project_duration(&self.project).max(1);
+                let tick = bench.next_tick(duration);
+                bench.next_request = Some(now + Duration::from_micros(16_667));
+                Some(tick)
+            } else {
+                None
+            }
+        };
+        if let Some(tick) = due {
+            self.request_render_at(Time(tick), BENCH_SIZE);
+        }
+        window.request_animation_frame();
     }
 
     fn drain_control(&mut self, cx: &mut Context<Self>) {
@@ -1541,7 +1673,7 @@ impl Editor {
 
     fn on_timeline_scroll_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1550,7 +1682,7 @@ impl Editor {
             ScrollDelta::Pixels(point) => (f32::from(point.x), f32::from(point.y)),
             ScrollDelta::Lines(point) => (point.x * 20.0, point.y * 20.0),
         };
-        if event.control {
+        if event.modifiers.control {
             let layout = self.current_layout();
             let anchor = timeline::x_to_time(&layout, x);
             let factor = (dy * 0.002).exp();
@@ -2727,6 +2859,9 @@ impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.pump_results(window);
         self.drain_control(cx);
+        if self.bench.is_some() {
+            self.bench_tick(window, cx);
+        }
         if let Some(task) = &self.export_task {
             match task.result.try_recv() {
                 Ok(result) => {
@@ -2781,7 +2916,7 @@ impl Render for Editor {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_timeline_mouse_down))
             .on_mouse_move(cx.listener(Self::on_timeline_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
-            .on_scroll_wheel(cx.listener(Self::on_timeline_scroll_wheel))
+            .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
             .child(
                 canvas(
                     move |bounds, _window, cx| {
@@ -2907,7 +3042,14 @@ fn paint_timeline(
             let line = window
                 .text_system()
                 .shape_line(clip.label.clone(), px(11.0), &[run], None);
-            let _ = line.paint(point(x0 + px(4.0), y0 + px(16.0)), px(14.0), window, cx);
+            let _ = line.paint(
+                point(x0 + px(4.0), y0 + px(16.0)),
+                px(14.0),
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
         }
         if clip.error {
             let badge = Bounds::from_corners(
@@ -2926,7 +3068,14 @@ fn paint_timeline(
             let line = window
                 .text_system()
                 .shape_line("!".into(), px(9.0), &[run], None);
-            let _ = line.paint(point(x0 + px(3.0), y0 + px(2.0)), px(9.0), window, cx);
+            let _ = line.paint(
+                point(x0 + px(3.0), y0 + px(2.0)),
+                px(9.0),
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
         }
         for keyframe in &clip.keyframes {
             let kx = bounds.origin.x + px(timeline::time_to_x(&layout, keyframe.time));
