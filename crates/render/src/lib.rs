@@ -97,7 +97,7 @@ pub(crate) fn check_size(size: Size) -> Result<(u16, u16), Error> {
 /// Engine-owned, content-addressed resources. Images decode lazily once per asset.
 #[derive(Default)]
 pub struct ResourcePool {
-    encoded: BTreeMap<AssetId, Vec<u8>>,
+    encoded: BTreeMap<AssetId, Arc<[u8]>>,
     images: BTreeMap<AssetId, Arc<Frame>>,
 }
 impl ResourcePool {
@@ -106,13 +106,15 @@ impl ResourcePool {
         if AssetId::of(&bytes) != id {
             return Err(Error::AssetHash);
         }
-        self.encoded.entry(id).or_insert(bytes);
+        self.encoded.entry(id).or_insert_with(|| bytes.into());
         Ok(())
     }
     /// Register content and return its hash.
     pub fn add(&mut self, bytes: Vec<u8>) -> AssetId {
         let id = AssetId::of(&bytes);
-        self.encoded.entry(id.clone()).or_insert(bytes);
+        self.encoded
+            .entry(id.clone())
+            .or_insert_with(|| bytes.into());
         id
     }
     /// Decode PNG/JPEG by probing bytes; metadata never selects the codec.
@@ -124,7 +126,8 @@ impl ResourcePool {
             .encoded
             .get(asset)
             .ok_or_else(|| Error::MissingAsset(asset.as_str().to_owned()))?;
-        let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+        let mut reader =
+            image::ImageReader::new(Cursor::new(bytes.as_ref())).with_guessed_format()?;
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(u32::from(u16::MAX));
         limits.max_image_height = Some(u32::from(u16::MAX));
@@ -189,6 +192,32 @@ impl FrameSource for PlaceholderFrameSource {
     }
 }
 
+impl FrameSource for animathio_media::MediaPool {
+    fn frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<Frame> {
+        let frame = animathio_media::MediaPool::frame_at(self, asset.clone(), media_time).ok()?;
+        Some(Frame {
+            size: (frame.width, frame.height),
+            pixels: frame.pixels.to_vec(),
+        })
+    }
+}
+
+struct AssetFrameSource {
+    pool: animathio_media::MediaPool,
+    pending: BTreeMap<AssetId, Arc<[u8]>>,
+}
+impl FrameSource for AssetFrameSource {
+    fn frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<Frame> {
+        if let Some(bytes) = self.pending.remove(asset)
+            && let Err(error) = self.pool.add_bytes(asset.clone(), bytes)
+        {
+            eprintln!("video asset {asset:?}: {error}");
+            return None;
+        }
+        FrameSource::frame_at(&mut self.pool, asset, media_time)
+    }
+}
+
 /// Small domain-only seam for a future wgpu/vello backend.
 pub trait Backend {
     /// Render back-to-front clips, resolving resources through the engine pool.
@@ -214,6 +243,31 @@ impl Default for RenderCtx {
     }
 }
 impl RenderCtx {
+    /// Build the shared preview/export context from verified encoded assets.
+    /// Video decoders open lazily on the render worker; image assets decode through the image pool.
+    pub fn from_assets(assets: BTreeMap<AssetId, Vec<u8>>) -> Result<Self, Error> {
+        let mut resources = ResourcePool::default();
+        let mut pending = BTreeMap::new();
+        for (id, bytes) in assets {
+            if AssetId::of(&bytes) != id {
+                return Err(Error::AssetHash);
+            }
+            let bytes: Arc<[u8]> = bytes.into();
+            resources.encoded.insert(id.clone(), bytes.clone());
+            pending.insert(id, bytes);
+        }
+        let video = AssetFrameSource {
+            pool: animathio_media::MediaPool::new(
+                Arc::new(animathio_media::FilmCraftBackend::new()),
+                animathio_media::MediaPoolConfig::default(),
+            ),
+            pending,
+        };
+        let mut ctx = Self::new(CpuBackend::default(), video);
+        ctx.resources = resources;
+        Ok(ctx)
+    }
+
     /// Select an adapter and video source without changing project data.
     #[must_use]
     pub fn new(backend: impl Backend + 'static, video: impl FrameSource + 'static) -> Self {

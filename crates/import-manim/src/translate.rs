@@ -3,7 +3,10 @@
 //! Manim frame (14.22 × 8 units, origin at the canvas centre) to normalized
 //! coordinates; the timeline is rebuilt sequentially from `self.play`/`self.wait`.
 
-use crate::ast::{self, Anim, AnimKind, DeclKind, Method, MobjectDecl, Stmt, StmtKind};
+use crate::ast::{
+    self, Anim, AnimKind, DeclKind, Method, MobjectDecl, MobjectExpr, MobjectExprKind, Stmt,
+    StmtKind,
+};
 use crate::{Asset, ImportError, ManimOptions, Report, Rgba};
 use animathio_core::builtin::{Builtin, PathElement, Shape, Stroke};
 use animathio_core::{
@@ -117,6 +120,7 @@ struct KeyEvent {
 #[derive(Default)]
 struct State {
     mobjects: BTreeMap<String, Mobject>,
+    groups: BTreeMap<String, Vec<String>>,
     order: Vec<String>,
     decl_pos: BTreeMap<String, (usize, usize, String)>,
     first_appear: BTreeMap<String, f64>,
@@ -140,25 +144,19 @@ pub(crate) fn translate(
     let mut state = State::default();
 
     // Hoist mobject declarations so the timeline pass can reference them in any
-    // statement order; declarations do not advance the cursor.
+    // statement order; declarations do not advance the cursor. Group members are
+    // resolved lazily, so `VGroup(a, b)` may reference members declared later.
     for stmt in &scene.statements {
-        if let StmtKind::Declare { name, mobject } = &stmt.kind {
-            if state.mobjects.contains_key(name) {
+        if let StmtKind::Declare { name, expr } = &stmt.kind {
+            if state.mobjects.contains_key(name) || state.groups.contains_key(name) {
                 report.warn(
                     stmt.line,
                     stmt.column,
                     format!("mobject `{name}` is declared more than once; the later value wins"),
                     stmt.snippet.clone(),
                 );
-                state
-                    .mobjects
-                    .insert(name.clone(), build_mobject(name, mobject));
-            } else {
-                state
-                    .mobjects
-                    .insert(name.clone(), build_mobject(name, mobject));
-                state.order.push(name.clone());
             }
+            define_expr(expr, name, &mut state, &mut report);
             state
                 .decl_pos
                 .insert(name.clone(), (stmt.line, stmt.column, stmt.snippet.clone()));
@@ -173,6 +171,7 @@ pub(crate) fn translate(
     build_project(scene_end, &state, options, report)
 }
 
+#[allow(clippy::too_many_lines)] // One arm per statement kind keeps the dispatcher together.
 fn interpret(stmt: &Stmt, state: &mut State, report: &mut Report) {
     match &stmt.kind {
         StmtKind::Declare { .. } => {}
@@ -189,32 +188,39 @@ fn interpret(stmt: &Stmt, state: &mut State, report: &mut Report) {
         }
         StmtKind::Add { targets } => {
             for target in targets {
-                if state.mobjects.contains_key(target) {
-                    state
-                        .first_appear
-                        .entry(target.clone())
-                        .or_insert(state.cursor);
-                } else {
-                    report.warn(
-                        stmt.line,
-                        stmt.column,
-                        format!("self.add of unknown mobject `{target}`"),
-                        stmt.snippet.clone(),
-                    );
+                let Some(name) = resolve_expr(target, state, report) else {
+                    continue;
+                };
+                for member in target_members(&name, state) {
+                    if state.mobjects.contains_key(&member) {
+                        state.first_appear.entry(member).or_insert(state.cursor);
+                    } else {
+                        report.warn(
+                            stmt.line,
+                            stmt.column,
+                            format!("self.add of unknown mobject `{member}`"),
+                            stmt.snippet.clone(),
+                        );
+                    }
                 }
             }
         }
         StmtKind::Remove { targets } => {
             for target in targets {
-                if state.mobjects.contains_key(target) {
-                    state.last_end.insert(target.clone(), state.cursor);
-                } else {
-                    report.warn(
-                        stmt.line,
-                        stmt.column,
-                        format!("self.remove of unknown mobject `{target}`"),
-                        stmt.snippet.clone(),
-                    );
+                let Some(name) = resolve_expr(target, state, report) else {
+                    continue;
+                };
+                for member in target_members(&name, state) {
+                    if state.mobjects.contains_key(&member) {
+                        state.last_end.insert(member, state.cursor);
+                    } else {
+                        report.warn(
+                            stmt.line,
+                            stmt.column,
+                            format!("self.remove of unknown mobject `{member}`"),
+                            stmt.snippet.clone(),
+                        );
+                    }
                 }
             }
         }
@@ -241,9 +247,31 @@ fn interpret(stmt: &Stmt, state: &mut State, report: &mut Report) {
                 );
                 return;
             };
-            let placement = placement_for(method, target, state);
-            apply_method(&mut mob, method, placement, stmt, report);
+            let placement = placement_for(method, &mob, state);
+            apply_method(
+                &mut mob,
+                method,
+                placement,
+                stmt.line,
+                stmt.column,
+                &stmt.snippet,
+                report,
+            );
             state.mobjects.insert(target.clone(), mob);
+        }
+        StmtKind::MutateExpr { expr, animated } => {
+            if *animated {
+                report.warn(
+                    stmt.line,
+                    stmt.column,
+                    "`<expr>.animate` outside `self.play` ignored".to_owned(),
+                    stmt.snippet.clone(),
+                );
+                return;
+            }
+            // Evaluating the expression applies its chained methods as side
+            // effects (e.g. `VGroup(a, b).arrange(DOWN)` repositions members).
+            let _ = resolve_expr(expr, state, report);
         }
         StmtKind::Play {
             animations,
@@ -326,127 +354,157 @@ fn apply_anim(
             );
         }
         Anim::Transform { source, target, .. } => {
+            let Some(source_name) = resolve_expr(source, state, report) else {
+                return;
+            };
+            let Some(target_name) = resolve_expr(target, state, report) else {
+                return;
+            };
             report.warn(
                 stmt.line,
                 stmt.column,
-                format!("Transform(`{source}`, `{target}`) approximated by a crossfade"),
+                format!("Transform(`{source_name}`, `{target_name}`) approximated by a crossfade"),
                 stmt.snippet.clone(),
             );
-            crossfade(source, run, interp, state);
-            crossfade(target, run, interp, state);
+            for member in target_members(&source_name, state) {
+                crossfade(&member, run, interp, state);
+            }
+            for member in target_members(&target_name, state) {
+                crossfade(&member, run, interp, state);
+            }
         }
         Anim::Simple { kind, target, .. } => {
-            let Some(mob) = state.mobjects.get(target).cloned() else {
-                report.warn(
-                    stmt.line,
-                    stmt.column,
-                    format!("animation targets unknown mobject `{target}`"),
-                    stmt.snippet.clone(),
-                );
+            let Some(name) = resolve_expr(target, state, report) else {
                 return;
             };
-            state
-                .first_appear
-                .entry(target.clone())
-                .or_insert(state.cursor);
-            let start = state.cursor;
-            let end = start + run;
-            match kind {
-                AnimKind::Write => {
-                    if matches!(mob.kind, Kind::Tex { .. }) {
-                        push_event(
-                            state,
-                            target,
-                            Target::Param("reveal".to_owned()),
-                            start,
-                            0.0,
-                            interp,
-                        );
-                        push_event(
-                            state,
-                            target,
-                            Target::Param("reveal".to_owned()),
-                            end,
-                            1.0,
-                            interp,
-                        );
-                    } else {
-                        push_opacity(state, target, start, 0.0, end, 1.0, interp);
-                    }
-                }
-                AnimKind::Create | AnimKind::FadeIn => {
-                    push_opacity(state, target, start, 0.0, end, 1.0, interp);
-                }
-                AnimKind::GrowFromCenter => {
-                    push_opacity(state, target, start, 0.0, end, 1.0, interp);
-                    let full = mob_transform(&mob);
-                    push_event(
-                        state,
-                        target,
-                        Target::Transform(TransformProperty::ScaleX),
-                        start,
-                        0.0,
-                        interp,
-                    );
-                    push_event(
-                        state,
-                        target,
-                        Target::Transform(TransformProperty::ScaleX),
-                        end,
-                        full.scale_x,
-                        interp,
-                    );
-                    push_event(
-                        state,
-                        target,
-                        Target::Transform(TransformProperty::ScaleY),
-                        start,
-                        0.0,
-                        interp,
-                    );
-                    push_event(
-                        state,
-                        target,
-                        Target::Transform(TransformProperty::ScaleY),
-                        end,
-                        full.scale_y,
-                        interp,
-                    );
-                }
-                AnimKind::FadeOut => {
-                    push_opacity(state, target, start, 1.0, end, 0.0, interp);
-                    state.last_end.insert(target.clone(), end);
-                }
-                AnimKind::Indicate => {
-                    report.warn(
-                        stmt.line,
-                        stmt.column,
-                        format!("animation `Indicate` on `{target}` is not supported; skipped"),
-                        stmt.snippet.clone(),
-                    );
-                }
-                AnimKind::Transform | AnimKind::ReplacementTransform => unreachable!(),
+            for member in target_members(&name, state) {
+                apply_simple_anim(*kind, &member, run, interp, state, stmt, report);
             }
         }
         Anim::Animate { target, method } => {
-            let Some(mob) = state.mobjects.get(target).cloned() else {
-                report.warn(
-                    stmt.line,
-                    stmt.column,
-                    format!("animation targets unknown mobject `{target}`"),
-                    stmt.snippet.clone(),
+            for member in target_members(target, state) {
+                let Some(mob) = state.mobjects.get(&member).cloned() else {
+                    report.warn(
+                        stmt.line,
+                        stmt.column,
+                        format!("animation targets unknown mobject `{member}`"),
+                        stmt.snippet.clone(),
+                    );
+                    continue;
+                };
+                state
+                    .first_appear
+                    .entry(member.clone())
+                    .or_insert(state.cursor);
+                let placement = placement_for(method, &mob, state);
+                apply_animate(
+                    &member, &mob, method, placement, run, interp, state, stmt, report,
                 );
-                return;
-            };
-            state
-                .first_appear
-                .entry(target.clone())
-                .or_insert(state.cursor);
-            let placement = placement_for(method, target, state);
-            apply_animate(
-                target, &mob, method, placement, run, interp, state, stmt, report,
+            }
+        }
+    }
+}
+
+/// Apply one simple animation to a single concrete mobject.
+fn apply_simple_anim(
+    kind: AnimKind,
+    target: &str,
+    run: f64,
+    interp: Interpolation,
+    state: &mut State,
+    stmt: &Stmt,
+    report: &mut Report,
+) {
+    let Some(mob) = state.mobjects.get(target).cloned() else {
+        report.warn(
+            stmt.line,
+            stmt.column,
+            format!("animation targets unknown mobject `{target}`"),
+            stmt.snippet.clone(),
+        );
+        return;
+    };
+    state
+        .first_appear
+        .entry(target.to_owned())
+        .or_insert(state.cursor);
+    let start = state.cursor;
+    let end = start + run;
+    match kind {
+        AnimKind::Write => {
+            if matches!(mob.kind, Kind::Tex { .. }) {
+                push_event(
+                    state,
+                    target,
+                    Target::Param("reveal".to_owned()),
+                    start,
+                    0.0,
+                    interp,
+                );
+                push_event(
+                    state,
+                    target,
+                    Target::Param("reveal".to_owned()),
+                    end,
+                    1.0,
+                    interp,
+                );
+            } else {
+                push_opacity(state, target, start, 0.0, end, 1.0, interp);
+            }
+        }
+        AnimKind::Create | AnimKind::FadeIn => {
+            push_opacity(state, target, start, 0.0, end, 1.0, interp);
+        }
+        AnimKind::GrowFromCenter => {
+            push_opacity(state, target, start, 0.0, end, 1.0, interp);
+            let full = mob_transform(&mob);
+            push_event(
+                state,
+                target,
+                Target::Transform(TransformProperty::ScaleX),
+                start,
+                0.0,
+                interp,
+            );
+            push_event(
+                state,
+                target,
+                Target::Transform(TransformProperty::ScaleX),
+                end,
+                full.scale_x,
+                interp,
+            );
+            push_event(
+                state,
+                target,
+                Target::Transform(TransformProperty::ScaleY),
+                start,
+                0.0,
+                interp,
+            );
+            push_event(
+                state,
+                target,
+                Target::Transform(TransformProperty::ScaleY),
+                end,
+                full.scale_y,
+                interp,
             );
         }
+        AnimKind::FadeOut => {
+            push_opacity(state, target, start, 1.0, end, 0.0, interp);
+            state.last_end.insert(target.to_owned(), end);
+        }
+        AnimKind::Indicate => {
+            report.warn(
+                stmt.line,
+                stmt.column,
+                format!("animation `Indicate` on `{target}` is not supported; skipped"),
+                stmt.snippet.clone(),
+            );
+        }
+        AnimKind::Transform | AnimKind::ReplacementTransform => unreachable!(),
     }
 }
 
@@ -497,6 +555,15 @@ fn apply_animate(
         }
         Method::Rotate { angle } => {
             mob.rotation += angle;
+        }
+        Method::Arrange { .. } => {
+            report.warn(
+                stmt.line,
+                stmt.column,
+                format!("`.animate.arrange` on `{target}` is not supported; skipped"),
+                stmt.snippet.clone(),
+            );
+            return;
         }
         Method::Unsupported { name } => {
             report.warn(
@@ -606,7 +673,9 @@ fn apply_method(
     mob: &mut Mobject,
     method: &Method,
     placement: Option<(f64, f64)>,
-    stmt: &Stmt,
+    line: usize,
+    column: usize,
+    snippet: &str,
     report: &mut Report,
 ) {
     match method {
@@ -628,29 +697,28 @@ fn apply_method(
         Method::Rotate { angle } => {
             mob.rotation += angle;
         }
+        Method::Arrange { .. } => {
+            // Arranging is a group-level operation; a plain mobject ignores it.
+        }
         Method::Unsupported { name } => {
             report.warn(
-                stmt.line,
-                stmt.column,
+                line,
+                column,
                 format!("unsupported method `{name}`"),
-                stmt.snippet.clone(),
+                snippet,
             );
         }
     }
 }
 
 /// Precompute a neighbour/edge-dependent centre before mutating `state.mobjects`.
-fn placement_for(method: &Method, target: &str, state: &State) -> Option<(f64, f64)> {
+fn placement_for(method: &Method, mob: &Mobject, state: &State) -> Option<(f64, f64)> {
     match method {
         Method::NextTo { other, direction } => {
-            let mob = state.mobjects.get(target)?;
             let neighbour = state.mobjects.get(other)?;
             Some(next_to_center(mob, neighbour, *direction))
         }
-        Method::ToEdge { direction } => {
-            let mob = state.mobjects.get(target)?;
-            Some(to_edge_center(mob, *direction))
-        }
+        Method::ToEdge { direction } => Some(to_edge_center(mob, *direction)),
         _ => None,
     }
 }
@@ -724,6 +792,184 @@ fn push_event(
         value,
         interp,
     });
+}
+
+// ---------- inline mobject expressions ----------
+
+enum Built {
+    Mob(Mobject),
+    Group(Vec<String>),
+}
+
+fn synthetic_name(expr: &MobjectExpr) -> String {
+    format!("_anon_{}_{}", expr.line, expr.column)
+}
+
+/// Materialize an expression, returning the name it is known by in [`State`].
+/// Named references are returned as-is; inline expressions get a synthetic id.
+fn resolve_expr(expr: &MobjectExpr, state: &mut State, report: &mut Report) -> Option<String> {
+    match &expr.kind {
+        MobjectExprKind::Ref(name) => Some(name.clone()),
+        MobjectExprKind::Unsupported(text) => {
+            report.warn(
+                expr.line,
+                expr.column,
+                format!("unsupported mobject expression: {text}"),
+                expr.snippet.clone(),
+            );
+            None
+        }
+        _ => {
+            let name = synthetic_name(expr);
+            define_expr(expr, &name, state, report).then_some(name)
+        }
+    }
+}
+
+/// Define `expr` under `name` in the state (as a mobject or a group).
+fn define_expr(expr: &MobjectExpr, name: &str, state: &mut State, report: &mut Report) -> bool {
+    match build_expr(expr, state, report) {
+        Ok(Built::Mob(mob)) => {
+            if !state.mobjects.contains_key(name) {
+                state.order.push(name.to_owned());
+            }
+            state.mobjects.insert(name.to_owned(), mob);
+            state
+                .decl_pos
+                .entry(name.to_owned())
+                .or_insert_with(|| (expr.line, expr.column, expr.snippet.clone()));
+            true
+        }
+        Ok(Built::Group(members)) => {
+            state.groups.insert(name.to_owned(), members);
+            true
+        }
+        Err(message) => {
+            report.warn(expr.line, expr.column, message, expr.snippet.clone());
+            false
+        }
+    }
+}
+
+/// Build a resolved mobject or group value without naming it.
+fn build_expr(expr: &MobjectExpr, state: &mut State, report: &mut Report) -> Result<Built, String> {
+    match &expr.kind {
+        MobjectExprKind::Ref(name) => state
+            .mobjects
+            .get(name)
+            .cloned()
+            .map(Built::Mob)
+            .ok_or_else(|| format!("unknown mobject `{name}`")),
+        MobjectExprKind::Factory(decl) => Ok(Built::Mob(build_mobject("", decl))),
+        MobjectExprKind::Chain(base, method) => match build_expr(base, state, report)? {
+            Built::Mob(mut mob) => {
+                let placement = placement_for(method, &mob, state);
+                apply_method(
+                    &mut mob,
+                    method,
+                    placement,
+                    expr.line,
+                    expr.column,
+                    &expr.snippet,
+                    report,
+                );
+                Ok(Built::Mob(mob))
+            }
+            Built::Group(members) => {
+                apply_group_method(&members, method, expr, state, report);
+                Ok(Built::Group(members))
+            }
+        },
+        MobjectExprKind::Group(members) => {
+            let mut names = Vec::new();
+            for member in members {
+                if let Some(name) = resolve_expr(member, state, report) {
+                    names.push(name);
+                }
+            }
+            Ok(Built::Group(names))
+        }
+        MobjectExprKind::Unsupported(text) => Err(text.clone()),
+    }
+}
+
+/// The concrete mobject names an expression refers to; groups expand to their
+/// members recursively.
+fn target_members(name: &str, state: &State) -> Vec<String> {
+    let Some(members) = state.groups.get(name) else {
+        return vec![name.to_owned()];
+    };
+    let mut out = Vec::new();
+    for member in members {
+        out.extend(target_members(member, state));
+    }
+    out
+}
+
+/// Apply a shared transform to every member of a group.
+fn apply_group_method(
+    members: &[String],
+    method: &Method,
+    expr: &MobjectExpr,
+    state: &mut State,
+    report: &mut Report,
+) {
+    match method {
+        Method::Arrange { direction } => arrange_members(members, *direction, state),
+        _ => {
+            for member in members {
+                let Some(mut mob) = state.mobjects.get(member).cloned() else {
+                    continue;
+                };
+                let placement = placement_for(method, &mob, state);
+                apply_method(
+                    &mut mob,
+                    method,
+                    placement,
+                    expr.line,
+                    expr.column,
+                    &expr.snippet,
+                    report,
+                );
+                state.mobjects.insert(member.clone(), mob);
+            }
+        }
+    }
+}
+
+/// Approximate `VGroup.arrange`: keep the first member where it is, then lay
+/// the rest out one after another along `direction`.
+fn arrange_members(members: &[String], direction: (f64, f64), state: &mut State) {
+    let horizontal = direction.0.abs() > 1e-9;
+    let mut previous_center: Option<(f64, f64)> = None;
+    let mut previous_size = (0.0, 0.0);
+    for name in members {
+        let Some(mut mob) = state.mobjects.get(name).cloned() else {
+            continue;
+        };
+        let this_size = (mob.size.0 * mob.scale, mob.size.1 * mob.scale);
+        let center = match previous_center {
+            None => mob.center,
+            Some(prev) => {
+                let (gap_x, gap_y) = if horizontal {
+                    (
+                        previous_size.0 / 2.0 + this_size.0 / 2.0 + NEXT_TO_BUFF,
+                        0.0,
+                    )
+                } else {
+                    (
+                        0.0,
+                        previous_size.1 / 2.0 + this_size.1 / 2.0 + NEXT_TO_BUFF,
+                    )
+                };
+                (prev.0 + direction.0 * gap_x, prev.1 + direction.1 * gap_y)
+            }
+        };
+        mob.center = center;
+        state.mobjects.insert(name.clone(), mob);
+        previous_center = Some(center);
+        previous_size = this_size;
+    }
 }
 
 // ---------- mobject construction ----------

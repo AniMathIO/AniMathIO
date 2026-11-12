@@ -1,0 +1,22 @@
+[package]
+name = "animathio-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+animathio-core.workspace = true
+animathio-render = { path = "../render" }
+animathio-media = { path = "../media" }
+animathio-audio = { path = "../audio" }
+thiserror.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true
+
+[lints]
+workspace = true

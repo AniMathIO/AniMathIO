@@ -609,3 +609,138 @@ class S(Scene):
         report.warnings()
     );
 }
+
+#[test]
+fn imports_an_inline_add_expression() {
+    let source = r"
+class S(Scene):
+    def construct(self):
+        self.add(Circle(radius=1))
+        self.wait(1)
+";
+    let (project, _, report) = import_manim_with_options(source, &ManimOptions::default()).unwrap();
+    assert!(report.is_empty(), "{:?}", report.warnings());
+
+    let clips = tracks(&project);
+    assert_eq!(clips.len(), 1);
+    let name = project.tracks()[0].name();
+    assert!(
+        name.starts_with("_anon_"),
+        "expected a synthetic id, got {name:?}"
+    );
+    assert_eq!(clips[0].1.range.start, Time(0));
+    assert_eq!(clips[0].1.range.end, Time(ticks(1.0)));
+    let ClipKind::Builtin(Builtin::Shape { shape, .. }) = &clips[0].1.kind else {
+        panic!("expected a builtin shape");
+    };
+    assert!(matches!(shape, animathio_core::builtin::Shape::Ellipse));
+}
+
+#[test]
+fn imports_an_inline_write_math_tex() {
+    let source = r#"
+class S(Scene):
+    def construct(self):
+        self.play(Write(MathTex("x^2")))
+"#;
+    let (project, _, report) = import_manim_with_options(source, &ManimOptions::default()).unwrap();
+    assert!(report.is_empty(), "{:?}", report.warnings());
+
+    let clips = tracks(&project);
+    assert_eq!(clips.len(), 1);
+    let name = project.tracks()[0].name();
+    assert!(name.starts_with("_anon_"), "unexpected track name {name:?}");
+    let ClipKind::Plugin { plugin_id, params } = &clips[0].1.kind else {
+        panic!("expected a plugin clip");
+    };
+    assert_eq!(plugin_id, "org.animathio.latex");
+    assert_eq!(params["source"], "x^2");
+    assert_eq!(params["mode"], "mathtex");
+
+    let reveal = animation(&project, name, &Target::Param("reveal".to_owned())).unwrap();
+    let keys: Vec<_> = reveal.keys.keys().keys().collect();
+    assert_eq!(keys, vec![&Time(0), &Time(ticks(1.0))]);
+}
+
+#[test]
+fn imports_an_inline_chained_transform() {
+    let source = r"
+class S(Scene):
+    def construct(self):
+        self.add(Circle(radius=1).shift(RIGHT))
+        self.wait(1)
+";
+    let (project, _, report) = import_manim_with_options(source, &ManimOptions::default()).unwrap();
+    assert!(report.is_empty(), "{:?}", report.warnings());
+
+    let clips = tracks(&project);
+    assert_eq!(clips.len(), 1);
+    assert!(project.tracks()[0].name().starts_with("_anon_"));
+    // Shift RIGHT moves the centre one scene unit to the right.
+    assert_close(clips[0].1.transform.x, 0.5 + 1.0 / FRAME_WIDTH);
+    assert_close(clips[0].1.transform.y, 0.5);
+}
+
+#[test]
+fn imports_a_vgroup_with_arrange_and_group_fade_in() {
+    let source = r"
+class S(Scene):
+    def construct(self):
+        a = Circle(radius=1)
+        b = Square(side_length=2)
+        g = VGroup(a, b).arrange(DOWN)
+        self.play(FadeIn(g))
+        self.wait(1)
+";
+    let (project, _, report) = import_manim_with_options(source, &ManimOptions::default()).unwrap();
+    assert!(report.is_empty(), "{:?}", report.warnings());
+
+    // The group itself is not a track; its two members are.
+    let clips = tracks(&project);
+    assert_eq!(clips.len(), 2);
+    assert_eq!(project.tracks()[0].name(), "a");
+    assert_eq!(project.tracks()[1].name(), "b");
+
+    // `arrange(DOWN)` lays `b` out one `b` height below `a` plus a buffer.
+    assert_close(clips[0].1.transform.y, 0.5);
+    let expected_b_y = 0.5 + (2.0 / 2.0 + 2.0 / 2.0 + 0.25) / FRAME_HEIGHT;
+    assert_close(clips[1].1.transform.y, expected_b_y);
+
+    // Animating the group fades both members in.
+    for name in ["a", "b"] {
+        let opacity = animation(
+            &project,
+            name,
+            &Target::Transform(TransformProperty::Opacity),
+        )
+        .unwrap();
+        let keys: Vec<_> = opacity.keys.keys().keys().collect();
+        assert_eq!(
+            keys,
+            vec![&Time(0), &Time(ticks(1.0))],
+            "opacity keys for {name}"
+        );
+    }
+}
+
+#[test]
+fn warns_on_unsupported_inline_mobjects() {
+    let source = r"
+class S(Scene):
+    def construct(self):
+        self.add(CustomMobject())
+        self.wait(1)
+";
+    let (project, _, report) = import_manim_with_options(source, &ManimOptions::default()).unwrap();
+    project.validate().unwrap();
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.message.contains("unsupported mobject expression")
+                && w.message.contains("CustomMobject")),
+        "expected an unsupported-inline-mobject warning: {:?}",
+        report.warnings()
+    );
+    assert!(tracks(&project).is_empty());
+}
