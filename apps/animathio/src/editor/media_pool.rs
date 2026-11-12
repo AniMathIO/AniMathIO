@@ -392,7 +392,7 @@ impl Editor {
             .flex_col()
             .bg(cx.theme().popover)
             .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                this.import_paths(paths.paths(), None, cx)
+                this.import_paths(paths.paths(), None, cx);
             }))
             .child(tab_row)
             .child(body)

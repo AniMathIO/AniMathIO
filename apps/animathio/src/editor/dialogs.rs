@@ -49,6 +49,7 @@ pub(super) struct ExportOptions {
 impl Editor {
     pub(super) fn open_export_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.export_task.is_some() {
+            self.open_export_status(window, cx);
             return;
         }
         let duration = timeline::project_duration(&self.project);
@@ -121,7 +122,7 @@ impl Editor {
                                                     path.to_string_lossy().into_owned(),
                                                     window,
                                                     cx,
-                                                )
+                                                );
                                             });
                                         }
                                     },
@@ -174,8 +175,31 @@ impl Editor {
                     });
                     if valid {
                         window.close_dialog(cx);
+                        editor.update(cx, |this, cx| this.open_export_status(window, cx));
                     }
                 }))
+        });
+    }
+
+    fn open_export_status(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let title = if self.export_task.is_some() {
+            "Exporting video"
+        } else {
+            "Export video"
+        };
+        let editor = cx.entity();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let content = editor.update(cx, |this, cx| this.export_dialog(cx));
+            let editor = editor.clone();
+            dialog
+                .title(title)
+                .child(content)
+                .on_close(move |_, _, cx| {
+                    editor.update(cx, |this, cx| {
+                        this.confirm_overwrite = None;
+                        cx.notify();
+                    });
+                })
         });
     }
 
@@ -275,10 +299,10 @@ impl Editor {
                                         {
                                             let (width, height) = p.resolution();
                                             pw.update(cx, |s, cx| {
-                                                s.set_value(width.to_string(), window, cx)
+                                                s.set_value(width.to_string(), window, cx);
                                             });
                                             ph.update(cx, |s, cx| {
-                                                s.set_value(height.to_string(), window, cx)
+                                                s.set_value(height.to_string(), window, cx);
                                             });
                                         }
                                     },
@@ -420,6 +444,7 @@ impl Editor {
         });
     }
     pub(super) fn open_manim_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Manim Python script", &["py"])
             .pick_file()
@@ -504,13 +529,10 @@ impl Editor {
         use std::sync::atomic::Ordering;
         let Some(task) = &self.export_task else {
             let Some(path) = &self.confirm_overwrite else {
-                return div();
+                return div().child("Export finished. See the notification for the result.");
             };
             return div()
-                .absolute()
-                .top(px(60.))
-                .left(px(30.))
-                .w(px(280.))
+                .w_full()
                 .p_3()
                 .bg(cx.theme().popover)
                 .flex()
@@ -549,16 +571,13 @@ impl Editor {
         };
         let completed = task.completed.load(Ordering::Relaxed);
         let total = task.total.load(Ordering::Relaxed);
-        let width = if total == 0 {
+        let percent = if total == 0 {
             0.0
         } else {
-            240.0 * completed as f32 / total as f32
+            100.0 * completed as f32 / total as f32
         };
         div()
-            .absolute()
-            .top(px(60.))
-            .left(px(30.))
-            .w(px(280.))
+            .w_full()
             .p_3()
             .bg(cx.theme().popover)
             .border_1()
@@ -569,11 +588,9 @@ impl Editor {
             .child("Exporting MP4")
             .child(format!("{completed} / {total} frames"))
             .child(
-                div()
-                    .w(px(240.))
-                    .h(px(8.))
-                    .bg(cx.theme().muted)
-                    .child(div().w(px(width)).h(px(8.)).bg(cx.theme().progress_bar)),
+                gpui_component::progress::Progress::new("export-progress")
+                    .value(percent)
+                    .loading(total == 0),
             )
             .child(button(
                 "cancel-export",

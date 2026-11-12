@@ -232,7 +232,7 @@ impl Editor {
                     play_tooltip,
                     cx.listener(Self::on_play_click),
                 )
-                .when(self.playing, |button| button.primary()),
+                .when(self.playing, ButtonVariants::primary),
             )
             .child(icon_button(
                 "step-fwd",

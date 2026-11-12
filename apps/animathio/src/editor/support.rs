@@ -775,22 +775,6 @@ pub(super) fn frames_to_ticks(frames: usize, rate: u32) -> i64 {
     i64::try_from(frames as u128 * TICKS_PER_SECOND as u128 / ticks).unwrap_or(i64::MAX)
 }
 
-pub(super) fn parse_hex_color(value: &str) -> Option<[u8; 4]> {
-    let hex = value.strip_prefix('#').unwrap_or(value);
-    let (rgb, alpha) = match hex.len() {
-        6 => (hex, 255),
-        8 => (&hex[..6], u8::from_str_radix(&hex[6..], 16).ok()?),
-        _ => return None,
-    };
-    let value = u32::from_str_radix(rgb, 16).ok()?;
-    Some([
-        ((value >> 16) & 0xff) as u8,
-        ((value >> 8) & 0xff) as u8,
-        (value & 0xff) as u8,
-        alpha,
-    ])
-}
-
 pub(super) fn parse_fps(value: &str) -> Result<FrameRate, String> {
     if let Some((numerator, denominator)) = value.split_once('/') {
         return FrameRate::new(

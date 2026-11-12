@@ -3,8 +3,8 @@
 use super::actions::*;
 use super::*;
 use gpui_component::{
-    Disableable, TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar,
-    notification::Notification, status_bar::StatusBar,
+    TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar, notification::Notification,
+    status_bar::StatusBar,
 };
 
 impl Editor {
@@ -39,7 +39,7 @@ impl Editor {
                 MenuItem::action("Import media…", ImportMedia),
                 MenuItem::action("Import v1…", ImportV1),
                 MenuItem::action("Import Manim scene…", ImportManim),
-                MenuItem::action("Export…", ExportVideo).disabled(self.export_task.is_some()),
+                MenuItem::action("Export…", ExportVideo),
                 MenuItem::separator(),
                 MenuItem::action("Project settings…", ProjectSettings),
                 MenuItem::action("Preferences…", Preferences),
@@ -152,7 +152,6 @@ impl Editor {
                         .small()
                         .icon(icons::icon(IconName::Upload))
                         .label("Export")
-                        .disabled(self.export_task.is_some())
                         .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
                         .on_click(
                             cx.listener(|this, _, window, cx| this.open_export_dialog(window, cx)),

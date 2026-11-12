@@ -76,7 +76,7 @@ impl Editor {
                             )
                             .child(Button::new("start-manim").label("Import Manim…").on_click(
                                 cx.listener(|this, _, window, cx| {
-                                    this.open_manim_import(window, cx)
+                                    this.open_manim_import(window, cx);
                                 }),
                             )),
                     )
@@ -98,11 +98,9 @@ impl Editor {
                                 Button::new(("start-recent", index))
                                     .ghost()
                                     .label(path.display().to_string())
-                                    .on_click(
-                                        cx.listener(move |this, _, _, cx| {
-                                            this.open_path(&path, cx)
-                                        }),
-                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_path(&path, cx);
+                                    }))
                             })),
                     )
                     .child(

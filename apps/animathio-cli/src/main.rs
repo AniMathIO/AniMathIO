@@ -66,9 +66,12 @@ enum Action {
         /// Output rate, e.g. 30 or 30000/1001.
         #[arg(long, value_parser = parse_rate)]
         fps: Option<animathio_core::FrameRate>,
-        /// Constant quality, 0..=51; lower is better.
-        #[arg(long, default_value_t = 23.0)]
-        crf: f32,
+        /// Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical` or square.
+        #[arg(long, value_parser = parse_export_preset)]
+        preset: Option<animathio_control::ExportPreset>,
+        /// Constant quality, 0..=51; lower is better (defaults to preset quality or 23).
+        #[arg(long)]
+        crf: Option<f32>,
         /// Replace an existing output file instead of failing.
         #[arg(long)]
         overwrite: bool,
@@ -135,6 +138,13 @@ impl OutputSize {
             self.height.unwrap_or(fallback_height),
         )
     }
+}
+
+fn parse_export_preset(
+    value: &str,
+) -> std::result::Result<animathio_control::ExportPreset, String> {
+    animathio_control::ExportPreset::from_name(value)
+        .ok_or_else(|| format!("unknown export preset: {value}"))
 }
 
 fn main() -> ExitCode {
@@ -216,10 +226,19 @@ fn run(cli: Cli) -> Result<()> {
             from,
             to,
             fps,
+            preset,
             crf,
             overwrite,
         } => {
-            let bundle = load(&project)?;
+            let mut bundle = load(&project)?;
+            if let Some(preset) = preset {
+                preset
+                    .command(&bundle.project)?
+                    .apply(&mut bundle.project)?;
+            }
+            let defaults = preset
+                .map(animathio_control::ExportPreset::export_settings)
+                .unwrap_or_default();
             let range = animathio_core::TimeRange::new(
                 from,
                 to.unwrap_or_else(|| animathio_export::duration(&bundle.project)),
@@ -234,7 +253,7 @@ fn run(cli: Cli) -> Result<()> {
                 range,
                 animathio_export::Settings {
                     frame_rate: fps,
-                    crf,
+                    crf: crf.unwrap_or(defaults.crf),
                 },
                 &destination,
                 |progress| {

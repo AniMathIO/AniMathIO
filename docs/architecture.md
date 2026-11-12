@@ -82,7 +82,18 @@ Rules that keep the layers honest:
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `inspector_view`, `media_pool`, `dialogs`, `commands`, `project_io`,
 `control_bridge` and `playback_glue`. Shared drawing/resource helpers live in
-`support`; `color_edit` owns the live-preview transaction.
+`support`; `color_edit` owns the live-preview transaction. `editing.rs` holds pure
+shuttle, in/out, blade and ripple command planning. In/out points and tool mode stay
+in view state. Ripple trim uses one `Command::Batch` on the source track;
+Shift+Delete uses `RippleDelete`. The ruler and export range share half-open bounds.
+The rate clock uses audio at 1x and a silent signed monotonic clock for shuttle.
+
+`start_screen` provides project presets, recents and importer entry points. Workflow
+dialogs use gpui-component forms; export works on an immutable snapshot, so selecting
+a delivery preset does not change the open project. `control::ExportPreset` is the
+shared table for editor, CLI and MCP. Preferences persist under the application
+config directory (`preferences.json`, renderer selection in `preview.json`) and
+never enter project serialization.
 
 The `actions` module registers GPUI actions and a contextual keymap (`Editor`,
 `Timeline`, `Viewer`, `Inspector`, `MediaPool`). `secondary-` bindings are resolved

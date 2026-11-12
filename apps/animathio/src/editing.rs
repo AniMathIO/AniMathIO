@@ -24,7 +24,7 @@ impl Shuttle {
     }
 }
 
-/// Out is exclusive, just like every core TimeRange. Partial marks use project bounds.
+/// Out is exclusive, just like every core `TimeRange`. Partial marks use project bounds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct InOut {
     pub(crate) start: Option<Time>,
@@ -47,6 +47,7 @@ impl InOut {
         self.start.is_some() || self.end.is_some()
     }
     pub(crate) fn range(self, duration: i64) -> Option<TimeRange> {
+        let duration = duration.max(0);
         TimeRange::new(
             Time(self.start.unwrap_or(Time(0)).0.clamp(0, duration)),
             Time(self.end.unwrap_or(Time(duration)).0.clamp(0, duration)),
@@ -72,7 +73,14 @@ pub(crate) fn playback_position(
     if looping && (time < range.start || time >= range.end) {
         let length = range.end.0 - range.start.0;
         return (
-            Time(range.start.0 + (time.0 - range.start.0).rem_euclid(length)),
+            Time(
+                range.start.0
+                    + i64::try_from(
+                        (i128::from(time.0) - i128::from(range.start.0))
+                            .rem_euclid(i128::from(length)),
+                    )
+                    .expect("remainder fits range"),
+            ),
             false,
         );
     }
@@ -88,7 +96,7 @@ pub(crate) fn blade_command(clip: &Clip, at: Time, right_id: ClipId) -> Option<C
 }
 
 /// Ripple trim affects only this track. The batch keeps both trimming and later moves
-/// atomic, including extensions; RemoveRange is intentionally reserved for all-track cuts.
+/// atomic, including extensions; `RemoveRange` is intentionally reserved for all-track cuts.
 pub(crate) fn trim_command(
     project: &Project,
     id: ClipId,
@@ -190,6 +198,27 @@ pub(crate) fn write_on_command(clip: &Clip, seconds: f64) -> Option<Command> {
 mod tests {
     use super::*;
     use animathio_core::{ClipKind, FrameRate, History, Track, TrackId};
+    #[test]
+    fn write_on_replaces_keys_and_rejects_invalid_durations() {
+        let clip = Clip::new(
+            ClipId(1),
+            ClipKind::Plugin {
+                plugin_id: "org.animathio.latex".into(),
+                params: serde_json::json!({}),
+            },
+            TimeRange::new(Time(0), Time(animathio_core::TICKS_PER_SECOND * 2)).unwrap(),
+        );
+        for seconds in [0., -1., f64::NAN, 3.] {
+            assert!(write_on_command(&clip, seconds).is_none());
+        }
+        let Command::Batch { commands } = write_on_command(&clip, 1.).unwrap() else {
+            panic!("expected atomic keyframes")
+        };
+        assert_eq!(commands.len(), 2);
+        assert!(
+            matches!(&commands[1],Command::AddKeyframe { time, keyframe,.. } if *time == Time(animathio_core::TICKS_PER_SECOND) && keyframe.value.as_number() == Some(1.))
+        );
+    }
     #[test]
     fn shuttle_repeats_caps_stops_and_changes_direction() {
         let mut shuttle = Shuttle::default();

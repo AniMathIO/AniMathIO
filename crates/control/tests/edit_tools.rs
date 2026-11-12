@@ -310,3 +310,33 @@ fn captions_share_a_track_and_presets_set_resolution() {
     assert_eq!((project.width(), project.height()), (1080, 1920));
     assert_eq!(project.frame_rate().numerator(), 30);
 }
+
+#[test]
+fn delivery_preset_table_has_stable_unique_names_and_settings() {
+    let expected = [
+        ("youtube_1080p", (1920, 1080)),
+        ("youtube_4k", (3840, 2160)),
+        ("shorts_vertical", (1080, 1920)),
+        ("square", (1080, 1080)),
+    ];
+    for (preset, (name, size)) in ExportPreset::ALL.into_iter().zip(expected) {
+        assert_eq!(preset.name(), name);
+        assert_eq!(preset.resolution(), size);
+        assert_eq!(ExportPreset::from_name(name), Some(preset));
+        assert_eq!(serde_json::to_value(preset).unwrap(), name);
+        assert_eq!(preset.export_settings().crf, 18.0);
+        let mut project =
+            animathio_core::Project::new(animathio_core::FrameRate::new(24, 1).unwrap());
+        preset
+            .command(&project)
+            .unwrap()
+            .apply(&mut project)
+            .unwrap();
+        assert_eq!((project.width(), project.height()), size);
+        assert_eq!(
+            project.frame_rate(),
+            animathio_core::FrameRate::new(30, 1).unwrap()
+        );
+    }
+    assert_eq!(ExportPreset::from_name("unknown"), None);
+}

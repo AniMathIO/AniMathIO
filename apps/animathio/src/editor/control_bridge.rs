@@ -217,6 +217,8 @@ impl Editor {
                 serde_json::to_value(())?
             }
             Call::PlaybackPlay => {
+                let _ = self.clock.set_rate(1);
+                self.shuttle.0 = 1;
                 self.playing = true;
                 if let Err(error) = self.clock.play() {
                     self.error = Some(error);
@@ -225,6 +227,7 @@ impl Editor {
                 serde_json::to_value(())?
             }
             Call::PlaybackPause => {
+                self.shuttle.0 = 0;
                 self.playing = false;
                 if let Err(error) = self.clock.pause() {
                     self.error = Some(error);
@@ -328,6 +331,10 @@ impl Editor {
         for warning in report.warnings() {
             eprintln!("warning: {warning}");
         }
+        let _ = self.clock.pause();
+        self.marks = InOut::default();
+        self.shuttle = Shuttle::default();
+        self.export_options = None;
         self.project = project;
         self.history = History::default();
         self.assets = Arc::new(assets.into_iter().map(|a| (a.id, a.bytes)).collect());

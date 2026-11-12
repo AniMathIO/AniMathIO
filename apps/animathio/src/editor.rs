@@ -642,9 +642,6 @@ impl Render for Editor {
         if let Some(ghost) = self.pool_drag_ghost(cx) {
             root = root.child(ghost);
         }
-        if self.export_task.is_some() || self.confirm_overwrite.is_some() {
-            root = root.child(self.export_dialog(cx));
-        }
         actions::attach(root, cx)
     }
 }

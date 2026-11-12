@@ -436,43 +436,19 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
 impl Editor {
     fn show_shortcuts(window: &mut Window, cx: &mut Context<Self>) {
         use gpui_component::{WindowExt, kbd::Kbd};
-        let rows: Vec<(String, Box<dyn Action>, &'static str)> = vec![
-            ("New Project".into(), Box::new(NewProject), "Editor"),
-            ("Open Project".into(), Box::new(OpenProject), "Editor"),
-            ("Save Project".into(), Box::new(SaveProject), "Editor"),
-            ("Import Media".into(), Box::new(ImportMedia), "Editor"),
-            ("Export Video".into(), Box::new(ExportVideo), "Editor"),
-            ("Undo".into(), Box::new(Undo), "Editor"),
-            ("Redo".into(), Box::new(Redo), "Editor"),
-            (
-                "Delete Selection".into(),
-                Box::new(DeleteSelection),
-                "Timeline",
-            ),
-            ("Split Clip".into(), Box::new(SplitClip), "Timeline"),
-            ("Toggle Playback".into(), Box::new(TogglePlayback), "Viewer"),
-            ("Previous Frame".into(), Box::new(PreviousFrame), "Viewer"),
-            ("Next Frame".into(), Box::new(NextFrame), "Viewer"),
-            ("Go To Start".into(), Box::new(GoToStart), "Viewer"),
-            ("Go To End".into(), Box::new(GoToEnd), "Viewer"),
-            ("Toggle Loop".into(), Box::new(ToggleLoop), "Viewer"),
-            (
-                "Toggle Snapping".into(),
-                Box::new(ToggleSnapping),
-                "Timeline",
-            ),
-            ("Zoom In".into(), Box::new(ZoomIn), "Timeline"),
-            ("Zoom Out".into(), Box::new(ZoomOut), "Timeline"),
-            ("Zoom To Fit".into(), Box::new(ZoomToFit), "Timeline"),
-            ("Larger Tracks".into(), Box::new(LargerTracks), "Timeline"),
-            ("Smaller Tracks".into(), Box::new(SmallerTracks), "Timeline"),
-            ("Fit Viewer".into(), Box::new(FitViewer), "Viewer"),
-            (
-                "Keyboard Shortcuts".into(),
-                Box::new(KeyboardShortcuts),
-                "Editor",
-            ),
-        ];
+        let mut seen = BTreeSet::new();
+        let rows: Vec<_> = keymap()
+            .into_iter()
+            .filter_map(|(_, action, context)| {
+                let name = action
+                    .name()
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(action.name())
+                    .to_owned();
+                seen.insert(name.clone()).then_some((name, action, context))
+            })
+            .collect();
         window.open_dialog(cx, move |dialog, window, _cx| {
             dialog.title("Keyboard shortcuts").child(
                 div()

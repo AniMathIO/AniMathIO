@@ -1355,12 +1355,13 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<SetExportPreset>,
     ) -> Result<CallToolResult, McpError> {
-        let preset = match p.preset {
-            ExportPresetParam::Youtube1080p => ExportPreset::Youtube1080p,
-            ExportPresetParam::Youtube4k => ExportPreset::Youtube4k,
-            ExportPresetParam::ShortsVertical => ExportPreset::ShortsVertical,
-            ExportPresetParam::Square => ExportPreset::Square,
+        let name = match p.preset {
+            ExportPresetParam::Youtube1080p => "youtube_1080p",
+            ExportPresetParam::Youtube4k => "youtube_4k",
+            ExportPresetParam::ShortsVertical => "shorts_vertical",
+            ExportPresetParam::Square => "square",
         };
+        let preset = ExportPreset::from_name(name).expect("shared preset table");
         let mut backend = self.backend.lock().await;
         let state = backend.project_get().map_err(mcp_error)?;
         backend
