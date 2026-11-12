@@ -11,15 +11,18 @@
     clippy::struct_excessive_bools,
     clippy::needless_pass_by_value,
     clippy::ref_option,
-    clippy::too_many_lines
+    clippy::too_many_lines,
+    clippy::too_many_arguments
 )]
 
 mod control;
 mod editor;
 mod export_worker;
 mod inspector;
+mod layout;
 mod playback;
 mod render_worker;
+mod timecode;
 mod timeline;
 
 use std::collections::BTreeMap;
@@ -35,14 +38,17 @@ fn main() {
         return;
     }
     let (project, assets, path, recovered) = initial_project();
+    let bench = bench_viewport_enabled();
     let control = if control_enabled() {
         let (bridge, rx) = control::ControlBridge::new();
         control::start(bridge).map(|server| control::ControlRuntime { rx, server })
     } else {
         None
     };
-    Application::new().run(move |cx: &mut App| {
-        cx.on_window_closed(|cx| {
+    gpui_platform::application().run(move |cx: &mut App| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
                 cx.quit();
             }
@@ -58,7 +64,9 @@ fn main() {
                 },
                 move |window, cx| {
                     cx.new(|cx| {
-                        editor::Editor::new(cx, window, project, assets, path, recovered, control)
+                        editor::Editor::new(
+                            cx, window, project, assets, path, recovered, control, bench,
+                        )
                     })
                 },
             )
@@ -80,10 +88,18 @@ fn control_enabled() -> bool {
         || std::env::var("ANIMATHIO_CONTROL").is_ok_and(|value| value == "1")
 }
 
-/// `animathio [--control] [file.amio]` opens a project; no argument opens the
-/// shared sample.
+/// Whether to run the viewport presentation benchmark: `--bench-viewport`.
+fn bench_viewport_enabled() -> bool {
+    std::env::args().any(|arg| arg == "--bench-viewport")
+}
+
+/// `animathio [--control] [--bench-viewport] [file.amio]` opens a project; no
+/// argument opens the shared sample.
 fn initial_project() -> (Project, BTreeMap<AssetId, Vec<u8>>, Option<PathBuf>, bool) {
-    let Some(arg) = std::env::args().skip(1).find(|arg| arg != "--control") else {
+    let Some(arg) = std::env::args()
+        .skip(1)
+        .find(|arg| arg != "--control" && arg != "--bench-viewport")
+    else {
         let sample = sample::build().expect("build sample project");
         return (sample.project, sample.assets, None, false);
     };

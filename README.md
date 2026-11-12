@@ -32,16 +32,21 @@ Headless engine prototype. What works today:
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
 | v1 and Manim importers | ✅ `import-v1`, `import-manim` |
-| GPUI desktop editor | 🚧 thin shell over the core |
+| GPUI desktop editor | 🚧 dockable NLE shell (media pool, viewer, inspector, timeline) |
 | Media decoding / video export | 🚧 deferred (labelled checkerboard placeholder) |
 
 Text and shapes under `core::builtin` are temporary stand-ins for the plugin equivalents.
 
 ## Screenshot
 
-> **Screenshot placeholder.** Add a capture of the `animathio` editor (or a CLI-rendered frame) to `docs/images/` and link it here:
->
-> `![AniMathIO 2.0 editor](docs/images/editor.png)`
+The DaVinci-style editor shell on the `v2` branch (dark theme, media pool, viewer
+with transport controls, inspector and timeline):
+
+![AniMathIO 2.0 editor](docs/screenshots/editor-main.png)
+
+| Viewer and inspector | Timeline |
+| --- | --- |
+| ![Viewer and inspector](docs/screenshots/editor-viewer.png) | ![Timeline](docs/screenshots/editor-timeline.png) |
 
 ## Documentation
 
