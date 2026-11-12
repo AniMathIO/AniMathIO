@@ -81,6 +81,22 @@ pub enum Command {
         /// New source offset.
         source_offset: Time,
     },
+    /// Split one clip into two adjacent clips at a point strictly inside its range.
+    SplitClip {
+        /// Existing clip identity; it becomes the left half.
+        id: ClipId,
+        /// Identity for the new right half.
+        right_id: ClipId,
+        /// Split point in timeline ticks.
+        at: Time,
+    },
+    /// Merge two adjacent clips back into one (the inverse of `SplitClip`).
+    MergeClip {
+        /// Left clip identity.
+        left: ClipId,
+        /// Right clip identity.
+        right: ClipId,
+    },
     /// Replace the base normalized transform.
     SetTransform {
         /// Clip identity.
@@ -254,6 +270,82 @@ impl Command {
                 clip.range = *range;
                 clip.source_offset = *source_offset;
                 inverse
+            }
+            Self::SplitClip { id, right_id, at } => {
+                if id == right_id {
+                    return Err(invalid("split clip ids must differ"));
+                }
+                let index = clip_track_index(project, *id)?;
+                if project
+                    .tracks
+                    .iter()
+                    .any(|t| t.clips.contains_key(right_id))
+                {
+                    return Err(invalid("right clip already exists"));
+                }
+                let left = project.tracks[index]
+                    .clips
+                    .get(id)
+                    .ok_or_else(|| invalid("clip missing"))?
+                    .clone();
+                if *at <= left.range.start || *at >= left.range.end {
+                    return Err(invalid("split point outside clip"));
+                }
+                let duration = at.0 - left.range.start.0;
+                let mut right = left.clone();
+                right.id = *right_id;
+                right.range = TimeRange::new(*at, left.range.end)?;
+                right.source_offset = Time(left.source_offset.0 + duration);
+                project.tracks[index]
+                    .clips
+                    .get_mut(id)
+                    .expect("clip checked above")
+                    .range = TimeRange::new(left.range.start, *at)?;
+                project.tracks[index].clips.insert(*right_id, right);
+                Self::MergeClip {
+                    left: *id,
+                    right: *right_id,
+                }
+            }
+            Self::MergeClip { left, right } => {
+                let left_index = clip_track_index(project, *left)?;
+                let right_index = clip_track_index(project, *right)?;
+                if left_index != right_index {
+                    return Err(invalid("merge clips must share a track"));
+                }
+                let left_clip = project.tracks[left_index]
+                    .clips
+                    .get(left)
+                    .ok_or_else(|| invalid("clip missing"))?
+                    .clone();
+                let right_clip = project.tracks[right_index]
+                    .clips
+                    .get(right)
+                    .ok_or_else(|| invalid("clip missing"))?
+                    .clone();
+                if left_clip.range.end != right_clip.range.start {
+                    return Err(invalid("merge clips must be adjacent"));
+                }
+                if left_clip.kind != right_clip.kind {
+                    return Err(invalid("merge clips must share a kind"));
+                }
+                let at = left_clip.range.end;
+                let original_source = right_clip.source_offset.0 - (at.0 - left_clip.range.start.0);
+                if original_source < 0 {
+                    return Err(invalid("merge would produce a negative source offset"));
+                }
+                let restored = project.tracks[left_index]
+                    .clips
+                    .get_mut(left)
+                    .ok_or_else(|| invalid("clip missing"))?;
+                restored.range = TimeRange::new(left_clip.range.start, right_clip.range.end)?;
+                restored.source_offset = Time(original_source);
+                project.tracks[right_index].clips.remove(right);
+                Self::SplitClip {
+                    id: *left,
+                    right_id: *right,
+                    at,
+                }
             }
             Self::SetTransform { id, transform } => {
                 let clip = clip_mut(project, *id)?;

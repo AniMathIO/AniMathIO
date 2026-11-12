@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use animathio_audio::{AudioPool, Player};
+use animathio_audio::{AudioPool, Mixer, Player};
 use animathio_core::{Project, Rounding, TICKS_PER_SECOND, Time};
 
 /// The single A/V master clock. The UI thread owns it and asks "which video frame
@@ -11,25 +11,39 @@ pub(crate) trait Clock {
     fn play(&mut self) -> Result<(), String>;
     fn pause(&mut self) -> Result<(), String>;
     fn seek(&mut self, time: Time) -> Result<(), String>;
+    /// Replace the project snapshot seen by the mixer worker. The default is a
+    /// no-op for clocks that have no mixer (the monotonic fallback).
+    fn set_project(&mut self, _project: Arc<Project>) {}
+    /// Replace the prepared mixer snapshot. The default is a no-op for clocks
+    /// that have no mixer.
+    fn set_mixer(&mut self, _mixer: Arc<Mixer>) {}
+    /// Output format used to prepare replacement mixers; `None` for clocks with
+    /// no audio device.
+    fn mixer_format(&self) -> Option<(u32, u16)> {
+        None
+    }
 }
 
 /// Device-master clock. The audio crate owns the callback/worker threads; this
 /// wrapper keeps that runtime detail out of the view.
 pub(crate) struct AudioClock {
     player: Player,
+    rate: u32,
+    channels: u16,
 }
 
 impl AudioClock {
-    /// Open the default output device and prepare an empty mixer snapshot. Audio
-    /// clip decoding is not wired into the editor shell yet, so the mixer emits
-    /// silence; the device callback still supplies the master clock.
-    pub(crate) fn open(project: &Project) -> Result<Self, String> {
+    /// Open the default output device and prepare a mixer from the decoded pool.
+    pub(crate) fn open(project: &Project, pool: &AudioPool) -> Result<Self, String> {
         let (rate, channels) = Player::default_output_format().map_err(|e| e.to_string())?;
-        let pool = AudioPool::default();
         let mixer = pool.prepare(rate, channels).map_err(|e| e.to_string())?;
         let player =
             Player::new(Arc::new(project.clone()), Arc::new(mixer)).map_err(|e| e.to_string())?;
-        Ok(Self { player })
+        Ok(Self {
+            player,
+            rate,
+            channels,
+        })
     }
 }
 
@@ -48,6 +62,18 @@ impl Clock for AudioClock {
 
     fn seek(&mut self, time: Time) -> Result<(), String> {
         self.player.seek(time).map_err(|e| e.to_string())
+    }
+
+    fn set_project(&mut self, project: Arc<Project>) {
+        self.player.set_project(project);
+    }
+
+    fn set_mixer(&mut self, mixer: Arc<Mixer>) {
+        self.player.set_mixer(mixer);
+    }
+
+    fn mixer_format(&self) -> Option<(u32, u16)> {
+        Some((self.rate, self.channels))
     }
 }
 
@@ -102,8 +128,8 @@ impl Clock for MonotonicClock {
 }
 
 /// Choose the audio clock, falling back to a monotonic clock with no device.
-pub(crate) fn make_clock(project: &Project) -> Box<dyn Clock> {
-    match AudioClock::open(project) {
+pub(crate) fn make_clock(project: &Project, pool: &AudioPool) -> Box<dyn Clock> {
+    match AudioClock::open(project, pool) {
         Ok(clock) => Box::new(clock),
         Err(_) => Box::new(MonotonicClock::new()),
     }

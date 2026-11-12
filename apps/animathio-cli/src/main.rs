@@ -1,4 +1,6 @@
 //! Headless project validation and deterministic PNG rendering.
+mod mcp;
+
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
 use animathio_format::{Bundle, Limits, read_amio, read_json, write_amio};
 use animathio_render::{RenderCtx, render, sample};
@@ -65,17 +67,41 @@ enum Action {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// Run an MCP stdio server: connects to a running editor, or drives a
+    /// project file headlessly when `--project` is given.
+    Mcp {
+        /// Project file to operate on headlessly (a `.amio` archive or `project.json`).
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
 }
 #[derive(Args)]
 struct OutputSize {
-    #[arg(long, default_value_t = 640)]
-    width: u32,
-    #[arg(long, default_value_t = 360)]
-    height: u32,
+    /// Overrides the project's output width.
+    #[arg(long)]
+    width: Option<u32>,
+    /// Overrides the project's output height.
+    #[arg(long)]
+    height: Option<u32>,
 }
 impl OutputSize {
-    fn tuple(&self) -> (u32, u32) {
-        (self.width, self.height)
+    fn tuple(&self, project: &Project) -> (u32, u32) {
+        // An unset project resolution (`0`) falls back to the historical CLI
+        // defaults so headless renders of imported projects still work.
+        let fallback_width = if project.width() == 0 {
+            640
+        } else {
+            project.width()
+        };
+        let fallback_height = if project.height() == 0 {
+            360
+        } else {
+            project.height()
+        };
+        (
+            self.width.unwrap_or(fallback_width),
+            self.height.unwrap_or(fallback_height),
+        )
     }
 }
 
@@ -139,8 +165,14 @@ fn run(cli: Cli) -> Result<()> {
                 time.ok_or("--frame or --time is required")?
             };
             let mut ctx = context(bundle.assets)?;
-            render(&evaluate(&bundle.project, time), &mut ctx, size.tuple())?.save_png(output)?;
+            render(
+                &evaluate(&bundle.project, time),
+                &mut ctx,
+                size.tuple(&bundle.project),
+            )?
+            .save_png(output)?;
         }
+        Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {
             project,
             from,
@@ -162,17 +194,35 @@ fn run(cli: Cli) -> Result<()> {
                     rate.frame_to_time(from, Rounding::Nearest)?,
                 ),
                 &mut ctx,
-                size.tuple(),
+                size.tuple(&bundle.project),
             )?;
             fs::create_dir_all(&output)?;
             first.save_png(output.join(format!("frame_{from:06}.png")))?;
             for frame in from + 1..to {
                 let time = rate.frame_to_time(frame, Rounding::Nearest)?;
-                render(&evaluate(&bundle.project, time), &mut ctx, size.tuple())?
-                    .save_png(output.join(format!("frame_{frame:06}.png")))?;
+                render(
+                    &evaluate(&bundle.project, time),
+                    &mut ctx,
+                    size.tuple(&bundle.project),
+                )?
+                .save_png(output.join(format!("frame_{frame:06}.png")))?;
             }
         }
     }
+    Ok(())
+}
+
+/// Run the MCP stdio server on a dedicated tokio runtime.
+#[tokio::main]
+async fn run_mcp(project: Option<PathBuf>) -> Result<()> {
+    use rmcp::{ServiceExt, transport::stdio};
+
+    let backend = mcp::build_backend(project)?;
+    let service = mcp::McpServer::new(backend)
+        .serve(stdio())
+        .await
+        .inspect_err(|error| eprintln!("mcp serve error: {error:?}"))?;
+    service.waiting().await?;
     Ok(())
 }
 
