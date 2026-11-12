@@ -221,3 +221,35 @@ fn equal_power_curves_keep_constant_power() {
     }
     assert_eq!(equal_power(0.0), (1.0, 0.0));
 }
+
+#[test]
+fn batch_edit_commands_keep_transitions_valid_and_atomic() {
+    let mut project = project();
+    add(&mut project, dissolve(7, 1, 2, 40)).unwrap();
+    let before = project.clone();
+
+    // Removing the whole outgoing clip would orphan the transition: the batch is
+    // rejected as a whole and the project is untouched.
+    let remove = Command::RemoveRange {
+        range: TimeRange::new(Time(0), Time(100)).unwrap(),
+        ripple: true,
+    };
+    assert!(remove.apply(&mut project).is_err());
+    assert_eq!(project, before);
+
+    // A batch mixing a transition edit with a ripple delete after it is one undo step.
+    let batch = Command::Batch {
+        commands: vec![
+            Command::SetTransitionDuration {
+                id: TransitionId(7),
+                duration: Time(20),
+            },
+            Command::RippleDelete { clip: ClipId(3) },
+        ],
+    };
+    let undo = batch.apply(&mut project).unwrap();
+    assert_eq!(project.tracks()[0].transitions()[0].duration, Time(20));
+    assert!(!project.tracks()[0].clips().contains_key(&ClipId(3)));
+    undo.apply(&mut project).unwrap();
+    assert_eq!(project, before);
+}

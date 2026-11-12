@@ -681,6 +681,16 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(())?
             }
+            Call::TrimSilence { params } => {
+                let result = animathio_control::trim_silence(
+                    &mut self.project,
+                    &mut self.history,
+                    &self.assets,
+                    &params,
+                )?;
+                self.after_edit(cx);
+                serde_json::to_value(result)?
+            }
             call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
                 let replace = matches!(&call, Call::ImportManim { params } if params.replace);
                 let importing = matches!(&call, Call::ImportManim { .. });

@@ -192,6 +192,36 @@ pub enum Command {
         /// Destination clip-local ticks; must be free.
         to: Time,
     },
+    /// Apply several commands as one transaction and one undo step. The inverse is a
+    /// `Batch` of the inverses in reverse order. The project is validated once, after
+    /// the last command, so intermediate states may be temporarily inconsistent.
+    Batch {
+        /// Commands applied in order.
+        commands: Vec<Command>,
+    },
+    /// Split every clip on every track that strictly contains one of `times`.
+    /// Right halves get fresh ids, allocated deterministically from the largest
+    /// existing clip id. The inverse is a `Batch` of merges.
+    SplitAt {
+        /// Timeline split points, in any order; duplicates are ignored.
+        times: Vec<Time>,
+    },
+    /// Remove all content inside `range` on every track: clips fully inside are removed,
+    /// clips crossing an edge are trimmed and clips spanning the whole range are split.
+    /// With `ripple`, content after the range moves left by the range length and an
+    /// explicit project duration shrinks accordingly.
+    RemoveRange {
+        /// Half-open timeline range to remove.
+        range: TimeRange,
+        /// Close the gap by shifting later content left on every track.
+        ripple: bool,
+    },
+    /// Remove a clip and close the gap it leaves on its own track by shifting later
+    /// clips on that track left by the clip's duration.
+    RippleDelete {
+        /// Clip identity.
+        clip: ClipId,
+    },
     /// Add a transition on the edit point between two adjacent clips of a track.
     AddTransition {
         /// Layer owning both clips.
@@ -228,6 +258,19 @@ impl Command {
     #[allow(clippy::too_many_lines)]
     fn apply_inner(&self, project: &mut Project) -> Result<Self, Error> {
         Ok(match self {
+            Self::Batch { commands } => apply_all(project, commands)?,
+            Self::SplitAt { times } => {
+                let commands = split_at_commands(project, times)?;
+                apply_all(project, &commands)?
+            }
+            Self::RemoveRange { range, ripple } => {
+                let commands = remove_range_commands(project, *range, *ripple)?;
+                apply_all(project, &commands)?
+            }
+            Self::RippleDelete { clip } => {
+                let commands = ripple_delete_commands(project, *clip)?;
+                apply_all(project, &commands)?
+            }
             Self::AddTrack { track, index } => {
                 if *index > project.tracks.len() {
                     return Err(invalid("track index out of bounds"));
@@ -703,6 +746,156 @@ impl Command {
         })
     }
 }
+/// Apply `commands` in order without intermediate validation, returning the combined
+/// inverse. On failure the caller's candidate project is discarded by `Command::apply`.
+fn apply_all(project: &mut Project, commands: &[Command]) -> Result<Command, Error> {
+    let mut inverses = Vec::with_capacity(commands.len());
+    for command in commands {
+        inverses.push(command.apply_inner(project)?);
+    }
+    inverses.reverse();
+    Ok(Command::Batch { commands: inverses })
+}
+
+/// First clip id strictly greater than every existing clip id.
+fn next_clip_id(project: &Project) -> Result<u64, Error> {
+    project
+        .tracks
+        .iter()
+        .flat_map(|t| t.clips.keys())
+        .map(|id| id.0)
+        .max()
+        .map_or(Some(1), |max| max.checked_add(1))
+        .ok_or_else(|| invalid("clip id overflow"))
+}
+
+fn split_at_commands(project: &Project, times: &[Time]) -> Result<Vec<Command>, Error> {
+    let mut times = times.to_vec();
+    times.sort_unstable();
+    times.dedup();
+    let mut next = next_clip_id(project)?;
+    let mut commands = Vec::new();
+    for track in &project.tracks {
+        for clip in track.clips.values() {
+            // Split from the right so the original id keeps shrinking leftwards and each
+            // later split point is still inside the clip being split.
+            for at in times
+                .iter()
+                .rev()
+                .filter(|at| clip.range.start < **at && **at < clip.range.end)
+            {
+                commands.push(Command::SplitClip {
+                    id: clip.id,
+                    right_id: ClipId(next),
+                    at: *at,
+                });
+                next = next
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("clip id overflow"))?;
+            }
+        }
+    }
+    Ok(commands)
+}
+
+fn remove_range_commands(
+    project: &Project,
+    range: TimeRange,
+    ripple: bool,
+) -> Result<Vec<Command>, Error> {
+    range.validate()?;
+    let (cut_start, cut_end) = (range.start.0, range.end.0);
+    let length = cut_end - cut_start;
+    let shift = |t: i64| if ripple { t - length } else { t };
+    let mut next = next_clip_id(project)?;
+    let mut commands = Vec::new();
+    for track in &project.tracks {
+        for clip in track.clips.values() {
+            let (start, end) = (clip.range.start.0, clip.range.end.0);
+            let offset = clip.source_offset.0;
+            if end <= cut_start {
+                continue;
+            }
+            if start >= cut_end {
+                if ripple {
+                    commands.push(Command::MoveClip {
+                        id: clip.id,
+                        track: track.id,
+                        start: Time(shift(start)),
+                    });
+                }
+                continue;
+            }
+            match (start < cut_start, end > cut_end) {
+                // Fully inside the removed range.
+                (false, false) => commands.push(Command::RemoveClip { id: clip.id }),
+                // Crosses the range start: keep the head.
+                (true, false) => commands.push(Command::TrimClip {
+                    id: clip.id,
+                    range: TimeRange::new(clip.range.start, range.start)?,
+                    source_offset: clip.source_offset,
+                }),
+                // Crosses the range end: keep the tail.
+                (false, true) => commands.push(Command::TrimClip {
+                    id: clip.id,
+                    range: TimeRange::new(Time(shift(cut_end)), Time(shift(end)))?,
+                    source_offset: Time(offset + (cut_end - start)),
+                }),
+                // Spans the whole range: split, then trim the right half.
+                (true, true) => {
+                    let right_id = ClipId(next);
+                    next = next
+                        .checked_add(1)
+                        .ok_or_else(|| invalid("clip id overflow"))?;
+                    commands.push(Command::SplitClip {
+                        id: clip.id,
+                        right_id,
+                        at: range.start,
+                    });
+                    commands.push(Command::TrimClip {
+                        id: clip.id,
+                        range: TimeRange::new(clip.range.start, range.start)?,
+                        source_offset: clip.source_offset,
+                    });
+                    commands.push(Command::TrimClip {
+                        id: right_id,
+                        range: TimeRange::new(Time(shift(cut_end)), Time(shift(end)))?,
+                        source_offset: Time(offset + (cut_end - start)),
+                    });
+                }
+            }
+        }
+    }
+    if ripple && project.duration.0 > cut_start {
+        let removed = project.duration.0.min(cut_end) - cut_start;
+        commands.push(Command::SetSettings {
+            width: project.width,
+            height: project.height,
+            frame_rate: project.frame_rate,
+            background: project.background,
+            duration: Time(project.duration.0 - removed),
+        });
+    }
+    Ok(commands)
+}
+
+fn ripple_delete_commands(project: &Project, id: ClipId) -> Result<Vec<Command>, Error> {
+    let track = &project.tracks[clip_track_index(project, id)?];
+    let clip = &track.clips[&id];
+    let length = clip.range.end.0 - clip.range.start.0;
+    let mut commands = vec![Command::RemoveClip { id }];
+    for later in track.clips.values() {
+        if later.range.start >= clip.range.end {
+            commands.push(Command::MoveClip {
+                id: later.id,
+                track: track.id,
+                start: Time(later.range.start.0 - length),
+            });
+        }
+    }
+    Ok(commands)
+}
+
 fn transition_index(project: &Project, id: TransitionId) -> Result<(usize, usize), Error> {
     project
         .tracks

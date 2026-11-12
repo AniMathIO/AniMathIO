@@ -271,6 +271,7 @@ dependencies = [
 name = "animathio-control"
 version = "2.0.0"
 dependencies = [
+ "animathio-audio",
  "animathio-core",
  "animathio-export",
  "animathio-format",
