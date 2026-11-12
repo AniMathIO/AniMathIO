@@ -6,9 +6,7 @@ use animathio_core::{
     Time, TrackId, Transform, evaluate,
 };
 use animathio_format::{Bundle, Limits, read_amio, read_json};
-use animathio_render::{
-    CpuBackend, Frame, GpuBackend, PlaceholderFrameSource, RenderCtx, render,
-};
+use animathio_render::{CpuBackend, Frame, GpuBackend, PlaceholderFrameSource, RenderCtx, render};
 use std::{collections::BTreeMap, fs::File, path::Path};
 
 /// Antialiasing differs slightly between the CPU and GPU rasterizers, so compare with
@@ -120,10 +118,9 @@ fn gpu_matches_cpu_on_golden_fixtures() {
 #[test]
 fn gpu_composites_cpu_effect_layers() {
     let Some(gpu) = gpu() else { return };
-    let bytes = std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/effects.png"),
-    )
-    .unwrap();
+    let bytes =
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/effects.png"))
+            .unwrap();
     let id = AssetId::of(&bytes);
     let mut effect = EffectInstance::new(EffectId(1), EffectKind::Blur);
     effect.params.insert("radius".to_owned(), 3.0);

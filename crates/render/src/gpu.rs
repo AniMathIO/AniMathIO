@@ -52,20 +52,18 @@ pub struct GpuBackend {
 impl GpuBackend {
     /// Create a headless device and Vello renderer.
     pub fn new() -> Result<Self, Error> {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..Default::default()
         }))
         .map_err(|e| Error::Gpu(format!("no GPU adapter: {e}")))?;
         let info = adapter.get_info();
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("animathio-render"),
-                ..Default::default()
-            }))
-            .map_err(|e| Error::Gpu(format!("GPU device creation failed: {e}")))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("animathio-render"),
+            ..Default::default()
+        }))
+        .map_err(|e| Error::Gpu(format!("GPU device creation failed: {e}")))?;
         let renderer = Renderer::new(
             &device,
             RendererOptions {
@@ -157,16 +155,21 @@ impl GpuBackend {
             };
             #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
             let opacity = clip.transform.opacity as f32;
-            self.scene
-                .push_layer(Fill::NonZero, Mix::Normal, opacity, Affine::IDENTITY, &canvas);
+            self.scene.push_layer(
+                Fill::NonZero,
+                Mix::Normal,
+                opacity,
+                Affine::IDENTITY,
+                &canvas,
+            );
             if clip.effects.is_empty() {
                 self.draw_clip(transform, size, clip, pool, video)?;
             } else {
                 // Effects run on the CPU path for now (WGSL ports are a follow-up):
                 // rasterize the clip alone, filter it, then composite it here.
-                let mut layer =
-                    self.cpu
-                        .render_effect_layer(clip, pool, video, size, transform)?;
+                let mut layer = self
+                    .cpu
+                    .render_effect_layer(clip, pool, video, size, transform)?;
                 crate::effects::apply_chain(&mut layer, &clip.effects)?;
                 let image = image_data(Arc::new(layer))?;
                 self.scene
@@ -203,7 +206,8 @@ impl GpuBackend {
                     let image = image_data(Arc::new(frame))?;
                     self.draw_unit_image(t, image);
                 } else {
-                    let label = format!("VIDEO {}\n{} ticks", &id.as_str()[..8], clip.source_time.0);
+                    let label =
+                        format!("VIDEO {}\n{} ticks", &id.as_str()[..8], clip.source_time.0);
                     self.placeholder(t, size, &label)?;
                 }
             }
@@ -219,8 +223,7 @@ impl GpuBackend {
             }) => {
                 let path = path(shape);
                 if let Some(fill) = fill {
-                    self.scene
-                        .fill(Fill::NonZero, t, color(*fill), None, &path);
+                    self.scene.fill(Fill::NonZero, t, color(*fill), None, &path);
                 }
                 if let Some(stroke) = stroke {
                     self.scene.stroke(
@@ -245,10 +248,8 @@ impl GpuBackend {
     }
 
     fn draw_unit_image(&mut self, t: Affine, image: ImageData) {
-        let scale = Affine::scale_non_uniform(
-            1.0 / f64::from(image.width),
-            1.0 / f64::from(image.height),
-        );
+        let scale =
+            Affine::scale_non_uniform(1.0 / f64::from(image.width), 1.0 / f64::from(image.height));
         self.scene.draw_image(&ImageBrush::new(image), t * scale);
     }
 
@@ -344,7 +345,13 @@ impl GpuBackend {
             None,
             &Rect::new(0.0, 0.25, 1.0, 0.75),
         );
-        self.text(t * Affine::translate((0.04, 0.3)), size, label, 0.12, [255; 4])
+        self.text(
+            t * Affine::translate((0.04, 0.3)),
+            size,
+            label,
+            0.12,
+            [255; 4],
+        )
     }
 
     fn readback(&mut self, size: Size) -> Result<Frame, Error> {
@@ -454,4 +461,3 @@ fn color(value: Color) -> VelloColor {
 fn color_core(value: CoreColor) -> VelloColor {
     color([value.r, value.g, value.b, value.a])
 }
-

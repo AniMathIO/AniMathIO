@@ -88,7 +88,8 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
             // keeps the (possibly GPU) backend and its device.
             match RenderCtx::from_assets(assets) {
                 Ok(mut loaded) => {
-                    let current = ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
+                    let current =
+                        ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
                     loaded.set_backend(current);
                     ctx = loaded;
                 }

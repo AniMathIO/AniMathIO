@@ -421,10 +421,7 @@ impl CpuBackend {
                     runs.push(ShapedRun {
                         font: run.run().font().clone(),
                         font_size: run.run().font_size(),
-                        glyphs: run
-                            .positioned_glyphs()
-                            .map(|g| (g.id, g.x, g.y))
-                            .collect(),
+                        glyphs: run.positioned_glyphs().map(|g| (g.id, g.x, g.y)).collect(),
                     });
                 }
             }
