@@ -330,6 +330,8 @@ pub(crate) struct Editor {
     plugin_host: Option<PluginHost>,
     plugins: Vec<PluginDescriptor>,
     settings_open: bool,
+    /// Persisted "GPU preview" toggle.
+    preview: crate::preview_settings::PreviewSettings,
     export_task: Option<crate::export_worker::ExportTask>,
     confirm_overwrite: Option<PathBuf>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -374,6 +376,8 @@ impl Editor {
         let initial_next_id = next_id(&project);
         let clock = make_clock(&project, &pool);
         let worker = RenderWorker::spawn();
+        let preview = crate::preview_settings::PreviewSettings::load();
+        worker.set_backend(preview.backend());
         worker.load(assets.clone());
         let mut this = Self {
             project,
@@ -401,6 +405,7 @@ impl Editor {
             plugin_host,
             plugins,
             settings_open: false,
+            preview,
             export_task: None,
             confirm_overwrite: None,
             keyframe_drag: None,
@@ -677,6 +682,16 @@ impl Editor {
                 self.import_control_v1(&path)?;
                 self.after_edit(cx);
                 serde_json::to_value(())?
+            }
+            Call::TrimSilence { params } => {
+                let result = animathio_control::trim_silence(
+                    &mut self.project,
+                    &mut self.history,
+                    &self.assets,
+                    &params,
+                )?;
+                self.after_edit(cx);
+                serde_json::to_value(result)?
             }
             call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
                 let replace = matches!(&call, Call::ImportManim { params } if params.replace);
@@ -1348,6 +1363,16 @@ impl Editor {
             PanelSide::Bottom => self.dock.bottom_open = !self.dock.bottom_open,
         }
         self.dock.save();
+        cx.notify();
+    }
+
+    fn toggle_gpu_preview(&mut self, cx: &mut Context<Self>) {
+        self.preview.gpu = !self.preview.gpu;
+        self.preview.save();
+        self.worker.set_backend(self.preview.backend());
+        if let Some(time) = self.last_requested {
+            self.request_render(time);
+        }
         cx.notify();
     }
 
@@ -3024,6 +3049,14 @@ impl Editor {
                     "Toggle timeline",
                     Box::new(|this, cx| this.toggle_panel(PanelSide::Bottom, cx)),
                 ),
+                (
+                    if self.preview.gpu {
+                        "GPU preview: on"
+                    } else {
+                        "GPU preview: off"
+                    },
+                    Box::new(Self::toggle_gpu_preview),
+                ),
             ],
             MenuId::Clip => vec![
                 ("Split at playhead S", Box::new(Self::split_at_playhead)),
@@ -4076,18 +4109,7 @@ fn media_type_for(path: &Path) -> &'static str {
 }
 
 fn project_size(project: &Project) -> (u32, u32) {
-    (
-        if project.width() == 0 {
-            1280
-        } else {
-            project.width()
-        },
-        if project.height() == 0 {
-            720
-        } else {
-            project.height()
-        },
-    )
+    animathio_export::resolution(project)
 }
 
 fn next_id(project: &Project) -> u64 {
@@ -4147,7 +4169,6 @@ fn write_project(
         .filter(|(id, _)| project.assets().contains_key(id))
         .map(|(id, bytes)| (id.clone(), bytes.clone()))
         .collect();
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    animathio_format::write_amio(file, project, &referenced).map_err(|e| e.to_string())?;
+    animathio_format::save_amio(path, project, &referenced).map_err(|e| e.to_string())?;
     Ok(())
 }

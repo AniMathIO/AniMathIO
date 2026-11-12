@@ -2,7 +2,7 @@
 mod mcp;
 
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
-use animathio_format::{Bundle, Limits, read_amio, read_json, write_amio};
+use animathio_format::{Bundle, Limits, read_amio, read_json, save_amio};
 use animathio_render::{RenderCtx, render, sample};
 use clap::{Args, Parser, Subcommand};
 use std::{
@@ -152,7 +152,7 @@ fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Action::NewSample { output } => {
             let sample = sample::build()?;
-            write_amio(File::create(output)?, &sample.project, &sample.assets)?;
+            save_amio(output, &sample.project, &sample.assets)?;
         }
         Action::Validate { project } => {
             let bundle = load(&project)?;
@@ -173,7 +173,7 @@ fn run(cli: Cli) -> Result<()> {
                 .into_iter()
                 .map(|asset| (asset.id, asset.bytes))
                 .collect();
-            write_amio(File::create(&output)?, &project, &asset_map)?;
+            save_amio(&output, &project, &asset_map)?;
             println!(
                 "imported {} tracks, {} assets into {}",
                 project.tracks().len(),
@@ -303,7 +303,7 @@ fn run_import_manim(input: &Path, scene: Option<String>, output: &Path) -> Resul
         .into_iter()
         .map(|asset| (asset.id, asset.bytes))
         .collect();
-    write_amio(File::create(output)?, &project, &asset_map)?;
+    save_amio(output, &project, &asset_map)?;
     println!(
         "imported {} tracks, {} assets into {}",
         project.tracks().len(),

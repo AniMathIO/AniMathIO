@@ -119,6 +119,14 @@ pub trait ControlHandler {
     ) -> Result<ImportManimResult, ControlError> {
         from_value(self.handle(Call::ImportManim { params })?)
     }
+
+    /// Detect silent audio and ripple-remove it, returning the removed ranges.
+    fn trim_silence(
+        &mut self,
+        params: crate::TrimSilenceParams,
+    ) -> Result<crate::TrimSilenceResult, ControlError> {
+        from_value(self.handle(Call::TrimSilence { params })?)
+    }
 }
 
 /// Deserialize a JSON result value into a typed value.

@@ -379,3 +379,58 @@ fn real_device_play_pause_and_seek() {
     player.seek(Time(0)).unwrap();
     assert_eq!(player.now(), Time(0));
 }
+
+/// Two DC clips `[0,1s)` and `[1s,2s)` sharing one asset, with a 0.4 s transition.
+fn crossfade_mix(kind: TransitionKind) -> Vec<f32> {
+    let rate = 1000;
+    let pcm = Pcm::new(rate, 1, vec![1.0; 2000]).unwrap();
+    let second = TICKS_PER_SECOND;
+    let (mut project, pool) = project(&pcm, 0, second);
+    let asset = AssetId::of(b"tone");
+    let mut incoming = Clip::new(ClipId(1), ClipKind::Audio(asset), range(second, 2 * second));
+    incoming.source_offset = Time(second / 2); // handle for the early half
+    let commands = [
+        Command::AddClip {
+            track: TrackId(0),
+            clip: incoming,
+        },
+        Command::AddTransition {
+            track: TrackId(0),
+            transition: Transition {
+                id: TransitionId(0),
+                kind,
+                duration: Time(second * 2 / 5),
+                from: ClipId(0),
+                to: ClipId(1),
+            },
+        },
+    ];
+    for command in commands {
+        command.apply(&mut project).unwrap();
+    }
+    pool.mix(&project, range(0, 2 * second), rate, 1).unwrap()
+}
+#[test]
+fn cross_dissolve_crossfades_audio_with_equal_power_gains() {
+    let mix = crossfade_mix(TransitionKind::CrossDissolve);
+    assert_eq!(mix.len(), 2000);
+    // Outside the [0.8 s, 1.2 s) window each clip plays alone at unity.
+    assert_eq!(mix[799], 1.0);
+    assert_eq!(mix[1200], 1.0);
+    // Inside, both clips play: cos(p·π/2) + sin(p·π/2).
+    for (frame, progress) in [(800, 0.0), (900, 0.25), (1000, 0.5), (1100, 0.75)] {
+        let (out, inc) = equal_power(progress);
+        assert!(
+            (f64::from(mix[frame]) - (out + inc)).abs() < 1e-6,
+            "frame {frame}: {} vs {}",
+            mix[frame],
+            out + inc
+        );
+        assert!((out * out + inc * inc - 1.0).abs() < 1e-12);
+    }
+}
+#[test]
+fn non_dissolve_transitions_keep_a_hard_audio_cut() {
+    let mix = crossfade_mix(TransitionKind::DipToBlack);
+    assert!(mix.iter().all(|&s| s == 1.0));
+}

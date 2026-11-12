@@ -70,6 +70,11 @@ cargo run -p animathio -- file.amio    # open a project
 cargo run -p animathio -- --control    # also start the control socket (see docs/mcp.md)
 ```
 
+The preview renders on the GPU (Vello on wgpu) when an adapter is available and
+falls back to the CPU reference otherwise. Toggle it with **View → GPU preview**
+(persisted), or force it for one run with `ANIMATHIO_RENDER=cpu` or `ANIMATHIO_RENDER=gpu`.
+Export always uses the CPU renderer.
+
 The editor is a thin GPUI shell over the command-only core. Playback, the timeline,
 selection and the control socket are wired; a media decoder and full plugin UI are
 still in progress.
