@@ -108,6 +108,17 @@ pub(crate) fn fade_command(clip: &Clip, edge: FadeEdge, ticks: i64) -> Option<Co
     };
     let base = base_level(clip);
     let mut commands = Vec::new();
+    // Core only animates parameters that exist, so materialise `gain` first.
+    if let Target::Param(name) = &target
+        && !clip.params.contains_key(name)
+        && ticks > 0
+    {
+        commands.push(Command::SetParam {
+            id,
+            name: name.clone(),
+            value: Some(base),
+        });
+    }
     if old > 0 {
         // Drop the previous ramp; the edge key is rewritten (or removed) below.
         commands.push(remove(old));
@@ -137,6 +148,17 @@ mod tests {
         }
         .apply(&mut project)
         .unwrap();
+        if let ClipKind::Audio(id) | ClipKind::Video(id) | ClipKind::Image(id) = &kind {
+            Command::AddAsset {
+                id: id.clone(),
+                asset: animathio_core::Asset {
+                    name: "a.wav".into(),
+                    media_type: "audio/wav".into(),
+                },
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
         let clip = Clip::new(
             ClipId(1),
             kind,

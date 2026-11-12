@@ -2776,10 +2776,12 @@ impl Editor {
         if self.dirty {
             title_row = title_row.child(
                 div()
-                    .w(px(8.))
-                    .h(px(8.))
-                    .rounded_full()
-                    .bg(cx.theme().warning),
+                    .id("dirty-indicator")
+                    .text_color(cx.theme().warning)
+                    .child(icons::icon(IconName::CircleDot).small())
+                    .tooltip(|window, cx| {
+                        gpui_component::tooltip::Tooltip::new("Unsaved changes").build(window, cx)
+                    }),
             );
         }
         div()
@@ -2832,6 +2834,14 @@ impl Editor {
     /// A dropdown listing the actions of the open menu, or `None` when closed.
     fn menu_dropdown(&self, cx: &mut Context<Self>) -> Option<Div> {
         let menu = self.menu_open?;
+        // Anchor the list under its own menu-bar button.
+        let menu_index = match menu {
+            MenuId::File => 0.0,
+            MenuId::Edit => 1.0,
+            MenuId::View => 2.0,
+            MenuId::Clip => 3.0,
+            MenuId::Help => 4.0,
+        };
         let items: Vec<(&str, MenuAction)> = match menu {
             MenuId::File => vec![
                 ("Open… Ctrl+O", Box::new(Self::open)),
@@ -2871,7 +2881,7 @@ impl Editor {
         let mut dropdown = div()
             .absolute()
             .top(px(34.))
-            .left(px(2.))
+            .left(px(4. + 50. * menu_index))
             .w(px(220.))
             .bg(cx.theme().popover)
             .border_1()
@@ -3734,10 +3744,10 @@ impl Editor {
     fn status_line(&self, cx: &App) -> Div {
         let error = self.error.clone().unwrap_or_default();
         // Completed-work notices are not errors, so they never use the danger colour.
-        let notice_color = if error.starts_with("Exported") {
-            cx.theme().success
+        let (notice_color, notice_icon) = if error.starts_with("Exported") {
+            (cx.theme().success, IconName::CircleCheck)
         } else {
-            cx.theme().danger
+            (cx.theme().danger, IconName::TriangleAlert)
         };
         let path = self
             .path
@@ -3764,7 +3774,18 @@ impl Editor {
                     .map(|t| t.clips().len())
                     .sum::<usize>()
             ))
-            .child(div().text_color(notice_color).child(error))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .text_color(notice_color)
+                    .when(!error.is_empty(), |this| {
+                        this.child(icons::icon(notice_icon).small())
+                    })
+                    .child(error),
+            )
     }
 }
 

@@ -93,7 +93,9 @@ The ignored device test can be run explicitly; `cargo run -p animathio-audio
 drift. Apply the same resource limits to these cargo invocations. Symphonia 0.5
 supports WAV/PCM, MP3, FLAC, AAC-LC/M4A and Vorbis; Opus returns an explicit
 unsupported-codec error. Full-asset decoding and equal-layout/mono channel mapping
-are prototype limits; streaming, surround layout matrices and waveform caches are deferred.
+are prototype limits; streaming and surround layout matrices are deferred. Timeline waveforms come from
+`AudioPool::waveform` (4096 downsampled peaks per asset, cached by the editor and
+pruned with the pool).
 
 Plugin compiled-component disk cache entries are stored as `MAC(32) || serialized`,
 where the MAC is a `blake3::keyed_hash` over the serialized bytes using a per-install
