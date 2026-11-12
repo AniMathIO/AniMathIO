@@ -8,7 +8,7 @@ impl Editor {
         TimelineLayout::zoomed(
             width,
             RULER_H,
-            ROW_H,
+            self.dock.track_height.pixels(),
             timeline::project_duration(&self.project),
             self.timeline_zoom,
             self.timeline_scroll,
@@ -45,6 +45,7 @@ impl Editor {
     }
 
     pub(super) fn execute(&mut self, command: &Command, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
         match self.history.execute(&mut self.project, command) {
             Ok(()) => self.after_edit(cx),
             Err(error) => self.error = Some(error.0),
@@ -107,148 +108,26 @@ impl Editor {
         cx.notify();
     }
 
-    pub(crate) fn handle_keystroke(
+    pub(super) fn commit_input_value(
         &mut self,
-        event: &KeystrokeEvent,
-        window: &Window,
+        target: InputTarget,
+        buffer: String,
         cx: &mut Context<Self>,
     ) {
-        // A focused inspector input owns the keyboard: shortcuts such as Delete
-        // or Space must edit its text, not the timeline.
-        if self.fields.any_focused(window, cx) {
-            return;
-        }
-        if self.timecode_buffer.is_some() {
-            self.handle_timecode_key(event, cx);
-            cx.stop_propagation();
-            return;
-        }
-        if self.editing.is_some() {
-            self.handle_text_key(event, cx);
-            cx.stop_propagation();
-            return;
-        }
-
-        let key = event.keystroke.key.as_str();
-        let modifiers = &event.keystroke.modifiers;
-        let handled = match (modifiers.control, modifiers.shift, modifiers.alt, key) {
-            (true, false, false, "z") => {
-                self.undo(cx);
-                true
-            }
-            (true, true, false, "z") => {
-                self.redo(cx);
-                true
-            }
-            (true, false, false, "s") => {
-                self.save();
-                true
-            }
-            (true, false, false, "o") => {
-                self.open(cx);
-                true
-            }
-            (false, false, false, "space") => {
-                self.toggle_play(cx);
-                true
-            }
-            (false, false, false, "delete" | "backspace") => {
-                self.delete_selected(cx);
-                true
-            }
-            (false, false, false, "s") => {
-                self.split_at_playhead(cx);
-                true
-            }
-            (false, false, false, "up") => {
-                self.nudge(1.0, cx);
-                true
-            }
-            (false, false, false, "down") => {
-                self.nudge(-1.0, cx);
-                true
-            }
-            _ => false,
-        };
-        if handled {
-            cx.stop_propagation();
-        }
-    }
-
-    pub(super) fn handle_timecode_key(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
-        let key = event.keystroke.key.as_str();
-        match key {
-            "enter" => self.commit_timecode(cx),
-            "escape" => {
-                self.timecode_buffer = None;
-                cx.notify();
-            }
-            "backspace" => {
-                if let Some(buffer) = &mut self.timecode_buffer {
-                    buffer.pop();
-                }
-                cx.notify();
-            }
-            _ => {
-                let allowed = key.len() == 1
-                    && (key
-                        .chars()
-                        .all(|c| c.is_ascii_digit() || c == ':' || c == '.'));
-                if allowed && let Some(buffer) = &mut self.timecode_buffer {
-                    buffer.push_str(key);
-                    cx.notify();
+        match target {
+            InputTarget::Timecode => {
+                if let Some(time) = timecode::parse_timecode(&buffer, self.project.frame_rate()) {
+                    self.seek_to(time, cx);
+                } else {
+                    self.error = Some("Invalid timecode (HH:MM:SS:FF)".into());
                 }
             }
-        }
-    }
-
-    pub(super) fn handle_text_key(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
-        let key = event.keystroke.key.as_str();
-        match key {
-            "enter" => self.commit_editing(cx),
-            "escape" => {
-                self.editing = None;
-                cx.notify();
-            }
-            "backspace" => {
-                if let Some(edit) = &mut self.editing {
-                    edit.buffer.pop();
-                }
-                cx.notify();
-            }
-            _ => {
-                let allowed = match self.editing.as_ref().map(|edit| &edit.target) {
-                    Some(target) if target.is_numeric() => {
-                        key.len() == 1
-                            && (key.chars().all(|c| c.is_ascii_digit()) || key == "." || key == "-")
-                    }
-                    Some(_) => key.len() == 1,
-                    None => false,
-                };
-                if allowed && let Some(edit) = &mut self.editing {
-                    edit.buffer.push_str(key);
-                    cx.notify();
-                }
-            }
-        }
-    }
-
-    pub(super) fn commit_editing(&mut self, cx: &mut Context<Self>) {
-        let Some(edit) = self.editing.take() else {
-            return;
-        };
-        match edit.target {
-            EditTarget::Field(field) => {
-                let Some(id) = self.selected else {
-                    return;
-                };
-                match edit.buffer.trim().parse::<f64>() {
-                    Ok(value) => self.commit_field(id, &field, value, cx),
-                    Err(_) => self.error = Some("invalid number".into()),
-                }
-            }
-            EditTarget::PluginNumber { id, name } => {
-                let Ok(value) = edit.buffer.trim().parse::<f64>() else {
+            InputTarget::Field { id, field } => match buffer.trim().parse::<f64>() {
+                Ok(value) => self.commit_field(id, &field, value, cx),
+                Err(_) => self.error = Some("invalid number".into()),
+            },
+            InputTarget::PluginNumber { id, name } => {
+                let Ok(value) = buffer.trim().parse::<f64>() else {
                     self.error = Some("invalid number".into());
                     cx.notify();
                     return;
@@ -269,12 +148,12 @@ impl Editor {
                     self.execute(&command, cx);
                 }
             }
-            EditTarget::PluginText { id, name } => {
-                let value = edit.buffer;
+            InputTarget::PluginText { id, name } => {
+                let value = buffer;
                 self.execute(&self.plugin_param_command(id, name, json!(value)), cx);
             }
-            EditTarget::PluginPoint { id, name, axis } => {
-                let Ok(value) = edit.buffer.trim().parse::<f64>() else {
+            InputTarget::PluginPoint { id, name, axis } => {
+                let Ok(value) = buffer.trim().parse::<f64>() else {
                     self.error = Some("invalid number".into());
                     cx.notify();
                     return;
@@ -286,17 +165,17 @@ impl Editor {
                     cx,
                 );
             }
-            EditTarget::SettingsWidth => {
-                self.commit_settings_edit(&edit.buffer, SettingsField::Width, cx);
+            InputTarget::SettingsWidth => {
+                self.commit_settings_edit(&buffer, SettingsField::Width, cx);
             }
-            EditTarget::SettingsHeight => {
-                self.commit_settings_edit(&edit.buffer, SettingsField::Height, cx);
+            InputTarget::SettingsHeight => {
+                self.commit_settings_edit(&buffer, SettingsField::Height, cx);
             }
-            EditTarget::SettingsFps => {
-                self.commit_settings_edit(&edit.buffer, SettingsField::Fps, cx);
+            InputTarget::SettingsFps => {
+                self.commit_settings_edit(&buffer, SettingsField::Fps, cx);
             }
-            EditTarget::SettingsBackground => {
-                self.commit_settings_edit(&edit.buffer, SettingsField::Background, cx);
+            InputTarget::SettingsBackground => {
+                self.commit_settings_edit(&buffer, SettingsField::Background, cx);
             }
         }
         cx.notify();
@@ -490,20 +369,6 @@ impl Editor {
         }
     }
 
-    pub(super) fn nudge(&mut self, direction: f64, cx: &mut Context<Self>) {
-        let Some(id) = self.selected else {
-            return;
-        };
-        let Some(field) = self.selected_field.clone() else {
-            return;
-        };
-        let Some(clip) = self.find_clip(id).cloned() else {
-            return;
-        };
-        let value = field_value(&clip, &field) + direction * field_step(&field);
-        self.commit_field(id, &field, value, cx);
-    }
-
     pub(super) fn split_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
         let Some(clip) = self.find_clip(id).cloned() else {
             return;
@@ -591,6 +456,7 @@ impl Editor {
     }
 
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
         match self.history.undo(&mut self.project) {
             Ok(true) => self.after_edit(cx),
             Ok(false) => {}
@@ -599,6 +465,7 @@ impl Editor {
     }
 
     pub(super) fn redo(&mut self, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
         match self.history.redo(&mut self.project) {
             Ok(true) => self.after_edit(cx),
             Ok(false) => {}

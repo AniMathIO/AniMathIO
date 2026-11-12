@@ -84,49 +84,6 @@ impl Editor {
         rows
     }
 
-    pub(super) fn plugin_asset_control(
-        &self,
-        id: ClipId,
-        name: String,
-        media_type: &str,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let current = self.plugin_asset_value(id, &name);
-        let label = current.as_ref().map_or_else(
-            || "none".to_owned(),
-            |asset| {
-                self.project
-                    .assets()
-                    .get(&asset_id_from(asset))
-                    .map_or_else(|| "unknown".to_owned(), |meta| meta.name.clone())
-            },
-        );
-        let media_type = media_type.to_owned();
-        div()
-            .cursor_pointer()
-            .child(label)
-            .id("plugin-asset")
-            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                let ids = this.matching_asset_ids(&media_type);
-                let next = current
-                    .as_deref()
-                    .and_then(|current| {
-                        let index = ids.iter().position(|asset| asset.as_str() == current)?;
-                        ids.get(index + 1).or_else(|| ids.first())
-                    })
-                    .or_else(|| ids.first())
-                    .cloned();
-                this.execute(
-                    &this.plugin_param_command(
-                        id,
-                        name.clone(),
-                        next.map_or(Value::Null, |asset| json!(asset.as_str())),
-                    ),
-                    cx,
-                );
-            }))
-    }
-
     pub(super) fn matching_asset_ids(&self, media_type: &str) -> Vec<AssetId> {
         let prefix = media_type.strip_suffix("/*").unwrap_or(media_type);
         let mut ids: Vec<AssetId> = self

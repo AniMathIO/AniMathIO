@@ -45,6 +45,7 @@ impl Editor {
         call: Call,
         cx: &mut Context<Self>,
     ) -> Result<Value, ControlError> {
+        self.finish_color_edit(cx);
         Ok(match call {
             Call::Export { .. } => {
                 return Err(ControlError::Other("export must run on its worker".into()));

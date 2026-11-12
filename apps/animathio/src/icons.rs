@@ -47,3 +47,18 @@ pub(crate) fn kind_icon(kind: &ClipKind) -> IconName {
         ClipKind::Error(_) => IconName::TriangleAlert,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::AssetSource;
+
+    #[test]
+    fn full_lucide_catalog_is_registered() {
+        let svg = gpui_kit_assets::AllAssets
+            .load(&IconName::Scissors.path())
+            .unwrap()
+            .unwrap();
+        assert!(std::str::from_utf8(&svg).unwrap().contains("<svg"));
+    }
+}

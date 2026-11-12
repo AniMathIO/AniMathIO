@@ -6,9 +6,10 @@ impl Editor {
     pub(super) fn on_timeline_mouse_down(
         &mut self,
         event: &MouseDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        window.focus(&self.panel_focus[0], cx);
         self.context_menu = None;
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
@@ -360,7 +361,7 @@ impl Editor {
             ScrollDelta::Pixels(point) => (f32::from(point.x), f32::from(point.y)),
             ScrollDelta::Lines(point) => (point.x * 20.0, point.y * 20.0),
         };
-        if event.modifiers.control {
+        if event.modifiers.control || event.modifiers.platform {
             let layout = self.current_layout();
             let anchor = timeline::x_to_time(&layout, x);
             let factor = (dy * 0.002).exp();
@@ -368,11 +369,14 @@ impl Editor {
             let new_layout = self.current_layout();
             let new_x = timeline::time_to_x(&new_layout, anchor);
             self.timeline_scroll += new_x - x;
-        } else {
+        } else if event.modifiers.alt || dx != 0.0 {
             self.timeline_scroll -= dy;
             if dx != 0.0 {
                 self.timeline_scroll -= dx;
             }
+        }
+        if event.modifiers.control || event.modifiers.platform || event.modifiers.alt {
+            cx.stop_propagation();
         }
         let layout = self.current_layout();
         self.timeline_scroll = self
@@ -391,7 +395,7 @@ impl Editor {
         Some(wave)
     }
 
-    pub(super) fn build_timeline_snapshot(&self) -> TimelineSnapshot {
+    pub(super) fn build_timeline_snapshot(&self, cx: &App) -> TimelineSnapshot {
         let duration = timeline::project_duration(&self.project);
         let mut clips = Vec::new();
         let any_solo = self.project.tracks().iter().any(Track::is_solo);
@@ -482,20 +486,26 @@ impl Editor {
             clips,
             position: self.position,
             frame_rate: self.project.frame_rate(),
+            row_height: self.dock.track_height.pixels(),
+            theme: cx.theme().clone(),
         }
     }
 
     pub(super) fn timeline_panel(&self, cx: &mut Context<Self>) -> Div {
-        let snapshot = self.build_timeline_snapshot();
+        let snapshot = self.build_timeline_snapshot(cx);
         let zoom = self.timeline_zoom;
         let scroll = self.timeline_scroll;
         let weak = cx.entity().downgrade();
         let weak_paint = weak.clone();
         let snapping = self.snapping;
+        let content_height =
+            RULER_H + self.project.tracks().len() as f32 * self.dock.track_height.pixels();
         let pool_dragging = self.pool_drag.is_some();
 
         div()
-            .h(px(TIMELINE_H))
+            .h_full()
+            .key_context("Timeline")
+            .track_focus(&self.panel_focus[0])
             .w_full()
             .flex()
             .flex_col()
@@ -503,6 +513,7 @@ impl Editor {
             .child(
                 div()
                     .h(px(30.))
+                    .flex_shrink_0()
                     .w_full()
                     .flex()
                     .flex_row()
@@ -523,6 +534,24 @@ impl Editor {
                         )
                         .selected(snapping)
                         .toggled(snapping),
+                    )
+                    .children(
+                        [
+                            (crate::layout::TrackHeight::Small, "S"),
+                            (crate::layout::TrackHeight::Medium, "M"),
+                            (crate::layout::TrackHeight::Large, "L"),
+                        ]
+                        .map(|(height, label)| {
+                            Button::new(label)
+                                .ghost()
+                                .compact()
+                                .label(label)
+                                .selected(self.dock.track_height == height)
+                                .tooltip(format!("Track height: {label}"))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.set_track_height(height, cx);
+                                }))
+                        }),
                     )
                     .child(icon_button(
                         "zoom-out",
@@ -551,40 +580,59 @@ impl Editor {
             .child(
                 div()
                     .flex_1()
-                    .w_full()
-                    .flex()
-                    .flex_row()
-                    .child(self.track_header(cx))
+                    .min_h_0()
+                    .relative()
                     .child(
                         div()
-                            .flex_1()
-                            .h_full()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(Self::on_timeline_mouse_down),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(Self::on_timeline_context_menu),
-                            )
-                            .on_mouse_move(cx.listener(Self::on_timeline_mouse_move))
-                            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
-                            .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
+                            .id("timeline-track-scroll")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.timeline_scroll_handle)
                             .child(
-                                canvas(
-                                    move |bounds, _window, cx| {
-                                        let _ = weak
-                                            .update(cx, |this, _| this.timeline_bounds = bounds);
-                                    },
-                                    {
-                                        let weak = weak_paint.clone();
-                                        move |bounds, (), window, cx| {
-                                            paint_timeline(
-                                                bounds, &snapshot, zoom, scroll, window, cx,
-                                            );
-                                            if pool_dragging {
-                                                let weak = weak.clone();
-                                                window.on_mouse_event(
+                                div()
+                                    .h(px(content_height))
+                                    .flex_shrink_0()
+                                    .w_full()
+                                    .flex()
+                                    .flex_row()
+                                    .child(self.track_header(cx))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .h_full()
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(Self::on_timeline_mouse_down),
+                                            )
+                                            .on_mouse_down(
+                                                MouseButton::Right,
+                                                cx.listener(Self::on_timeline_context_menu),
+                                            )
+                                            .on_mouse_move(
+                                                cx.listener(Self::on_timeline_mouse_move),
+                                            )
+                                            .on_mouse_up(
+                                                MouseButton::Left,
+                                                cx.listener(Self::on_timeline_mouse_up),
+                                            )
+                                            .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
+                                            .child(
+                                                canvas(
+                                                    move |bounds, _window, cx| {
+                                                        let _ = weak.update(cx, |this, _| {
+                                                            this.timeline_bounds = bounds;
+                                                        });
+                                                    },
+                                                    {
+                                                        let weak = weak_paint.clone();
+                                                        move |bounds, (), window, cx| {
+                                                            paint_timeline(
+                                                                bounds, &snapshot, zoom, scroll,
+                                                                window, cx,
+                                                            );
+                                                            if pool_dragging {
+                                                                let weak = weak.clone();
+                                                                window.on_mouse_event(
                                                 move |event: &MouseUpEvent,
                                                       phase: DispatchPhase,
                                                       window,
@@ -598,14 +646,19 @@ impl Editor {
                                                     window.refresh();
                                                 },
                                             );
-                                                window.request_animation_frame();
-                                            }
-                                        }
-                                    },
-                                )
-                                .size_full(),
+                                                                window.request_animation_frame();
+                                                            }
+                                                        }
+                                                    },
+                                                )
+                                                .size_full(),
+                                            ),
+                                    ),
                             ),
-                    ),
+                    )
+                    .child(gpui_component::scroll::Scrollbar::vertical(
+                        &self.timeline_scroll_handle,
+                    )),
             )
     }
 
@@ -613,12 +666,14 @@ impl Editor {
         let mut header = div()
             .w(px(HEADER_W))
             .h_full()
+            .flex_shrink_0()
             .flex()
             .flex_col()
             .bg(cx.theme().popover);
         header = header.child(
             div()
                 .h(px(RULER_H))
+                .flex_shrink_0()
                 .w_full()
                 .border_b_1()
                 .border_color(cx.theme().border),
@@ -713,10 +768,15 @@ impl Editor {
                 div()
                     // A per-track id scopes the buttons' hover/tooltip state.
                     .id(("track-header", id.0))
-                    .h(px(ROW_H))
+                    .h(px(self.dock.track_height.pixels()))
+                    .flex_shrink_0()
                     .w_full()
                     .flex()
-                    .flex_col()
+                    .when(
+                        self.dock.track_height != crate::layout::TrackHeight::Small,
+                        gpui::Styled::flex_col,
+                    )
+                    .items_center()
                     .justify_center()
                     .px_2()
                     .border_b_1()

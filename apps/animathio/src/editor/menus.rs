@@ -1,166 +1,133 @@
-//! Menus.
+//! Title bar, application menus, context menus and status.
 
+use super::actions::*;
 use super::*;
+use gpui_component::{
+    Disableable, TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar,
+    notification::Notification, status_bar::StatusBar,
+};
 
 impl Editor {
-    pub(super) fn menu_bar(&self, cx: &mut Context<Self>) -> Div {
-        let title = self.path.as_ref().map_or_else(
-            || "Untitled".to_owned(),
-            |p| {
-                p.file_name().map_or_else(
-                    || p.display().to_string(),
-                    |n| n.to_string_lossy().into_owned(),
-                )
-            },
+    pub(super) fn refresh_menus(&mut self, cx: &mut Context<Self>) {
+        let signature = format!(
+            "{:?}/{:?}/{:?}/{:?}/{}",
+            self.recent.paths,
+            self.selected,
+            self.dock,
+            self.preview.gpu,
+            self.export_task.is_some()
         );
-        let mut title_row = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_1()
-            .text_color(cx.theme().foreground)
-            .child(title);
-        if self.dirty {
-            title_row = title_row.child(
-                div()
-                    .id("dirty-indicator")
-                    .text_color(cx.theme().warning)
-                    .child(icons::icon(IconName::CircleDot).small())
-                    .tooltip(|window, cx| {
-                        gpui_component::tooltip::Tooltip::new("Unsaved changes").build(window, cx)
-                    }),
-            );
+        if self.menu_signature == signature {
+            return;
         }
-        div()
-            .h(px(34.))
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .px_1()
-            .bg(cx.theme().background)
-            .child(
-                Button::new("menu-file")
-                    .ghost()
-                    .compact()
-                    .label("File")
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::File, cx))),
-            )
-            .child(
-                Button::new("menu-edit")
-                    .ghost()
-                    .compact()
-                    .label("Edit")
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::Edit, cx))),
-            )
-            .child(
-                Button::new("menu-view")
-                    .ghost()
-                    .compact()
-                    .label("View")
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::View, cx))),
-            )
-            .child(
-                Button::new("menu-clip")
-                    .ghost()
-                    .compact()
-                    .label("Clip")
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::Clip, cx))),
-            )
-            .child(
-                Button::new("menu-help")
-                    .ghost()
-                    .compact()
-                    .label("Help")
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(MenuId::Help, cx))),
-            )
-            .child(div().flex_1())
-            .child(title_row)
+        self.menu_signature = signature;
+        let recent = Menu::new("Open Recent")
+            .items(self.recent.paths.iter().map(|path| {
+                MenuItem::action(
+                    path.display().to_string(),
+                    OpenRecent { path: path.clone() },
+                )
+            }))
+            .disabled(self.recent.paths.is_empty());
+        let menus = vec![
+            Menu::new("File").items([
+                MenuItem::action("New project", NewProject),
+                MenuItem::action("Open…", OpenProject),
+                MenuItem::submenu(recent),
+                MenuItem::action("Save", SaveProject),
+                MenuItem::separator(),
+                MenuItem::action("Import media…", ImportMedia),
+                MenuItem::action("Export…", ExportVideo).disabled(self.export_task.is_some()),
+                MenuItem::separator(),
+                MenuItem::action("Project settings…", ProjectSettings),
+            ]),
+            Menu::new("Edit").items([
+                MenuItem::action("Undo", Undo),
+                MenuItem::action("Redo", Redo),
+                MenuItem::separator(),
+                MenuItem::action("Delete selection", DeleteSelection)
+                    .disabled(self.selected.is_none()),
+            ]),
+            Menu::new("View").items([
+                MenuItem::action("Media pool", ToggleMediaPool).checked(self.dock.left_open),
+                MenuItem::action("Inspector", ToggleInspector).checked(self.dock.right_open),
+                MenuItem::action("Timeline", ToggleTimeline).checked(self.dock.bottom_open),
+                MenuItem::separator(),
+                MenuItem::action("GPU preview", ToggleGpuPreview).checked(self.preview.gpu),
+                MenuItem::action("Zoom to fit", ZoomToFit),
+            ]),
+            Menu::new("Clip").items([
+                MenuItem::action("Split at playhead", SplitClip).disabled(self.selected.is_none()),
+                MenuItem::action("Add effect", ShowEffects),
+            ]),
+            Menu::new("Help").items([
+                MenuItem::action("Keyboard shortcuts…", KeyboardShortcuts),
+                MenuItem::separator(),
+                MenuItem::action("About AniMathIO", About),
+            ]),
+        ];
+        GlobalState::global_mut(cx).set_app_menus(menus.into_iter().map(Menu::owned).collect());
+        self.app_menu.update(cx, AppMenuBar::reload);
     }
 
-    /// A dropdown listing the actions of the open menu, or `None` when closed.
-    pub(super) fn menu_dropdown(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let menu = self.menu_open?;
-        // Anchor the list under its own menu-bar button.
-        let menu_index = match menu {
-            MenuId::File => 0.0,
-            MenuId::Edit => 1.0,
-            MenuId::View => 2.0,
-            MenuId::Clip => 3.0,
-            MenuId::Help => 4.0,
-        };
-        let items: Vec<(&str, MenuAction)> = match menu {
-            MenuId::File => vec![
-                ("Open… Ctrl+O", Box::new(Self::open)),
-                ("Save Ctrl+S", Box::new(|this, _cx| this.save())),
-                ("Import media…", Box::new(Self::import_media)),
-                ("Export…", Box::new(Self::open_export_dialog)),
-                ("Settings", Box::new(Self::toggle_settings)),
-            ],
-            MenuId::Edit => vec![
-                ("Undo Ctrl+Z", Box::new(Self::undo)),
-                ("Redo Ctrl+Shift+Z", Box::new(Self::redo)),
-                ("Delete selection Del", Box::new(Self::delete_selected)),
-            ],
-            MenuId::View => vec![
-                (
-                    "Toggle media pool",
-                    Box::new(|this, cx| this.toggle_panel(PanelSide::Left, cx)),
+    pub(super) fn menu_bar(&self, cx: &mut Context<Self>) -> TitleBar {
+        let title = self.path.as_ref().and_then(|p| p.file_name()).map_or_else(
+            || "Untitled".to_owned(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        TitleBar::new().child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .w_full()
+                .child(div().w(px(300.)).h_full().child(self.app_menu.clone()))
+                .child(div().flex_1())
+                .child(div().text_color(cx.theme().foreground).child(title))
+                .when(self.dirty, |row| {
+                    row.child(
+                        icons::icon(IconName::CircleDot)
+                            .small()
+                            .text_color(cx.theme().warning),
+                    )
+                })
+                .child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .bg(cx.theme().muted)
+                        .text_color(if self.control.is_some() {
+                            cx.theme().success
+                        } else {
+                            cx.theme().muted_foreground
+                        })
+                        .child(if self.control.is_some() {
+                            "MCP: listening"
+                        } else {
+                            "MCP: off"
+                        }),
+                )
+                .child(
+                    Button::new("title-export")
+                        .primary()
+                        .small()
+                        .icon(icons::icon(IconName::Upload))
+                        .label("Export")
+                        .disabled(self.export_task.is_some())
+                        .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
+                        .on_click(cx.listener(|this, _, _, cx| this.open_export_dialog(cx))),
                 ),
-                (
-                    "Toggle inspector",
-                    Box::new(|this, cx| this.toggle_panel(PanelSide::Right, cx)),
-                ),
-                (
-                    "Toggle timeline",
-                    Box::new(|this, cx| this.toggle_panel(PanelSide::Bottom, cx)),
-                ),
-                (
-                    if self.preview.gpu {
-                        "GPU preview: on"
-                    } else {
-                        "GPU preview: off"
-                    },
-                    Box::new(Self::toggle_gpu_preview),
-                ),
-            ],
-            MenuId::Clip => vec![
-                ("Split at playhead S", Box::new(Self::split_at_playhead)),
-                (
-                    "Add effect",
-                    Box::new(|this, cx| this.select_left_tab(LeftTab::Effects, cx)),
-                ),
-            ],
-            MenuId::Help => vec![("AniMathIO 2.0 — DaVinci-style editor", Box::new(|_, _| {}))],
-        };
-        let mut dropdown = div()
-            .absolute()
-            .top(px(34.))
-            .left(px(4. + 50. * menu_index))
-            .w(px(220.))
-            .bg(cx.theme().popover)
-            .border_1()
-            .border_color(cx.theme().border)
-            .p_1()
-            .flex()
-            .flex_col()
-            .shadow_lg();
-        for (label, action) in items {
-            dropdown = dropdown.child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .cursor_pointer()
-                    .hover(|this| this.bg(cx.theme().list_hover))
-                    .child(label)
-                    .id("menu-item")
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.menu_open = None;
-                        action(this, cx);
-                    })),
-            );
+        )
+    }
+
+    pub(super) fn flush_notices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(error) = self.error.take() {
+            self.notices.push(Notification::error(error));
         }
-        Some(dropdown)
+        for notice in self.notices.drain(..) {
+            window.push_notification(notice, cx);
+        }
     }
 
     pub(super) fn context_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -270,52 +237,31 @@ impl Editor {
         Some(menu)
     }
 
-    /// A small chip that follows the pointer while an item is dragged from the
-    /// media pool toward the timeline.
-    pub(super) fn status_line(&self, cx: &App) -> Div {
-        let error = self.error.clone().unwrap_or_default();
-        // Completed-work notices are not errors, so they never use the danger colour.
-        let (notice_color, notice_icon) = if error.starts_with("Exported") {
-            (cx.theme().success, IconName::CircleCheck)
-        } else {
-            (cx.theme().danger, IconName::TriangleAlert)
-        };
-        let path = self
-            .path
-            .as_ref()
-            .map_or_else(|| "untitled".into(), |p| p.display().to_string());
-        div()
-            .h(px(24.))
-            .w_full()
-            .flex()
-            .flex_row()
-            .justify_between()
-            .px_2()
-            .bg(cx.theme().status_bar)
-            .border_t_1()
-            .border_color(cx.theme().status_bar_border)
-            .text_color(cx.theme().muted_foreground)
-            .items_center()
-            .child(format!(
-                "{path} | tracks {} | clips {}",
-                self.project.tracks().len(),
-                self.project
-                    .tracks()
-                    .iter()
-                    .map(|t| t.clips().len())
-                    .sum::<usize>()
-            ))
-            .child(
+    /// Persistent project summary; transient results are notifications.
+    pub(super) fn status_line(&self, cx: &App) -> StatusBar {
+        let (width, height) = project_size(&self.project);
+        let duration = timecode::format_timecode(
+            Time(timeline::project_duration(&self.project)),
+            self.project.frame_rate(),
+        );
+        StatusBar::new()
+            .left(div().text_color(cx.theme().muted_foreground).child(format!(
+                "{width} x {height}   {}",
+                frame_rate_label(self.project.frame_rate())
+            )))
+            .left(
                 div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_1()
-                    .text_color(notice_color)
-                    .when(!error.is_empty(), |this| {
-                        this.child(icons::icon(notice_icon).small())
-                    })
-                    .child(error),
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .child(duration),
+            )
+            .right(
+                div()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if self.path.is_some() {
+                        format!("Autosave: {} s ago", self.last_autosave.elapsed().as_secs())
+                    } else {
+                        "Save project to enable autosave".into()
+                    }),
             )
     }
 }

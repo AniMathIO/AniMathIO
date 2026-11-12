@@ -3,10 +3,13 @@
 use super::*;
 
 impl Editor {
-    pub(super) fn settings_dialog(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn settings_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let width = self.project.width();
         let height = self.project.height();
-        let fps = frame_rate_label(self.project.frame_rate());
+        let fps = fields::format_number(
+            f64::from(self.project.frame_rate().numerator())
+                / f64::from(self.project.frame_rate().denominator()),
+        );
         let background = self.project.background();
         let hex = format!(
             "#{:02x}{:02x}{:02x}{:02x}",
@@ -25,14 +28,21 @@ impl Editor {
             .flex()
             .flex_col()
             .gap_2()
-            .child(self.settings_field("Width", width.to_string(), EditTarget::SettingsWidth, cx))
+            .child(self.settings_field(
+                "Width",
+                width.to_string(),
+                InputTarget::SettingsWidth,
+                window,
+                cx,
+            ))
             .child(self.settings_field(
                 "Height",
                 height.to_string(),
-                EditTarget::SettingsHeight,
+                InputTarget::SettingsHeight,
+                window,
                 cx,
             ))
-            .child(self.settings_field("Frame rate", fps, EditTarget::SettingsFps, cx))
+            .child(self.settings_field("Frame rate", fps, InputTarget::SettingsFps, window, cx))
             .child(
                 div()
                     .flex()
@@ -43,7 +53,8 @@ impl Editor {
                     .child(self.settings_field(
                         "Background",
                         hex,
-                        EditTarget::SettingsBackground,
+                        InputTarget::SettingsBackground,
+                        window,
                         cx,
                     )),
             )
@@ -60,40 +71,33 @@ impl Editor {
             )
     }
 
-    pub(super) fn settings_field(
-        &self,
+    fn settings_field(
+        &mut self,
         label: &str,
         value: String,
-        target: EditTarget,
+        target: InputTarget,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let display = if let Some(edit) = &self.editing
-            && edit.target == target
-        {
-            edit.buffer.clone()
+        let key = format!("settings:{label}");
+        let numeric = target.is_numeric();
+        let state = self.input_state(&key, target, value, 1.0, window, cx);
+        let control = if numeric {
+            gpui_component::input::NumberInput::new(&state)
+                .small()
+                .into_any_element()
         } else {
-            value.clone()
+            gpui_component::input::Input::new(&state)
+                .small()
+                .into_any_element()
         };
         div()
             .flex()
-            .flex_row()
+            .items_center()
             .justify_between()
-            .px_2()
-            .py_1()
+            .gap_2()
             .child(label.to_owned())
-            .child(
-                div()
-                    .cursor_pointer()
-                    .child(display)
-                    .id("settings-field")
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
-                        this.editing = Some(TextEdit {
-                            target: target.clone(),
-                            buffer: value.clone(),
-                        });
-                        cx.notify();
-                    })),
-            )
+            .child(div().w(px(140.)).child(control))
     }
 
     pub(super) fn open_export_dialog(&mut self, cx: &mut Context<Self>) {
@@ -163,14 +167,14 @@ impl Editor {
                 .left(px(30.))
                 .w(px(280.))
                 .p_3()
-                .bg(rgb(0x1f2430))
+                .bg(cx.theme().popover)
                 .flex()
                 .flex_col()
                 .gap_2()
                 .child("Replace existing file?")
                 .child(
                     div()
-                        .text_color(rgb(0x8a94a6))
+                        .text_color(cx.theme().muted_foreground)
                         .child(path.display().to_string()),
                 )
                 .child(

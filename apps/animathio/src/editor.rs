@@ -31,6 +31,8 @@ use crate::render_worker::{RenderRequest, RenderWorker};
 use crate::timecode;
 use crate::timeline::{self, TimelineLayout, TrimEdge};
 
+pub(crate) mod actions;
+mod color_edit;
 mod commands;
 mod control_bridge;
 mod dialogs;
@@ -44,13 +46,14 @@ mod support;
 mod timeline_view;
 mod transport;
 mod viewer;
+mod workspace;
 
 use support::*;
-pub(crate) use support::{color_from_json, load_plugins, point_from_json, read_project_with_recovery};
+pub(crate) use support::{
+    color_from_json, load_plugins, point_from_json, read_project_with_recovery,
+};
 
 const RULER_H: f32 = 28.0;
-const ROW_H: f32 = 44.0;
-const TIMELINE_H: f32 = 340.0;
 const HEADER_W: f32 = 240.0;
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_RECENT: usize = 10;
@@ -119,8 +122,6 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 /// recovery flag.
 type LoadedProject = (Project, BTreeMap<AssetId, Vec<u8>>, bool);
 
-/// A menu-bar action: a closure mutating the editor in its window context.
-type MenuAction = Box<dyn Fn(&mut Editor, &mut Context<Editor>)>;
 /// A context-menu action on one clip.
 type ClipAction = fn(&mut Editor, ClipId, &mut Context<Editor>);
 
@@ -138,16 +139,6 @@ enum ViewerFit {
     Contain,
     Fill,
     Actual,
-}
-
-/// Top menu-bar menus.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MenuId {
-    File,
-    Edit,
-    View,
-    Clip,
-    Help,
 }
 
 /// Dockable panel sides, mirroring [`DockLayout`] flags.
@@ -168,9 +159,12 @@ enum Field {
 
 /// Where a typed edit commits once the user presses Enter.
 #[derive(Clone, PartialEq)]
-enum EditTarget {
+enum InputTarget {
     /// Builtin transform/param numeric field.
-    Field(Field),
+    Field {
+        id: ClipId,
+        field: Field,
+    },
     /// Plugin numeric parameter.
     PluginNumber {
         id: ClipId,
@@ -187,17 +181,18 @@ enum EditTarget {
         name: String,
         axis: usize,
     },
+    Timecode,
     SettingsWidth,
     SettingsHeight,
     SettingsFps,
     SettingsBackground,
 }
 
-impl EditTarget {
+impl InputTarget {
     fn is_numeric(&self) -> bool {
         matches!(
             self,
-            Self::Field(_)
+            Self::Field { .. }
                 | Self::PluginNumber { .. }
                 | Self::PluginPoint { .. }
                 | Self::SettingsWidth
@@ -213,11 +208,6 @@ enum SettingsField {
     Height,
     Fps,
     Background,
-}
-
-struct TextEdit {
-    target: EditTarget,
-    buffer: String,
 }
 
 struct ClipDrag {
@@ -315,6 +305,8 @@ struct TimelineSnapshot {
     clips: Vec<ClipPaint>,
     position: Time,
     frame_rate: FrameRate,
+    row_height: f32,
+    theme: gpui_component::Theme,
 }
 
 /// A small on-disk list of recently opened projects, kept in the XDG config dir.
@@ -373,7 +365,6 @@ pub(crate) struct Editor {
     timeline_zoom: f32,
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
-    editing: Option<TextEdit>,
     plugin_host: Option<PluginHost>,
     plugins: Vec<PluginDescriptor>,
     settings_open: bool,
@@ -393,10 +384,15 @@ pub(crate) struct Editor {
     recent: RecentFiles,
     dock: DockLayout,
     left_tab: LeftTab,
-    menu_open: Option<MenuId>,
+    app_menu: Entity<gpui_component::menu::AppMenuBar>,
+    menu_signature: String,
+    panel_focus: [FocusHandle; 4],
+    timeline_scroll_handle: ScrollHandle,
+    pointer_down: bool,
+    color_edit: Option<color_edit::ColorEdit>,
+    notices: Vec<gpui_component::notification::Notification>,
     loop_playback: bool,
     snapping: bool,
-    timecode_buffer: Option<String>,
     hovered_clip: Option<ClipId>,
     viewer_fit: ViewerFit,
     safe_areas: bool,
@@ -457,7 +453,6 @@ impl Editor {
             timeline_zoom: 1.0,
             timeline_scroll: 0.0,
             gesture: None,
-            editing: None,
             plugin_host,
             plugins,
             settings_open: false,
@@ -476,10 +471,15 @@ impl Editor {
             recent: RecentFiles::load(),
             dock: DockLayout::load(),
             left_tab: LeftTab::Assets,
-            menu_open: None,
+            app_menu: gpui_component::menu::AppMenuBar::new(cx),
+            menu_signature: String::new(),
+            panel_focus: std::array::from_fn(|_| cx.focus_handle()),
+            timeline_scroll_handle: ScrollHandle::new(),
+            pointer_down: false,
+            color_edit: None,
+            notices: Vec::new(),
             loop_playback: false,
             snapping: true,
-            timecode_buffer: None,
             hovered_clip: None,
             viewer_fit: ViewerFit::Contain,
             safe_areas: false,
@@ -493,10 +493,13 @@ impl Editor {
             waveforms: std::cell::RefCell::default(),
         };
         if recovered {
-            this.error = Some("recovered from autosave".into());
+            this.notices
+                .push(gpui_component::notification::Notification::info(
+                    "Recovered from autosave",
+                ));
         }
         this.request_render(Time(0));
-        window.focus(&this.focus_handle, cx);
+        window.focus(&this.panel_focus[0], cx);
         cx.spawn(async move |this, cx| {
             loop {
                 let timer = cx.background_executor().timer(Duration::from_secs(1));
@@ -528,10 +531,15 @@ impl Render for Editor {
         if let Some(task) = &self.export_task {
             match task.result.try_recv() {
                 Ok(result) => {
-                    self.error = Some(match result {
-                        Ok(path) => format!("Exported {}", path.display()),
-                        Err(error) => error,
-                    });
+                    match result {
+                        Ok(path) => {
+                            self.notices
+                                .push(gpui_component::notification::Notification::success(
+                                    format!("Exported {}", path.display()),
+                                ));
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
                     self.export_task = None;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -541,6 +549,8 @@ impl Render for Editor {
                 Err(std::sync::mpsc::TryRecvError::Empty) => window.request_animation_frame(),
             }
         }
+
+        self.flush_notices(window, cx);
 
         if self.playing {
             let now = self.clock.now();
@@ -554,16 +564,20 @@ impl Render for Editor {
             window.request_animation_frame();
         }
 
-        let mut middle = div().flex_1().min_h_0().flex().flex_row();
-        if self.dock.left_open {
-            middle = middle.child(self.media_pool(cx));
-        }
-        middle = middle.child(self.viewer(cx));
-        if self.dock.right_open {
-            middle = middle.child(self.inspector(window, cx));
-        }
-
+        self.refresh_menus(cx);
+        let workspace = self.workspace(window, cx);
+        let gesture_view = cx.entity().downgrade();
         let mut root = div()
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |_, (), window, _| {
+                        Self::capture_color_gesture(gesture_view.clone(), window);
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
             .size_full()
             .relative()
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
@@ -576,16 +590,12 @@ impl Render for Editor {
             .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .text_size(cx.theme().font_size)
+            .key_context("Editor")
             .track_focus(&self.focus_handle)
             .child(self.menu_bar(cx))
-            .child(middle);
-        if self.dock.bottom_open {
-            root = root.child(self.timeline_panel(cx));
-        }
+            .child(workspace);
         root = root.child(self.status_line(cx));
-        if let Some(dropdown) = self.menu_dropdown(cx) {
-            root = root.child(dropdown);
-        }
         if let Some(menu) = self.context_menu_dropdown(cx) {
             root = root.child(menu);
         }
@@ -593,11 +603,11 @@ impl Render for Editor {
             root = root.child(ghost);
         }
         if self.settings_open {
-            root = root.child(self.settings_dialog(cx));
+            root = root.child(self.settings_dialog(window, cx));
         }
         if self.export_task.is_some() || self.confirm_overwrite.is_some() {
             root = root.child(self.export_dialog(cx));
         }
-        root
+        actions::attach(root, cx)
     }
 }

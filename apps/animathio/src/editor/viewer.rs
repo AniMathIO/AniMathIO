@@ -3,7 +3,7 @@
 use super::*;
 
 impl Editor {
-    pub(super) fn viewer(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let image = self.image.clone();
         let fit = match self.viewer_fit {
             ViewerFit::Contain => ObjectFit::Contain,
@@ -43,6 +43,16 @@ impl Editor {
             viewport.child(empty_state("rendering…", cx))
         };
         let viewer_root = div()
+            .key_context("Viewer")
+            .track_focus(&self.panel_focus[1])
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    if !this.fields.any_focused(window, cx) {
+                        window.focus(&this.panel_focus[1], cx);
+                    }
+                }),
+            )
             .flex_1()
             .h_full()
             .flex()
@@ -84,7 +94,7 @@ impl Editor {
                     ),
             )
             .child(viewport)
-            .child(self.transport_controls(cx));
+            .child(self.transport_controls(window, cx));
         if self.viewer_menu_open {
             viewer_root.child(self.viewer_menu(cx))
         } else {

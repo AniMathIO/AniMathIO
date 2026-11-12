@@ -3,7 +3,31 @@
 use super::*;
 
 impl Editor {
-    pub(super) fn save(&mut self) {
+    pub(super) fn new_project(&mut self, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
+        let _ = self.clock.pause();
+        self.project = Project::new(self.project.frame_rate());
+        self.history = History::default();
+        self.assets.clear();
+        self.pool = AudioPool::default();
+        self.audio_ids.clear();
+        self.waveforms.borrow_mut().clear();
+        self.clock = make_clock(&self.project, &self.pool);
+        self.path = None;
+        self.dirty = false;
+        self.selected = None;
+        self.selected_field = None;
+        self.selected_keyframe = None;
+        self.position = Time(0);
+        self.playing = false;
+        self.next_id = next_id(&self.project);
+        self.worker.load(self.assets.clone());
+        self.request_render(Time(0));
+        cx.notify();
+    }
+
+    pub(super) fn save(&mut self, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
         let path = if let Some(path) = &self.path {
             path.clone()
         } else {
@@ -22,6 +46,11 @@ impl Editor {
                 self.dirty = false;
                 self.last_autosave = Instant::now();
                 self.recent.add(&path);
+                self.notices
+                    .push(gpui_component::notification::Notification::success(
+                        "Project saved",
+                    ));
+                cx.notify();
             }
             Err(error) => self.error = Some(error),
         }
@@ -38,6 +67,7 @@ impl Editor {
     }
 
     pub(super) fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
         match read_project_with_recovery(path) {
             Ok((project, assets, recovered)) => {
                 self.project = project;
@@ -61,7 +91,10 @@ impl Editor {
                 self.request_render(Time(0));
                 self.recent.add(path);
                 if recovered {
-                    self.error = Some("recovered from autosave".into());
+                    self.notices
+                        .push(gpui_component::notification::Notification::info(
+                            "Recovered from autosave",
+                        ));
                 }
             }
             Err(error) => self.error = Some(error),

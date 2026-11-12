@@ -371,7 +371,13 @@ impl Editor {
             }
         }
         div()
-            .w(px(self.dock.left_width))
+            .key_context("MediaPool")
+            .track_focus(&self.panel_focus[3])
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| window.focus(&this.panel_focus[3], cx)),
+            )
+            .w_full()
             .h_full()
             .flex()
             .flex_col()

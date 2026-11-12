@@ -21,12 +21,29 @@ pub(super) fn icon_button(
     tooltip: impl Into<SharedString>,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Button {
-    Button::new(id)
+    let button = Button::new(id)
         .ghost()
         .compact()
         .icon(icon)
-        .tooltip(tooltip)
-        .on_click(listener)
+        .on_click(listener);
+    let binding: Option<(Box<dyn Action>, &str)> = match id {
+        "jump-start" => Some((Box::new(actions::GoToStart), "Viewer")),
+        "step-back" => Some((Box::new(actions::PreviousFrame), "Viewer")),
+        "play" => Some((Box::new(actions::TogglePlayback), "Viewer")),
+        "step-fwd" => Some((Box::new(actions::NextFrame), "Viewer")),
+        "jump-end" => Some((Box::new(actions::GoToEnd), "Viewer")),
+        "loop" => Some((Box::new(actions::ToggleLoop), "Viewer")),
+        "snap" => Some((Box::new(actions::ToggleSnapping), "Timeline")),
+        "zoom-in" => Some((Box::new(actions::ZoomIn), "Timeline")),
+        "zoom-out" => Some((Box::new(actions::ZoomOut), "Timeline")),
+        "safe-areas" => Some((Box::new(actions::ToggleSafeAreas), "Viewer")),
+        _ => None,
+    };
+    if let Some((action, context)) = binding {
+        button.tooltip_with_action(tooltip, action.as_ref(), Some(context))
+    } else {
+        button.tooltip(tooltip)
+    }
 }
 
 /// A track-header icon button: the extra-small size keeps two lines in a row.
@@ -48,11 +65,18 @@ pub(super) fn paint_timeline(
     cx: &mut App,
 ) {
     let width = f32::from(bounds.size.width).max(1.0);
-    let layout = TimelineLayout::zoomed(width, RULER_H, ROW_H, snapshot.duration, zoom, scroll);
-    let background = cx.theme().background;
-    let ruler_bg = cx.theme().popover;
-    let border = cx.theme().border;
-    let muted = cx.theme().muted_foreground;
+    let layout = TimelineLayout::zoomed(
+        width,
+        RULER_H,
+        snapshot.row_height,
+        snapshot.duration,
+        zoom,
+        scroll,
+    );
+    let background = snapshot.theme.background;
+    let ruler_bg = snapshot.theme.popover;
+    let border = snapshot.theme.border;
+    let muted = snapshot.theme.muted_foreground;
     window.paint_quad(fill(bounds, background));
     let height = f32::from(bounds.size.height);
     let ruler = Bounds::from_corners(
@@ -62,10 +86,10 @@ pub(super) fn paint_timeline(
     window.paint_quad(fill(ruler, ruler_bg));
     paint_ruler(bounds, &layout, snapshot, width, muted, border, window, cx);
     for row in 0..snapshot.rows {
-        let top = bounds.origin.y + px(RULER_H + row as f32 * ROW_H);
+        let top = bounds.origin.y + px(RULER_H + row as f32 * snapshot.row_height);
         let row_bounds = Bounds::from_corners(
             point(bounds.origin.x, top),
-            point(bounds.origin.x + px(width), top + px(ROW_H)),
+            point(bounds.origin.x + px(width), top + px(snapshot.row_height)),
         );
         window.paint_quad(fill(
             row_bounds,
@@ -99,10 +123,10 @@ pub(super) fn paint_clip(
 ) {
     let x0 = bounds.origin.x + px(timeline::time_to_x(layout, clip.start));
     let x1 = bounds.origin.x + px(timeline::time_to_x(layout, clip.end));
-    let y0 = bounds.origin.y + px(RULER_H + clip.row as f32 * ROW_H + 3.0);
-    let y1 = bounds.origin.y + px(RULER_H + (clip.row as f32 + 1.0) * ROW_H - 3.0);
+    let y0 = bounds.origin.y + px(RULER_H + clip.row as f32 * layout.row_height + 3.0);
+    let y1 = bounds.origin.y + px(RULER_H + (clip.row as f32 + 1.0) * layout.row_height - 3.0);
     let block = Bounds::from_corners(point(x0, y0), point(x1, y1));
-    let kind_color = clip_color(&clip.kind, cx);
+    let kind_color = clip_color(&clip.kind, cx.theme());
     let dim = if clip.silenced { 0.5 } else { 1.0 };
     window.paint_quad(fill(block, kind_color.opacity(0.45 * dim)));
     window.paint_quad(outline(block, kind_color.opacity(dim), BorderStyle::Solid));
@@ -358,26 +382,26 @@ pub(super) fn ruler_step(duration: i64, pixels_per_tick: f64, rate: FrameRate) -
 }
 
 /// A source-kind colour from the theme's semantic palette.
-pub(super) fn clip_color(kind: &animathio_core::ClipKind, cx: &App) -> Hsla {
+pub(super) fn clip_color(kind: &animathio_core::ClipKind, theme: &gpui_component::Theme) -> Hsla {
     match kind {
-        animathio_core::ClipKind::Video(_) => cx.theme().blue,
-        animathio_core::ClipKind::Image(_) => cx.theme().cyan,
-        animathio_core::ClipKind::Audio(_) => cx.theme().green,
+        animathio_core::ClipKind::Video(_) => theme.blue,
+        animathio_core::ClipKind::Image(_) => theme.cyan,
+        animathio_core::ClipKind::Audio(_) => theme.green,
         animathio_core::ClipKind::Builtin(builtin) => match builtin {
-            animathio_core::builtin::Builtin::Text { .. } => cx.theme().magenta,
-            animathio_core::builtin::Builtin::Shape { .. } => cx.theme().yellow,
+            animathio_core::builtin::Builtin::Text { .. } => theme.magenta,
+            animathio_core::builtin::Builtin::Shape { .. } => theme.yellow,
         },
         animathio_core::ClipKind::Plugin { plugin_id, .. } => {
             if plugin_id.contains("latex") || plugin_id.contains("math") {
-                cx.theme().primary
+                theme.primary
             } else if plugin_id.contains("graph") {
-                cx.theme().chart_2
+                theme.chart_2
             } else {
-                cx.theme().accent
+                theme.accent
             }
         }
-        animathio_core::ClipKind::Vector(_) => cx.theme().accent,
-        animathio_core::ClipKind::Error(_) => cx.theme().danger,
+        animathio_core::ClipKind::Vector(_) => theme.accent,
+        animathio_core::ClipKind::Error(_) => theme.danger,
     }
 }
 

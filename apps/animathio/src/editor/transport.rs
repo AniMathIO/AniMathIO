@@ -102,15 +102,6 @@ impl Editor {
         cx.notify();
     }
 
-    pub(super) fn toggle_menu(&mut self, menu: MenuId, cx: &mut Context<Self>) {
-        self.menu_open = if self.menu_open == Some(menu) {
-            None
-        } else {
-            Some(menu)
-        };
-        cx.notify();
-    }
-
     pub(super) fn toggle_viewer_menu(&mut self, cx: &mut Context<Self>) {
         self.viewer_menu_open = !self.viewer_menu_open;
         cx.notify();
@@ -132,26 +123,6 @@ impl Editor {
             self.closed_sections.insert(name.to_owned());
         }
         cx.notify();
-    }
-
-    pub(super) fn begin_timecode_edit(&mut self, cx: &mut Context<Self>) {
-        self.timecode_buffer = Some(timecode::format_timecode(
-            self.position,
-            self.project.frame_rate(),
-        ));
-        cx.notify();
-    }
-
-    pub(super) fn commit_timecode(&mut self, cx: &mut Context<Self>) {
-        let Some(buffer) = self.timecode_buffer.take() else {
-            return;
-        };
-        if let Some(time) = timecode::parse_timecode(&buffer, self.project.frame_rate()) {
-            self.seek_to(time, cx);
-        } else {
-            self.error = Some("invalid timecode (HH:MM:SS:FF)".into());
-            cx.notify();
-        }
     }
 
     pub(super) fn nudge_track_gain(&mut self, track: TrackId, delta: f64, cx: &mut Context<Self>) {
@@ -178,18 +149,19 @@ impl Editor {
         self.toggle_play(cx);
     }
 
-    pub(super) fn transport_controls(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn transport_controls(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let play_icon = if self.playing {
             icons::icon(IconName::Pause)
         } else {
             icons::icon(IconName::Play)
         };
         let play_tooltip = if self.playing { "Pause" } else { "Play" };
-        let timecode_text = self
-            .timecode_buffer
-            .clone()
-            .unwrap_or_else(|| timecode::format_timecode(self.position, self.project.frame_rate()));
-        let timecode_editing = self.timecode_buffer.is_some();
+        let value = timecode::format_timecode(self.position, self.project.frame_rate());
+        let state = self.input_state("timecode", InputTarget::Timecode, value, 0.0, window, cx);
         div()
             .h(px(36.))
             .w_full()
@@ -245,20 +217,9 @@ impl Editor {
             )
             .child(
                 div()
-                    .px_2()
-                    .py_1()
-                    .cursor_text()
-                    .bg(cx.theme().popover)
-                    .text_color(if timecode_editing {
-                        cx.theme().warning
-                    } else {
-                        cx.theme().foreground
-                    })
-                    .child(timecode_text)
-                    .id("timecode")
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.begin_timecode_edit(cx);
-                    })),
+                    .w(px(124.))
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .child(gpui_component::input::Input::new(&state).small()),
             )
     }
 }

@@ -76,6 +76,39 @@ Rules that keep the layers honest:
 - Third-party crates (FilmCraft, vello, GPUI) stay behind adapter boundaries;
   no third-party type leaks into `core`.
 
+## Desktop editor foundations
+
+`apps/animathio/src/editor.rs` owns view state and composes implementation modules
+under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
+`fields`, `inspector_view`, `media_pool`, `dialogs`, `commands`, `project_io`,
+`control_bridge` and `playback_glue`. Shared drawing/resource helpers live in
+`support`; `color_edit` owns the live-preview transaction.
+
+The `actions` module registers GPUI actions and a contextual keymap (`Editor`,
+`Timeline`, `Viewer`, `Inspector`, `MediaPool`). `secondary-` bindings are resolved
+with GPUI's OS-aware loader: Cmd on macOS and Ctrl elsewhere. App menus and button
+tooltips read hints from those bindings. Text and numeric inputs own their editing
+keys, clipboard, selection and IME; timeline Delete/Space never intercept a focused
+input. The Help menu opens the shortcut reference.
+
+The workspace uses horizontal and vertical resizable panel groups. Sizes, visibility
+and S/M/L track density (28/44/72 logical pixels) persist in `dock-layout.json` under
+the application config directory. Older files default to medium tracks. Headers and
+clips share a vertical scroll surface, so every track remains accessible. Wheel
+scrolls vertically; Alt+wheel scrolls horizontally; Ctrl/Cmd+wheel zooms.
+
+Chrome uses the active dark theme, a 12 px base and monospaced timecodes. A single
+custom title bar hosts the application menus, project/dirty state, control-server
+status and Export. The status bar contains project output settings, duration and
+autosave age. Transient errors, information and successful work use typed
+notifications hosted by `Root`.
+
+A colour drag applies `Command`s for immediate preview. On pointer release, it
+restores the original value with the inverse command and records the final command
+once in `History`. Other commands and control calls finish a pending drag first,
+so a colour change undoes in one step without swallowing adjacent edits. Asset
+parameter selectors display names but commit asset identities (or `null` for None).
+
 ## Time model (integer ticks)
 
 AniMathIO 2.0 uses **integer ticks** at a fixed rate, with **rational frame rates**
