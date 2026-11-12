@@ -442,22 +442,17 @@ impl Command {
                 if left_clip.kind != right_clip.kind {
                     return Err(invalid("merge clips must share a kind"));
                 }
-                let at = left_clip.range.end;
-                let original_source = right_clip.source_offset.0 - (at.0 - left_clip.range.start.0);
-                if original_source < 0 {
-                    return Err(invalid("merge would produce a negative source offset"));
-                }
                 let restored = project.tracks[left_index]
                     .clips
                     .get_mut(left)
                     .ok_or_else(|| invalid("clip missing"))?;
                 restored.range = TimeRange::new(left_clip.range.start, right_clip.range.end)?;
-                restored.source_offset = Time(original_source);
+                restored.source_offset = left_clip.source_offset;
                 project.tracks[right_index].clips.remove(right);
-                Self::SplitClip {
-                    id: *left,
-                    right_id: *right,
-                    at,
+                Self::RestoreClips {
+                    track: project.tracks[left_index].id,
+                    ids: vec![*left, *right],
+                    clips: vec![left_clip, right_clip],
                 }
             }
             Self::SetTransform { id, transform } => {
