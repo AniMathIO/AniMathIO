@@ -10,6 +10,7 @@
 //! socket; clients must send it with every request and it is compared in
 //! constant time.
 
+mod authoring;
 mod client;
 mod error;
 mod handler;
@@ -19,6 +20,7 @@ mod path;
 mod server;
 mod token;
 
+pub use authoring::apply_authoring_call;
 pub use client::ControlClient;
 pub use error::ControlError;
 pub use handler::{ControlHandler, dispatch, from_value};

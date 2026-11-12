@@ -105,7 +105,10 @@ pub trait ControlHandler {
     }
 
     /// Import a Manim scene, appending to or replacing the current project.
-    fn import_manim(&mut self, params: ImportManimParams) -> Result<ImportManimResult, ControlError> {
+    fn import_manim(
+        &mut self,
+        params: ImportManimParams,
+    ) -> Result<ImportManimResult, ControlError> {
         from_value(self.handle(Call::ImportManim { params })?)
     }
 }

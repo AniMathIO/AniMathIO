@@ -313,6 +313,9 @@ fn parse_clip_id(id: &str) -> Result<ClipId, McpError> {
 
 fn parse_color(value: &str) -> Option<[u8; 4]> {
     let hex = value.trim().strip_prefix('#')?;
+    if !hex.is_ascii() {
+        return None;
+    }
     let byte = |i: usize, j: usize| u8::from_str_radix(&hex[i..j], 16).ok();
     match hex.len() {
         6 => Some([byte(0, 2)?, byte(2, 4)?, byte(4, 6)?, 255]),
@@ -429,20 +432,29 @@ impl McpServer {
             None => project_duration(&state),
         };
         let reveal_duration = p.reveal_duration_ms.map(ms_to_ticks).transpose()?;
-        let result = backend
-            .math_add(MathAddParams {
-                latex: p.latex,
-                mode: p.mode.unwrap_or_else(|| "latex".to_owned()),
-                size: p.size.unwrap_or(48.0),
-                color: p.color.as_deref().and_then(parse_color),
-                x: p.x.map(|x| x / f64::from(width)),
-                y: p.y.map(|y| y / f64::from(height)),
-                start,
-                duration: Some(duration),
-                reveal_duration,
-            })
-            .map_err(mcp_error)?;
-        tool_text(json!({ "track_id": result.track_id.0, "clip_id": result.clip_id.0 }))
+        let result = backend.math_add(MathAddParams {
+            latex: p.latex,
+            mode: p.mode.unwrap_or_else(|| "latex".to_owned()),
+            size: p.size.unwrap_or(48.0),
+            color: p
+                .color
+                .as_deref()
+                .map(|color| {
+                    parse_color(color).ok_or_else(|| invalid("color must be #RRGGBB or #RRGGBBAA"))
+                })
+                .transpose()?,
+            x: p.x.map(|x| x / f64::from(width)),
+            y: p.y.map(|y| y / f64::from(height)),
+            start,
+            duration: Some(duration),
+            reveal_duration,
+        });
+        match result {
+            Ok(result) => tool_text(result),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
     }
 
     #[tool(
@@ -461,25 +473,34 @@ impl McpServer {
             None => project_duration(&state),
         };
         let draw_duration = p.draw_duration_ms.map(ms_to_ticks).transpose()?;
-        let result = backend
-            .graph_add(GraphAddParams {
-                x_min: p.x_min,
-                x_max: p.x_max,
-                y_min: p.y_min,
-                y_max: p.y_max,
-                items: p.items.unwrap_or_else(|| "plot y=x^2".to_owned()),
-                show_grid: p.show_grid,
-                show_axes: p.show_axes,
-                show_labels: p.show_labels,
-                color: p.color.as_deref().and_then(parse_color),
-                x: p.x.map(|x| x / f64::from(width)),
-                y: p.y.map(|y| y / f64::from(height)),
-                start,
-                duration: Some(duration),
-                draw_duration,
-            })
-            .map_err(mcp_error)?;
-        tool_text(json!({ "track_id": result.track_id.0, "clip_id": result.clip_id.0 }))
+        let result = backend.graph_add(GraphAddParams {
+            x_min: p.x_min,
+            x_max: p.x_max,
+            y_min: p.y_min,
+            y_max: p.y_max,
+            items: p.items.unwrap_or_else(|| "plot y=x^2".to_owned()),
+            show_grid: p.show_grid,
+            show_axes: p.show_axes,
+            show_labels: p.show_labels,
+            color: p
+                .color
+                .as_deref()
+                .map(|color| {
+                    parse_color(color).ok_or_else(|| invalid("color must be #RRGGBB or #RRGGBBAA"))
+                })
+                .transpose()?,
+            x: p.x.map(|x| x / f64::from(width)),
+            y: p.y.map(|y| y / f64::from(height)),
+            start,
+            duration: Some(duration),
+            draw_duration,
+        });
+        match result {
+            Ok(result) => tool_text(result),
+            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(
+                error.to_string(),
+            )])),
+        }
     }
 
     #[tool(

@@ -84,7 +84,7 @@ pub struct TrackInfo {
 /// Arguments for `math.add`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MathAddParams {
-    /// LaTeX source, validated up front when a typeset engine is available.
+    /// Math source, validated up front through the typeset engine.
     pub latex: String,
     /// Typeset mode: `latex` or `typst`.
     #[serde(default = "default_math_mode")]

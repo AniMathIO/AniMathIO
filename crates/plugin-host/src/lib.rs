@@ -23,6 +23,9 @@ wasmtime::component::bindgen!({
     world: "plugin",
 });
 
+mod discovery;
+pub use discovery::{PluginDirectory, plugin_search_dirs};
+
 use animathio::plugin::host::Host;
 use animathio::plugin::types as wit_types;
 
@@ -50,6 +53,9 @@ pub enum HostError {
     /// A plugin with this id is already registered.
     #[error("plugin id already registered: {0}")]
     DuplicateId(String),
+    /// A user-installed package claimed a reserved first-party id.
+    #[error("reserved plugin id is not allowed in the user directory: {0}")]
+    ReservedId(String),
     /// The plugin produced a scene that failed validation.
     #[error("plugin produced an invalid scene: {0}")]
     InvalidOutput(String),
@@ -607,20 +613,48 @@ impl PluginHost {
         self.load_plugin_package(package)
     }
 
-    /// Load all `.amplugin` files from a directory.
+    /// Load all `.amplugin` files from a trusted directory.
+    ///
+    /// For application discovery, use [`Self::load_plugin_directory`] so user
+    /// installations cannot claim reserved `org.animathio.*` ids.
     pub fn load_plugins_dir(&mut self, dir: impl AsRef<Path>) -> Result<Vec<String>, HostError> {
+        self.load_directory(dir.as_ref(), true)
+    }
+
+    /// Load a discovered directory, enforcing its reserved-id policy before
+    /// compiling or instantiating any component.
+    pub fn load_plugin_directory(
+        &mut self,
+        dir: &PluginDirectory,
+    ) -> Result<Vec<String>, HostError> {
+        self.load_directory(&dir.path, dir.allow_reserved_ids)
+    }
+
+    fn load_directory(
+        &mut self,
+        dir: &Path,
+        allow_reserved: bool,
+    ) -> Result<Vec<String>, HostError> {
         let mut ids = Vec::new();
-        let dir = dir.as_ref();
         if !dir.exists() {
             return Ok(ids);
         }
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "amplugin")
-                && let Ok(id) = self.load_plugin_file(&path)
-            {
-                ids.push(id);
+        let mut paths = fs::read_dir(dir)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        paths.sort();
+        for path in paths {
+            if !path.extension().is_some_and(|ext| ext == "amplugin") {
+                continue;
+            }
+            let result = (|| {
+                let package = PluginPackage::from_bytes(&fs::read(&path)?)?;
+                check_plugin_id(&package.manifest.id, allow_reserved)?;
+                self.load_plugin_package(package)
+            })();
+            match result {
+                Ok(id) => ids.push(id),
+                Err(error) => log::warn!("plugin {} was not loaded: {error}", path.display()),
             }
         }
         Ok(ids)
@@ -1587,4 +1621,11 @@ mod tests {
         assert!(!cache.is_enabled());
         assert!(!real.join("key").exists());
     }
+}
+
+fn check_plugin_id(id: &str, allow_reserved: bool) -> Result<(), HostError> {
+    if !allow_reserved && id.starts_with("org.animathio.") {
+        return Err(HostError::ReservedId(id.to_owned()));
+    }
+    Ok(())
 }
