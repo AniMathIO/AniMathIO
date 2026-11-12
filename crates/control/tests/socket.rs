@@ -14,9 +14,19 @@ fn spec(dir: &std::path::Path) -> SocketSpec {
     }
 }
 
+fn private_dir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    dir
+}
+
 #[test]
 fn wrong_token_is_rejected_and_correct_token_round_trips() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = private_dir();
     let spec = spec(dir.path());
 
     let server = ControlServer::bind(spec.clone()).unwrap();
@@ -72,4 +82,44 @@ fn base64_decode(value: String) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD
         .decode(value)
         .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn bind_refuses_pre_created_world_writable_dir() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket_dir = dir.path().join("run");
+    std::fs::create_dir(&socket_dir).unwrap();
+    std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+    let spec = SocketSpec {
+        path: socket_dir.join("control.sock"),
+        token_file: socket_dir.join("control.token"),
+    };
+    assert!(ControlServer::bind(spec).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn bind_does_not_follow_symlinked_token_path() {
+    let dir = private_dir();
+    let target = dir.path().join("target");
+    std::fs::write(&target, b"original").unwrap();
+    let token_file = dir.path().join("control.token");
+    std::os::unix::fs::symlink(&target, &token_file).unwrap();
+
+    let spec = SocketSpec {
+        path: dir.path().join("control.sock"),
+        token_file,
+    };
+    let server = ControlServer::bind(spec).unwrap();
+    let token_file = server.token_file().to_path_buf();
+
+    // The symlink itself is replaced by the server, not the file it pointed at.
+    let meta = std::fs::symlink_metadata(&token_file).unwrap();
+    assert!(!meta.file_type().is_symlink());
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
+    drop(server);
 }

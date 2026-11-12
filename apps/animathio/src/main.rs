@@ -7,11 +7,16 @@
     clippy::unreadable_literal,
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::struct_excessive_bools,
+    clippy::needless_pass_by_value,
+    clippy::ref_option,
+    clippy::too_many_lines
 )]
 
 mod control;
 mod editor;
+mod inspector;
 mod playback;
 mod render_worker;
 mod timeline;

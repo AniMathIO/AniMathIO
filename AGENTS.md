@@ -95,6 +95,14 @@ supports WAV/PCM, MP3, FLAC, AAC-LC/M4A and Vorbis; Opus returns an explicit
 unsupported-codec error. Full-asset decoding and equal-layout/mono channel mapping
 are prototype limits; streaming, surround layout matrices and waveform caches are deferred.
 
+Plugin compiled-component disk cache entries are stored as `MAC(32) || serialized`,
+where the MAC is a `blake3::keyed_hash` over the serialized bytes using a per-install
+32-byte key at `<cache>/key`. On Unix the cache directory must be private
+(`0700`, current-uid, non-symlink) or the disk cache is disabled and components are
+recompiled. The control socket and token file live under `$XDG_RUNTIME_DIR/animathio`
+(never a shared `/tmp`) and are verified private before use; token writes go through a
+`0600` `O_NOFOLLOW` temp file plus atomic rename.
+
 CLI smoke run and intentional golden regeneration:
 
 ```bash

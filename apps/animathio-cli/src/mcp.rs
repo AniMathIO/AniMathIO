@@ -682,6 +682,7 @@ impl McpServer {
             .command_apply(Command::SetSettings {
                 width,
                 height,
+                frame_rate: state.project.frame_rate(),
                 background,
                 duration,
             })

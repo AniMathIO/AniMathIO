@@ -13,6 +13,8 @@ animathio-format = { path = "../../crates/format" }
 animathio-import-v1 = { path = "../../crates/import-v1" }
 animathio-render = { path = "../../crates/render" }
 animathio-audio = { path = "../../crates/audio" }
+animathio-plugin-api = { path = "../../crates/plugin-api" }
+animathio-plugin-host = { path = "../../crates/plugin-host" }
 base64 = "0.22"
 directories = "6"
 gpui.workspace = true

@@ -9,14 +9,18 @@ use animathio_control::{
     media_type_of, read_bounded, timeline_of, validate_existing_file, validate_output_file,
 };
 use animathio_core::{
-    Asset, AssetId, Clip, ClipId, ClipKind, Command, History, Project, TICKS_PER_SECOND, Time,
-    TimeRange, Track, TrackId, Transform, TransformProperty,
+    Asset, AssetId, Clip, ClipId, ClipKind, Command, FrameRate, History, Interpolation, Project,
+    Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform, TransformProperty,
+    evaluate,
 };
+use animathio_plugin_api::PluginKind;
+use animathio_plugin_host::PluginHost;
 use base64::Engine as _;
 use gpui::{prelude::*, *};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::control::{ControlMsg, ControlRuntime};
+use crate::inspector::{self, ParamModel, PluginDescriptor};
 use crate::playback::{Clock, due_frame, make_clock};
 use crate::render_worker::{RenderRequest, RenderWorker};
 use crate::timeline::{self, TimelineLayout, TrimEdge};
@@ -40,6 +44,60 @@ enum Field {
     Param(String),
 }
 
+/// Where a typed edit commits once the user presses Enter.
+#[derive(Clone, PartialEq)]
+enum EditTarget {
+    /// Builtin transform/param numeric field.
+    Field(Field),
+    /// Plugin numeric parameter.
+    PluginNumber {
+        id: ClipId,
+        name: String,
+    },
+    /// Plugin string parameter.
+    PluginText {
+        id: ClipId,
+        name: String,
+    },
+    /// Plugin color parameter, edited as `#RRGGBB` / `#RRGGBBAA`.
+    PluginColor {
+        id: ClipId,
+        name: String,
+    },
+    /// One axis of a plugin point parameter.
+    PluginPoint {
+        id: ClipId,
+        name: String,
+        axis: usize,
+    },
+    SettingsWidth,
+    SettingsHeight,
+    SettingsFps,
+    SettingsBackground,
+}
+
+impl EditTarget {
+    fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            Self::Field(_)
+                | Self::PluginNumber { .. }
+                | Self::PluginPoint { .. }
+                | Self::SettingsWidth
+                | Self::SettingsHeight
+                | Self::SettingsFps
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SettingsField {
+    Width,
+    Height,
+    Fps,
+    Background,
+}
+
 struct Scrub {
     field: Field,
     start_x: f32,
@@ -47,8 +105,16 @@ struct Scrub {
     current: f64,
 }
 
-struct NumberEdit {
-    field: Field,
+struct PluginScrub {
+    id: ClipId,
+    name: String,
+    start_x: f32,
+    start_value: f64,
+    current: f64,
+}
+
+struct TextEdit {
+    target: EditTarget,
     buffer: String,
 }
 
@@ -60,6 +126,21 @@ struct ClipDrag {
     duration: i64,
     grab_offset: i64,
     current_start: Time,
+}
+
+struct KeyframeDrag {
+    clip_id: ClipId,
+    target: Target,
+    clip_start: Time,
+    origin: Time,
+    current: Time,
+}
+
+#[derive(Clone, PartialEq)]
+struct KeyframeSelection {
+    clip_id: ClipId,
+    target: Target,
+    time: Time,
 }
 
 struct TrimDrag {
@@ -77,12 +158,19 @@ enum TimelineGesture {
     Trim(TrimDrag),
 }
 
+struct KeyframePaint {
+    time: Time,
+    selected: bool,
+}
+
 struct ClipPaint {
     row: usize,
     start: Time,
     end: Time,
     selected: bool,
     label: SharedString,
+    error: bool,
+    keyframes: Vec<KeyframePaint>,
 }
 
 struct TimelineSnapshot {
@@ -149,7 +237,14 @@ pub(crate) struct Editor {
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
     scrub: Option<Scrub>,
-    editing: Option<NumberEdit>,
+    plugin_scrub: Option<PluginScrub>,
+    editing: Option<TextEdit>,
+    plugin_host: Option<PluginHost>,
+    plugins: Vec<PluginDescriptor>,
+    add_menu_open: bool,
+    settings_open: bool,
+    keyframe_drag: Option<KeyframeDrag>,
+    selected_keyframe: Option<KeyframeSelection>,
     error: Option<String>,
     focus_handle: FocusHandle,
     control: Option<ControlRuntime>,
@@ -173,6 +268,10 @@ impl Editor {
         let mut error = None;
         if let Err(message) = load_audio(&mut pool, &project, &assets) {
             error = Some(message);
+        }
+        let (plugin_host, plugins, plugin_error) = load_plugins();
+        if error.is_none() {
+            error = plugin_error;
         }
         let audio_ids = audio_asset_ids(&project);
         let initial_next_id = next_id(&project);
@@ -200,7 +299,14 @@ impl Editor {
             timeline_scroll: 0.0,
             gesture: None,
             scrub: None,
+            plugin_scrub: None,
             editing: None,
+            plugin_host,
+            plugins,
+            add_menu_open: false,
+            settings_open: false,
+            keyframe_drag: None,
+            selected_keyframe: None,
             error,
             focus_handle: cx.focus_handle(),
             control,
@@ -232,12 +338,22 @@ impl Editor {
         self.request_generation = self.request_generation.wrapping_add(1);
         self.last_requested = Some(time);
         let size = project_size(&self.project);
+        let scene = evaluate(&self.project, time);
+        let scene = self.resolve_scene(scene, size);
         self.worker.request(RenderRequest {
             generation: self.request_generation,
-            project: self.project.clone(),
-            time,
+            scene,
             size,
         });
+    }
+
+    /// Run plugin clips through the plugin host so the render worker only ever
+    /// sees media, builtin, vector and error clips.
+    fn resolve_scene(&mut self, scene: Scene, size: (u32, u32)) -> Scene {
+        match &mut self.plugin_host {
+            Some(host) => host.resolve(&scene, size),
+            None => scene,
+        }
     }
 
     fn pump_results(&mut self, window: &mut Window) {
@@ -363,7 +479,7 @@ impl Editor {
     }
 
     fn render_control_frame(
-        &self,
+        &mut self,
         params: RenderFrameParams,
     ) -> Result<RenderFrameResult, ControlError> {
         let mut ctx = animathio_render::RenderCtx::default();
@@ -371,6 +487,7 @@ impl Editor {
             ctx.resources.insert(id.clone(), bytes.clone())?;
         }
         let scene = animathio_core::evaluate(&self.project, params.time);
+        let scene = self.resolve_scene(scene, (params.width, params.height));
         let frame = animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;
@@ -541,7 +658,7 @@ impl Editor {
 
     pub(crate) fn handle_keystroke(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
         if self.editing.is_some() {
-            self.handle_number_key(event, cx);
+            self.handle_text_key(event, cx);
             cx.stop_propagation();
             return;
         }
@@ -592,7 +709,7 @@ impl Editor {
         }
     }
 
-    fn handle_number_key(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
+    fn handle_text_key(&mut self, event: &KeystrokeEvent, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         match key {
             "enter" => self.commit_editing(cx),
@@ -607,11 +724,16 @@ impl Editor {
                 cx.notify();
             }
             _ => {
-                let digit = key.len() == 1 && key.chars().all(|c| c.is_ascii_digit());
-                if digit || key == "." || key == "-" {
-                    if let Some(edit) = &mut self.editing {
-                        edit.buffer.push_str(key);
+                let allowed = match self.editing.as_ref().map(|edit| &edit.target) {
+                    Some(target) if target.is_numeric() => {
+                        key.len() == 1
+                            && (key.chars().all(|c| c.is_ascii_digit()) || key == "." || key == "-")
                     }
+                    Some(_) => key.len() == 1,
+                    None => false,
+                };
+                if allowed && let Some(edit) = &mut self.editing {
+                    edit.buffer.push_str(key);
                     cx.notify();
                 }
             }
@@ -622,14 +744,226 @@ impl Editor {
         let Some(edit) = self.editing.take() else {
             return;
         };
-        let Some(id) = self.selected else {
-            return;
-        };
-        match edit.buffer.trim().parse::<f64>() {
-            Ok(value) => self.commit_field(id, &edit.field, value, cx),
-            Err(_) => self.error = Some("invalid number".into()),
+        match edit.target {
+            EditTarget::Field(field) => {
+                let Some(id) = self.selected else {
+                    return;
+                };
+                match edit.buffer.trim().parse::<f64>() {
+                    Ok(value) => self.commit_field(id, &field, value, cx),
+                    Err(_) => self.error = Some("invalid number".into()),
+                }
+            }
+            EditTarget::PluginNumber { id, name } => {
+                let Ok(value) = edit.buffer.trim().parse::<f64>() else {
+                    self.error = Some("invalid number".into());
+                    cx.notify();
+                    return;
+                };
+                if !value.is_finite() {
+                    self.error = Some("non-finite value".into());
+                    cx.notify();
+                    return;
+                }
+                let value = self
+                    .plugin_model(id, &name)
+                    .and_then(|model| match model {
+                        ParamModel::Number { min, max, .. } => Some(value.clamp(min, max)),
+                        _ => None,
+                    })
+                    .unwrap_or(value);
+                if let Some(command) = self.plugin_number_command(id, &name, value) {
+                    self.execute(&command, cx);
+                }
+            }
+            EditTarget::PluginText { id, name } => {
+                let value = edit.buffer;
+                self.execute(
+                    &Command::SetPluginParam {
+                        id,
+                        name,
+                        value: Some(json!(value)),
+                    },
+                    cx,
+                );
+            }
+            EditTarget::PluginColor { id, name } => match parse_hex_color(edit.buffer.trim()) {
+                Some(color) => self.execute(
+                    &Command::SetPluginParam {
+                        id,
+                        name,
+                        value: Some(json!([color[0], color[1], color[2], color[3]])),
+                    },
+                    cx,
+                ),
+                None => self.error = Some("invalid color (use #RRGGBB or #RRGGBBAA)".into()),
+            },
+            EditTarget::PluginPoint { id, name, axis } => {
+                let Ok(value) = edit.buffer.trim().parse::<f64>() else {
+                    self.error = Some("invalid number".into());
+                    cx.notify();
+                    return;
+                };
+                let mut point = self.plugin_point_value(id, &name);
+                point[axis] = value as f32;
+                self.execute(
+                    &Command::SetPluginParam {
+                        id,
+                        name,
+                        value: Some(json!([point[0], point[1]])),
+                    },
+                    cx,
+                );
+            }
+            EditTarget::SettingsWidth => {
+                self.commit_settings_edit(&edit.buffer, SettingsField::Width, cx);
+            }
+            EditTarget::SettingsHeight => {
+                self.commit_settings_edit(&edit.buffer, SettingsField::Height, cx);
+            }
+            EditTarget::SettingsFps => {
+                self.commit_settings_edit(&edit.buffer, SettingsField::Fps, cx);
+            }
+            EditTarget::SettingsBackground => {
+                self.commit_settings_edit(&edit.buffer, SettingsField::Background, cx);
+            }
         }
         cx.notify();
+    }
+
+    fn plugin_number_command(&self, id: ClipId, name: &str, value: f64) -> Option<Command> {
+        let value = self
+            .plugin_model(id, name)
+            .and_then(|model| match model {
+                ParamModel::Number { min, max, .. } => Some(value.clamp(min, max)),
+                _ => None,
+            })
+            .unwrap_or(value);
+        let clip = self.find_clip(id)?;
+        Some(inspector::numeric_edit_command(
+            clip,
+            Target::Param(name.to_owned()),
+            value,
+            self.position,
+        ))
+    }
+
+    fn plugin_number_value(&self, id: ClipId, name: &str) -> f64 {
+        let Some(clip) = self.find_clip(id) else {
+            return 0.0;
+        };
+        let target = Target::Param(name.to_owned());
+        let base = inspector::numeric_base(clip, &target);
+        inspector::sampled_numeric(clip, &target, self.position, base)
+    }
+
+    fn editing_display(&self, target: &EditTarget) -> Option<String> {
+        self.editing
+            .as_ref()
+            .filter(|edit| &edit.target == target)
+            .map(|edit| edit.buffer.clone())
+    }
+
+    fn plugin_model(&self, id: ClipId, name: &str) -> Option<ParamModel> {
+        let clip = self.find_clip(id)?;
+        let ClipKind::Plugin { plugin_id, .. } = &clip.kind else {
+            return None;
+        };
+        self.plugins
+            .iter()
+            .find(|plugin| &plugin.id == plugin_id)?
+            .models()
+            .into_iter()
+            .find(|model| model.id() == name)
+    }
+
+    fn plugin_opaque(&self, id: ClipId, name: &str) -> Option<Value> {
+        let clip = self.find_clip(id)?;
+        let ClipKind::Plugin { params, .. } = &clip.kind else {
+            return None;
+        };
+        params.get(name).cloned()
+    }
+
+    fn plugin_text_value(&self, id: ClipId, name: &str, default: &str) -> String {
+        self.plugin_opaque(id, name)
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| default.to_owned())
+    }
+
+    fn plugin_bool_value(&self, id: ClipId, name: &str, default: bool) -> bool {
+        self.plugin_opaque(id, name)
+            .and_then(|value| value.as_bool())
+            .unwrap_or(default)
+    }
+
+    fn plugin_color_value(&self, id: ClipId, name: &str, default: [u8; 4]) -> [u8; 4] {
+        self.plugin_opaque(id, name)
+            .and_then(|value| color_from_json(&value))
+            .unwrap_or(default)
+    }
+
+    fn plugin_point_value(&self, id: ClipId, name: &str) -> [f32; 2] {
+        self.plugin_opaque(id, name)
+            .and_then(|value| point_from_json(&value))
+            .unwrap_or([0.0, 0.0])
+    }
+
+    fn plugin_asset_value(&self, id: ClipId, name: &str) -> Option<String> {
+        self.plugin_opaque(id, name).and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .filter(|value| self.project.assets().contains_key(&asset_id_from(value)))
+        })
+    }
+
+    fn commit_settings_edit(&mut self, buffer: &str, field: SettingsField, cx: &mut Context<Self>) {
+        let mut width = self.project.width();
+        let mut height = self.project.height();
+        let mut frame_rate = self.project.frame_rate();
+        let mut background = self.project.background();
+        match field {
+            SettingsField::Width => match buffer.trim().parse::<u32>() {
+                Ok(value) if value <= 65_535 => width = value,
+                _ => {
+                    self.error = Some("invalid width".into());
+                    return;
+                }
+            },
+            SettingsField::Height => match buffer.trim().parse::<u32>() {
+                Ok(value) if value <= 65_535 => height = value,
+                _ => {
+                    self.error = Some("invalid height".into());
+                    return;
+                }
+            },
+            SettingsField::Fps => match parse_fps(buffer.trim()) {
+                Ok(value) => frame_rate = value,
+                Err(message) => {
+                    self.error = Some(message);
+                    return;
+                }
+            },
+            SettingsField::Background => {
+                if let Some(value) = parse_hex_color(buffer.trim()) {
+                    background = value;
+                } else {
+                    self.error = Some("invalid color (use #RRGGBB or #RRGGBBAA)".into());
+                    return;
+                }
+            }
+        }
+        self.execute(
+            &Command::SetSettings {
+                width,
+                height,
+                frame_rate,
+                background,
+                duration: self.project.duration(),
+            },
+            cx,
+        );
     }
 
     fn commit_field(&mut self, id: ClipId, field: &Field, value: f64, cx: &mut Context<Self>) {
@@ -936,10 +1270,29 @@ impl Editor {
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
         if y < layout.ruler_height {
+            self.selected_keyframe = None;
             self.gesture = Some(TimelineGesture::Scrub);
             self.scrub_to(x, cx);
             return;
         }
+        if let Some(selection) = self.hit_keyframe(&layout, x, y) {
+            let clip = self.find_clip(selection.clip_id).cloned();
+            self.selected = Some(selection.clip_id);
+            self.selected_field = None;
+            self.selected_keyframe = Some(selection.clone());
+            if let Some(clip) = clip {
+                self.keyframe_drag = Some(KeyframeDrag {
+                    clip_id: selection.clip_id,
+                    target: selection.target.clone(),
+                    clip_start: clip.range.start,
+                    origin: selection.time,
+                    current: selection.time,
+                });
+            }
+            cx.notify();
+            return;
+        }
+        self.selected_keyframe = None;
         if let Some((hit, edge)) = timeline::hit_trim_edge(&layout, &self.project, x, y)
             && let Some(clip) = self.find_clip(hit.clip).cloned()
         {
@@ -983,6 +1336,43 @@ impl Editor {
         cx.notify();
     }
 
+    fn hit_keyframe(&self, layout: &TimelineLayout, x: f32, y: f32) -> Option<KeyframeSelection> {
+        let selected = self.selected?;
+        if y < layout.ruler_height {
+            return None;
+        }
+        let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+        let mut found = None;
+        for (clip_row, clip) in self
+            .project
+            .tracks()
+            .iter()
+            .enumerate()
+            .flat_map(|(row, track)| track.clips().values().map(move |clip| (row, clip)))
+        {
+            if clip.id != selected {
+                continue;
+            }
+            if clip_row != row {
+                return None;
+            }
+            for animation in &clip.animations {
+                for local in animation.keys.keys().keys() {
+                    let time = Time(clip.range.start.0 + local.0);
+                    let kx = timeline::time_to_x(layout, time);
+                    if (x - kx).abs() <= 6.0 {
+                        found = Some(KeyframeSelection {
+                            clip_id: selected,
+                            target: animation.target.clone(),
+                            time: *local,
+                        });
+                    }
+                }
+            }
+        }
+        found
+    }
+
     fn on_timeline_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
@@ -994,6 +1384,12 @@ impl Editor {
         }
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
+        if let Some(drag) = &mut self.keyframe_drag {
+            let raw = timeline::x_to_time(&layout, x);
+            drag.current = Time((raw.0 - drag.clip_start.0).max(0));
+            cx.notify();
+            return;
+        }
         match &mut self.gesture {
             Some(TimelineGesture::Drag(drag)) => {
                 let raw = timeline::drag_start(&layout, drag.grab_offset, x);
@@ -1035,6 +1431,26 @@ impl Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(drag) = self.keyframe_drag.take() {
+            self.selected_keyframe = Some(KeyframeSelection {
+                clip_id: drag.clip_id,
+                target: drag.target.clone(),
+                time: drag.current,
+            });
+            if drag.current != drag.origin {
+                self.execute(
+                    &Command::MoveKeyframe {
+                        id: drag.clip_id,
+                        target: drag.target,
+                        from: drag.origin,
+                        to: drag.current,
+                    },
+                    cx,
+                );
+            }
+            cx.notify();
+            return;
+        }
         match self.gesture.take() {
             Some(TimelineGesture::Drag(drag)) => {
                 if drag.target_track == drag.origin_track && drag.current_start == drag.origin_start
@@ -1120,8 +1536,8 @@ impl Editor {
         self.selected = Some(id);
         self.selected_field = Some(field.clone());
         if event.click_count >= 2 {
-            self.editing = Some(NumberEdit {
-                field: field.clone(),
+            self.editing = Some(TextEdit {
+                target: EditTarget::Field(field.clone()),
                 buffer: format!("{value}"),
             });
             self.scrub = None;
@@ -1176,6 +1592,93 @@ impl Editor {
         self.open(cx);
     }
 
+    fn on_add_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.add_menu_open = !self.add_menu_open;
+        cx.notify();
+    }
+
+    fn on_settings_click(
+        &mut self,
+        _event: &ClickEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_open = !self.settings_open;
+        cx.notify();
+    }
+
+    fn add_plugin_clip(&mut self, descriptor: &PluginDescriptor, cx: &mut Context<Self>) {
+        self.add_menu_open = false;
+        let models = descriptor.models();
+        let (numeric, opaque) = inspector::default_params(&models);
+        let Some(track) = self.project.tracks().first() else {
+            self.error = Some("no track to place the clip".into());
+            cx.notify();
+            return;
+        };
+        let track = track.id();
+        let start = self.position;
+        let duration = DEFAULT_MEDIA_TICKS;
+        let Some(end) = start.0.checked_add(duration) else {
+            self.error = Some("clip end overflow".into());
+            cx.notify();
+            return;
+        };
+        let Ok(range) = TimeRange::new(start, Time(end)) else {
+            self.error = Some("invalid clip range".into());
+            cx.notify();
+            return;
+        };
+        let mut clip = Clip::new(
+            self.next_clip_id(),
+            ClipKind::Plugin {
+                plugin_id: descriptor.id.clone(),
+                params: opaque,
+            },
+            range,
+        );
+        clip.params = numeric;
+        self.execute(&Command::AddClip { track, clip }, cx);
+    }
+
+    fn add_menu(&self, cx: &mut Context<Self>) -> Div {
+        let mut menu = div()
+            .absolute()
+            .top(px(48.))
+            .left(px(8.))
+            .w(px(220.))
+            .bg(rgb(0x1f2430))
+            .p_1()
+            .flex()
+            .flex_col();
+        if self.plugins.is_empty() {
+            menu = menu.child(div().px_2().child("No clip plugins loaded"));
+        }
+        for descriptor in &self.plugins {
+            let id = descriptor.id.clone();
+            menu = menu.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .cursor_pointer()
+                    .child(descriptor.name.clone())
+                    .id("add-plugin-item")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.add_plugin_clip_by_id(&id, cx);
+                    })),
+            );
+        }
+        menu
+    }
+
+    fn add_plugin_clip_by_id(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(descriptor) = self.plugins.iter().find(|plugin| plugin.id == id) else {
+            return;
+        };
+        let descriptor = descriptor.clone();
+        self.add_plugin_clip(&descriptor, cx);
+    }
+
     fn on_save_click(
         &mut self,
         _event: &ClickEvent,
@@ -1228,12 +1731,40 @@ impl Editor {
                 } else {
                     (clip.range.start, clip.range.end)
                 };
+                let mut keyframes = Vec::new();
+                if self.selected == Some(clip.id) {
+                    for animation in &clip.animations {
+                        for local in animation.keys.keys().keys() {
+                            let time = if let Some(drag) = &self.keyframe_drag
+                                && drag.clip_id == clip.id
+                                && drag.target == animation.target
+                                && drag.origin == *local
+                            {
+                                drag.current
+                            } else {
+                                *local
+                            };
+                            keyframes.push(KeyframePaint {
+                                time: Time(clip.range.start.0 + time.0),
+                                selected: self.selected_keyframe.as_ref().is_some_and(
+                                    |selection| {
+                                        selection.clip_id == clip.id
+                                            && selection.target == animation.target
+                                            && selection.time == time
+                                    },
+                                ),
+                            });
+                        }
+                    }
+                }
                 clips.push(ClipPaint {
                     row,
                     start,
                     end,
                     selected: self.selected == Some(clip.id),
                     label: clip_label(&self.project, clip).into(),
+                    error: matches!(clip.kind, ClipKind::Error(_)),
+                    keyframes,
                 });
             }
         }
@@ -1245,7 +1776,7 @@ impl Editor {
         }
     }
 
-    fn field_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
+    fn transform_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
         let Some(clip) = self.find_clip(id) else {
             return Vec::new();
         };
@@ -1262,11 +1793,637 @@ impl Editor {
             let value = field_value(clip, &field);
             rows.push(self.field_row(id, &field, label, value, cx));
         }
+        rows
+    }
+
+    fn numeric_param_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
+        let Some(clip) = self.find_clip(id) else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
         for (name, value) in &clip.params {
             let field = Field::Param(name.clone());
             rows.push(self.field_row(id, &field, name, *value, cx));
         }
         rows
+    }
+
+    fn plugin_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
+        let Some(clip) = self.find_clip(id) else {
+            return Vec::new();
+        };
+        let ClipKind::Plugin { plugin_id, .. } = &clip.kind else {
+            return Vec::new();
+        };
+        let Some(descriptor) = self.plugins.iter().find(|plugin| &plugin.id == plugin_id) else {
+            return vec![div().px_2().child("plugin not loaded")];
+        };
+        let models = descriptor.models();
+        let mut rows = Vec::new();
+        for model in &models {
+            rows.push(self.plugin_row(id, model, cx));
+        }
+        rows
+    }
+
+    fn plugin_row(&self, id: ClipId, model: &ParamModel, cx: &mut Context<Self>) -> Div {
+        let name = model.id().to_owned();
+        let diamond = if model.is_keyframeable() {
+            self.keyframe_diamond(id, Target::Param(name.clone()), cx)
+        } else {
+            div().w(px(14.)).h(px(14.)).id("no-keyframe")
+        };
+        let control = match model {
+            ParamModel::Number { .. } => self.plugin_number_control(id, name.clone(), cx),
+            ParamModel::Color { default, .. } => self.plugin_color_control(
+                id,
+                name.clone(),
+                [default.r, default.g, default.b, default.a],
+                cx,
+            ),
+            ParamModel::Text { default, .. } => {
+                self.plugin_text_control(id, name.clone(), default, cx)
+            }
+            ParamModel::Enum {
+                options, default, ..
+            } => self.plugin_enum_control(id, name.clone(), options.clone(), default, cx),
+            ParamModel::Bool { default, .. } => {
+                self.plugin_bool_control(id, name.clone(), *default, cx)
+            }
+            ParamModel::Point { default, .. } => {
+                self.plugin_point_control(id, name.clone(), *default, cx)
+            }
+            ParamModel::Asset {
+                media_type,
+                default,
+                ..
+            } => self.plugin_asset_control(id, name.clone(), media_type, default, cx),
+        };
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .child(diamond)
+            .child(div().flex_1().child(model.label().to_owned()))
+            .child(control)
+    }
+
+    fn keyframe_diamond(
+        &self,
+        id: ClipId,
+        target: Target,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let active = self
+            .find_clip(id)
+            .is_some_and(|clip| inspector::keyframed(clip, &target, self.position));
+        let label = if active { "◆" } else { "◇" };
+        div()
+            .w(px(14.))
+            .h(px(14.))
+            .cursor_pointer()
+            .child(label)
+            .id("keyframe-diamond")
+            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                this.toggle_keyframe(id, target.clone(), cx);
+            }))
+    }
+
+    fn toggle_keyframe(&mut self, id: ClipId, target: Target, cx: &mut Context<Self>) {
+        let Some(clip) = self.find_clip(id) else {
+            return;
+        };
+        let command = inspector::keyframe_toggle_command(clip, target, self.position);
+        self.execute(&command, cx);
+    }
+
+    fn interpolation_command(
+        &self,
+        selection: &KeyframeSelection,
+        interpolation: Interpolation,
+    ) -> Option<Command> {
+        let clip = self.find_clip(selection.clip_id)?;
+        inspector::interpolation_command(
+            clip,
+            selection.target.clone(),
+            selection.time,
+            interpolation,
+        )
+    }
+
+    fn keyframe_menu(
+        &self,
+        selection: &KeyframeSelection,
+        cx: &mut Context<Self>,
+    ) -> Vec<Stateful<Div>> {
+        let mut rows = vec![
+            div()
+                .px_2()
+                .child("Keyframe interpolation")
+                .id("keyframe-menu-title"),
+        ];
+        let current = self.find_clip(selection.clip_id).and_then(|clip| {
+            inspector::keyframe_interpolation(clip, &selection.target, selection.time)
+        });
+        for (label, interpolation) in [
+            ("linear", Interpolation::Linear),
+            ("hold", Interpolation::Hold),
+            ("ease", Interpolation::EaseInOut),
+        ] {
+            let active = current == Some(interpolation);
+            let selection = selection.clone();
+            rows.push(
+                div()
+                    .px_2()
+                    .cursor_pointer()
+                    .bg(if active { rgb(0x2a3342) } else { rgb(0x151a22) })
+                    .child(label)
+                    .id("keyframe-interp")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        if let Some(command) = this.interpolation_command(&selection, interpolation)
+                        {
+                            this.execute(&command, cx);
+                        }
+                    })),
+            );
+        }
+        rows
+    }
+
+    fn plugin_number_control(
+        &self,
+        id: ClipId,
+        name: String,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let value = self.plugin_number_value(id, &name);
+        let target = EditTarget::PluginNumber {
+            id,
+            name: name.clone(),
+        };
+        let display = if let Some(buffer) = self.editing_display(&target) {
+            buffer
+        } else if let Some(scrub) = &self.plugin_scrub
+            && scrub.id == id
+            && scrub.name == name
+        {
+            format!("{:.4}", scrub.current)
+        } else {
+            format!("{value:.4}")
+        };
+
+        let down = name.clone();
+        let move_name = name.clone();
+        let up = name.clone();
+        div()
+            .cursor(CursorStyle::ResizeLeftRight)
+            .child(display)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    this.on_plugin_number_down(id, &down, event, cx);
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.on_plugin_number_move(id, &move_name, event, cx);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
+                    this.on_plugin_number_up(id, &up, event, cx);
+                }),
+            )
+            .id("plugin-number")
+    }
+
+    fn on_plugin_number_down(
+        &mut self,
+        id: ClipId,
+        name: &str,
+        event: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let value = self.plugin_number_value(id, name);
+        if event.click_count >= 2 {
+            self.editing = Some(TextEdit {
+                target: EditTarget::PluginNumber {
+                    id,
+                    name: name.to_owned(),
+                },
+                buffer: format!("{value}"),
+            });
+            self.plugin_scrub = None;
+        } else {
+            self.plugin_scrub = Some(PluginScrub {
+                id,
+                name: name.to_owned(),
+                start_x: f32::from(event.position.x),
+                start_value: value,
+                current: value,
+            });
+            self.editing = None;
+        }
+        cx.notify();
+    }
+
+    fn on_plugin_number_move(
+        &mut self,
+        id: ClipId,
+        name: &str,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if !event.dragging() {
+            return;
+        }
+        let step = self
+            .plugin_model(id, name)
+            .and_then(|model| match model {
+                ParamModel::Number { step, .. } => Some(step),
+                _ => None,
+            })
+            .unwrap_or(0.1);
+        let Some(scrub) = &mut self.plugin_scrub else {
+            return;
+        };
+        if scrub.id != id || scrub.name != name {
+            return;
+        }
+        let delta = f64::from(f32::from(event.position.x) - scrub.start_x);
+        scrub.current = scrub.start_value + delta * step * 0.05;
+        cx.notify();
+    }
+
+    fn on_plugin_number_up(
+        &mut self,
+        id: ClipId,
+        name: &str,
+        _event: &MouseUpEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(scrub) = self.plugin_scrub.take()
+            && scrub.id == id
+            && scrub.name == name
+            && let Some(command) = self.plugin_number_command(id, name, scrub.current)
+        {
+            self.execute(&command, cx);
+        }
+        cx.notify();
+    }
+
+    fn plugin_text_control(
+        &self,
+        id: ClipId,
+        name: String,
+        default: &str,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let value = self.plugin_text_value(id, &name, default);
+        let target = EditTarget::PluginText {
+            id,
+            name: name.clone(),
+        };
+        let display = self
+            .editing_display(&target)
+            .unwrap_or_else(|| value.clone());
+        let current = value.clone();
+        div()
+            .cursor_pointer()
+            .child(display)
+            .id("plugin-text")
+            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                this.editing = Some(TextEdit {
+                    target: EditTarget::PluginText {
+                        id,
+                        name: name.clone(),
+                    },
+                    buffer: current.clone(),
+                });
+                cx.notify();
+            }))
+    }
+
+    fn plugin_enum_control(
+        &self,
+        id: ClipId,
+        name: String,
+        options: Vec<String>,
+        default: &str,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let current = self.plugin_text_value(id, &name, default);
+        let options_for_click = options.clone();
+        div()
+            .cursor_pointer()
+            .child(current.clone())
+            .id("plugin-enum")
+            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                let next = cycle_option(&options_for_click, &current);
+                this.execute(
+                    &Command::SetPluginParam {
+                        id,
+                        name: name.clone(),
+                        value: Some(json!(next)),
+                    },
+                    cx,
+                );
+            }))
+    }
+
+    fn plugin_bool_control(
+        &self,
+        id: ClipId,
+        name: String,
+        default: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let value = self.plugin_bool_value(id, &name, default);
+        let label = if value { "on" } else { "off" };
+        div()
+            .cursor_pointer()
+            .child(label)
+            .id("plugin-bool")
+            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                this.execute(
+                    &Command::SetPluginParam {
+                        id,
+                        name: name.clone(),
+                        value: Some(json!(!value)),
+                    },
+                    cx,
+                );
+            }))
+    }
+
+    fn plugin_color_control(
+        &self,
+        id: ClipId,
+        name: String,
+        default: [u8; 4],
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let color = self.plugin_color_value(id, &name, default);
+        let hex = format!(
+            "#{:02x}{:02x}{:02x}{:02x}",
+            color[0], color[1], color[2], color[3]
+        );
+        let target = EditTarget::PluginColor {
+            id,
+            name: name.clone(),
+        };
+        let display = self.editing_display(&target).unwrap_or_else(|| hex.clone());
+        let swatch =
+            rgb(u32::from(color[0]) << 16 | u32::from(color[1]) << 8 | u32::from(color[2]));
+        let name_for_click = name.clone();
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .child(div().w(px(16.)).h(px(12.)).bg(swatch))
+            .child(
+                div()
+                    .cursor_pointer()
+                    .child(display)
+                    .id("plugin-color")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.editing = Some(TextEdit {
+                            target: EditTarget::PluginColor {
+                                id,
+                                name: name.clone(),
+                            },
+                            buffer: hex.clone(),
+                        });
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .cursor_pointer()
+                    .child("↻")
+                    .id("plugin-color-cycle")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        let next = cycle_color(color);
+                        this.execute(
+                            &Command::SetPluginParam {
+                                id,
+                                name: name_for_click.clone(),
+                                value: Some(json!([next[0], next[1], next[2], next[3]])),
+                            },
+                            cx,
+                        );
+                    })),
+            )
+            .id("plugin-color-row")
+    }
+
+    fn plugin_point_control(
+        &self,
+        id: ClipId,
+        name: String,
+        default: animathio_plugin_api::PointValue,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let point = self.plugin_point_value(id, &name);
+        let x_name = name.clone();
+        let y_name = name.clone();
+        div()
+            .flex()
+            .flex_row()
+            .gap_1()
+            .child(
+                div()
+                    .cursor_pointer()
+                    .child(format!("x {:.2}", point[0]))
+                    .id("plugin-point-x")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.editing = Some(TextEdit {
+                            target: EditTarget::PluginPoint {
+                                id,
+                                name: x_name.clone(),
+                                axis: 0,
+                            },
+                            buffer: format!("{:.2}", point[0]),
+                        });
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .cursor_pointer()
+                    .child(format!("y {:.2}", point[1]))
+                    .id("plugin-point-y")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.editing = Some(TextEdit {
+                            target: EditTarget::PluginPoint {
+                                id,
+                                name: y_name.clone(),
+                                axis: 1,
+                            },
+                            buffer: format!("{:.2}", point[1]),
+                        });
+                        cx.notify();
+                    })),
+            )
+            .child(div().px_1().child(format!("({} {})", default.x, default.y)))
+            .id("plugin-point-row")
+    }
+
+    fn plugin_asset_control(
+        &self,
+        id: ClipId,
+        name: String,
+        media_type: &str,
+        default: &Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let current = self
+            .plugin_asset_value(id, &name)
+            .or_else(|| default.clone());
+        let label = current.as_ref().map_or_else(
+            || "none".to_owned(),
+            |asset| {
+                self.project
+                    .assets()
+                    .get(&asset_id_from(asset))
+                    .map_or_else(|| "unknown".to_owned(), |meta| meta.name.clone())
+            },
+        );
+        let media_type = media_type.to_owned();
+        div()
+            .cursor_pointer()
+            .child(label)
+            .id("plugin-asset")
+            .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                let ids = this.matching_asset_ids(&media_type);
+                let next = current
+                    .as_deref()
+                    .and_then(|current| {
+                        let index = ids.iter().position(|asset| asset.as_str() == current)?;
+                        ids.get(index + 1).or_else(|| ids.first())
+                    })
+                    .or_else(|| ids.first())
+                    .cloned();
+                this.execute(
+                    &Command::SetPluginParam {
+                        id,
+                        name: name.clone(),
+                        value: Some(next.map_or(Value::Null, |asset| json!(asset.as_str()))),
+                    },
+                    cx,
+                );
+            }))
+    }
+
+    fn settings_dialog(&self, cx: &mut Context<Self>) -> Div {
+        let width = self.project.width();
+        let height = self.project.height();
+        let fps = frame_rate_label(self.project.frame_rate());
+        let background = self.project.background();
+        let hex = format!(
+            "#{:02x}{:02x}{:02x}{:02x}",
+            background[0], background[1], background[2], background[3]
+        );
+        let swatch = rgb(u32::from(background[0]) << 16
+            | u32::from(background[1]) << 8
+            | u32::from(background[2]));
+        div()
+            .absolute()
+            .top(px(52.))
+            .right(px(12.))
+            .w(px(280.))
+            .bg(rgb(0x1f2430))
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(self.settings_field("Width", width.to_string(), EditTarget::SettingsWidth, cx))
+            .child(self.settings_field(
+                "Height",
+                height.to_string(),
+                EditTarget::SettingsHeight,
+                cx,
+            ))
+            .child(self.settings_field("Frame rate", fps, EditTarget::SettingsFps, cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(div().w(px(16.)).h(px(12.)).bg(swatch))
+                    .child(self.settings_field(
+                        "Background",
+                        hex,
+                        EditTarget::SettingsBackground,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .cursor_pointer()
+                    .px_2()
+                    .child("Close")
+                    .id("settings-close")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.settings_open = false;
+                        cx.notify();
+                    })),
+            )
+    }
+
+    fn settings_field(
+        &self,
+        label: &str,
+        value: String,
+        target: EditTarget,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let display = if let Some(edit) = &self.editing
+            && edit.target == target
+        {
+            edit.buffer.clone()
+        } else {
+            value.clone()
+        };
+        div()
+            .flex()
+            .flex_row()
+            .justify_between()
+            .px_2()
+            .py_1()
+            .child(label.to_owned())
+            .child(
+                div()
+                    .cursor_pointer()
+                    .child(display)
+                    .id("settings-field")
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, _window, cx| {
+                        this.editing = Some(TextEdit {
+                            target: target.clone(),
+                            buffer: value.clone(),
+                        });
+                        cx.notify();
+                    })),
+            )
+    }
+
+    fn matching_asset_ids(&self, media_type: &str) -> Vec<AssetId> {
+        let prefix = media_type.strip_suffix("/*").unwrap_or(media_type);
+        let mut ids: Vec<AssetId> = self
+            .project
+            .assets()
+            .iter()
+            .filter(|(_, asset)| asset.media_type.starts_with(prefix))
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
     }
 
     fn field_row(
@@ -1278,7 +2435,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) -> Div {
         let display = if let Some(edit) = &self.editing
-            && &edit.field == field
+            && edit.target == EditTarget::Field(field.clone())
         {
             edit.buffer.clone()
         } else if let Some(scrub) = &self.scrub
@@ -1340,6 +2497,12 @@ impl Editor {
                 "Add media…",
                 cx.listener(Self::on_import_click),
             ))
+            .child(button("add", "Add clip…", cx.listener(Self::on_add_click)))
+            .child(button(
+                "settings",
+                "Settings",
+                cx.listener(Self::on_settings_click),
+            ))
             .child(button("undo", "Undo", cx.listener(Self::on_undo_click)))
             .child(button("redo", "Redo", cx.listener(Self::on_redo_click)))
             .child(button("play", play_label, cx.listener(Self::on_play_click)))
@@ -1382,8 +2545,25 @@ impl Editor {
         };
         let kind = kind_label(&clip.kind);
         pane = pane.child(format!("Clip {}", id.0)).child(kind);
-        let rows = self.field_rows(id, cx);
-        pane.children(rows)
+        if let ClipKind::Error(message) = &clip.kind {
+            pane = pane.child(
+                div()
+                    .text_color(rgb(0xff6b6b))
+                    .child(format!("⚠ {message}")),
+            );
+        }
+        pane = pane.children(self.transform_rows(id, cx));
+        if matches!(clip.kind, ClipKind::Plugin { .. }) {
+            pane = pane.children(self.plugin_rows(id, cx));
+        } else {
+            pane = pane.children(self.numeric_param_rows(id, cx));
+        }
+        if let Some(selection) = &self.selected_keyframe
+            && selection.clip_id == id
+        {
+            pane = pane.children(self.keyframe_menu(selection, cx));
+        }
+        pane
     }
 
     fn status_line(&self) -> Div {
@@ -1474,8 +2654,9 @@ impl Render for Editor {
                 .size_full(),
             );
 
-        div()
+        let mut root = div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .bg(rgb(0x0b0e13))
@@ -1491,7 +2672,14 @@ impl Render for Editor {
                     .child(self.inspector(cx)),
             )
             .child(timeline)
-            .child(self.status_line())
+            .child(self.status_line());
+        if self.add_menu_open {
+            root = root.child(self.add_menu(cx));
+        }
+        if self.settings_open {
+            root = root.child(self.settings_dialog(cx));
+        }
+        root
     }
 }
 
@@ -1578,6 +2766,43 @@ fn paint_timeline(
                 .shape_line(clip.label.clone(), px(11.0), &[run], None);
             let _ = line.paint(point(x0 + px(4.0), y0 + px(16.0)), px(14.0), window, cx);
         }
+        if clip.error {
+            let badge = Bounds::from_corners(
+                point(x0 + px(2.0), y0 + px(2.0)),
+                point(x0 + px(12.0), y0 + px(12.0)),
+            );
+            window.paint_quad(fill(badge, rgb(0xe04040)));
+            let run = TextRun {
+                len: 1,
+                font: font(".SystemUIFont"),
+                color: rgb(0xffffff).into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let line = window
+                .text_system()
+                .shape_line("!".into(), px(9.0), &[run], None);
+            let _ = line.paint(point(x0 + px(3.0), y0 + px(2.0)), px(9.0), window, cx);
+        }
+        for keyframe in &clip.keyframes {
+            let kx = bounds.origin.x + px(timeline::time_to_x(&layout, keyframe.time));
+            let cy = y0 + px((ROW_H - 6.0) / 2.0);
+            let half = px(4.0);
+            let mut path = gpui::Path::new(point(kx, cy - half));
+            path.line_to(point(kx + half, cy));
+            path.line_to(point(kx, cy + half));
+            path.line_to(point(kx - half, cy));
+            path.line_to(point(kx, cy - half));
+            window.paint_path(
+                path,
+                if keyframe.selected {
+                    rgb(0xffffff)
+                } else {
+                    rgb(0xf2c14e)
+                },
+            );
+        }
     }
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let head = Bounds::from_corners(
@@ -1632,6 +2857,17 @@ fn seconds(time: Time) -> f64 {
     time.0 as f64 / TICKS_PER_SECOND as f64
 }
 
+fn frame_rate_label(rate: FrameRate) -> String {
+    if rate.denominator() == 1 {
+        format!("{} fps", rate.numerator())
+    } else {
+        format!(
+            "{:.3} fps",
+            f64::from(rate.numerator()) / f64::from(rate.denominator())
+        )
+    }
+}
+
 fn kind_label(kind: &ClipKind) -> String {
     match kind {
         ClipKind::Video(_) => "video".into(),
@@ -1669,6 +2905,71 @@ fn audio_asset_ids(project: &Project) -> BTreeSet<AssetId> {
         .collect()
 }
 
+fn plugin_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(dir) = std::env::var("ANIMATHIO_PLUGIN_DIR") {
+        dirs.push(PathBuf::from(dir));
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(target_dir) = exe.parent().and_then(Path::parent)
+    {
+        // In-tree builds: `target/{debug,release}/animathio` -> `target/plugins`.
+        dirs.push(target_dir.join("plugins"));
+    }
+    if let Some(base) = directories::BaseDirs::new() {
+        dirs.push(base.data_dir().join("animathio").join("plugins"));
+    }
+    dirs
+}
+
+fn plugins_cache_dir() -> PathBuf {
+    directories::BaseDirs::new().map_or_else(
+        || std::env::temp_dir().join("animathio-plugin-cache"),
+        |base| base.cache_dir().join("animathio").join("plugin-cache"),
+    )
+}
+
+/// Load every clip-source plugin from the bundled build output and the user
+/// plugins directory. Descriptors are plain data for the UI; the host itself is
+/// kept on the UI thread and drives both preview and control rendering.
+fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Option<String>) {
+    let mut host = match PluginHost::new(plugins_cache_dir()) {
+        Ok(host) => host,
+        Err(error) => {
+            return (
+                None,
+                Vec::new(),
+                Some(format!("plugin host unavailable: {error}")),
+            );
+        }
+    };
+    let mut error = None;
+    for dir in plugin_search_dirs() {
+        match host.load_plugins_dir(&dir) {
+            Ok(_) => {}
+            Err(message) => {
+                eprintln!("plugin load failed from {}: {message}", dir.display());
+                error.get_or_insert_with(|| format!("plugin load failed: {message}"));
+            }
+        }
+    }
+    let mut descriptors = Vec::new();
+    for id in host.loaded_plugin_ids() {
+        let Some(plugin) = host.get_plugin(&id) else {
+            continue;
+        };
+        if plugin.manifest.kinds.contains(&PluginKind::ClipSource) {
+            descriptors.push(PluginDescriptor {
+                id: id.clone(),
+                name: plugin.manifest.name.clone(),
+                schema: plugin.inspector_schema.clone(),
+            });
+        }
+    }
+    descriptors.sort_by(|left, right| left.name.cmp(&right.name));
+    (Some(host), descriptors, error)
+}
+
 fn load_audio(
     pool: &mut AudioPool,
     project: &Project,
@@ -1695,6 +2996,116 @@ fn load_audio(
 fn frames_to_ticks(frames: usize, rate: u32) -> i64 {
     let ticks = u128::from(rate.max(1));
     i64::try_from(frames as u128 * TICKS_PER_SECOND as u128 / ticks).unwrap_or(i64::MAX)
+}
+
+fn parse_hex_color(value: &str) -> Option<[u8; 4]> {
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    let (rgb, alpha) = match hex.len() {
+        6 => (hex, 255),
+        8 => (&hex[..6], u8::from_str_radix(&hex[6..], 16).ok()?),
+        _ => return None,
+    };
+    let value = u32::from_str_radix(rgb, 16).ok()?;
+    Some([
+        ((value >> 16) & 0xff) as u8,
+        ((value >> 8) & 0xff) as u8,
+        (value & 0xff) as u8,
+        alpha,
+    ])
+}
+
+fn parse_fps(value: &str) -> Result<FrameRate, String> {
+    let fps = value
+        .parse::<f64>()
+        .map_err(|_| "invalid frame rate".to_owned())?;
+    if !fps.is_finite() || fps <= 0.0 {
+        return Err("invalid frame rate".into());
+    }
+    // Integer rates keep denominator 1; fractional rates use the NTSC 1001
+    // denominator so 23.976/29.97/59.94 round-trip exactly.
+    let (numerator, denominator) = if fps.fract() == 0.0 {
+        (fps as u32, 1)
+    } else {
+        ((fps * 1001.0).round() as u32, 1001)
+    };
+    FrameRate::new(numerator.max(1), denominator).map_err(|e| e.0)
+}
+
+fn color_from_json(value: &Value) -> Option<[u8; 4]> {
+    if let Some(array) = value.as_array()
+        && array.len() >= 3
+    {
+        return Some([
+            array.first().and_then(Value::as_u64).unwrap_or(0) as u8,
+            array.get(1).and_then(Value::as_u64).unwrap_or(0) as u8,
+            array.get(2).and_then(Value::as_u64).unwrap_or(0) as u8,
+            array.get(3).and_then(Value::as_u64).unwrap_or(255) as u8,
+        ]);
+    }
+    if let Some(object) = value.as_object() {
+        return Some([
+            object.get("r").and_then(Value::as_u64).unwrap_or(0) as u8,
+            object.get("g").and_then(Value::as_u64).unwrap_or(0) as u8,
+            object.get("b").and_then(Value::as_u64).unwrap_or(0) as u8,
+            object.get("a").and_then(Value::as_u64).unwrap_or(255) as u8,
+        ]);
+    }
+    None
+}
+
+fn point_from_json(value: &Value) -> Option<[f32; 2]> {
+    if let Some(array) = value.as_array()
+        && array.len() >= 2
+    {
+        return Some([
+            array.first().and_then(Value::as_f64).unwrap_or(0.0) as f32,
+            array.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        ]);
+    }
+    if let Some(object) = value.as_object() {
+        return Some([
+            object.get("x").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+            object.get("y").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        ]);
+    }
+    None
+}
+
+fn asset_id_from(value: &str) -> AssetId {
+    AssetId::try_from(value.to_owned()).unwrap_or_else(|_| AssetId::of(value.as_bytes()))
+}
+
+fn cycle_option(options: &[String], current: &str) -> String {
+    options
+        .iter()
+        .position(|option| option == current)
+        .and_then(|index| options.get(index + 1).or_else(|| options.first()))
+        .cloned()
+        .unwrap_or_else(|| current.to_owned())
+}
+
+const COLOR_PRESETS: [[u8; 4]; 8] = [
+    [255, 255, 255, 255],
+    [0, 0, 0, 255],
+    [239, 68, 68, 255],
+    [34, 197, 94, 255],
+    [59, 130, 246, 255],
+    [234, 179, 8, 255],
+    [168, 85, 247, 255],
+    [90, 170, 255, 255],
+];
+
+fn cycle_color(current: [u8; 4]) -> [u8; 4] {
+    COLOR_PRESETS
+        .iter()
+        .position(|color| color[0..3] == current[0..3])
+        .and_then(|index| {
+            COLOR_PRESETS
+                .get(index + 1)
+                .or_else(|| COLOR_PRESETS.first())
+        })
+        .copied()
+        .unwrap_or(COLOR_PRESETS[0])
 }
 
 fn media_type_for(path: &Path) -> &'static str {
