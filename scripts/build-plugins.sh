@@ -34,3 +34,5 @@ PY
 
 build_plugin shapes
 build_plugin text
+build_plugin latex
+build_plugin graph
