@@ -5,11 +5,43 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Persisted timeline density (logical pixels per track).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TrackHeight {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+impl TrackHeight {
+    pub const fn pixels(self) -> f32 {
+        match self {
+            Self::Small => 28.,
+            Self::Medium => 44.,
+            Self::Large => 72.,
+        }
+    }
+    pub const fn larger(self) -> Self {
+        match self {
+            Self::Small => Self::Medium,
+            _ => Self::Large,
+        }
+    }
+    pub const fn smaller(self) -> Self {
+        match self {
+            Self::Large => Self::Medium,
+            _ => Self::Small,
+        }
+    }
+}
+
 /// Sizes (logical pixels) and open/closed flags for the dockable panels.
 /// Sizes are clamped on load so a hand-edited or stale file cannot produce a
 /// degenerate layout.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DockLayout {
+    #[serde(default)]
+    pub track_height: TrackHeight,
     /// Left panel (media pool) width in logical pixels.
     pub left_width: f32,
     /// Right panel (inspector) width in logical pixels.
@@ -27,6 +59,7 @@ pub struct DockLayout {
 impl Default for DockLayout {
     fn default() -> Self {
         Self {
+            track_height: TrackHeight::default(),
             left_width: 260.0,
             right_width: 300.0,
             bottom_height: 240.0,
@@ -101,6 +134,7 @@ mod tests {
     #[test]
     fn custom_layout_round_trips_through_json() {
         let layout = DockLayout {
+            track_height: TrackHeight::Large,
             left_width: 320.0,
             right_width: 480.0,
             bottom_height: 300.0,
@@ -124,6 +158,16 @@ mod tests {
         assert_eq!(layout.left_width, 160.0);
         assert_eq!(layout.right_width, 720.0);
         assert_eq!(layout.bottom_height, 120.0);
+    }
+
+    #[test]
+    fn existing_layout_files_default_to_medium_tracks() {
+        let mut json = serde_json::to_value(DockLayout::default()).unwrap();
+        json.as_object_mut().unwrap().remove("track_height");
+        assert_eq!(
+            DockLayout::from_json(&json.to_string()).track_height,
+            TrackHeight::Medium
+        );
     }
 
     #[test]

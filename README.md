@@ -40,7 +40,7 @@ Text and shapes under `core::builtin` are temporary stand-ins for the plugin equ
 ## Screenshot
 
 The DaVinci-style editor shell on the `v2` branch (dark theme, media pool, viewer
-with transport controls, inspector and timeline):
+with transport controls, resizable inspector and vertically scrolling timeline):
 
 ![AniMathIO 2.0 editor](docs/screenshots/editor-main.png)
 
@@ -78,6 +78,17 @@ Export always uses the CPU renderer.
 The editor is a thin GPUI shell over the command-only core. Playback, the timeline,
 selection and the control socket are wired; a media decoder and full plugin UI are
 still in progress.
+
+The title bar provides File/Edit/View/Clip/Help menus, project status, the control
+socket badge and Export. Drag panel dividers to resize; View toggles panel visibility.
+The layout and S/M/L timeline track heights persist between sessions.
+
+Use Ctrl (Cmd on macOS) with N/O/S/I/M for New/Open/Save/Import/Export and Z or
+Shift+Z for Undo/Redo. In the timeline, Ctrl/Cmd+B splits at the playhead and Delete
+removes the selection. Space, Left/Right and Home/End control playback/navigation
+in the timeline or viewer. N toggles snapping; Ctrl/Cmd+plus/minus zooms and
+Shift+Z fits the timeline. Help → Keyboard shortcuts shows the registered bindings.
+Timecode and settings fields support normal text selection, paste and IME.
 
 ### The CLI
 

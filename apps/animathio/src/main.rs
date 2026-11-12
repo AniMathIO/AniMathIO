@@ -62,13 +62,14 @@ fn main() {
             .detach();
 
             let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
-            let editor_cell: std::rc::Rc<std::cell::RefCell<Option<Entity<editor::Editor>>>> =
-                std::rc::Rc::default();
-            let cell = editor_cell.clone();
+            editor::actions::init(cx);
+            cx.global_mut::<gpui_component::Theme>().font_size = px(12.);
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
+                    window_min_size: Some(size(px(900.), px(600.))),
+                    window_decorations: Some(WindowDecorations::Client),
+                    ..gpui_component::TitleBar::window_options()
                 },
                 move |window, cx| {
                     let view = cx.new(|cx| {
@@ -76,22 +77,12 @@ fn main() {
                             cx, window, project, assets, path, recovered, control, bench,
                         )
                     });
-                    *cell.borrow_mut() = Some(view.clone());
                     // `Root` hosts the popover layers that gpui-component widgets
                     // (select, colour picker) render into.
                     cx.new(|cx| gpui_component::Root::new(view, window, cx))
                 },
             )
             .expect("open editor window");
-
-            let view = editor_cell
-                .borrow_mut()
-                .take()
-                .expect("editor view was created with the window");
-            cx.intercept_keystrokes(move |event, window, cx| {
-                view.update(cx, |editor, cx| editor.handle_keystroke(event, window, cx));
-            })
-            .detach();
 
             cx.activate(true);
         });

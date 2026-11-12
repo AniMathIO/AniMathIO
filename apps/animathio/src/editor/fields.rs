@@ -14,7 +14,7 @@ use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerSta
 use gpui_component::input::{
     Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction,
 };
-use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectState};
+use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::switch::Switch;
 
 use super::*;
@@ -28,7 +28,7 @@ struct InputField {
     state: Entity<InputState>,
     /// Model text last written to (or committed from) the input.
     synced: String,
-    target: EditTarget,
+    target: InputTarget,
     step: f64,
     _subscriptions: Vec<Subscription>,
 }
@@ -44,12 +44,33 @@ struct EnumField {
     _subscription: Subscription,
 }
 
+#[derive(Clone, PartialEq)]
+struct AssetChoice {
+    id: Option<String>,
+    label: String,
+}
+impl SelectItem for AssetChoice {
+    type Value = Option<String>;
+    fn title(&self) -> SharedString {
+        self.label.clone().into()
+    }
+    fn value(&self) -> &Self::Value {
+        &self.id
+    }
+}
+struct AssetField {
+    state: Entity<SelectState<SearchableVec<AssetChoice>>>,
+    choices: Vec<AssetChoice>,
+    _subscription: Subscription,
+}
+
 /// Live widget state for the inspector, keyed by `c<clip>:<kind>:<name>`.
 #[derive(Default)]
 pub(super) struct FieldPool {
     inputs: BTreeMap<String, InputField>,
     colors: BTreeMap<String, ColorField>,
     enums: BTreeMap<String, EnumField>,
+    assets: BTreeMap<String, AssetField>,
 }
 
 impl FieldPool {
@@ -64,8 +85,10 @@ impl FieldPool {
     /// Drop widgets that belong to clips other than `clip`.
     fn retain_clip(&mut self, clip: ClipId) {
         let prefix = format!("c{}:", clip.0);
-        self.inputs.retain(|key, _| key.starts_with(&prefix));
+        self.inputs
+            .retain(|key, _| !key.starts_with('c') || key.starts_with(&prefix));
         self.colors.retain(|key, _| key.starts_with(&prefix));
+        self.assets.retain(|key, _| key.starts_with(&prefix));
         self.enums.retain(|key, _| key.starts_with(&prefix));
     }
 }
@@ -88,10 +111,10 @@ fn is_numeric_prefix(text: &str) -> bool {
 
 impl Editor {
     /// Get (or create) the input for `key`, keeping it in step with the model.
-    fn input_state(
+    pub(super) fn input_state(
         &mut self,
         key: &str,
-        target: EditTarget,
+        target: InputTarget,
         text: String,
         step: f64,
         window: &mut Window,
@@ -170,8 +193,7 @@ impl Editor {
         }
         field.synced.clone_from(&buffer);
         let target = field.target.clone();
-        self.editing = Some(TextEdit { target, buffer });
-        self.commit_editing(cx);
+        self.commit_input_value(target, buffer, cx);
     }
 
     /// The +/- buttons and the Up/Down keys of a [`NumberInput`].
@@ -202,17 +224,13 @@ impl Editor {
             .update(cx, |state, cx| state.set_value(text.clone(), window, cx));
         field.synced.clone_from(&text);
         let target = field.target.clone();
-        self.editing = Some(TextEdit {
-            target,
-            buffer: text,
-        });
-        self.commit_editing(cx);
+        self.commit_input_value(target, text, cx);
     }
 
     fn number_control(
         &mut self,
         key: &str,
-        target: EditTarget,
+        target: InputTarget,
         value: f64,
         step: f64,
         window: &mut Window,
@@ -227,7 +245,7 @@ impl Editor {
     fn text_control(
         &mut self,
         key: &str,
-        target: EditTarget,
+        target: InputTarget,
         value: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -271,8 +289,8 @@ impl Editor {
                         return;
                     }
                     field.synced = next;
-                    this.execute(
-                        &this.plugin_param_command(
+                    this.preview_color(
+                        this.plugin_param_command(
                             id,
                             param.clone(),
                             json!([next[0], next[1], next[2], next[3]]),
@@ -374,6 +392,91 @@ impl Editor {
         div().w(px(CONTROL_W)).child(Select::new(&field.state))
     }
 
+    pub(super) fn plugin_asset_control(
+        &mut self,
+        id: ClipId,
+        name: String,
+        media_type: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let key = format!("c{}:asset:{name}", id.0);
+        let current = self.plugin_asset_value(id, &name);
+        let mut choices = vec![AssetChoice {
+            id: None,
+            label: "None".into(),
+        }];
+        choices.extend(
+            self.matching_asset_ids(media_type)
+                .into_iter()
+                .map(|asset| AssetChoice {
+                    label: self
+                        .project
+                        .assets()
+                        .get(&asset)
+                        .expect("matching asset exists")
+                        .name
+                        .clone(),
+                    id: Some(asset.as_str().to_owned()),
+                }),
+        );
+        if let Some(missing) = &current
+            && !choices.iter().any(|choice| choice.id == current)
+        {
+            choices.push(AssetChoice {
+                id: current.clone(),
+                label: format!("Missing: {missing}"),
+            });
+        }
+        if !self.fields.assets.contains_key(&key) {
+            let selected = choices
+                .iter()
+                .position(|choice| choice.id == current)
+                .map(IndexPath::new);
+            let state = cx.new(|cx| {
+                SelectState::new(SearchableVec::new(choices.clone()), selected, window, cx)
+            });
+            let subscription = cx.subscribe_in(
+                &state,
+                window,
+                move |this, _, event: &SelectEvent<SearchableVec<AssetChoice>>, _, cx| {
+                    let SelectEvent::Confirm(Some(value)) = event else {
+                        return;
+                    };
+                    this.execute(
+                        &this.plugin_param_command(id, name.clone(), json!(value)),
+                        cx,
+                    );
+                },
+            );
+            self.fields.assets.insert(
+                key.clone(),
+                AssetField {
+                    state,
+                    choices: choices.clone(),
+                    _subscription: subscription,
+                },
+            );
+        }
+        let field = self
+            .fields
+            .assets
+            .get_mut(&key)
+            .expect("asset field exists");
+        if field.choices != choices {
+            field.choices.clone_from(&choices);
+            field.state.update(cx, |state, cx| {
+                state.set_items(SearchableVec::new(choices), window, cx);
+            });
+        }
+        if field.state.read(cx).selected_value() != Some(&current) {
+            field.state.update(cx, |state, cx| {
+                state.set_selected_value(&current, window, cx);
+            });
+        }
+        div().w_full().child(Select::new(&field.state).small())
+    }
+
     fn bool_control(id: ClipId, name: &str, value: bool, cx: &mut Context<Self>) -> Div {
         let param = name.to_owned();
         div().w(px(CONTROL_W)).child(
@@ -456,7 +559,10 @@ impl Editor {
         };
         let control = self.number_control(
             &key,
-            EditTarget::Field(field.clone()),
+            InputTarget::Field {
+                id,
+                field: field.clone(),
+            },
             value,
             field_step(&field),
             window,
@@ -582,7 +688,7 @@ impl Editor {
                 let value = self.plugin_number_value(id, &name);
                 self.number_control(
                     &format!("c{}:pn:{name}", id.0),
-                    EditTarget::PluginNumber {
+                    InputTarget::PluginNumber {
                         id,
                         name: name.clone(),
                     },
@@ -604,7 +710,7 @@ impl Editor {
                 let value = self.plugin_text_value(id, &name, default);
                 self.text_control(
                     &format!("c{}:pt:{name}", id.0),
-                    EditTarget::PluginText {
+                    InputTarget::PluginText {
                         id,
                         name: name.clone(),
                     },
@@ -628,7 +734,7 @@ impl Editor {
                 let axes = [0usize, 1].map(|axis| {
                     self.number_control(
                         &format!("c{}:pp{axis}:{name}", id.0),
-                        EditTarget::PluginPoint {
+                        InputTarget::PluginPoint {
                             id,
                             name: name.clone(),
                             axis,
@@ -649,7 +755,7 @@ impl Editor {
             }
             ParamModel::Asset { media_type, .. } => div()
                 .w(px(CONTROL_W))
-                .child(self.plugin_asset_control(id, name.clone(), media_type, cx)),
+                .child(self.plugin_asset_control(id, name.clone(), media_type, window, cx)),
         };
         Self::param_row(Some(diamond), model.label(), control, cx)
     }
@@ -658,7 +764,9 @@ impl Editor {
     /// selected clip.
     pub(super) fn inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let mut pane = div()
-            .w(px(self.dock.right_width))
+            .key_context("Inspector")
+            .track_focus(&self.panel_focus[2])
+            .w_full()
             .h_full()
             .flex()
             .flex_col()
