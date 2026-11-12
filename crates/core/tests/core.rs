@@ -626,7 +626,7 @@ fn split_and_merge_are_single_step_inverses() {
     inverse.apply(&mut project).unwrap();
     assert_eq!(project, original);
     let inverse = split.apply(&mut project).unwrap();
-    assert!(matches!(inverse, Command::MergeClip { .. }));
+    assert!(matches!(inverse, Command::RestoreClips { .. }));
     inverse.apply(&mut project).unwrap();
     assert_eq!(project, original);
 }
@@ -788,4 +788,41 @@ fn set_plugin_param_preserves_opaque_json_and_is_reversible() {
     assert_eq!(project, original);
     inverse.apply(&mut project).unwrap();
     assert_eq!(project, original);
+}
+
+#[test]
+fn animated_split_preserves_boundary_and_exact_undo_redo() {
+    let mut project = base();
+    for (time, value) in [(0, 0.0), (100, 1.0)] {
+        Command::AddKeyframe {
+            id: ClipId(0),
+            target: Target::Opacity,
+            time: Time(time),
+            keyframe: Keyframe {
+                value: ParamValue::Number(value),
+                interpolation: Interpolation::Linear,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let original = project.clone();
+    let undo = Command::SplitClip {
+        id: ClipId(0),
+        right_id: ClipId(9),
+        at: Time(50),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let split = project.clone();
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(9)].animations[0]
+            .keys
+            .sample(Time(0)),
+        Some(ParamValue::Number(0.5))
+    );
+    let redo = undo.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+    redo.apply(&mut project).unwrap();
+    assert_eq!(project, split);
 }
