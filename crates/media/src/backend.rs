@@ -28,7 +28,7 @@ pub trait VideoDecoder: Send + Sync {
 pub trait AudioDecoder: Send + Sync {
     /// Static metadata for this stream.
     fn info(&self) -> &AudioStreamInfo;
-    /// Decode `len` interleaved f32 samples starting at `media_time`, at the stream's sample rate.
+    /// Decode `len` frames of interleaved f32 samples starting at `media_time`, at the stream's sample rate.
     fn samples(&self, media_time: Time, len: usize) -> Result<Arc<[f32]>>;
 }
 
@@ -178,6 +178,9 @@ impl VideoDecoder for FilmCraftVideoDecoder {
     }
 
     fn frame_at(&self, media_time: Time) -> Result<Arc<Frame>> {
+        if media_time.0 < 0 {
+            return Err(crate::limits::invalid());
+        }
         let frame = self
             .source
             .video_frame(FrameRequest::full(to_filmcraft(media_time)))
@@ -194,6 +197,52 @@ impl VideoDecoder for FilmCraftVideoDecoder {
     }
 }
 
+fn indexed_container(bytes: &[u8]) -> bool {
+    bytes.get(4..8) == Some(b"ftyp") || bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
+}
+
+fn bounded_audio(bytes: &[u8]) -> Result<animathio_audio::Pcm> {
+    crate::limits::input(bytes)?;
+    let source = animathio_audio::SymphoniaSource::from_bytes_with_limits(
+        bytes.to_vec(),
+        animathio_audio::DecodeLimits {
+            max_duration: std::time::Duration::from_hours(4),
+            max_samples: crate::limits::MAX_AUDIO_SAMPLES,
+        },
+    )
+    .map_err(|e| MediaError::Decode(e.to_string()))?;
+    let pcm = source.pcm().clone();
+    crate::limits::audio(pcm.rate(), usize::from(pcm.channels()), pcm.frames())?;
+    Ok(pcm)
+}
+
+struct BoundedAudioDecoder {
+    pcm: animathio_audio::Pcm,
+    info: AudioStreamInfo,
+}
+impl AudioDecoder for BoundedAudioDecoder {
+    fn info(&self) -> &AudioStreamInfo {
+        &self.info
+    }
+    fn samples(&self, media_time: Time, len: usize) -> Result<Arc<[f32]>> {
+        crate::limits::audio(self.info.sample_rate, self.info.channels as usize, len)?;
+        if media_time.0 < 0 {
+            return Err(crate::limits::invalid());
+        }
+        let channels = usize::from(self.pcm.channels());
+        let start = usize::try_from(sample_index(media_time, self.pcm.rate()))
+            .map_err(|_| crate::limits::invalid())?;
+        let mut output = vec![0.0; len * channels];
+        let available = self.pcm.frames().saturating_sub(start).min(len);
+        if available > 0 {
+            output[..available * channels].copy_from_slice(
+                &self.pcm.samples()[start * channels..(start + available) * channels],
+            );
+        }
+        Ok(output.into())
+    }
+}
+
 /// A FilmCraft-backed audio decoder returning interleaved f32 PCM.
 pub struct FilmCraftAudioDecoder {
     source: SharedSource,
@@ -206,6 +255,9 @@ impl AudioDecoder for FilmCraftAudioDecoder {
     }
 
     fn samples(&self, media_time: Time, len: usize) -> Result<Arc<[f32]>> {
+        if media_time.0 < 0 {
+            return Err(crate::limits::invalid());
+        }
         let sample_rate = self.info.sample_rate;
         crate::limits::audio(sample_rate, self.info.channels as usize, len)?;
         if sample_rate == 0 {
@@ -232,6 +284,26 @@ impl MediaBackend for FilmCraftBackend {
         self.probe_bytes("media", self.load(path)?)
     }
     fn probe_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<MediaInfo> {
+        if !indexed_container(&bytes) {
+            let pcm = bounded_audio(&bytes)?;
+            return Ok(MediaInfo {
+                kind: MediaKind::AudioOnly,
+                duration: Time(
+                    i64::try_from(
+                        pcm.frames() as i128 * i128::from(TICKS_PER_SECOND)
+                            / i128::from(pcm.rate()),
+                    )
+                    .map_err(|_| crate::limits::invalid())?,
+                ),
+                video: None,
+                audio: vec![AudioStreamInfo {
+                    sample_rate: pcm.rate(),
+                    channels: u32::from(pcm.channels()),
+                    codec: "PCM (Symphonia)".into(),
+                }],
+                container: "audio".into(),
+            });
+        }
         let source = open_source(name, bytes.clone())?;
         Ok(media_info(&source, &bytes))
     }
@@ -240,6 +312,9 @@ impl MediaBackend for FilmCraftBackend {
         self.open_video_bytes("media", self.load(path)?)
     }
     fn open_video_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<Box<dyn VideoDecoder>> {
+        if !indexed_container(&bytes) {
+            return Err(MediaError::NoStream("video"));
+        }
         let source = open_source(name, bytes.clone())?;
         let mi = source.info();
         let v = mi.video.as_ref().ok_or(MediaError::NoStream("video"))?;
@@ -265,6 +340,15 @@ impl MediaBackend for FilmCraftBackend {
         self.open_audio_bytes("media", self.load(path)?)
     }
     fn open_audio_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<Box<dyn AudioDecoder>> {
+        if !indexed_container(&bytes) {
+            let pcm = bounded_audio(&bytes)?;
+            let info = AudioStreamInfo {
+                sample_rate: pcm.rate(),
+                channels: u32::from(pcm.channels()),
+                codec: "PCM (Symphonia)".into(),
+            };
+            return Ok(Box::new(BoundedAudioDecoder { pcm, info }));
+        }
         let source = open_source(name, bytes)?;
         let mi = source.info();
         let a = mi.audio().ok_or(MediaError::NoStream("audio"))?;

@@ -275,6 +275,7 @@ dependencies = [
  "filmcraft-h264",
  "filmcraft-h264enc",
  "filmcraft-isobmff",
+ "filmcraft-matroska",
  "filmcraft-media",
  "filmcraft-time",
  "thiserror 2.0.21",
