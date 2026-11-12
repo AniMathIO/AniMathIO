@@ -10,20 +10,25 @@ the render/audio/export data flow. The authority for these rules is
 | --- | --- |
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. **No IO, GPU, decoder or UI dependencies.** |
 | `format` | Versioned `project.json` (schema version 1) and content-addressed `.amio` ZIP containers. Reader/writer APIs leave filesystem policy (atomic replace, autosave) to callers. |
-| `render` | Deterministic, GPU-free Vello CPU backend, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project. |
+| `render` | Deterministic, GPU-free Vello CPU backend, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
 | `audio` | Engine-owned decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb device playback. No audio resources live in `Project`. |
-| `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods, token auth, headless handler and client. |
+| `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
+| `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
+| `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
 | `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema and the guest SDK. |
 | `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, log) and plugin scene resolution. |
 | `typeset` | Host-side math typesetting: Typst as a library plus MiTeX for LaTeX→Typst conversion, turned into vector path outlines plus a tight bbox. |
 | `import-v1` | One-way importer for v1 `.animathio` projects (deflated JSON + base64 media). |
 | `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with tree-sitter. |
-| `apps/animathio-cli` | Headless validation, PNG rendering, importers and the MCP sidecar. |
-| `apps/animathio` | The GPUI desktop editor: a thin view over the command-only core. |
+| `apps/animathio-cli` | Headless validation, PNG rendering, MP4 export, importers and the MCP sidecar. |
+| `apps/animathio` | The GPUI desktop editor: a thin view over the command-only core, plus an export worker and dialog. |
 | `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `trap` (sandbox fixture), and `examples/hello`. |
 
-`media` (FilmCraft decode + MP4/WebM export) is planned but not yet integrated;
-video clips currently render a labelled checkerboard placeholder.
+Video clips decode through `render::FrameSource` via the `media` crate's
+`MediaPool`, so real video frames appear in preview, the CLI and headless
+renders. `export` encodes MP4 (H.264 + AAC, BT.709-tagged) offline. WebM export
+and an FFmpeg fallback backend remain future work; `MediaBackend` is shaped so a
+second backend can be added without touching callers.
 
 ## Layering
 
@@ -31,32 +36,43 @@ Dependencies point inward. The core owns its domain types and exposes no
 `&mut` outside command application; the UI and control layers change state only
 through `Command`s.
 
-```text
-                       apps/animathio (GPUI editor)
-                       apps/animathio-cli (headless + MCP)
-                                    │
-                         control (JSON-RPC + MCP)
-                          │    │       │
-              ┌───────────┘    │       └──────────────┐
-              ▼                ▼                      ▼
-   import-v1 / import-manim   render                audio
-              │                │                      │
-              └────────┬───────┴──────────┬───────────┘
-                       ▼                  ▼
-                    format           plugin-host ── plugin-api (WIT/SDK)
-                       │                  │  └── typeset
-                       └────────┬─────────┘
-                                ▼
-                              core
+```mermaid
+flowchart TD
+    UI[apps/animathio · apps/animathio-cli] --> CTL[control]
+    CTL --> IMP[import-v1 / import-manim]
+    CTL --> RENDER[render]
+    CTL --> AUDIO[audio]
+    CTL --> EXPORT[export]
+    RENDER --> MEDIA[media]
+    EXPORT --> RENDER
+    EXPORT --> MEDIA
+    EXPORT --> AUDIO
+    MEDIA --> AUDIO
+    IMP --> FORMAT[format]
+    CTL --> FORMAT
+    FORMAT --> CORE[core]
+    AUDIO --> CORE
+    MEDIA --> CORE
+    RENDER --> CORE
+    EXPORT --> CORE
+    CTL --> HOST[plugin-host]
+    HOST --> API[plugin-api · WIT/SDK]
+    HOST --> TYPESET[typeset]
+    HOST --> CORE
+    TYPESET --> CORE
 ```
+
+`render` and `export` share `media`; `export` additionally uses `audio`'s mixer
+and `render`'s rasterizer, and `media` reuses `audio`'s Symphonia decode for
+non-indexed audio assets. Every crate bottoms out in `core`.
 
 Rules that keep the layers honest:
 
 - `core` has no IO/GPU/decoder deps. `Project` contains no runtime resources.
-- `format`, `render`, `audio`, `import-v1`, `import-manim`, `control` and
-  `plugin-host` all depend on `core` and never the reverse.
-- `control` sits above `format`/`render`/`import-v1` so the MCP sidecar can load,
-  mutate, render and import headlessly without the editor.
+- `format`, `render`, `audio`, `media`, `export`, `import-v1`, `import-manim`,
+  `control` and `plugin-host` all depend on `core` and never the reverse.
+- `control` sits above `format`/`render`/`export`/`import-v1` so the MCP sidecar
+  can load, mutate, render, export and import headlessly without the editor.
 - Third-party crates (FilmCraft, vello, GPUI) stay behind adapter boundaries;
   no third-party type leaks into `core`.
 
@@ -145,6 +161,15 @@ flowchart LR
         P --> Q[Mixer::mix project, range]
         Q --> R[Player / ring buffer / device clock]
     end
+
+    subgraph export["export"]
+        H --> S[export::Exporter::export]
+        S --> T[render(evaluate(project, t)) per frame]
+        S --> U[Mixer::mix per inter-frame block]
+        T --> V[media::Mp4Encoder]
+        U --> V
+        V --> W[out.mp4]
+    end
 ```
 
 - **Load.** `format::read_amio`/`read_json` produce a `Bundle` (validated `Project`
@@ -168,5 +193,7 @@ flowchart LR
   export; `Player` consumes the ring buffer and updates the latency-corrected
   master clock. The device callback only consumes the ring; `Player::now()` is
   quantized to callbacks and freezes on underflow.
-- **Export.** Export steps the render path frame by frame (`render-seq` today;
-  MP4/WebM export is pending the `media` crate). It is never a recording of playback.
+- **Export.** Export steps the render path frame by frame —
+  `render(evaluate(project, t))` per frame plus the audio mixer's snapshot for
+  each inter-frame block — and encodes with `media::Mp4Encoder`. It is never a
+  recording of playback.

@@ -117,10 +117,10 @@ fn boxes(mut bytes: &[u8], depth: usize) -> Result<()> {
                     return Err(invalid());
                 }
             }
-            b"stco" | b"co64" | b"stsc" | b"stss" | b"stsd" => {
-                if u64::from(u32_at(body, 4)?) > MAX_FRAMES {
-                    return Err(invalid());
-                }
+            b"stco" | b"co64" | b"stsc" | b"stss" | b"stsd"
+                if u64::from(u32_at(body, 4)?) > MAX_FRAMES =>
+            {
+                return Err(invalid());
             }
             _ => {}
         }
@@ -137,7 +137,7 @@ mod tests {
         for (w, h) in [(0, 1), (u32::MAX, u32::MAX), (8192, 8192)] {
             assert!(frame_bytes(w, h).is_err());
         }
-        assert_eq!(frame_bytes(320, 180).unwrap(), 230400);
+        assert_eq!(frame_bytes(320, 180).unwrap(), 230_400);
         for (rate, channels, frames) in [
             (u32::MAX, 2, 1),
             (48000, usize::MAX, 1),

@@ -50,6 +50,7 @@ gets a JSON-RPC error instead of a result.
 | `command.apply` | `{ command }` | — (applied through the shared history) |
 | `history.undo` / `history.redo` | — | whether an edit was undone/redone |
 | `render.frame` | `{ time, width, height, output? }` | `{ size, base64?, path? }` |
+| `export` | `{ output, from?, to?, settings? }` | destination path (after completion) |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
 | `assets.import` | `{ path }` | `AssetInfo` (id, name, media_type) |
@@ -94,7 +95,7 @@ All mutations are applied as `Command`s and are undoable.
 | `set_playing` | Start / pause playback | |
 | `save_project` | Save to a path, or overwrite the current file | |
 | `render_frame` | Render one frame to PNG | base64 return, or written to a path |
-| `export_video` | Export to `.mp4`/`.webm` | **Not implemented** — returns `not yet supported` |
+| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; returns the written path |
 | `import_v1` | Import a v1 `.animathio` project, replacing the current one | |
 | `import_manim_scene` | Build a scene from a Manim script | **Not implemented** — returns `not yet supported` (use `animathio-cli import-manim`) |
 

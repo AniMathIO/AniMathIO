@@ -66,10 +66,10 @@ impl FilmCraftBackend {
     /// Create an empty backend.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
-    fn load(&self, path: &Path) -> Result<Arc<[u8]>> {
+    fn load(path: &Path) -> Result<Arc<[u8]>> {
         let mut bytes = Vec::new();
         std::fs::File::open(path)
             .map_err(|e| MediaError::Io(e.to_string()))?
@@ -281,7 +281,7 @@ fn sample_index(time: Time, sample_rate: u32) -> i64 {
 
 impl MediaBackend for FilmCraftBackend {
     fn probe(&self, path: &Path) -> Result<MediaInfo> {
-        self.probe_bytes("media", self.load(path)?)
+        self.probe_bytes("media", Self::load(path)?)
     }
     fn probe_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<MediaInfo> {
         if !indexed_container(&bytes) {
@@ -309,7 +309,7 @@ impl MediaBackend for FilmCraftBackend {
     }
 
     fn open_video(&self, path: &Path) -> Result<Box<dyn VideoDecoder>> {
-        self.open_video_bytes("media", self.load(path)?)
+        self.open_video_bytes("media", Self::load(path)?)
     }
     fn open_video_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<Box<dyn VideoDecoder>> {
         if !indexed_container(&bytes) {
@@ -337,7 +337,7 @@ impl MediaBackend for FilmCraftBackend {
     }
 
     fn open_audio(&self, path: &Path) -> Result<Box<dyn AudioDecoder>> {
-        self.open_audio_bytes("media", self.load(path)?)
+        self.open_audio_bytes("media", Self::load(path)?)
     }
     fn open_audio_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<Box<dyn AudioDecoder>> {
         if !indexed_container(&bytes) {

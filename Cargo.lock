@@ -265,6 +265,7 @@ dependencies = [
 name = "animathio-media"
 version = "2.0.0"
 dependencies = [
+ "animathio-audio",
  "animathio-core",
  "crossbeam-channel",
  "filmcraft-aac",

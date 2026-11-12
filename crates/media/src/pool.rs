@@ -240,6 +240,7 @@ impl MediaPool {
     }
 
     /// Read registered asset metadata.
+    #[must_use]
     pub fn info(&self, asset: &AssetId) -> Option<MediaInfo> {
         self.state(asset).map(|state| state.info.clone())
     }

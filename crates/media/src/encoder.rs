@@ -131,6 +131,7 @@ pub struct Mp4Encoder {
 
 impl Mp4Encoder {
     /// Create an encoder.
+    #[allow(clippy::too_many_lines)]
     pub fn new(config: EncoderConfig) -> Result<Self> {
         let video = config.video;
         let audio_config = config.audio;

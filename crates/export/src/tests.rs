@@ -145,7 +145,7 @@ fn encoder_input_frame_n_is_exactly_preview_frame_n() {
                 )
                 .unwrap();
                 assert_eq!(*frame, expected, "encoder input at frame {index}");
-                assert!(!pcm.is_empty());
+                assert_ne!(pcm.len(), 0);
                 index += 1;
                 Ok(())
             },

@@ -208,11 +208,11 @@ struct AssetFrameSource {
 }
 impl FrameSource for AssetFrameSource {
     fn frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<Frame> {
-        if let Some(bytes) = self.pending.remove(asset) {
-            if let Err(error) = self.pool.add_bytes(asset.clone(), bytes) {
-                eprintln!("video asset {asset:?}: {error}");
-                return None;
-            }
+        if let Some(bytes) = self.pending.remove(asset)
+            && let Err(error) = self.pool.add_bytes(asset.clone(), bytes)
+        {
+            eprintln!("video asset {asset:?}: {error}");
+            return None;
         }
         FrameSource::frame_at(&mut self.pool, asset, media_time)
     }
