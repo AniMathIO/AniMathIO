@@ -411,29 +411,37 @@ class S(Scene):
 #[test]
 fn rejects_absolute_image_paths() {
     let dir = tempfile::tempdir().unwrap();
-    let source = r#"
+    let paths = ["/etc/passwd", "/photo.png"];
+    #[cfg(windows)]
+    let paths =
+        paths
+            .into_iter()
+            .chain([r"C:\photo.png", r"\photo.png", r"\\server\share\photo.png"]);
+    for path in paths {
+        let source = format!(
+            r#"
 class S(Scene):
     def construct(self):
-        img = ImageMobject("/etc/passwd")
+        img = ImageMobject(r"{path}")
         self.add(img)
         self.wait(1)
-"#;
-    let (project, assets, report) = import_image_scene(source, dir.path());
-    assert!(assets.is_empty());
-    let clips = tracks(&project);
-    assert_eq!(clips.len(), 1);
-    assert!(
-        matches!(&clips[0].1.kind, ClipKind::Error(message) if message.contains("/etc/passwd"))
-    );
-    assert!(
-        report
-            .warnings()
-            .iter()
-            .any(|w| w.message.contains("absolute path")),
-        "expected an absolute-path warning: {:?}",
-        report.warnings()
-    );
-    assert!(report.infos().is_empty());
+"#
+        );
+        let (project, assets, report) = import_image_scene(&source, dir.path());
+        assert!(assets.is_empty());
+        let clips = tracks(&project);
+        assert_eq!(clips.len(), 1);
+        assert!(matches!(&clips[0].1.kind, ClipKind::Error(message) if message.contains(path)));
+        assert!(
+            report
+                .warnings()
+                .iter()
+                .any(|w| w.message.contains("absolute path")),
+            "expected an absolute-path warning for {path}: {:?}",
+            report.warnings()
+        );
+        assert!(report.infos().is_empty());
+    }
 }
 
 #[test]

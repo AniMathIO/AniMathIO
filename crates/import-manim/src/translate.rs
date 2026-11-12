@@ -1274,7 +1274,9 @@ fn resolve_image(path: &str, options: &ManimOptions) -> ImageResolution {
 
     // Absolute paths and traversal components are never resolved: a malicious
     // scene must not be able to read arbitrary local files into the archive.
-    if relative.is_absolute() {
+    // On Windows, `/image.png` has a root but no drive, so `is_absolute`
+    // would miss it even though it must not be joined to the script directory.
+    if relative.has_root() {
         return Err(format!("absolute path `{path}` is not allowed"));
     }
     for component in relative.components() {
