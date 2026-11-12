@@ -12,7 +12,7 @@ use animathio_core::{
     TransformProperty,
 };
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path};
 
 /// Manim frame width in scene units.
 const FRAME_WIDTH: f64 = 14.22;
@@ -38,6 +38,14 @@ const STROKE_PX: f64 = 4.0;
 const IMAGE_SIZE: (f64, f64) = (6.0, 4.0);
 /// Reverse-domain plugin id for the `latex` plugin (Tex/MathTex clips).
 const LATEX_PLUGIN: &str = "org.animathio.latex";
+/// Maximum size of a single embedded image, in bytes.
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+/// Image file extensions accepted for embedding.
+const ALLOWED_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
+/// One successfully resolved image: `(name, media type, bytes)`.
+type ResolvedImage = (String, String, Vec<u8>);
+/// Resolution result: either a validated image or a rejection reason.
+type ImageResolution = Result<ResolvedImage, String>;
 
 /// Interpreted, mutable state for one mobject.
 #[derive(Clone, Debug)]
@@ -1046,11 +1054,11 @@ fn build_project(
 
         // Resolve images once, before building the clip kind.
         let image = match &mob.kind {
-            Kind::Image { path } => resolve_image(path, options),
+            Kind::Image { path } => Some(resolve_image(path, options)),
             _ => None,
         };
         let (kind, params) = build_clip_kind(mob, image.as_ref(), &mut report, pos);
-        if let Some((asset_name, media_type, bytes)) = &image {
+        if let Some(Ok((asset_name, media_type, bytes))) = &image {
             let id = AssetId::of(bytes);
             if !assets.contains_key(&id) {
                 Command::AddAsset {
@@ -1068,6 +1076,15 @@ fn build_project(
                 media_type: media_type.clone(),
                 bytes: bytes.clone(),
             });
+            report.info(
+                pos.map_or(0, |p| p.0),
+                pos.map_or(0, |p| p.1),
+                format!(
+                    "embedded `{asset_name}` ({media_type}, {} bytes)",
+                    bytes.len()
+                ),
+                pos.map_or("", |p| p.2.as_str()),
+            );
         }
 
         track_index += 1;
@@ -1116,7 +1133,7 @@ fn build_project(
 
 fn build_clip_kind(
     mob: &Mobject,
-    image: Option<&(String, String, Vec<u8>)>,
+    image: Option<&ImageResolution>,
     report: &mut Report,
     pos: Option<&(usize, usize, String)>,
 ) -> (ClipKind, BTreeMap<String, f64>) {
@@ -1176,10 +1193,21 @@ fn build_clip_kind(
                 BTreeMap::new(),
             )
         }
-        Kind::Image { path } => {
-            if let Some((_, _, bytes)) = image {
-                (ClipKind::Image(AssetId::of(bytes)), BTreeMap::new())
-            } else {
+        Kind::Image { path } => match image {
+            Some(Ok((_, _, bytes))) => (ClipKind::Image(AssetId::of(bytes)), BTreeMap::new()),
+            Some(Err(reason)) => {
+                report.warn(
+                    pos.map_or(0, |p| p.0),
+                    pos.map_or(0, |p| p.1),
+                    format!("ImageMobject `{path}` rejected: {reason}"),
+                    pos.map_or("", |p| p.2.as_str()),
+                );
+                (
+                    ClipKind::Error(format!("unavailable image: {path} ({reason})")),
+                    BTreeMap::new(),
+                )
+            }
+            None => {
                 report.warn(
                     pos.map_or(0, |p| p.0),
                     pos.map_or(0, |p| p.1),
@@ -1191,7 +1219,7 @@ fn build_clip_kind(
                     BTreeMap::new(),
                 )
             }
-        }
+        },
     }
 }
 
@@ -1239,35 +1267,118 @@ fn builtin_path(verbs: &[LocalVerb]) -> Vec<PathElement> {
         .collect()
 }
 
-fn resolve_image(path: &str, options: &ManimOptions) -> Option<(String, String, Vec<u8>)> {
-    let path = Path::new(path);
-    let candidate: PathBuf = if path.is_absolute() {
-        path.to_path_buf()
-    } else if let Some(dir) = &options.script_dir {
-        dir.join(path)
-    } else {
-        path.to_path_buf()
+fn resolve_image(path: &str, options: &ManimOptions) -> ImageResolution {
+    let relative = Path::new(path);
+
+    // Absolute paths and traversal components are never resolved: a malicious
+    // scene must not be able to read arbitrary local files into the archive.
+    if relative.is_absolute() {
+        return Err(format!("absolute path `{path}` is not allowed"));
+    }
+    for component in relative.components() {
+        match component {
+            Component::ParentDir => {
+                return Err(format!("`..` path component in `{path}` is not allowed"));
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(format!("unsupported path component in `{path}`"));
+            }
+            Component::CurDir | Component::Normal(_) => {}
+        }
+    }
+
+    // Images are resolved relative to the script directory; without one the
+    // importer cannot tell where the file is, so it refuses to guess.
+    let Some(script_dir) = &options.script_dir else {
+        return Err("no script directory was provided".to_owned());
     };
-    let bytes = std::fs::read(&candidate).ok()?;
-    let media_type = media_type_for(&candidate);
+    let base = script_dir.canonicalize().map_err(|error| {
+        format!(
+            "cannot canonicalize script directory `{}`: {error}",
+            script_dir.display()
+        )
+    })?;
+
+    let candidate = base.join(relative);
+
+    let extension = candidate
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase);
+    let Some(extension) = extension else {
+        return Err(format!("image `{path}` has no file extension"));
+    };
+    if !ALLOWED_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        return Err(format!(
+            "image `{path}` has unsupported extension `.{extension}`"
+        ));
+    }
+
+    // Canonicalize so a symlink pointing outside the script directory is
+    // refused rather than followed.
+    let candidate = candidate
+        .canonicalize()
+        .map_err(|error| format!("image `{path}` is not readable: {error}"))?;
+    if !candidate.starts_with(&base) {
+        return Err(format!(
+            "image `{path}` resolves outside the script directory"
+        ));
+    }
+
+    let metadata = candidate
+        .metadata()
+        .map_err(|error| format!("cannot stat image `{path}`: {error}"))?;
+    if !metadata.is_file() {
+        return Err(format!("image `{path}` is not a regular file"));
+    }
+    if metadata.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "image `{path}` exceeds the {MAX_IMAGE_BYTES} byte size limit"
+        ));
+    }
+
+    let bytes = std::fs::read(&candidate)
+        .map_err(|error| format!("cannot read image `{path}`: {error}"))?;
+    verify_magic(&extension, &bytes)?;
+
+    let media_type = media_type_for(&extension);
     let name = candidate
         .file_name()
         .map_or_else(|| "image".to_owned(), |n| n.to_string_lossy().into_owned());
-    Some((name, media_type, bytes))
+    Ok((name, media_type, bytes))
 }
 
-fn media_type_for(path: &Path) -> String {
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
-    match extension.as_deref() {
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("svg") => "image/svg+xml",
-        Some("bmp") => "image/bmp",
+fn verify_magic(extension: &str, bytes: &[u8]) -> Result<(), String> {
+    let valid = match extension {
+        "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpg" | "jpeg" => {
+            bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF
+        }
+        "gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "webp" => bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        "bmp" => bytes.starts_with(b"BM"),
+        // SVG is XML text, not a raster format; the extension allowlist is the
+        // content check for it.
+        "svg" => true,
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "image content does not match its `.{extension}` extension"
+        ))
+    }
+}
+
+fn media_type_for(extension: &str) -> String {
+    match extension {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
         _ => "application/octet-stream",
     }
     .to_owned()

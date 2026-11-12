@@ -239,6 +239,9 @@ fn run_import_manim(input: &Path, scene: Option<String>, output: &Path) -> Resul
     for warning in report.warnings() {
         eprintln!("warning: {warning}");
     }
+    for info in report.infos() {
+        eprintln!("info: {info}");
+    }
     let asset_map: BTreeMap<AssetId, Vec<u8>> = assets
         .into_iter()
         .map(|asset| (asset.id, asset.bytes))
