@@ -27,6 +27,16 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
   playhead and meters. Respect a "Reduce motion" preference if one exists.
 - **States:** every interactive element has hover, active, focus and disabled styles.
   Empty states get an icon, one line of text and a primary action.
+- **Timeline:** video/image clips show a filmstrip of low-resolution thumbnails
+  (decoded off-thread, cached by asset, time and row height); audio clips a filled,
+  mirrored waveform in the clip colour; text, LaTeX and shape clips their snippet.
+  Fades are smooth curves with handles, transitions a violet to cyan gradient over
+  the overlap, keyframes rotated-square diamonds on the selected clip. Track headers
+  carry a kind-colour stripe, a kind icon, compact mute/solo/lock pills (tinted when
+  active) and a horizontal gain slider (drag to change, double-click for unity). The
+  playhead is a `PLAYHEAD` pentagon head with a 1px glowing line and a timecode pill
+  while scrubbing; the in/out range is shaded with the accent and an engaged snap
+  draws an accent line with a magnet icon.
 
 
 ## Application frame and launcher

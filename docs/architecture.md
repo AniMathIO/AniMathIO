@@ -91,6 +91,18 @@ monotonic clock stands in.
 
 Audible shuttle lives in `crates/audio` (`Speed`, `BlockGenerator`, `varispeed`).
 `Player::set_speed` restarts the session at the latency-corrected position like a seek.
+Timeline painting uses GPUI canvas quads/paths and culls clips before building
+labels or requesting previews. A separate `timeline_thumbnails` worker decodes
+five source-time samples per visible video clip, resizes them to low-resolution
+BGRA tiles and repeats one tile for still images. Keys include asset, source time
+and track height; the queue holds 16 requests and the UI retains at most 256 tiles.
+The worker keeps at most eight video decoders and eight small still images.
+Waveforms reuse the editor's cached 4096-peak audio summaries and a bounded cache
+of 128 paint-ready paths, invalidated by clip geometry, zoom, scroll or window
+position changes. These resources
+never enter the project model. The overview uses only lightweight clip ranges;
+zoom interpolates view state over the design token's 180ms motion duration.
+
 The mixer worker (never the device callback) renders blocks: it mixes the timeline span a
 block covers and resamples it by the signed rate with linear interpolation, carrying the
 fractional position so blocks join seamlessly. Negative speeds read backwards, so the block

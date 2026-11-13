@@ -140,8 +140,14 @@ I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Alt+X
 the range; looping uses it and export defaults to it. Select (A), Blade (B), Ripple
 trim (T) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
 splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later clips
-on the same track as one undo step. N toggles snapping and an engaged snap draws a
-yellow line. Ctrl/Cmd+plus/minus zooms and Shift+Z fits the timeline.
+on the same track as one undo step. N toggles snapping and an engaged snap draws an
+accent line. Ctrl/Cmd+plus/minus zooms and Shift+Z fits the timeline.
+Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
+tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
+waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
+clip to show its keyframe diamonds. Track headers have mute/solo/lock buttons and
+a horizontal gain slider (drag to adjust, double-click to reset to unity); a drag
+is one undo step. Use large tracks for the most detailed clip previews.
 
 Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
 `youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square` presets (30 fps, CRF 18).
