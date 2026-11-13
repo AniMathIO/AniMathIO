@@ -35,13 +35,16 @@ pub enum PluginKind {
     Effect,
     /// Evaluates a 1D value animation curve.
     Animation,
+    /// Audio filter exported through the `audio-effect-plugin` world (`audio-effects`).
+    /// Like `effect`, an audio-effect plugin declares exactly this kind.
+    AudioEffect,
 }
 
 /// Plugin manifest stored as `plugin.toml` inside `.amplugin` packages.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifestToml {
-    /// Plugin API version contract, e.g. "0.2.1". Any `0.2.x` is accepted;
-    /// `effect` plugins need `0.2.1` or newer.
+    /// Plugin API version contract, e.g. "0.2.2". Any `0.2.x` is accepted;
+    /// `effect` plugins need `0.2.1` or newer and `audio-effect` plugins `0.2.2` or newer.
     pub api_version: String,
     /// Reverse-domain plugin identifier, e.g. "org.animathio.shapes".
     pub id: String,
@@ -112,6 +115,19 @@ impl PluginManifestToml {
             if self.api_version == "0.2.0" {
                 return Err(ManifestError::UnsupportedApiVersion(
                     "effect plugins require api_version 0.2.1".to_owned(),
+                ));
+            }
+        }
+        if self.kinds.contains(&PluginKind::AudioEffect) {
+            if self.kinds.len() != 1 {
+                return Err(ManifestError::InvalidKinds(
+                    "an audio-effect plugin implements only the audio-effect-plugin world"
+                        .to_owned(),
+                ));
+            }
+            if matches!(self.api_version.as_str(), "0.2.0" | "0.2.1") {
+                return Err(ManifestError::UnsupportedApiVersion(
+                    "audio-effect plugins require api_version 0.2.2".to_owned(),
                 ));
             }
         }

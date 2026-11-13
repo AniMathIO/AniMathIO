@@ -326,6 +326,15 @@ pub enum Call {
         /// Clip, plugin, filter and optional parameter overrides.
         params: crate::EffectAddParams,
     },
+    /// List the audio effects provided by loaded audio-effect plugins.
+    #[serde(rename = "audio_effects.list")]
+    AudioEffectsList,
+    /// Add an audio effect to a clip's or a track's chain with the plugin's default parameters.
+    #[serde(rename = "audio_effects.add")]
+    AudioEffectsAdd {
+        /// Clip or track, plugin, filter and optional parameter overrides.
+        params: crate::AudioEffectAddParams,
+    },
     /// Detect silent audio and ripple-remove it from every track as one undo step.
     #[serde(rename = "timeline.trim_silence")]
     TrimSilence {

@@ -44,3 +44,7 @@ required-features = ["test-support"]
 [[test]]
 name = "effects"
 required-features = ["test-support"]
+
+[[test]]
+name = "audio_effects"
+required-features = ["test-support"]

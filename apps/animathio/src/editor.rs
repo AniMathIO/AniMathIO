@@ -9,9 +9,9 @@ use animathio_control::{
     media_type_of, read_bounded, timeline_of, validate_existing_file, validate_output_file,
 };
 use animathio_core::{
-    Asset, AssetId, Clip, ClipId, ClipKind, Command, FrameRate, History, Interpolation, Project,
-    Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform,
-    TransformProperty, evaluate,
+    Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, Command, EffectId, FrameRate, History,
+    Interpolation, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track,
+    TrackId, Transform, TransformProperty, evaluate,
 };
 use animathio_plugin_api::PluginKind;
 use animathio_plugin_host::PluginHost;
@@ -36,6 +36,7 @@ use crate::timecode;
 use crate::timeline::{self, TimelineLayout, TrimEdge};
 
 pub(crate) mod actions;
+mod audio_effects;
 mod clip_ops;
 mod color_edit;
 mod commands;
@@ -172,6 +173,12 @@ enum InputTarget {
         id: ClipId,
         field: Field,
     },
+    /// Numeric parameter of one of a clip's audio effects.
+    AudioEffectParam {
+        clip: ClipId,
+        effect: EffectId,
+        name: String,
+    },
     /// Plugin numeric parameter.
     PluginNumber {
         id: ClipId,
@@ -203,6 +210,7 @@ impl InputTarget {
                 | Self::SelectionField { .. }
                 | Self::PluginNumber { .. }
                 | Self::PluginPoint { .. }
+                | Self::AudioEffectParam { .. }
         )
     }
 }
@@ -551,6 +559,9 @@ impl Editor {
         let (plugin_host, plugins, plugin_error) = load_plugins();
         if error.is_none() {
             error = plugin_error;
+        }
+        if let Some(host) = &plugin_host {
+            crate::playback::install_audio_effects(Arc::new(host.audio_effect_processor()));
         }
         let audio_ids = audio_asset_ids(&project);
         let initial_next_id = next_id(&project);

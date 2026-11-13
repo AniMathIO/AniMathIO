@@ -256,3 +256,297 @@ fn clips_deserialize_without_effects() {
     let decoded: Project = serde_json::from_value(value).unwrap();
     assert_eq!(clip(&decoded).effects, Vec::<EffectInstance>::new());
 }
+
+fn audio_effect(id: u64, effect: &str, value: f64) -> EffectInstance {
+    EffectInstance::new(
+        EffectId(id),
+        BASIC_AUDIO_EFFECTS_PLUGIN,
+        effect,
+        std::collections::BTreeMap::from([("gain_db".to_owned(), value)]),
+    )
+}
+
+#[test]
+fn audio_effect_chain_commands_are_reversible_on_clips_and_tracks() {
+    for chain in [AudioChain::Clip(ClipId(0)), AudioChain::Track(TrackId(0))] {
+        let mut project = project_with_clip();
+        let original = project.clone();
+        let mut history = History::default();
+        let chain_of = |project: &Project| -> Vec<EffectInstance> {
+            match chain {
+                AudioChain::Clip(_) => clip(project).audio_effects.clone(),
+                AudioChain::Track(_) => project.tracks()[0].audio_effects().to_vec(),
+            }
+        };
+        let gain = audio_effect(1, "gain", 3.0);
+        let eq = audio_effect(2, "eq3", 0.0);
+        for (index, effect) in [(0, gain.clone()), (1, eq.clone())] {
+            history
+                .execute(
+                    &mut project,
+                    &Command::AddAudioEffect {
+                        chain,
+                        index,
+                        effect,
+                    },
+                )
+                .unwrap();
+        }
+        assert_eq!(chain_of(&project), vec![gain.clone(), eq.clone()]);
+
+        history
+            .execute(
+                &mut project,
+                &Command::MoveAudioEffect {
+                    chain,
+                    effect: EffectId(2),
+                    index: 0,
+                },
+            )
+            .unwrap();
+        assert_eq!(chain_of(&project), vec![eq.clone(), gain.clone()]);
+
+        history
+            .execute(
+                &mut project,
+                &Command::SetAudioEffectParam {
+                    chain,
+                    effect: EffectId(1),
+                    name: "gain_db".into(),
+                    value: Some(-6.0),
+                },
+            )
+            .unwrap();
+        assert_eq!(chain_of(&project)[1].params["gain_db"], -6.0);
+
+        history
+            .execute(
+                &mut project,
+                &Command::SetAudioEffectBypass {
+                    chain,
+                    effect: EffectId(1),
+                    bypass: true,
+                },
+            )
+            .unwrap();
+        assert!(chain_of(&project)[1].bypass);
+
+        history
+            .execute(
+                &mut project,
+                &Command::RemoveAudioEffect {
+                    chain,
+                    effect: EffectId(2),
+                },
+            )
+            .unwrap();
+        assert_eq!(chain_of(&project).len(), 1);
+
+        // Undo walks back through every step, redo replays them.
+        for _ in 0..6 {
+            history.undo(&mut project).unwrap();
+        }
+        assert_eq!(project, original);
+        for _ in 0..6 {
+            history.redo(&mut project).unwrap();
+        }
+        assert_eq!(chain_of(&project).len(), 1);
+        assert!(chain_of(&project)[0].bypass);
+    }
+}
+
+#[test]
+fn audio_effect_commands_reject_bad_edits_and_leave_the_project_unchanged() {
+    let mut project = project_with_clip();
+    let chain = AudioChain::Clip(ClipId(0));
+    Command::AddAudioEffect {
+        chain,
+        index: 0,
+        effect: audio_effect(1, "gain", 0.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+    // The same id twice, an out-of-range index, an unknown effect and a missing target.
+    for bad in [
+        Command::AddAudioEffect {
+            chain,
+            index: 1,
+            effect: audio_effect(1, "gain", 0.0),
+        },
+        Command::AddAudioEffect {
+            chain,
+            index: 5,
+            effect: audio_effect(2, "gain", 0.0),
+        },
+        Command::MoveAudioEffect {
+            chain,
+            effect: EffectId(1),
+            index: 1,
+        },
+        Command::RemoveAudioEffect {
+            chain,
+            effect: EffectId(9),
+        },
+        Command::SetAudioEffectBypass {
+            chain: AudioChain::Track(TrackId(9)),
+            effect: EffectId(1),
+            bypass: true,
+        },
+        Command::AddAudioEffect {
+            chain: AudioChain::Clip(ClipId(9)),
+            index: 0,
+            effect: audio_effect(2, "gain", 0.0),
+        },
+    ] {
+        let before = project.clone();
+        assert!(bad.apply(&mut project).is_err(), "{bad:?}");
+        assert_eq!(project, before);
+    }
+    // Ids are unique across a clip's video and audio chains.
+    let error = Command::AddEffect {
+        id: ClipId(0),
+        index: 0,
+        effect: EffectInstance::basic(EffectId(1), "grayscale"),
+    }
+    .apply(&mut project)
+    .unwrap_err();
+    assert!(error.0.contains("duplicate"), "{error}");
+    // Non-finite parameters are rejected by validation.
+    let mut nan = audio_effect(3, "gain", 0.0);
+    nan.params.insert("gain_db".into(), f64::NAN);
+    assert!(
+        Command::AddAudioEffect {
+            chain,
+            index: 0,
+            effect: nan
+        }
+        .apply(&mut project)
+        .is_err()
+    );
+}
+
+#[test]
+fn animated_audio_effects_resolve_and_cannot_be_removed() {
+    let mut project = project_with_clip();
+    let chain = AudioChain::Clip(ClipId(0));
+    Command::AddAudioEffect {
+        chain,
+        index: 0,
+        effect: audio_effect(1, "gain", 0.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let target = Target::Effect {
+        effect: EffectId(1),
+        param: "gain_db".into(),
+    };
+    for (time, value) in [(0, 0.0), (100, 10.0)] {
+        Command::AddKeyframe {
+            id: ClipId(0),
+            target: target.clone(),
+            time: Time(time),
+            keyframe: Keyframe {
+                value: value.into(),
+                interpolation: Interpolation::Linear,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let resolved = clip(&project).audio_effects_at(Time(50));
+    assert_eq!(resolved[0].params["gain_db"], 5.0);
+    // Base parameters stay as stored, and the video evaluation is unaffected.
+    assert_eq!(clip(&project).audio_effects[0].params["gain_db"], 0.0);
+    assert_eq!(evaluate(&project, Time(50)).clips[0].effects.len(), 0);
+    assert!(
+        Command::RemoveAudioEffect {
+            chain,
+            effect: EffectId(1)
+        }
+        .apply(&mut project)
+        .is_err()
+    );
+    assert!(
+        Command::SetAudioEffectParam {
+            chain,
+            effect: EffectId(1),
+            name: "gain_db".into(),
+            value: None
+        }
+        .apply(&mut project)
+        .is_err()
+    );
+    // Bypass hides the effect from the resolved chain without losing it.
+    Command::SetAudioEffectBypass {
+        chain,
+        effect: EffectId(1),
+        bypass: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(clip(&project).audio_effects_at(Time(50)).len(), 0);
+}
+
+#[test]
+fn locked_tracks_reject_clip_audio_effects_but_not_track_chains() {
+    let mut project = project_with_clip();
+    Command::SetTrackLocked {
+        id: TrackId(0),
+        locked: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let clip_edit = Command::AddAudioEffect {
+        chain: AudioChain::Clip(ClipId(0)),
+        index: 0,
+        effect: audio_effect(1, "gain", 0.0),
+    };
+    assert_eq!(clip_edit.locked_track(&project), Some(TrackId(0)));
+    assert!(clip_edit.apply(&mut project).is_err());
+    Command::AddAudioEffect {
+        chain: AudioChain::Track(TrackId(0)),
+        index: 0,
+        effect: audio_effect(1, "gain", 0.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+}
+
+#[test]
+fn audio_effects_round_trip_through_json_and_old_files_still_load() {
+    let mut project = project_with_clip();
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(ClipId(0)),
+        index: 0,
+        effect: audio_effect(1, "gain", 2.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddAudioEffect {
+        chain: AudioChain::Track(TrackId(0)),
+        index: 0,
+        effect: audio_effect(1, "eq3", 0.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetAudioEffectBypass {
+        chain: AudioChain::Track(TrackId(0)),
+        effect: EffectId(1),
+        bypass: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let json = serde_json::to_string(&project).unwrap();
+    assert_eq!(serde_json::from_str::<Project>(&json).unwrap(), project);
+    // Absent chains and bypass flags serialize to nothing, so v3 files are unchanged.
+    let plain = serde_json::to_string(&project_with_clip()).unwrap();
+    assert!(!plain.contains("audio_effects") && !plain.contains("bypass"));
+    // Commands themselves are serializable.
+    let command = Command::MoveAudioEffect {
+        chain: AudioChain::Track(TrackId(0)),
+        effect: EffectId(1),
+        index: 0,
+    };
+    let text = serde_json::to_string(&command).unwrap();
+    assert_eq!(serde_json::from_str::<Command>(&text).unwrap(), command);
+}

@@ -260,6 +260,7 @@ fn run(cli: Cli) -> Result<()> {
             let mut plugins = plugin_host()?;
             let mut exporter = animathio_export::Exporter::new(&bundle.project, &bundle.assets)?;
             exporter.set_effect_processor(plugins.effect_processor());
+            exporter.set_audio_effect_processor(plugins.audio_effect_processor());
             exporter.export_to_file(
                 &bundle.project,
                 range,

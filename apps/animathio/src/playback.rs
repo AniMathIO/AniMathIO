@@ -2,7 +2,24 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use animathio_audio::{AudioPool, Mixer, Player, Speed};
-use animathio_core::{Project, Rounding, TICKS_PER_SECOND, Time};
+use animathio_core::{AudioEffectProcessor, Project, Rounding, TICKS_PER_SECOND, Time};
+use std::sync::OnceLock;
+
+static AUDIO_EFFECTS: OnceLock<Arc<dyn AudioEffectProcessor>> = OnceLock::new();
+
+/// Register the plugin runner that every playback mixer uses for audio effects. The handle
+/// shares the plugin host's registry, so it is installed once at startup.
+pub(crate) fn install_audio_effects(processor: Arc<dyn AudioEffectProcessor>) {
+    let _ = AUDIO_EFFECTS.set(processor);
+}
+
+/// Attach the registered audio-effect runner (if any) to a freshly prepared mixer.
+pub(crate) fn with_audio_effects(mixer: Mixer) -> Mixer {
+    match AUDIO_EFFECTS.get() {
+        Some(processor) => mixer.with_effect_processor(Arc::clone(processor)),
+        None => mixer,
+    }
+}
 
 /// The single A/V master clock. The UI thread owns it and asks "which video frame
 /// is due now" once per UI frame; video is never drift-corrected on its own.
@@ -43,7 +60,7 @@ impl AudioClock {
     /// Open the default output device and prepare a mixer from the decoded pool.
     pub(crate) fn open(project: &Project, pool: &AudioPool) -> Result<Self, String> {
         let (rate, channels) = Player::default_output_format().map_err(|e| e.to_string())?;
-        let mixer = pool.prepare(rate, channels).map_err(|e| e.to_string())?;
+        let mixer = with_audio_effects(pool.prepare(rate, channels).map_err(|e| e.to_string())?);
         let player =
             Player::new(Arc::new(project.clone()), Arc::new(mixer)).map_err(|e| e.to_string())?;
         Ok(Self {

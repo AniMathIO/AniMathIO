@@ -214,6 +214,11 @@ pub struct Clip {
     /// Ordered visual effects, applied after rasterizing the clip source.
     #[serde(default)]
     pub effects: Vec<EffectInstance>,
+    /// Ordered audio effects, applied to the clip's own signal in the mixer. Effect ids
+    /// are unique across `effects` and `audio_effects`, so [`Target::Effect`] animations
+    /// address either chain unambiguously.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_effects: Vec<EffectInstance>,
     /// Typed curves in clip-local time, sorted by unique target.
     pub animations: Vec<Animation>,
 }
@@ -230,8 +235,30 @@ impl Clip {
             transform: Transform::default(),
             params: BTreeMap::new(),
             effects: Vec::new(),
+            audio_effects: Vec::new(),
             animations: Vec::new(),
         }
+    }
+
+    /// The audio-effect chain resolved at clip-local `time`: bypassed effects are dropped and
+    /// keyframed [`Target::Effect`] parameters are sampled. Pure and order independent.
+    #[must_use]
+    pub fn audio_effects_at(&self, time: Time) -> Vec<EffectInstance> {
+        let mut chain: Vec<EffectInstance> = self
+            .audio_effects
+            .iter()
+            .filter(|effect| !effect.bypass)
+            .cloned()
+            .collect();
+        for animation in &self.animations {
+            if let Target::Effect { effect, param } = &animation.target
+                && let Some(instance) = chain.iter_mut().find(|instance| instance.id == *effect)
+                && let Some(number) = animation.keys.sample(time).and_then(|v| v.as_number())
+            {
+                instance.params.insert(param.clone(), number);
+            }
+        }
+        chain
     }
 }
 
@@ -255,6 +282,9 @@ pub struct Track {
     /// Edit-point transitions between adjacent clips of this track.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) transitions: Vec<crate::Transition>,
+    /// Ordered audio effects applied to the sum of this track's clips, before its gain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) audio_effects: Vec<EffectInstance>,
 }
 impl Track {
     /// Construct an empty layer.
@@ -269,7 +299,13 @@ impl Track {
             solo: false,
             locked: false,
             transitions: Vec::new(),
+            audio_effects: Vec::new(),
         }
+    }
+    /// Ordered audio effects applied to the sum of this track's clips (before the gain).
+    #[must_use]
+    pub fn audio_effects(&self) -> &[EffectInstance] {
+        &self.audio_effects
     }
     /// Linear audio gain (unity by default).
     #[must_use]
@@ -473,6 +509,13 @@ impl Project {
             if ranges.windows(2).any(|pair| pair[0].end > pair[1].start) {
                 return Err(invalid("overlapping clips"));
             }
+            let mut track_effect_ids = BTreeSet::new();
+            for effect in &track.audio_effects {
+                if !track_effect_ids.insert(effect.id) {
+                    return Err(invalid("duplicate track audio effect id"));
+                }
+                effect.validate()?;
+            }
             track.validate_transitions()?;
             if !track
                 .transitions
@@ -541,7 +584,7 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                 source_time: Time((clip.source_offset.0 + local_time.0).max(0)),
                 transform: clip.transform,
                 params: clip.params.clone(),
-                effects: clip.effects.clone(),
+                effects: clip.effects.iter().filter(|e| !e.bypass).cloned().collect(),
                 transition: span.transition_at(clip, time),
             };
             for animation in &clip.animations {
@@ -576,7 +619,7 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
 
 fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
     let mut effect_ids = BTreeSet::new();
-    for effect in &clip.effects {
+    for effect in clip.effects.iter().chain(&clip.audio_effects) {
         if !effect_ids.insert(effect.id) {
             return Err(invalid("duplicate effect id"));
         }
@@ -604,6 +647,7 @@ fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
                 let instance = clip
                     .effects
                     .iter()
+                    .chain(&clip.audio_effects)
                     .find(|instance| instance.id == *effect)
                     .ok_or_else(|| invalid("animation effect missing"))?;
                 if !instance.params.contains_key(param) {

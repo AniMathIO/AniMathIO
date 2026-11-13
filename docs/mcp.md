@@ -60,6 +60,8 @@ gets a JSON-RPC error instead of a result.
 | `graph.add` | `{ params: { x_min?, x_max?, y_min?, y_max?, items?, show_grid?, show_axes?, show_labels?, color?, x?, y?, start?, duration?, draw_duration? } }` | `{ track_id, clip_id }` |
 | `effects.list` | — | `[EffectInfo]` (plugin, effect, name, description, params with id/label/min/max/default) from loaded effect plugins |
 | `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults |
+| `audio_effects.list` | — | `[EffectInfo]` (same shape as `effects.list`) from loaded audio-effect plugins |
+| `audio_effects.add` | `{ params: { clip? \| track?, plugin, effect, params?, index? } }` | `{ chain, effect_id }` where `chain` is `{ "Clip": id }` or `{ "Track": id }`; give exactly one of `clip` and `track`; unspecified params use the plugin defaults |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
 
 `command` is a serialized `animathio_core::Command` — the same enum undo/redo,
@@ -109,6 +111,8 @@ clears its undo history.
 | `set_param` | Set/change a clip's named numeric parameter | |
 | `list_effects` | List effects provided by loaded effect plugins | plugin id, effect id, name, description and numeric parameters (id, min, max, default); nothing is hard-coded, so installing an effect plugin adds entries |
 | `add_effect` | Add a plugin effect to a clip (one undo step) | `id` (clip), `plugin`, `effect`, optional `params` overrides; returns the effect id; rejects ids not in `list_effects` |
+| `list_audio_effects` | List audio effects provided by loaded audio-effect plugins | same shape as `list_effects` (plugin id, effect id, name, description, numeric parameters in dB/Hz/ms with min/max/default); first-party `org.animathio.audio-basic` offers `gain`, `eq3`, `compressor`, `gate`, `highpass` and `voice_cleanup` |
+| `add_audio_effect` | Add an audio effect to a clip's own chain (`id`) or a track's chain (`track`) (one undo step) | exactly one of `id` (clip) and `track`; `plugin`, `effect`, optional `params` overrides and `index`; returns `{chain, effect_id}`. Clip chains run on the clip's signal right after its `gain`; track chains run on the summed track before its gain. Rejects ids not in `list_audio_effects` |
 | `add_keyframe` | Add a keyframe to a clip | target: `x`, `y`, `scale_x`, `scale_y`, `rotation`, `opacity` or a param name |
 | `undo` / `redo` | Undo / redo the last edit | |
 | `seek` | Move the playhead (ms) | |

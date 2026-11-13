@@ -40,6 +40,12 @@ contrast, blur, opacity) use the bundled WASM components end to end, including C
 and exports. Build them with `scripts/build-plugins.sh`; schema-1 and schema-2 projects
 migrate automatically to plugin clips and plugin effects when loaded.
 
+Audio effects are plugins too: `org.animathio.audio-basic` provides gain/trim, a 3-band EQ,
+compressor, noise gate, high-pass filter and a voice-cleanup preset (high-pass + gentle gate +
+de-esser). Clips and tracks carry ordered, undoable audio-effect chains that run in the shared
+mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
+Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools.
+
 ## Screenshot
 
 The DaVinci-style editor shell on the `v2` branch (dark theme, media pool, viewer

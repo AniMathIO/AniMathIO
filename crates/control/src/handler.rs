@@ -115,6 +115,19 @@ pub trait ControlHandler {
         from_value(self.handle(Call::EffectsAdd { params })?)
     }
 
+    /// List the filters provided by loaded audio-effect plugins.
+    fn audio_effects_list(&mut self) -> Result<Vec<crate::EffectInfo>, ControlError> {
+        from_value(self.handle(Call::AudioEffectsList)?)
+    }
+
+    /// Add an audio effect to a clip or track.
+    fn audio_effects_add(
+        &mut self,
+        params: crate::AudioEffectAddParams,
+    ) -> Result<crate::AudioEffectAdded, ControlError> {
+        from_value(self.handle(Call::AudioEffectsAdd { params })?)
+    }
+
     /// Add a LaTeX plugin clip.
     fn math_add(&mut self, params: MathAddParams) -> Result<ClipAdded, ControlError> {
         from_value(self.handle(Call::MathAdd { params })?)

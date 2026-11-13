@@ -1352,6 +1352,7 @@ fn build_project(
             transform: mob_transform(mob),
             params: params.into_iter().map(|(k, v)| (k, v.into())).collect(),
             effects: Vec::new(),
+            audio_effects: Vec::new(),
             animations: Vec::new(),
         };
         Command::AddClip {

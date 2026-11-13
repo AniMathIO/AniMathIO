@@ -1,5 +1,5 @@
 //! Shared integration-test setup. Builds real WASI components on Linux and Windows.
-use crate::{EffectHandle, PluginHost};
+use crate::{AudioEffectHandle, EffectHandle, PluginHost};
 use animathio_core::Scene;
 use animathio_plugin_api::{PluginManifestToml, PluginPackage};
 use std::{
@@ -14,7 +14,7 @@ fn packages() -> &'static (tempfile::TempDir, Vec<PluginPackage>) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let target = root.join("target/plugin-tests");
         let mut packages = Vec::new();
-        for name in ["text", "shapes", "effects-basic"] {
+        for name in ["text", "shapes", "effects-basic", "audio-basic"] {
             let mut command = if cfg!(target_os = "linux") {
                 let mut command = Command::new("nice");
                 command.args(["-n", "19", "ionice", "-c3", "cargo"]);
@@ -77,6 +77,14 @@ pub fn host() -> PluginHost {
 pub fn effect_processor() -> EffectHandle {
     static HANDLE: OnceLock<EffectHandle> = OnceLock::new();
     HANDLE.get_or_init(|| host().effect_processor()).clone()
+}
+
+/// A mixer handle onto the first-party audio-effect plugins, shared by the test process.
+pub fn audio_effect_processor() -> AudioEffectHandle {
+    static HANDLE: OnceLock<AudioEffectHandle> = OnceLock::new();
+    HANDLE
+        .get_or_init(|| host().audio_effect_processor())
+        .clone()
 }
 
 /// Resolve through the actual sandbox, reusing a host between test frames.

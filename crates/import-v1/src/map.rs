@@ -253,6 +253,7 @@ pub(crate) fn import_with_report(
             transform,
             params: params.into_iter().map(|(k, v)| (k, v.into())).collect(),
             effects,
+            audio_effects: Vec::new(),
             animations: Vec::new(),
         };
         Command::AddClip {

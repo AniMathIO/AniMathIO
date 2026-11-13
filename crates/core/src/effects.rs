@@ -1,10 +1,13 @@
-//! Typed per-clip visual effects.
+//! Typed per-clip visual effects and per-clip / per-track audio effects.
 //!
-//! Effects are plain data on a [`Clip`](crate::Clip): an ordered chain of
-//! [`EffectInstance`]s with keyframeable numeric parameters. The core owns the
-//! model only; pixel processing lives in sandboxed plugins (the first-party
+//! Effects are plain data on a [`Clip`](crate::Clip) (or, for audio, a
+//! [`Track`](crate::Track)): an ordered chain of [`EffectInstance`]s with
+//! keyframeable numeric parameters. The core owns the model only; pixel
+//! processing lives in sandboxed plugins (the first-party
 //! `org.animathio.effects-basic`) and reaches the renderer through the
-//! [`EffectProcessor`] port.
+//! [`EffectProcessor`] port; audio processing lives in sandboxed audio-effect
+//! plugins (`org.animathio.audio-basic`) and reaches the mixer through the
+//! [`AudioEffectProcessor`] port.
 
 use crate::{Error, invalid};
 use serde::{Deserialize, Serialize};
@@ -16,6 +19,27 @@ pub struct EffectId(pub u64);
 
 /// Plugin id of the first-party basic effects (grayscale, sepia, blur, ...).
 pub const BASIC_EFFECTS_PLUGIN: &str = "org.animathio.effects-basic";
+
+/// Plugin id of the first-party audio effects (gain, EQ, compressor, gate, ...).
+pub const BASIC_AUDIO_EFFECTS_PLUGIN: &str = "org.animathio.audio-basic";
+
+/// Which ordered audio-effect chain a command edits.
+///
+/// A clip chain processes that clip's own signal (after its `gain` parameter and
+/// before its fades and the track fader); a track chain processes the sum of the
+/// track's clips (before the track gain).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AudioChain {
+    /// The `audio_effects` of one clip.
+    Clip(crate::ClipId),
+    /// The `audio_effects` of one track.
+    Track(crate::TrackId),
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde `skip_serializing_if` passes a reference.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 /// One ordered effect in a clip's effect chain.
 ///
@@ -33,6 +57,10 @@ pub struct EffectInstance {
     pub effect: String,
     /// Keyframeable base parameters, resolved into the evaluated scene.
     pub params: BTreeMap<String, f64>,
+    /// A bypassed effect stays in the chain (and keeps its parameters) but is skipped
+    /// when processing. Honoured by audio chains and by the evaluated video chain.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bypass: bool,
 }
 
 impl EffectInstance {
@@ -50,6 +78,7 @@ impl EffectInstance {
             plugin: plugin.into(),
             effect: effect.into(),
             params,
+            bypass: false,
         }
     }
 
@@ -111,4 +140,48 @@ pub trait EffectProcessor {
         size: (u32, u32),
         pixels: &mut Vec<u8>,
     ) -> Result<(), String>;
+}
+
+/// One block of interleaved `f32` PCM handed to an [`AudioEffectProcessor`].
+#[derive(Clone, Copy, Debug)]
+pub struct AudioBlock<'a> {
+    /// Frames per second.
+    pub sample_rate: u32,
+    /// Interleaved channel count.
+    pub channels: u16,
+    /// Time of the block's first frame in the chain's own timeline: clip-local ticks for a
+    /// clip chain, project ticks for a track chain. May be negative before a clip starts.
+    pub start: crate::Time,
+    /// `frames * channels` interleaved samples.
+    pub samples: &'a [f32],
+}
+
+/// Result of processing one block: the output samples (same length as the input) and the
+/// opaque state to pass back with the next contiguous block. An empty state means "fresh".
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AudioBlockOutput {
+    /// Processed interleaved samples, exactly as many as were passed in.
+    pub samples: Vec<f32>,
+    /// Plugin state to carry to the next block, or empty for stateless effects.
+    pub state: Vec<u8>,
+}
+
+/// Runs plugin audio effects for the mixer.
+///
+/// The audio crate owns PCM but not plugins, and the plugin host owns plugins but not
+/// mixing; this port connects them. Implementations must be deterministic functions of
+/// `(effect, block, state)` and may be called from the mixer worker thread only, never from
+/// the real-time device callback.
+pub trait AudioEffectProcessor: Send + Sync {
+    /// Apply `effect` (parameters already resolved for this block) to `block`.
+    ///
+    /// # Errors
+    /// A human-readable reason when the plugin is missing, rejects the parameters or state,
+    /// exceeds its sandbox limits or returns a malformed block.
+    fn process(
+        &self,
+        effect: &EffectInstance,
+        block: &AudioBlock<'_>,
+        state: &[u8],
+    ) -> Result<AudioBlockOutput, String>;
 }
