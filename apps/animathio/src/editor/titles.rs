@@ -55,7 +55,7 @@ impl Editor {
                         let (Some(mut host), _, _) = load_plugins() else {
                             return BTreeMap::new();
                         };
-                        let factor = 240.0 / f64::from(size.0.max(size.1));
+                        let factor = 360.0 / f64::from(size.0.max(size.1));
                         let output = (
                             (f64::from(size.0) * factor).round().max(1.) as u32,
                             (f64::from(size.1) * factor).round().max(1.) as u32,
@@ -135,7 +135,7 @@ impl Editor {
                 .cloned();
             let mut preview = div()
                 .w_full()
-                .h(px(92.))
+                .h(px(112.))
                 .bg(hex(color::BG))
                 .flex()
                 .items_center()
@@ -154,7 +154,7 @@ impl Editor {
             cards = cards.child(
                 div()
                     .id(SharedString::from(format!("title-{id}")))
-                    .w(px(160.))
+                    .w_full()
                     .rounded(px(6.))
                     .overflow_hidden()
                     .border_1()

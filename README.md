@@ -59,6 +59,10 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Multi-selection](docs/screenshots/editor-multiselect.png) | ![Media pool](docs/screenshots/editor-media.png) |
 
+| Titles tab and a lower third (inspector text fields) |
+| --- |
+| ![Titles](docs/screenshots/editor-titles.png) |
+
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — crate map, time model, engine rules and data flow
@@ -182,6 +186,20 @@ tab's **Write on…** action replaces a selected LaTeX clip's reveal animation w
 0-to-1 keyframes over a chosen duration, in one undo step. Help → Keyboard shortcuts
 shows the registered bindings. Text fields support selection, paste and IME.
 
+### Titles and social formats
+
+The library's **Titles** tab offers eight animated compositions: centered title,
+title + subtitle, lower third, caption bar, chapter card, end card, kinetic word
+pop and math title. Double-click a card to add five seconds at the playhead, or
+drag it to a timeline position. The inspector exposes the linked composition's
+text fields. All layers move together and insertion undoes in one step.
+Thumbnails render on the CPU in the background and are cached per canvas size.
+Text/shapes plugins are required; math titles also need the LaTeX plugin.
+
+The launcher, project settings and export dialog share 1080p, 4K, 9:16, square and
+4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
+and `fields`; see [the control guide](docs/mcp.md#title-preset-library).
+
 ### The CLI
 
 ```bash
@@ -224,21 +242,6 @@ Video imports include a linked companion audio clip when the file contains audio
 
 Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See `AGENTS.md` for branch rules, automation and commands.
 
-
 ## License
 
 [MIT](LICENSE)
-
-### Titles and social formats
-
-The library's **Titles** tab offers eight animated compositions: centered title,
-title + subtitle, lower third, caption bar, chapter card, end card, kinetic word
-pop and math title. Double-click a card to add five seconds at the playhead, or
-drag it to a timeline position. The inspector exposes the linked composition's
-text fields. All layers move together and insertion undoes in one step.
-Thumbnails render on the CPU in the background and are cached per canvas size.
-Text/shapes plugins are required; math titles also need the LaTeX plugin.
-
-The launcher, project settings and export dialog share 1080p, 4K, 9:16, square and
-4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
-and `fields`; see [the control guide](docs/mcp.md#title-preset-library).
