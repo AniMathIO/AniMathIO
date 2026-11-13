@@ -82,11 +82,11 @@ impl Editor {
         let generation = self.audio_generation;
         let live = audio_asset_ids(&self.project);
         let Some((rate, channels)) = self.clock.mixer_format() else {
-            self.clock.set_project(Arc::new(self.project.clone()));
+            self.clock.set_project(Arc::new(self.monitor_project()));
             return;
         };
         if live == self.audio_ids {
-            self.clock.set_project(Arc::new(self.project.clone()));
+            self.clock.set_project(Arc::new(self.monitor_project()));
             return;
         }
         let project = self.project.clone();
@@ -109,7 +109,7 @@ impl Editor {
                         editor.pool = pool;
                         editor.pool.collect(&editor.project);
                         editor.clock.set_mixer(Arc::new(mixer));
-                        editor.clock.set_project(Arc::new(editor.project.clone()));
+                        editor.clock.set_project(Arc::new(editor.monitor_project()));
                         editor.audio_ids = live;
                         editor.waveforms.borrow_mut().clear();
                     }

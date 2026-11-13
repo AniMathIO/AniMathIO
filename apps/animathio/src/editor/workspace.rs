@@ -33,7 +33,7 @@ impl Editor {
                 resizable_panel()
                     .size(px(self.dock.left_width))
                     .size_range(px(160.)..px(640.))
-                    .child(self.media_pool(cx)),
+                    .child(self.media_pool(window, cx)),
             );
         }
         middle = middle.child(

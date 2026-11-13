@@ -1,6 +1,7 @@
 //! Transport.
 
 use super::*;
+use crate::style::{color, hex};
 
 impl Editor {
     pub(super) fn toggle_play(&mut self, cx: &mut Context<Self>) {
@@ -194,33 +195,58 @@ impl Editor {
         self.toggle_play(cx);
     }
 
+    /// A monitor-only snapshot: adjusting listening volume never changes export.
+    pub(super) fn monitor_project(&self) -> Project {
+        let mut project = self.project.clone();
+        let commands = self
+            .project
+            .tracks()
+            .iter()
+            .map(|track| Command::SetTrackGain {
+                id: track.id(),
+                gain: track.gain() * self.viewer_state.volume,
+            })
+            .collect();
+        let _ = Command::Batch { commands }.apply(&mut project);
+        project
+    }
+
+    pub(super) fn set_monitor_volume(&mut self, value: f64, cx: &mut Context<Self>) {
+        self.viewer_state.volume = value.clamp(0., 1.);
+        self.clock.set_project(Arc::new(self.monitor_project()));
+        cx.notify();
+    }
+
     pub(super) fn transport_controls(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let play_icon = if self.playing {
-            icons::icon(IconName::Pause)
-        } else {
-            icons::icon(IconName::Play)
-        };
-        let play_tooltip = if self.playing { "Pause" } else { "Play" };
         let value = timecode::format_timecode(self.position, self.project.frame_rate());
         let state = self.input_state("timecode", InputTarget::Timecode, value, 0.0, window, cx);
+        let volume =
+            self.slider_control("monitor-volume", None, self.viewer_state.volume, window, cx);
+        let duration = timecode::format_timecode(
+            Time(timeline::project_duration(&self.project)),
+            self.project.frame_rate(),
+        );
         div()
-            .h(px(40.))
+            .h(px(58.))
             .w_full()
+            .flex_shrink_0()
             .flex()
-            .flex_row()
             .items_center()
-            .gap_1()
-            .px_1()
-            .bg(cx.theme().background)
+            .gap_2()
+            .px_3()
+            .bg(hex(color::PANEL))
+            .border_t_1()
+            .border_color(hex(color::BORDER))
             .child(
                 div()
-                    .w(px(124.))
+                    .w(px(144.))
                     .flex_shrink_0()
                     .font_family(cx.theme().mono_font_family.clone())
+                    .text_size(px(20.))
                     .child(gpui_component::input::Input::new(&state).small()),
             )
             .child(
@@ -232,71 +258,98 @@ impl Editor {
                     .justify_center()
                     .gap_1()
                     .child(icon_button(
-                        "jump-start",
+                        "prev-edit",
                         icons::icon(IconName::SkipBack),
-                        "Go to start",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_start(cx)),
+                        "Previous edit (Up)",
+                        cx.listener(|this, _, _, cx| this.step_edit(-1, cx)),
                     ))
                     .child(icon_button(
                         "step-back",
                         icons::icon(IconName::StepBack),
-                        "Step back one frame",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(-1, cx)),
+                        "Previous frame (Left)",
+                        cx.listener(|this, _, _, cx| this.step_frame(-1, cx)),
                     ))
                     .child(
-                        icon_button(
-                            "play",
-                            play_icon,
-                            play_tooltip,
-                            cx.listener(Self::on_play_click),
-                        )
-                        .when(self.playing, ButtonVariants::primary),
+                        Button::new("play")
+                            .primary()
+                            .rounded_full()
+                            .w(px(38.))
+                            .h(px(38.))
+                            .icon(icons::icon(if self.playing {
+                                IconName::Pause
+                            } else {
+                                IconName::Play
+                            }))
+                            .tooltip(if self.playing {
+                                "Pause (Space)"
+                            } else {
+                                "Play (Space)"
+                            })
+                            .on_click(cx.listener(Self::on_play_click)),
                     )
                     .child(icon_button(
                         "step-fwd",
                         icons::icon(IconName::StepForward),
-                        "Step forward one frame",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(1, cx)),
+                        "Next frame (Right)",
+                        cx.listener(|this, _, _, cx| this.step_frame(1, cx)),
                     ))
                     .child(icon_button(
-                        "jump-end",
+                        "next-edit",
                         icons::icon(IconName::SkipForward),
-                        "Go to end",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_end(cx)),
+                        "Next edit (Down)",
+                        cx.listener(|this, _, _, cx| this.step_edit(1, cx)),
                     ))
                     .child(
                         icon_button(
                             "loop",
                             icons::icon(IconName::Repeat),
-                            if self.loop_playback {
-                                "Loop: on"
-                            } else {
-                                "Loop: off"
-                            },
-                            cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_loop(cx)),
+                            "Loop playback",
+                            cx.listener(|this, _, _, cx| this.toggle_loop(cx)),
                         )
-                        .selected(self.loop_playback)
-                        .toggled(self.loop_playback),
+                        .selected(self.loop_playback),
+                    )
+                    .child(
+                        div()
+                            .w(px(38.))
+                            .px_1()
+                            .py_1()
+                            .rounded(px(6.))
+                            .bg(hex(color::RAISED))
+                            .text_size(px(11.))
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(hex(color::ACCENT))
+                            .child(if self.playing {
+                                self.shuttle.label()
+                            } else {
+                                "1x".into()
+                            }),
                     ),
             )
             .child(
                 div()
-                    .w(px(110.))
+                    .w(px(102.))
                     .flex_shrink_0()
-                    .h_full()
                     .flex()
-                    .items_center()
-                    .justify_end()
+                    .flex_col()
+                    .text_size(px(11.))
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if self.playing && self.shuttle != Shuttle(1, false) {
-                        self.shuttle.label()
-                    } else {
-                        timecode::format_timecode(
-                            Time(timeline::project_duration(&self.project)),
-                            self.project.frame_rate(),
-                        )
-                    }),
+                    .text_color(hex(color::TEXT_SECONDARY))
+                    .child(duration)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                icons::icon(if self.viewer_state.volume == 0. {
+                                    IconName::VolumeX
+                                } else {
+                                    IconName::Volume2
+                                })
+                                .xsmall(),
+                            )
+                            .child(volume),
+                    ),
             )
     }
 }
