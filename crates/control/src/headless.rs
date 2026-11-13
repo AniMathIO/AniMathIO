@@ -165,12 +165,7 @@ impl HeadlessHandler {
 
     fn effects_list(&mut self) -> Vec<crate::EffectInfo> {
         self.ensure_effect_plugins();
-        crate::effect_infos(
-            self.plugins
-                .as_ref()
-                .map(PluginHost::effects)
-                .unwrap_or_default(),
-        )
+        crate::effect_infos(self.plugins.as_ref().map_or_default(PluginHost::effects))
     }
 
     fn effects_add(
@@ -178,11 +173,7 @@ impl HeadlessHandler {
         params: &crate::EffectAddParams,
     ) -> Result<crate::EffectAdded, ControlError> {
         self.ensure_effect_plugins();
-        let descriptors = self
-            .plugins
-            .as_ref()
-            .map(PluginHost::effects)
-            .unwrap_or_default();
+        let descriptors = self.plugins.as_ref().map_or_default(PluginHost::effects);
         let (command, added) = crate::add_effect_command(&self.project, &descriptors, params)?;
         self.history.execute(&mut self.project, &command)?;
         Ok(added)
