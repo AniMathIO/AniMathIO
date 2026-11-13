@@ -1,6 +1,7 @@
 //! Project io.
 
 use super::*;
+use animathio_media::MediaBackend;
 
 impl Editor {
     pub(super) fn new_project(&mut self, cx: &mut Context<Self>) {
@@ -256,15 +257,63 @@ impl Editor {
         } else {
             (ClipKind::Video(id.clone()), DEFAULT_MEDIA_TICKS)
         };
+        let media_info = if matches!(kind, ClipKind::Video(_)) {
+            animathio_media::FilmCraftBackend::new().probe(path).ok()
+        } else {
+            None
+        };
+        let duration = media_info.as_ref().map_or(duration, |info| info.duration.0);
         let mut end = Time(0);
         if let Some((track, start)) = placement {
             end = Time(start.0.checked_add(duration).ok_or("clip end overflow")?);
-            let clip = Clip::new(
+            let mut clip = Clip::new(
                 self.next_clip_id(),
                 kind,
                 TimeRange::new(start, end).map_err(|e| e.0)?,
             );
+            if matches!(clip.kind, ClipKind::Audio(_)) {
+                clip.params.insert("gain".into(), 1.0.into());
+                clip.params.insert("muted".into(), 0.0.into());
+            }
+            let companion = media_info
+                .as_ref()
+                .is_some_and(|info| !info.audio.is_empty());
+            let clip_id = clip.id;
+            let range = clip.range;
             commands.push(Command::AddClip { track, clip });
+            if companion {
+                let audio_track = TrackId(
+                    self.project
+                        .tracks()
+                        .iter()
+                        .map(|t| t.id().0)
+                        .max()
+                        .unwrap_or(0)
+                        + 1,
+                );
+                let mut audio =
+                    Clip::new(ClipId(clip_id.0 + 1), ClipKind::Audio(id.clone()), range);
+                audio.link_group = Some(clip_id);
+                audio.params.insert("gain".into(), 1.0.into());
+                audio.params.insert("muted".into(), 0.0.into());
+                commands.push(Command::SetClipLink {
+                    id: clip_id,
+                    group: Some(clip_id),
+                });
+                commands.push(Command::AddTrack {
+                    track: Track::new(audio_track, "Audio"),
+                    index: self.project.tracks().len(),
+                });
+                commands.push(Command::AddClip {
+                    track: audio_track,
+                    clip: audio,
+                });
+                if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
+                    self.pool
+                        .insert(id.clone(), &source)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
         }
         if !commands.is_empty() {
             self.history

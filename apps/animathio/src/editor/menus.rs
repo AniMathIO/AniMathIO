@@ -214,6 +214,7 @@ impl Editor {
                     (IconName::Copy, "Copy", Self::copy_clip),
                     (IconName::Scissors, "Cut", Self::cut_clip),
                     (IconName::Trash, "Delete", Self::delete_clip),
+                    (IconName::Scissors, "Unlink", Self::unlink_clip),
                     (
                         IconName::FoldHorizontal,
                         "Ripple delete",

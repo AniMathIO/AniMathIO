@@ -717,7 +717,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Import an image, video, or audio file by absolute path and add a clip for it."
+        description = "Import an image, video, or audio file by absolute path. Video with audio gets linked video and audio clips; the complete import is one undo step."
     )]
     async fn add_media(
         &self,
@@ -748,26 +748,50 @@ impl McpServer {
             clip.params.insert("gain".into(), 1.0.into());
             clip.params.insert("muted".into(), 0.0.into());
         }
+        let mut commands = vec![
+            Command::AddAsset {
+                id: info.id.clone(),
+                asset: Asset {
+                    name: info.name.clone(),
+                    media_type: info.media_type.clone(),
+                },
+            },
+            Command::AddTrack {
+                track: Track::new(track_id, info.name),
+                index: state.project.tracks().len(),
+            },
+            Command::AddClip {
+                track: track_id,
+                clip: clip.clone(),
+            },
+        ];
+        if matches!(clip.kind, ClipKind::Video(_)) {
+            use animathio_media::MediaBackend;
+            let info_media = animathio_media::FilmCraftBackend::new()
+                .probe(std::path::Path::new(&p.path))
+                .map_err(|e| invalid(&e.to_string()))?;
+            if !info_media.audio.is_empty() {
+                let audio_track = TrackId(base + 2);
+                let mut audio = Clip::new(ClipId(base + 3), ClipKind::Audio(info.id), clip.range);
+                audio.link_group = Some(clip_id);
+                audio.params.insert("gain".into(), 1.0.into());
+                audio.params.insert("muted".into(), 0.0.into());
+                commands.push(Command::SetClipLink {
+                    id: clip_id,
+                    group: Some(clip_id),
+                });
+                commands.push(Command::AddTrack {
+                    track: Track::new(audio_track, "Audio"),
+                    index: state.project.tracks().len() + 1,
+                });
+                commands.push(Command::AddClip {
+                    track: audio_track,
+                    clip: audio,
+                });
+            }
+        }
         backend
-            .command_apply(Command::Batch {
-                commands: vec![
-                    Command::AddAsset {
-                        id: info.id.clone(),
-                        asset: Asset {
-                            name: info.name.clone(),
-                            media_type: info.media_type.clone(),
-                        },
-                    },
-                    Command::AddTrack {
-                        track: Track::new(track_id, info.name),
-                        index: state.project.tracks().len(),
-                    },
-                    Command::AddClip {
-                        track: track_id,
-                        clip,
-                    },
-                ],
-            })
+            .command_apply(Command::Batch { commands })
             .map_err(mcp_error)?;
         tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))
     }

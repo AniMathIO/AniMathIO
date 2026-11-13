@@ -230,6 +230,29 @@ fn media_edit_save_reopen_and_export() {
         json!({"width":160,"height":90,"max_time_ms":2000}),
     );
     session.json_tool("add_media", json!({"path": media}));
+    let imported = session.json_tool("get_project_state", json!({}));
+    let clips: Vec<_> = imported["project"]["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["clips"].as_object().unwrap().values())
+        .collect();
+    assert!(
+        clips.iter().any(|c| c["kind"].get("Audio").is_some()),
+        "MP4 companion audio missing: {imported}"
+    );
+    let companion_export = dir.path().join("companion.mp4");
+    session.json_tool("export_video", json!({"path":companion_export}));
+    let decoder = animathio_media::FilmCraftBackend::new()
+        .open_audio(&companion_export)
+        .unwrap();
+    assert!(
+        decoder
+            .samples(animathio_core::Time(0), 48000)
+            .unwrap()
+            .iter()
+            .any(|sample| sample.abs() > 0.0001)
+    );
     let sound = session.json_tool("add_media", json!({"path": audio}));
     let sound_id = sound["clip_id"].as_u64().unwrap().to_string();
     session.json_tool(

@@ -170,7 +170,10 @@ impl SymphoniaSource {
             .map_err(decode_error)?
             .format;
         let track = format
-            .default_track()
+            .tracks()
+            .iter()
+            .find(|track| track.codec_params.sample_rate.is_some())
+            .or_else(|| format.default_track())
             .ok_or_else(|| Error::Unsupported("no audio track".into()))?;
         if track.codec_params.codec == CODEC_TYPE_OPUS {
             return Err(Error::Unsupported(

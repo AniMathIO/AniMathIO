@@ -461,3 +461,29 @@ impl Editor {
         }
     }
 }
+
+impl Editor {
+    pub(super) fn unlink_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        let group = self
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .find(|c| c.id == id)
+            .and_then(|c| c.link_group);
+        if let Some(group) = group {
+            let commands = self
+                .project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .filter(|c| c.link_group == Some(group))
+                .map(|c| Command::SetClipLink {
+                    id: c.id,
+                    group: None,
+                })
+                .collect();
+            self.execute(&Command::Batch { commands }, cx);
+        }
+    }
+}

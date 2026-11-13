@@ -184,9 +184,12 @@ Both importers rebuild the project exclusively through `Command`s and print
 non-fatal warnings to stderr. What maps and what doesn't is documented in
 [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md).
 
+Video imports include a linked companion audio clip when the file contains audio. Linked clips move, trim, split and delete together; use **Unlink** in the clip context menu to edit them independently. Headless import is available through MCP `add_media` or `animathio-cli import-media INPUT -o OUTPUT.amio`.
+
 ## Contributing
 
 Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See `AGENTS.md` for branch rules, automation and commands.
+
 
 ## License
 

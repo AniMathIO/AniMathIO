@@ -31,7 +31,7 @@ impl Editor {
             return;
         };
         let clip = Clip::new(self.next_clip_id(), kind, range);
-        self.execute(&Command::AddClip { track, clip }, cx);
+        self.place_media_clip(track, clip, cx);
     }
 
     /// Start dragging an item from the media pool.
@@ -110,7 +110,51 @@ impl Editor {
             return;
         };
         let clip = Clip::new(self.next_clip_id(), kind, range);
-        self.execute(&Command::AddClip { track, clip }, cx);
+        self.place_media_clip(track, clip, cx);
+    }
+
+    fn place_media_clip(&mut self, track: TrackId, mut clip: Clip, cx: &mut Context<Self>) {
+        use animathio_media::MediaBackend;
+        let mut commands = Vec::new();
+        if matches!(clip.kind, ClipKind::Audio(_)) {
+            clip.params.insert("gain".into(), 1.0.into());
+            clip.params.insert("muted".into(), 0.0.into());
+        }
+        if let ClipKind::Video(id) = &clip.kind
+            && let Some(bytes) = self.assets.get(id)
+            && let Ok(info) =
+                animathio_media::FilmCraftBackend::new().probe_bytes("media", bytes.clone().into())
+            && !info.audio.is_empty()
+        {
+            let audio_track = TrackId(
+                self.project
+                    .tracks()
+                    .iter()
+                    .map(|t| t.id().0)
+                    .max()
+                    .unwrap_or(0)
+                    + 1,
+            );
+            clip.link_group = Some(clip.id);
+            let mut audio = Clip::new(
+                ClipId(clip.id.0 + 1),
+                ClipKind::Audio(id.clone()),
+                clip.range,
+            );
+            audio.link_group = clip.link_group;
+            audio.params.insert("gain".into(), 1.0.into());
+            audio.params.insert("muted".into(), 0.0.into());
+            commands.push(Command::AddTrack {
+                track: Track::new(audio_track, "Audio"),
+                index: self.project.tracks().len(),
+            });
+            commands.push(Command::AddClip {
+                track: audio_track,
+                clip: audio,
+            });
+        }
+        commands.push(Command::AddClip { track, clip });
+        self.execute(&Command::Batch { commands }, cx);
     }
 
     /// Place a plugin clip at an explicit timeline position and track.
