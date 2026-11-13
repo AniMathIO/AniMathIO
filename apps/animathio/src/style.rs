@@ -90,6 +90,26 @@ pub fn primary_gradient() -> gpui::Background {
     )
 }
 
+/// Gradient primary button (Export, Create). Dark lettering stays legible on
+/// both ends of the violet to cyan ramp.
+pub fn primary_button(
+    id: impl Into<gpui::ElementId>,
+    cx: &gpui::App,
+) -> gpui_component::button::Button {
+    use gpui::Styled as _;
+    use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(hex(color::ACCENT_FROM))
+                .foreground(hex(color::BG))
+                .hover(hex(color::ACCENT_FROM))
+                .active(hex(color::ACCENT_FROM)),
+        )
+        .bg(primary_gradient())
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+}
+
 /// Compose the bundled brand with the component kit's complete Lucide catalog.
 pub struct Assets;
 impl gpui::AssetSource for Assets {
@@ -326,22 +346,6 @@ pub fn panel_header(
         .child(action)
 }
 
-#[cfg(test)]
-mod theme_tests {
-    use super::*;
-    #[test]
-    fn palette_covers_component_surfaces_and_semantic_variants() {
-        let mut colors = gpui_component::ThemeColor::default();
-        apply_palette(&mut colors);
-        assert_eq!(colors.background, hex(color::BG));
-        assert_eq!(colors.popover, hex(color::RAISED));
-        assert_eq!(colors.button_primary, colors.primary);
-        assert_eq!(colors.button_danger, colors.danger);
-        assert_eq!(colors.table_hover, hex(color::HOVER));
-        assert_eq!(colors.selection, hexa(color::ACCENT, 0.2));
-    }
-}
-
 /// The kit owns toast placement, dismissal and its slide animation; the app
 /// adds the semantic left stripe before handing it to the kit.
 pub struct Toast;
@@ -355,6 +359,7 @@ impl Toast {
         gpui_component::notification::Notification::new()
             .message(message)
             .with_type(kind)
+            .border_0()
             .border_l(gpui::px(3.))
             .border_color(hex(color))
             .rounded(gpui::px(radius::PANEL))
@@ -385,5 +390,21 @@ impl Toast {
             gpui_component::notification::NotificationType::Error,
             color::DANGER,
         )
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+    #[test]
+    fn palette_covers_component_surfaces_and_semantic_variants() {
+        let mut colors = gpui_component::ThemeColor::default();
+        apply_palette(&mut colors);
+        assert_eq!(colors.background, hex(color::BG));
+        assert_eq!(colors.popover, hex(color::RAISED));
+        assert_eq!(colors.button_primary, colors.primary);
+        assert_eq!(colors.button_danger, colors.danger);
+        assert_eq!(colors.table_hover, hex(color::HOVER));
+        assert_eq!(colors.selection, hexa(color::ACCENT, 0.2));
     }
 }

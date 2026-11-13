@@ -575,10 +575,14 @@ impl Editor {
             dock: DockLayout::load(),
             left_tab: LeftTab::Assets,
             previous_left_tab: LeftTab::Assets,
-            tab_changed: Instant::now() - Duration::from_secs(1),
+            tab_changed: Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
             hovered_preset: None,
             previous_hovered_preset: None,
-            preset_hover_changed: Instant::now() - Duration::from_secs(1),
+            preset_hover_changed: Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
             app_menu: gpui_component::menu::AppMenuBar::new(cx),
             menu_signature: String::new(),
             panel_focus: std::array::from_fn(|_| cx.focus_handle()),

@@ -33,6 +33,7 @@ fn field(label: &'static str, child: impl IntoElement) -> FormField {
 }
 fn footer(
     label: &'static str,
+    app: &App,
     callback: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
     div()
@@ -45,10 +46,7 @@ fn footer(
                 .on_click(|_, window, cx| window.close_dialog(cx)),
         )
         .child(
-            Button::new("dialog-apply")
-                .primary()
-                .bg(style::primary_gradient())
-                .text_color(style::hex(style::color::BG))
+            style::primary_button("dialog-apply", app)
                 .label(label)
                 .on_click(callback),
         )
@@ -99,7 +97,7 @@ impl Editor {
             cx,
         );
         let editor = cx.entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let path_input = output.clone();
             let submit = {
                 let (editor, preset, range, from, to, output) = (
@@ -195,10 +193,7 @@ impl Editor {
                                 .on_click(move |_, window, cx| queue_submit(false, window, cx)),
                         )
                         .child(
-                            Button::new("export-now")
-                                .primary()
-                                .bg(style::primary_gradient())
-                                .text_color(style::hex(style::color::BG))
+                            style::primary_button("export-now", cx)
                                 .icon(icons::icon(IconName::Upload))
                                 .label("Export now")
                                 .on_click(move |_, window, cx| now_submit(true, window, cx)),
@@ -396,8 +391,7 @@ impl Editor {
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
-                            Button::new("overwrite-replace")
-                                .primary()
+                            style::primary_button("overwrite-replace", cx)
                                 .label("Replace")
                                 .on_click(move |_, window, cx| {
                                     replace.update(cx, |this, cx| {
@@ -438,7 +432,7 @@ impl Editor {
             cx,
         );
         let editor = cx.entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let w = width.clone();
             let h = height.clone();
             let f = fps.clone();
@@ -484,7 +478,7 @@ impl Editor {
                             gpui_component::color_picker::ColorPicker::new(&color),
                         )),
                 )
-                .footer(footer("Apply", move |_, window, cx| {
+                .footer(footer("Apply", cx, move |_, window, cx| {
                     let size = w
                         .read(cx)
                         .value()
@@ -562,7 +556,7 @@ impl Editor {
             cx,
         );
         let editor = cx.entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let motion_submit = motion.clone();
             let autosave_submit = autosave.clone();
             let folder_submit = folder.clone();
@@ -582,7 +576,7 @@ impl Editor {
                         .child(field("Theme density", Select::new(&density)))
                         .child(field("Motion", Select::new(&motion))),
                 )
-                .footer(footer("Save", move |_, window, cx| {
+                .footer(footer("Save", cx, move |_, window, cx| {
                     let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
                         return;
                     };
@@ -641,7 +635,7 @@ impl Editor {
         };
         let scene = input("", window, cx);
         let editor = cx.entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let editor = editor.clone();
             let scene_submit = scene.clone();
             let path = path.clone();
@@ -651,7 +645,7 @@ impl Editor {
                     "Scene class (blank uses first Scene)",
                     Input::new(&scene),
                 )))
-                .footer(footer("Import", move |_, window, cx| {
+                .footer(footer("Import", cx, move |_, window, cx| {
                     let scene = scene_submit.read(cx).value().trim().to_owned();
                     let imported = editor.update(cx, |this, cx| {
                         let params = animathio_control::ImportManimParams {
@@ -683,7 +677,7 @@ impl Editor {
         };
         let duration = input("1", window, cx);
         let editor = cx.entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let duration_submit = duration.clone();
             let editor = editor.clone();
             dialog
@@ -692,7 +686,7 @@ impl Editor {
                     "Reveal duration in seconds",
                     NumberInput::new(&duration),
                 )))
-                .footer(footer("Apply", move |_, window, cx| {
+                .footer(footer("Apply", cx, move |_, window, cx| {
                     let seconds = duration_submit.read(cx).value().parse::<f64>().ok();
                     let applied = editor.update(cx, |this, cx| {
                         let Some(command) = this.find_clip(id).and_then(|clip| {

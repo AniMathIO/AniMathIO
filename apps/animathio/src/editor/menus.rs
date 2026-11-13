@@ -193,12 +193,9 @@ impl Editor {
                         }),
                 )
                 .child(
-                    Button::new("title-export")
-                        .primary()
+                    style::primary_button("title-export", cx)
                         .small()
-                        .bg(style::primary_gradient())
-                        .text_color(style::hex(color::BG))
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .mr_2()
                         .icon(icons::icon(IconName::Upload))
                         .label("Export")
                         .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))

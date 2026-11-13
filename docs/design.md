@@ -52,3 +52,8 @@ tab changes settle in 180ms. Preferences > Motion > Reduce motion makes the glow
 static and disables decorative widget transitions through GPUI's motion policy;
 the preference is saved separately from projects. Toasts retain the component
 kit's slide-in/dismiss behavior and add a semantic coloured left border.
+
+The Export button, dialog primaries and "Create" actions share `style::primary_button`
+(violet-to-cyan gradient, dark lettering). The launcher hero adds a slow light sweep
+over a static wash; Reduce motion keeps only the wash. Preset cards carry an aspect
+chip, and the drop zone is dashed and lights up while files are dragged over it.

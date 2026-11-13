@@ -22,24 +22,59 @@ impl Editor {
     }
 
     pub(super) fn start_screen(&self, cx: &mut Context<Self>) -> Div {
-        let glow = div()
-            .absolute()
-            .inset_0()
-            .rounded(px(18.))
-            .bg(linear_gradient(
-                115.,
-                linear_color_stop(style::hexa(color::ACCENT_FROM, 0.20), 0.),
-                linear_color_stop(style::hexa(color::ACCENT_TO, 0.06), 1.),
-            ))
-            .with_animation(
-                "launcher-glow",
-                Animation::new(Duration::from_secs(6))
-                    .repeat()
-                    .with_max_fps(20.),
-                |this, progress| {
-                    this.opacity(0.65 + 0.35 * (progress * std::f32::consts::TAU).cos())
-                },
-            );
+        // Static wash plus a slow light sweep. The sweep is skipped entirely
+        // under "Reduce motion", leaving only the wash.
+        let wash = div().absolute().inset_0().bg(linear_gradient(
+            115.,
+            linear_color_stop(style::hexa(color::ACCENT_FROM, 0.22), 0.),
+            linear_color_stop(style::hexa(color::ACCENT_TO, 0.07), 1.),
+        ));
+        let sweep = |left: f32| {
+            let half = |from: f32, to: f32, at: f32| {
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(relative(at))
+                    .w(relative(0.5))
+                    .bg(linear_gradient(
+                        90.,
+                        linear_color_stop(style::hexa(color::ACCENT_TO, from), 0.),
+                        linear_color_stop(style::hexa(color::ACCENT_TO, to), 1.),
+                    ))
+            };
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(relative(left))
+                .w(relative(0.42))
+                .child(half(0., 0.12, 0.))
+                .child(half(0.12, 0., 0.5))
+        };
+        let glow: AnyElement = if self.preferences.reduce_motion {
+            div()
+                .absolute()
+                .inset_0()
+                .child(wash)
+                .child(sweep(0.30))
+                .into_any_element()
+        } else {
+            div()
+                .absolute()
+                .inset_0()
+                .child(wash)
+                .child(
+                    sweep(0.).with_animation(
+                        "launcher-glow",
+                        Animation::new(Duration::from_secs(9))
+                            .repeat()
+                            .with_max_fps(24.),
+                        |this, progress| this.left(relative(-0.42 + 1.42 * progress)),
+                    ),
+                )
+                .into_any_element()
+        };
         let hero = div()
             .relative()
             .flex()
@@ -48,6 +83,7 @@ impl Editor {
             .gap_6()
             .px_8()
             .py_6()
+            .overflow_hidden()
             .rounded(px(18.))
             .border_1()
             .border_color(style::hexa(color::ACCENT, 0.22))
@@ -112,35 +148,54 @@ impl Editor {
             .child(
                 div()
                     .relative()
-                    .w(px(280.))
-                    .h(px(168.))
+                    .w(px(300.))
                     .flex_shrink_0()
-                    .rounded(px(12.))
-                    .bg(style::hexa(color::BG, 0.6))
-                    .border_1()
-                    .border_color(style::hexa(color::ACCENT, 0.22))
                     .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(img("brand.svg").size(px(140.)))
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded(px(12.))
+                    .bg(style::hexa(color::BG, 0.7))
+                    .border_1()
+                    .border_color(style::hexa(color::ACCENT, 0.28))
+                    .shadow_lg()
                     .child(
                         div()
-                            .absolute()
-                            .bottom_3()
-                            .left_4()
-                            .right_4()
+                            .h(px(116.))
                             .flex()
                             .items_center()
-                            .gap_1()
-                            .children([color::CLIP_VIDEO, color::ACCENT, color::CLIP_AUDIO].map(
-                                |tone| {
+                            .justify_center()
+                            .rounded(px(7.))
+                            .bg(linear_gradient(
+                                135.,
+                                linear_color_stop(style::hexa(color::ACCENT_FROM, 0.30), 0.),
+                                linear_color_stop(style::hexa(color::ACCENT_TO, 0.12), 1.),
+                            ))
+                            .child(img("brand.svg").size(px(84.))),
+                    )
+                    .children(
+                        [
+                            (color::CLIP_VIDEO, [0.0, 0.46], [0.5, 0.42]),
+                            (color::ACCENT, [0.12, 0.30], [0.46, 0.26]),
+                            (color::CLIP_AUDIO, [0.0, 0.78], [0.82, 0.18]),
+                        ]
+                        .map(|(tone, first, second)| {
+                            div()
+                                .relative()
+                                .h(px(9.))
+                                .rounded(px(3.))
+                                .bg(style::hexa(color::BORDER, 0.5))
+                                .children([first, second].map(|[left, width]| {
                                     div()
-                                        .flex_1()
-                                        .h(px(5.))
-                                        .rounded_full()
-                                        .bg(style::hexa(tone, 0.6))
-                                },
-                            )),
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .left(relative(left))
+                                        .w(relative(width))
+                                        .rounded(px(3.))
+                                        .bg(style::hexa(tone, 0.75))
+                                }))
+                        }),
                     ),
             );
 
@@ -264,9 +319,19 @@ impl Editor {
                                             .child(label),
                                     )
                                     .child(
-                                        icons::icon(IconName::ArrowUpRight)
-                                            .small()
-                                            .text_color(style::hex(color::TEXT_MUTED)),
+                                        div()
+                                            .px_2()
+                                            .py_px()
+                                            .rounded_full()
+                                            .bg(style::hexa(color::ACCENT, 0.14))
+                                            .text_size(px(10.))
+                                            .font_family(cx.theme().mono_font_family.clone())
+                                            .text_color(style::hex(color::ACCENT))
+                                            .child(match preset {
+                                                ExportPreset::ShortsVertical => "9:16",
+                                                ExportPreset::Square => "1:1",
+                                                _ => "16:9",
+                                            }),
                                     ),
                             )
                             .child(
@@ -446,52 +511,76 @@ impl Editor {
                         .child(
                             div()
                                 .flex()
-                                .gap_2()
+                                .items_center()
+                                .justify_between()
                                 .child(
-                                    Button::new("start-open")
-                                        .icon(icons::icon(IconName::FolderOpen))
-                                        .label("Open project…")
-                                        .on_click(cx.listener(|this, _, _, cx| this.open(cx))),
+                                    div()
+                                        .text_size(px(16.))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Pick up where you left off"),
                                 )
                                 .child(
-                                    Button::new("start-v1")
-                                        .icon(icons::icon(IconName::Import))
-                                        .label("Import v1…")
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.import_legacy(cx)),
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("start-open")
+                                                .outline()
+                                                .icon(icons::icon(IconName::FolderOpen))
+                                                .label("Open project")
+                                                .on_click(cx.listener(|this, _, _, cx| this.open(cx))),
+                                        )
+                                        .child(
+                                            Button::new("start-v1")
+                                                .outline()
+                                                .icon(icons::icon(IconName::Import))
+                                                .label("Import v1")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.import_legacy(cx);
+                                                })),
+                                        )
+                                        .child(
+                                            Button::new("start-manim")
+                                                .outline()
+                                                .icon(icons::icon(IconName::Code))
+                                                .label("Import Manim")
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.open_manim_import(window, cx);
+                                                })),
                                         ),
-                                )
-                                .child(
-                                    Button::new("start-manim")
-                                        .icon(icons::icon(IconName::Code))
-                                        .label("Import Manim…")
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_manim_import(window, cx)
-                                        })),
                                 ),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(16.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child("Pick up where you left off"),
                         )
                         .child(recent)
                         .child(
                             div()
+                                .id("start-drop-zone")
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .gap_3()
-                                .p_4()
+                                .h(px(92.))
                                 .rounded(px(style::radius::PANEL))
                                 .border_1()
-                                .border_color(style::hex(color::BORDER))
-                                .bg(style::hex(color::PANEL))
+                                .border_dashed()
+                                .border_color(style::hexa(color::ACCENT, 0.35))
+                                .bg(style::hexa(color::ACCENT, 0.04))
                                 .text_color(style::hex(color::TEXT_SECONDARY))
+                                .drag_over::<ExternalPaths>(|zone, _, _, _| {
+                                    zone.border_color(style::hex(color::ACCENT))
+                                        .bg(style::hexa(color::ACCENT, 0.14))
+                                })
                                 .child(
-                                    icons::icon(IconName::CloudUpload)
-                                        .text_color(style::hex(color::ACCENT)),
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .size(px(40.))
+                                        .rounded_full()
+                                        .bg(style::hexa(color::ACCENT, 0.16))
+                                        .child(
+                                            icons::icon(IconName::CloudUpload)
+                                                .text_color(style::hex(color::ACCENT)),
+                                        ),
                                 )
                                 .child(
                                     div().child("Drop media anywhere to start").child(
@@ -511,7 +600,9 @@ impl Editor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // Not `super::*`: it would import gpui's `test` attribute over the built-in.
+    use super::modified_label;
+    use std::time::{Duration, SystemTime};
     #[test]
     fn unavailable_or_future_modification_time_is_not_reported_as_recent() {
         assert_eq!(modified_label(None), "Modified time unavailable");
