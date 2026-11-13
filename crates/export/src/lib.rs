@@ -183,7 +183,9 @@ impl Exporter {
     ) -> Result<Frame, Error> {
         let scene = evaluate(project, time);
         let pending = plugin_check::pending_plugins(&scene);
+        let resolve_timer = animathio_core::timing::Timer::new("resolve-plugins");
         let scene = resolve(scene);
+        drop(resolve_timer);
         plugin_check::check_resolved(&pending, &scene)?;
         Ok(render(&scene, &mut self.ctx, resolution(project))?)
     }
@@ -214,19 +216,57 @@ impl Exporter {
             video,
             AudioConfig::new(48_000, 2, 128_000),
         ))?;
-        self.encode_frames(
-            project,
-            range,
-            rate,
-            &mut progress,
-            &mut resolve,
-            |frame, pcm| {
-                encoder.encode_video_frame(&frame.pixels)?;
-                encoder.encode_audio(pcm)?;
-                Ok(())
-            },
-        )?;
-        encoder.finish().map_err(Error::from)
+        // One queued frame bounds memory while rendering overlaps encoding. The
+        // worker receives owned buffers, preserving frame/audio order without copies.
+        std::thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<(Frame, Vec<f32>)>(1);
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let worker = scope.spawn(move || -> Result<Vec<u8>, Error> {
+                for (frame, pcm) in rx {
+                    encoder.encode_video_frame(&frame.pixels)?;
+                    encoder.encode_audio(&pcm)?;
+                    if done_tx.send(()).is_err() {
+                        return Err(Error::Cancelled);
+                    }
+                }
+                encoder.finish().map_err(Error::from)
+            });
+            let mut submitted = 0;
+            let mut completed = 0;
+            let produced = self.encode_frames(
+                project,
+                range,
+                rate,
+                &mut |_| true,
+                &mut resolve,
+                |frame, pcm| {
+                    tx.send((frame, pcm)).map_err(|_| Error::Cancelled)?;
+                    submitted += 1;
+                    if submitted > 1 {
+                        done_rx.recv().map_err(|_| Error::Cancelled)?;
+                        completed += 1;
+                        if !progress(Progress { completed, total }) {
+                            return Err(Error::Cancelled);
+                        }
+                    }
+                    Ok(())
+                },
+            );
+            drop(tx);
+            let worker_result = worker
+                .join()
+                .map_err(|_| Error::Invalid("encoder worker panicked".into()))?;
+            // Prefer the encoder's concrete error over a disconnected channel.
+            let bytes = worker_result?;
+            produced?;
+            if !progress(Progress {
+                completed: total,
+                total,
+            }) {
+                return Err(Error::Cancelled);
+            }
+            Ok(bytes)
+        })
     }
 
     /// Render, mix and encode into `destination` atomically.
@@ -258,7 +298,7 @@ impl Exporter {
         rate: FrameRate,
         progress: &mut impl FnMut(Progress) -> bool,
         resolve: &mut impl FnMut(Scene) -> Scene,
-        mut encode: impl FnMut(&Frame, &[f32]) -> Result<(), Error>,
+        mut encode: impl FnMut(Frame, Vec<f32>) -> Result<(), Error>,
     ) -> Result<(), Error> {
         let total = frame_count(project, range, rate)?;
         for index in 0..total {
@@ -279,8 +319,10 @@ impl Exporter {
                 Rounding::Nearest,
             )?;
             let end = Time(range.start.0.saturating_add(next.0).min(range.end.0));
+            let mix_timer = animathio_core::timing::Timer::new("audio-mix");
             let pcm = self.mixer.mix(project, TimeRange::new(time, end)?)?;
-            encode(&frame, &pcm)?;
+            drop(mix_timer);
+            encode(frame, pcm)?;
             if !progress(Progress {
                 completed: index + 1,
                 total,

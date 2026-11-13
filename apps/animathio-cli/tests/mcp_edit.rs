@@ -107,6 +107,47 @@ fn describe_cut_remove_batch_and_preset() {
         assert!(names.iter().any(|name| name == expected), "{names:?}");
     }
 
+    let library = session.json_tool("list_title_presets", json!({}));
+    assert_eq!(library.as_array().unwrap().len(), 8);
+    let before_title = session.json_tool("get_project_state", json!({}))["project"].clone();
+    let composition = session.json_tool(
+        "add_title",
+        json!({
+            "preset":"lower_third", "fields":{"name":"Jane Doe","role":"Researcher"},
+            "start_ms":5000, "duration_ms":3000
+        }),
+    );
+    assert!(composition["clip_id"].as_u64().is_some());
+    let titled = session.json_tool("get_project_state", json!({}))["project"].clone();
+    let clips: Vec<_> = titled["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["clips"].as_object().unwrap().values())
+        .collect();
+    assert_eq!(clips.len(), 3);
+    assert!(
+        clips
+            .iter()
+            .all(|c| c["link_group"] == clips[0]["link_group"])
+    );
+    assert!(
+        clips
+            .iter()
+            .any(|c| c["kind"]["Plugin"]["params"]["text"] == "Jane Doe")
+    );
+    session.json_tool("undo", json!({}));
+    assert_eq!(
+        session.json_tool("get_project_state", json!({}))["project"],
+        before_title
+    );
+    session.json_tool("redo", json!({}));
+    assert_eq!(
+        session.json_tool("get_project_state", json!({}))["project"],
+        titled
+    );
+    session.json_tool("undo", json!({}));
+
     let preset = session.json_tool("set_export_preset", json!({"preset": "youtube_1080p"}));
     assert_eq!(preset["width"], 1920);
 

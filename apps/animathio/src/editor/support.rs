@@ -367,10 +367,23 @@ pub(super) fn paint_clip(
     if x1 - x0 > px(28.0) {
         let icon_bounds = Bounds::new(point(lx + px(7.0), y0 + px(3.0)), size(px(12.0), px(12.0)));
         paint_icon(clip.icon, icon_bounds, cx.theme().foreground, window, cx);
+        let warned = clip.effect_warning && x1 - x0 > px(64.0);
+        if warned {
+            // Missing or failed effect plugin: amber badge beside the kind icon.
+            let badge = Bounds::new(point(lx + px(23.0), y0 + px(2.0)), size(px(16.0), px(14.0)));
+            window.paint_quad(fill(badge, style::hex(colors::WARNING)).corner_radii(px(4.0)));
+            paint_icon(
+                IconName::TriangleAlert,
+                Bounds::new(point(lx + px(25.0), y0 + px(3.0)), size(px(12.0), px(12.0))),
+                style::hex(colors::BG),
+                window,
+                cx,
+            );
+        }
         if !clip.label.is_empty() {
             paint_clip_label(
                 clip.label.clone(),
-                point(lx + px(22.0), y0 + px(3.0)),
+                point(lx + px(if warned { 44.0 } else { 22.0 }), y0 + px(3.0)),
                 x1 - px(4.0),
                 font(cx.theme().font_family.clone()),
                 window,
@@ -412,25 +425,26 @@ pub(super) fn paint_clip(
 
 /// Content labels are kept here so plugin migration touches one small match.
 pub(super) fn timeline_content_preview(clip: &Clip) -> String {
+    const KEYS: [&str; 4] = ["text", "source", "latex", "expression"];
+    let first_line = |text: &str| -> String {
+        text.lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(100)
+            .collect()
+    };
     match &clip.kind {
         ClipKind::Vector(_) => "Vector shape".into(),
-        ClipKind::Plugin { plugin_id, .. } => ["text", "source", "latex", "expression"]
+        ClipKind::Plugin { plugin_id, params } => KEYS
             .iter()
-            .find_map(|key| {
-                clip.params.get(*key).and_then(|value| {
-                    if let animathio_core::ParamValue::String(text) = value {
-                        Some(
-                            text.lines()
-                                .next()
-                                .unwrap_or("")
-                                .chars()
-                                .take(100)
-                                .collect(),
-                        )
-                    } else {
-                        None
-                    }
-                })
+            .find_map(|key| match clip.params.get(*key) {
+                Some(animathio_core::ParamValue::String(text)) => Some(first_line(text)),
+                // Plugin sources keep their text in the clip kind's JSON data.
+                _ => params
+                    .get(*key)
+                    .and_then(serde_json::Value::as_str)
+                    .map(first_line),
             })
             .unwrap_or_else(|| {
                 if plugin_id.ends_with("shapes") {
@@ -472,10 +486,8 @@ fn paint_filmstrip(
         if x >= x1 {
             break;
         }
-        let fraction = f32::from(x - left) / f32::from(x1 - left).max(1.);
-        let slot =
-            ((fraction * clip.thumbnails.len() as f32) as usize).min(clip.thumbnails.len() - 1);
-        if let Some(image) = &clip.thumbnails[slot] {
+        let slot = index.saturating_sub(clip.thumbnail_first);
+        if let Some(Some(image)) = clip.thumbnails.get(slot) {
             let tile = Bounds::new(point(x, top), size(tile_width - px(1.), height));
             let _ = window.paint_image(mask, tile, Corners::all(px(2.)), image.clone(), 0, false);
             window.paint_quad(fill(tile.intersect(&mask), style::hexa(colors::BG, 0.18)));
@@ -678,7 +690,7 @@ pub(super) fn paint_waveform(
 }
 
 /// Polyline samples per fade curve.
-const FADE_SAMPLES: usize = 20;
+const FADE_SAMPLES: usize = 32;
 
 /// Fade ramps (a darkened triangle over the attenuated region) and, on the
 /// hovered or selected clip, the circular fade handles.
@@ -696,7 +708,7 @@ pub(super) fn paint_fades(
     let ppt = width / (clip.end.0 - clip.start.0).max(1) as f32;
     let fade_in_px = (clip.fade_in as f32 * ppt).min(width);
     let fade_out_px = (clip.fade_out as f32 * ppt).min(width);
-    // Level curve of a fade: a smoothstep from the clip edge (silent) to full
+    // Level curve sampled from the actual keyframes from the edge to full
     // level. The attenuated area above it is shaded; the curve itself is stroked.
     // Sampled as a polyline so the fill stays exact (curve segments in GPUI
     // paths only approximate concave fills).
@@ -709,7 +721,11 @@ pub(super) fn paint_fades(
         let curve: Vec<Point<Pixels>> = (0..=FADE_SAMPLES)
             .map(|i| {
                 let t = i as f32 / FADE_SAMPLES as f32;
-                let ease = t * t * (3.0 - 2.0 * t);
+                let ease = clip.fade_levels[usize::from(!left)]
+                    .get(i)
+                    .copied()
+                    .unwrap_or(t)
+                    .clamp(0., 1.);
                 point(edge + px(sign * length * t), y1 - (y1 - y0) * ease)
             })
             .collect();
@@ -897,7 +913,7 @@ pub(super) fn field_value(clip: &Clip, field: &Field) -> f64 {
             TransformProperty::Y => clip.transform.y,
             TransformProperty::ScaleX => clip.transform.scale_x,
             TransformProperty::ScaleY => clip.transform.scale_y,
-            TransformProperty::Rotation => clip.transform.rotation,
+            TransformProperty::Rotation => clip.transform.rotation.to_degrees(),
             TransformProperty::Opacity => clip.transform.opacity,
         },
         Field::Param(name) => clip
@@ -926,7 +942,8 @@ pub(super) fn with_transform(
 
 pub(super) fn field_step(field: &Field) -> f64 {
     match field {
-        Field::Transform(TransformProperty::Rotation | TransformProperty::Opacity) => 0.05,
+        Field::Transform(TransformProperty::Rotation) => 1.0,
+        Field::Transform(TransformProperty::Opacity) => 0.05,
         Field::Transform(_) => 0.01,
         Field::Param(_) => 0.1,
     }
@@ -951,7 +968,10 @@ pub(super) fn kind_label(kind: &ClipKind) -> String {
         ClipKind::Plugin { plugin_id, .. } => match plugin_id.as_str() {
             "org.animathio.text" => "text".into(),
             "org.animathio.shapes" => "shape".into(),
-            _ => format!("plugin {plugin_id}"),
+            "org.animathio.latex" => "math".into(),
+            "org.animathio.graph" => "graph".into(),
+            // Third-party plugins: the last segment of the reverse-DNS id.
+            other => other.rsplit('.').next().unwrap_or(other).to_owned(),
         },
         ClipKind::Vector(_) => "vector".into(),
         ClipKind::Error(_) => "error".into(),
@@ -1325,6 +1345,52 @@ pub(super) fn write_project(
         .collect();
     animathio_format::save_amio(path, project, &referenced).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Inspector (display) value for a model value: rotation shows in degrees.
+pub(super) fn field_display_value(field: &Field, model: f64) -> f64 {
+    if matches!(field, Field::Transform(TransformProperty::Rotation)) {
+        model.to_degrees()
+    } else {
+        model
+    }
+}
+
+/// Model value for an inspector (display) value: rotation is stored in radians.
+pub(super) fn field_model_value(field: &Field, value: f64) -> f64 {
+    if matches!(field, Field::Transform(TransformProperty::Rotation)) {
+        value.to_radians()
+    } else {
+        value
+    }
+}
+
+#[cfg(test)]
+mod ui_units_tests {
+    use super::*;
+    #[core::prelude::v1::test]
+    fn rotation_degrees_round_trip() {
+        let field = Field::Transform(TransformProperty::Rotation);
+        let mut clip = Clip::new(
+            ClipId(1),
+            ClipKind::Image(AssetId::of(b"rotation")),
+            animathio_core::TimeRange::new(Time(0), Time(1)).unwrap(),
+        );
+        clip.transform.rotation = std::f64::consts::FRAC_PI_2;
+        assert!((field_value(&clip, &field) - 90.).abs() < 1e-10);
+        let changed = with_transform(
+            clip.transform,
+            TransformProperty::Rotation,
+            field_model_value(&field, -45.),
+        );
+        assert!((changed.rotation + std::f64::consts::FRAC_PI_4).abs() < 1e-10);
+        for degrees in [-360., -45., 0., 90., 180., 720.] {
+            assert!((field_model_value(&field, degrees).to_degrees() - degrees).abs() < 1e-10);
+        }
+        assert!(
+            (field_model_value(&Field::Transform(TransformProperty::X), 0.25) - 0.25).abs() < 1e-10
+        );
+    }
 }
 
 #[cfg(test)]

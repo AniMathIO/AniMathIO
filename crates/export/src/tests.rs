@@ -155,7 +155,7 @@ fn encoder_input_frame_n_is_exactly_preview_frame_n() {
                     (160, 90),
                 )
                 .unwrap();
-                assert_eq!(*frame, expected, "encoder input at frame {index}");
+                assert_eq!(frame, expected, "encoder input at frame {index}");
                 assert_ne!(pcm.len(), 0);
                 index += 1;
                 Ok(())
@@ -255,7 +255,7 @@ fn rational_frame_steps_and_audio_blocks_are_deterministic() {
             &mut |_| true,
             &mut |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
             |_, pcm| {
-                actual.extend_from_slice(pcm);
+                actual.extend_from_slice(&pcm);
                 Ok(())
             },
         )
@@ -474,4 +474,35 @@ fn project_error_clips_still_export() {
             |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
         )
         .unwrap();
+}
+
+#[test]
+fn pipelined_export_is_byte_identical_to_serial_encoding() {
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 5)).unwrap();
+    let rate = project.frame_rate();
+    let mut serial = Exporter::new(&project, &assets).unwrap();
+    let mut encoder = Mp4Encoder::new(EncoderConfig::with_audio(
+        VideoConfig::new(160, 90, rate),
+        AudioConfig::new(48_000, 2, 128_000),
+    ))
+    .unwrap();
+    serial
+        .encode_frames(
+            &project,
+            range,
+            rate,
+            &mut |_| true,
+            &mut |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
+            |frame, pcm| {
+                encoder.encode_video_frame(&frame.pixels)?;
+                encoder.encode_audio(&pcm)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let expected = encoder.finish().unwrap();
+    let actual =
+        export_with_plugins(&project, &assets, range, Settings::default(), |_| true).unwrap();
+    assert_eq!(actual, expected);
 }

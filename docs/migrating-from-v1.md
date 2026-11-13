@@ -22,7 +22,7 @@ embedded asset, ≤ 10,000 media entries.
 | `editor_elements` z-order | One `Track` per element, in the same order |
 | Embedded media (base64 data URLs) | Deduplicated content-addressed assets (`AssetId` = BLAKE3), registered via `AddAsset` |
 | `image` element | `ClipKind::Image` |
-| `video` element | `ClipKind::Video` (renders a checkerboard until the media decoder lands) |
+| `video` element | `ClipKind::Video` (decoded by the `media` crate) |
 | `audio` element | `ClipKind::Audio` with `gain` + `muted` clip params; `masterVolume` → `SetTrackGain` |
 | `text` element | `ClipKind::Plugin` (`org.animathio.text`) with normalized font size and color |
 | `mafs` graph element | `ClipKind::Image` (see gaps below) |
@@ -64,8 +64,8 @@ where they matter.
 
 ## Not covered by this importer
 
-- **Video playback/export.** Video clips import as data, but decoding and MP4/WebM
-  export await the `media` crate; the renderer draws a labelled checkerboard.
+- **WebM export.** Video clips import as ordinary video clips and export to H.264 + AAC
+  MP4 like any other project; WebM output is not implemented.
 - **Manim import** is a separate importer (`crates/import-manim`), used via
   `animathio-cli import-manim`.
 - **Round-tripping.** Import is one-way; there is no v2 → v1 export.

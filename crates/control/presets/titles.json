@@ -1,0 +1,347 @@
+[
+  {
+    "id": "centered_title",
+    "name": "Centered title",
+    "animation": "fade",
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Your title",
+        "y": 0.43,
+        "size": 0.09,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.18
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "title_subtitle",
+    "name": "Title + subtitle",
+    "animation": "fade",
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Your title",
+        "y": 0.37,
+        "size": 0.08,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.12
+      },
+      {
+        "kind": "text",
+        "field": "subtitle",
+        "default": "A story worth sharing",
+        "y": 0.51,
+        "size": 0.04,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.18
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lower_third",
+    "name": "Lower third",
+    "animation": "slide",
+    "layers": [
+      {
+        "kind": "bar",
+        "y": 0.72,
+        "height": 0.2,
+        "color": [
+          22,
+          28,
+          48,
+          230
+        ],
+        "x": 0.38,
+        "width": 0.6
+      },
+      {
+        "kind": "text",
+        "field": "name",
+        "default": "Jane Doe",
+        "y": 0.745,
+        "size": 0.05,
+        "x": 0.38,
+        "width": 0.54,
+        "height": 0.06
+      },
+      {
+        "kind": "text",
+        "field": "role",
+        "default": "Researcher",
+        "y": 0.825,
+        "size": 0.032,
+        "x": 0.38,
+        "width": 0.54,
+        "height": 0.095
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      },
+      {
+        "property": "X",
+        "space": "offset",
+        "values": [
+          -0.04,
+          0.0,
+          0.04
+        ]
+      }
+    ]
+  },
+  {
+    "id": "caption",
+    "name": "Caption / subtitle bar",
+    "animation": "fade",
+    "layers": [
+      {
+        "kind": "bar",
+        "y": 0.79,
+        "height": 0.13,
+        "color": [
+          22,
+          28,
+          48,
+          180
+        ],
+        "x": 0.5,
+        "width": 0.84
+      },
+      {
+        "kind": "text",
+        "field": "caption",
+        "default": "Every story starts here",
+        "y": 0.82,
+        "size": 0.04,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.1
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "chapter_card",
+    "name": "Chapter card",
+    "animation": "fade",
+    "layers": [
+      {
+        "kind": "background",
+        "color": [
+          22,
+          28,
+          48,
+          255
+        ],
+        "x": 0.5,
+        "width": 0.84
+      },
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Chapter one",
+        "y": 0.38,
+        "size": 0.08,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.12
+      },
+      {
+        "kind": "text",
+        "field": "subtitle",
+        "default": "A new perspective",
+        "y": 0.52,
+        "size": 0.038,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.18
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "end_card",
+    "name": "End card",
+    "animation": "fade",
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Thanks for watching",
+        "y": 0.36,
+        "size": 0.07,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.14
+      },
+      {
+        "kind": "text",
+        "field": "cta",
+        "default": "Subscribe for more",
+        "y": 0.52,
+        "size": 0.04,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.18
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  {
+    "id": "kinetic_word_pop",
+    "name": "Kinetic word pop",
+    "animation": "scale",
+    "layers": [
+      {
+        "kind": "text",
+        "field": "word",
+        "default": "CREATE",
+        "y": 0.43,
+        "size": 0.1,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.18
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      },
+      {
+        "property": "ScaleX",
+        "space": "factor",
+        "values": [
+          0.65,
+          1.0,
+          0.9
+        ]
+      },
+      {
+        "property": "ScaleY",
+        "space": "factor",
+        "values": [
+          0.65,
+          1.0,
+          0.9
+        ]
+      }
+    ]
+  },
+  {
+    "id": "math_title",
+    "name": "Math title",
+    "animation": "fade",
+    "layers": [
+      {
+        "kind": "latex",
+        "field": "latex",
+        "default": "E = mc^2",
+        "y": 0.42,
+        "size": 0.075,
+        "x": 0.5,
+        "width": 0.84
+      },
+      {
+        "kind": "text",
+        "field": "caption",
+        "default": "An elegant idea",
+        "y": 0.58,
+        "size": 0.038,
+        "x": 0.5,
+        "width": 0.84,
+        "height": 0.18
+      }
+    ],
+    "ramp_ticks": 235200000,
+    "curves": [
+      {
+        "property": "Opacity",
+        "space": "absolute",
+        "values": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    ]
+  }
+]

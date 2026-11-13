@@ -168,6 +168,7 @@ impl Editor {
             LeftTab::Assets => 0.,
             LeftTab::Plugins => 1.,
             LeftTab::Effects => 2.,
+            LeftTab::Titles => 3.,
         };
         let from = index(self.previous_left_tab);
         let to = index(self.left_tab);
@@ -180,8 +181,8 @@ impl Editor {
         let eased = 1. - (1. - progress).powi(3);
         let indicator = div()
             .absolute()
-            .left(relative((from + (to - from) * eased) / 3.))
-            .w(relative(1. / 3.))
+            .left(relative((from + (to - from) * eased) / 4.))
+            .w(relative(1. / 4.))
             .h_full()
             .rounded(px(style::radius::CONTROL))
             .bg(style::hexa(color::ACCENT, 0.16))
@@ -200,6 +201,7 @@ impl Editor {
                         (LeftTab::Assets, "Assets", IconName::Images),
                         (LeftTab::Plugins, "Plugins", IconName::Puzzle),
                         (LeftTab::Effects, "Effects", IconName::Sparkles),
+                        (LeftTab::Titles, "Titles", IconName::Type),
                     ]
                     .map(|(tab, label, icon)| {
                         let selected = self.left_tab == tab;

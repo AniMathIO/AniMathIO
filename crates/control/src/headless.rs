@@ -316,6 +316,12 @@ impl ControlHandler for HeadlessHandler {
                     .map_err(ControlError::from)?;
                 serde_json::to_value(written.display().to_string())?
             }
+            Call::TitlesList => serde_json::to_value(crate::title_presets())?,
+            Call::TitlesAdd { params } => {
+                let (command, added) = crate::title_preset_command(&self.project, &params)?;
+                self.history.execute(&mut self.project, &command)?;
+                serde_json::to_value(added)?
+            }
             Call::EffectsList => serde_json::to_value(self.effects_list())?,
             Call::EffectsAdd { params } => serde_json::to_value(self.effects_add(&params)?)?,
             Call::ProjectGet => serde_json::to_value(self.state())?,

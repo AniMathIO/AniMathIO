@@ -375,6 +375,15 @@ impl Toast {
             color::ACCENT_TO,
         )
     }
+    pub fn warning(
+        message: impl Into<gpui::SharedString>,
+    ) -> gpui_component::notification::Notification {
+        Self::styled(
+            message,
+            gpui_component::notification::NotificationType::Warning,
+            color::WARNING,
+        )
+    }
     pub fn success(
         message: impl Into<gpui::SharedString>,
     ) -> gpui_component::notification::Notification {

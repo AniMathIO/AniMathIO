@@ -200,6 +200,15 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(())?
             }
+            Call::TitlesList => serde_json::to_value(animathio_control::title_presets())?,
+            Call::TitlesAdd { params } => {
+                let (command, added) =
+                    animathio_control::title_preset_command(&self.project, &params)?;
+                self.finish_color_edit(cx);
+                self.history.execute(&mut self.project, &command)?;
+                self.after_edit(cx);
+                serde_json::to_value(added)?
+            }
             Call::EffectsList => {
                 serde_json::to_value(animathio_control::effect_infos(self.available_effects()))?
             }

@@ -28,7 +28,7 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
 - **States:** every interactive element has hover, active, focus and disabled styles.
   Empty states get an icon, one line of text and a primary action.
 - **Timeline:** video/image clips show a filmstrip of low-resolution thumbnails
-  (decoded off-thread, cached by asset, time and row height); audio clips a filled,
+  (one tile per visible slot, decoded off-thread, cached by asset, time and row height); audio clips a filled,
   mirrored waveform in the clip colour; text, LaTeX and shape clips their snippet.
   Fades are smooth curves with handles, transitions a violet to cyan gradient over
   the overlap, keyframes rotated-square diamonds on the selected clip. Track headers
@@ -50,12 +50,12 @@ sources under `apps/animathio/assets/fonts`. The bundled gradient brand is
 
 The workspace wraps each resizable pane in a rounded panel with a consistent
 icon/title/action header and 6px shared gutters. The library uses a sliding active
-pill for Assets, Plugins and Effects. The title bar shows the project name, an
+pill for Assets, Plugins, Effects and Titles. The title bar shows the project name, an
 unsaved dot, MCP listener status and Export. The bottom chips report the canvas,
 frame rate, duration, autosave policy, requested preview renderer and export queue.
 “GPU requested” describes the preview preference: the worker can fall back to CPU.
 
-The launcher offers four aspect-ratio canvas cards, recent-project cards with
+The launcher offers five canvas preset cards, recent-project cards with
 cached modification times, media drops and Open / Import v1 / Import Manim.
 Its quiet gradient glow runs only while the launcher is visible. Card lifts and
 tab changes settle in 180ms. Preferences > Motion > Reduce motion makes the glow
@@ -67,3 +67,39 @@ The Export button, dialog primaries and "Create" actions share `style::primary_b
 (violet-to-cyan gradient, dark lettering). The launcher hero adds a slow light sweep
 over a static wash; Reduce motion keeps only the wash. Preset cards carry an aspect
 chip, and the drop zone is dashed and lights up while files are dragged over it.
+
+## Viewer, inspector and timeline follow-ups
+
+- **Rotation** is shown and typed in degrees everywhere in the UI (inspector rows,
+  numeric scrubbing, multi-selection, the gizmo pill). Transforms and keyframes still
+  store radians; conversion lives in `field_display_value` / `field_model_value`.
+- **Click-to-pick:** clicking the preview selects the topmost visible clip under the
+  pointer, Alt-click cycles through the stack, and a click on empty canvas clears the
+  selection. Media clips hit anywhere inside their transformed bounds. Text, LaTeX,
+  graph and shape clips have a canvas-sized box but draw little, so they are rendered
+  alone at thumbnail size and only count when they have ink within a few pixels of the
+  pointer. Handles of the selected clip keep priority for scale and rotate drags.
+- **Compositing:** the model has no blend modes, so the inspector shows only the
+  opacity row (section "Compositing"); a blend dropdown waits for core support.
+- **Effect warnings:** a clip whose effect plugin is not loaded, or whose last preview
+  frame failed inside an effect, gets an amber warning badge next to its kind icon in
+  the timeline, a warning row (icon plus reason) in the inspector Effects section and a
+  toast when the preview first fails ([screenshot](screenshots/editor-effect-warning.png)).
+- **Filmstrip:** one thumbnail per visible tile, requested per source time, decoded on
+  a worker and kept in a 256-tile least-recently-used cache; the worker also keeps
+  LRU caches of open decoders and stills and one shared copy of each encoded video. Fades are drawn by
+  sampling the clip's actual fade keyframes, so linear, ease and hold fades differ.
+- **Gizmo:** scale handles work on mirrored (negative-scale) clips and keep their sign;
+  rotate drags are unwrapped so crossing the -x axis never jumps by a full turn.
+- **Window controls:** the window is client-decorated and the gpui-component title bar
+  supplies minimise, maximise/restore and close (theme hover colours; close hovers in
+  `DANGER`). Minimise and maximise appear when the window manager advertises them;
+  close is always shown. On X11 client decorations need a compositing window manager,
+  so a bare Xvfb shows none. To test them there, run
+  `scripts/virtual-display.sh` with a tiny helper that sets `_NET_WM_CM_OWNER`,
+  `_NET_SUPPORTING_WM_CHECK` and `_GTK_FRAME_EXTENTS` on the root window.
+
+The Titles tab uses CPU-rendered preset cards cached by canvas size. Double-click
+adds at the playhead; dragging uses timeline snapping. The inspector presents all
+linked composition text fields before the usual clip properties. Preset data lives
+in `crates/control/presets/titles.json`; applying a composition is one command batch.
