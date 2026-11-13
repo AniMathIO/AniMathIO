@@ -343,6 +343,7 @@ impl Editor {
     }
 
     pub(super) fn field_command(&self, id: ClipId, field: &Field, value: f64) -> Option<Command> {
+        let value = field_model_value(field, value);
         match field {
             Field::Transform(property) => {
                 let clip = self.find_clip(id)?;

@@ -17,7 +17,8 @@ pub(crate) struct RenderRequest {
 /// produced it so stale results can be dropped.
 pub(crate) struct RenderResult {
     pub(crate) generation: u64,
-    pub(crate) image: Arc<RenderImage>,
+    pub(crate) failed_effect_clips: std::collections::BTreeSet<animathio_core::ClipId>,
+    pub(crate) image: Result<Arc<RenderImage>, String>,
 }
 
 pub(crate) enum WorkerMsg {
@@ -113,10 +114,32 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
             if let Some(host) = &mut host {
                 request.scene = host.resolve(&request.scene, request.size);
             }
-            let Some(image) = render_image(&mut ctx, &request) else {
-                continue;
+            let image = render_image(&mut ctx, &request);
+            let failed_effect_clips = if image.is_err() {
+                request
+                    .scene
+                    .clips
+                    .iter()
+                    .filter(|clip| !clip.effects.is_empty())
+                    .filter(|clip| {
+                        matches!(
+                            render(
+                                &Scene {
+                                    clips: vec![(*clip).clone()],
+                                },
+                                &mut ctx,
+                                request.size,
+                            ),
+                            Err(animathio_render::Error::Effect(_))
+                        )
+                    })
+                    .map(|clip| clip.id)
+                    .collect()
+            } else {
+                std::collections::BTreeSet::default()
             };
             let _ = tx.send(RenderResult {
+                failed_effect_clips,
                 generation: request.generation,
                 image,
             });
@@ -124,18 +147,18 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
     }
 }
 
-fn render_image(ctx: &mut RenderCtx, request: &RenderRequest) -> Option<Arc<RenderImage>> {
+fn render_image(ctx: &mut RenderCtx, request: &RenderRequest) -> Result<Arc<RenderImage>, String> {
     let frame = match render(&request.scene, ctx, request.size) {
         Ok(frame) => frame,
         Err(animathio_render::Error::Gpu(error)) => {
             // A GPU failure mid-session (device lost, size limit): fall back to CPU.
             eprintln!("preview renderer: GPU failed ({error}); using CPU");
             ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
-            render(&request.scene, ctx, request.size).ok()?
+            render(&request.scene, ctx, request.size).map_err(|e| e.to_string())?
         }
         Err(error) => {
             eprintln!("preview render failed: {error}");
-            return None;
+            return Err(error.to_string());
         }
     };
     let mut pixels = frame.pixels;
@@ -143,6 +166,7 @@ fn render_image(ctx: &mut RenderCtx, request: &RenderRequest) -> Option<Arc<Rend
     for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
-    let image = image::RgbaImage::from_raw(frame.size.0, frame.size.1, pixels)?;
-    Some(Arc::new(RenderImage::new([image::Frame::new(image)])))
+    let image =
+        image::RgbaImage::from_raw(frame.size.0, frame.size.1, pixels).ok_or("invalid frame")?;
+    Ok(Arc::new(RenderImage::new([image::Frame::new(image)])))
 }
