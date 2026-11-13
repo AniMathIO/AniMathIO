@@ -68,6 +68,26 @@ pub(crate) fn fade_len(clip: &Clip, edge: FadeEdge) -> i64 {
     }
 }
 
+/// Sample the same interpolated level used by rendering/mixing, from the edge inward.
+pub(crate) fn levels(clip: &Clip, edge: FadeEdge, length: i64) -> Vec<f32> {
+    (0..=32)
+        .map(|i| {
+            let distance = length * i / 32;
+            let local = if edge == FadeEdge::In {
+                distance
+            } else {
+                clip_len(clip) - distance
+            };
+            clip.animations
+                .iter()
+                .find(|a| a.target == fade_target(clip))
+                .and_then(|a| a.keys.sample(Time(local)))
+                .and_then(|v| v.as_number())
+                .unwrap_or(i as f64 / 32.) as f32
+        })
+        .collect()
+}
+
 /// The largest fade allowed on `edge` without running into the opposite fade.
 pub(crate) fn max_fade(clip: &Clip, edge: FadeEdge) -> i64 {
     let other = match edge {
@@ -175,6 +195,34 @@ mod tests {
 
     fn current(project: &Project) -> Clip {
         project.tracks()[0].clips()[&ClipId(1)].clone()
+    }
+
+    #[test]
+    fn drawn_fade_uses_keyframe_interpolation() {
+        for (interpolation, expected) in [
+            (Interpolation::Linear, 0.25),
+            (Interpolation::EaseInOut, 0.15625),
+            (Interpolation::Hold, 0.),
+        ] {
+            let (mut project, _) = project_with(ClipKind::Audio(AssetId::of(b"a")));
+            fade_command(&current(&project), FadeEdge::In, TICKS_PER_SECOND)
+                .unwrap()
+                .apply(&mut project)
+                .unwrap();
+            Command::AddKeyframe {
+                id: ClipId(1),
+                target: Target::Param("gain".into()),
+                time: Time(0),
+                keyframe: Keyframe {
+                    value: ParamValue::Number(0.),
+                    interpolation,
+                },
+            }
+            .apply(&mut project)
+            .unwrap();
+            let sampled = levels(&current(&project), FadeEdge::In, TICKS_PER_SECOND);
+            assert!((sampled[8] - expected).abs() < 1e-6);
+        }
     }
 
     #[test]
