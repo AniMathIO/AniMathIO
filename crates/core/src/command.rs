@@ -553,8 +553,7 @@ impl Command {
                         .range(..=Time(duration))
                         .next_back()
                         .or_else(|| animation.keys.0.first_key_value())
-                        .map(|(_, key)| key.interpolation)
-                        .unwrap_or_default();
+                        .map_or_default(|(_, key)| key.interpolation);
                     animation.keys.0 = animation
                         .keys
                         .0
