@@ -32,6 +32,7 @@ mod preview_settings;
 mod render_worker;
 mod ripple;
 mod selection;
+mod style;
 mod timecode;
 mod timeline;
 

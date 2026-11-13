@@ -952,19 +952,13 @@ fn kwarg<'a>(kwargs: &'a [(String, Value)], name: &str) -> Option<&'a Value> {
 
 fn position(node: &Node<'_>, source: &str) -> (usize, usize, String) {
     let pos = node.start_position();
-    let snippet = source
-        .lines()
-        .nth(pos.row)
-        .map_or_default(str::trim);
+    let snippet = source.lines().nth(pos.row).map_or_default(str::trim);
     (pos.row + 1, pos.column + 1, truncate(snippet, 80))
 }
 
 fn snippet_at(node: &Node<'_>, source: &str) -> String {
     let pos = node.start_position();
-    let snippet = source
-        .lines()
-        .nth(pos.row)
-        .map_or_default(str::trim);
+    let snippet = source.lines().nth(pos.row).map_or_default(str::trim);
     truncate(snippet, 80)
 }
 

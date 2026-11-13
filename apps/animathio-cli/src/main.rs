@@ -247,8 +247,7 @@ fn run(cli: Cli) -> Result<()> {
                     .command(&bundle.project)?
                     .apply(&mut bundle.project)?;
             }
-            let defaults = preset
-                .map_or_default(animathio_control::ExportPreset::export_settings);
+            let defaults = preset.map_or_default(animathio_control::ExportPreset::export_settings);
             let range = animathio_core::TimeRange::new(
                 from,
                 to.unwrap_or_else(|| animathio_export::duration(&bundle.project)),
