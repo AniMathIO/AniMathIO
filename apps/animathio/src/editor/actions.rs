@@ -371,9 +371,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             cx.propagate();
             return;
         }
-        this.timeline_zoom = 1.0;
-        this.timeline_scroll = 0.0;
-        cx.notify();
+        this.animate_timeline_zoom(1.0, 0.0, cx);
     }))
     .on_action(cx.listener(|this, _: &LargerTracks, window, cx| {
         if this.fields.any_focused(window, cx) {
@@ -586,8 +584,15 @@ impl Editor {
     }
 
     pub(super) fn zoom_timeline(&mut self, factor: f32, cx: &mut Context<Self>) {
-        self.timeline_zoom = (self.timeline_zoom * factor).clamp(1.0, 64.0);
-        cx.notify();
+        let zoom = self
+            .zoom_motion
+            .as_ref()
+            .map_or(self.timeline_zoom, |motion| motion.to.0);
+        self.animate_timeline_zoom(
+            (zoom * factor).clamp(1.0, 64.0),
+            f32::from(self.timeline_bounds.size.width) / 2.0,
+            cx,
+        );
     }
 
     pub(super) fn set_track_height(

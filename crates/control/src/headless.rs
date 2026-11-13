@@ -123,6 +123,9 @@ impl HeadlessHandler {
             evaluate(&self.project, params.time),
             (params.width, params.height),
         );
+        if let Some(host) = &self.plugins {
+            ctx.set_effect_processor(host.effect_processor());
+        }
         let frame = render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;
@@ -151,8 +154,44 @@ impl HeadlessHandler {
                 .tracks()
                 .iter()
                 .flat_map(|t| t.clips().values())
-                .any(|clip| matches!(clip.kind, animathio_core::ClipKind::Plugin { .. }))
+                .any(|clip| {
+                    matches!(clip.kind, animathio_core::ClipKind::Plugin { .. })
+                        || !clip.effects.is_empty()
+                })
         {
+            self.plugins = load_plugins();
+        }
+    }
+
+    fn effects_list(&mut self) -> Vec<crate::EffectInfo> {
+        self.ensure_effect_plugins();
+        crate::effect_infos(
+            self.plugins
+                .as_ref()
+                .map(PluginHost::effects)
+                .unwrap_or_default(),
+        )
+    }
+
+    fn effects_add(
+        &mut self,
+        params: &crate::EffectAddParams,
+    ) -> Result<crate::EffectAdded, ControlError> {
+        self.ensure_effect_plugins();
+        let descriptors = self
+            .plugins
+            .as_ref()
+            .map(PluginHost::effects)
+            .unwrap_or_default();
+        let (command, added) = crate::add_effect_command(&self.project, &descriptors, params)?;
+        self.history.execute(&mut self.project, &command)?;
+        Ok(added)
+    }
+
+    /// Load the plugin host even when the project has no plugin clips or effects yet, so
+    /// effect listing and adding work on an empty project.
+    fn ensure_effect_plugins(&mut self) {
+        if self.plugins.is_none() {
             self.plugins = load_plugins();
         }
     }
@@ -246,6 +285,9 @@ impl ControlHandler for HeadlessHandler {
                 let plugins = &mut self.plugins;
                 let mut exporter = animathio_export::Exporter::new(project, assets)
                     .map_err(|e| ControlError::Other(e.to_string()))?;
+                if let Some(host) = plugins.as_ref() {
+                    exporter.set_effect_processor(host.effect_processor());
+                }
                 let destination = animathio_export::Destination {
                     path: output,
                     overwrite: params.overwrite,
@@ -265,6 +307,8 @@ impl ControlHandler for HeadlessHandler {
                     .map_err(ControlError::from)?;
                 serde_json::to_value(written.display().to_string())?
             }
+            Call::EffectsList => serde_json::to_value(self.effects_list())?,
+            Call::EffectsAdd { params } => serde_json::to_value(self.effects_add(&params)?)?,
             Call::ProjectGet => serde_json::to_value(self.state())?,
             Call::ProjectOpen { path } => {
                 self.open(&path)?;
@@ -591,7 +635,12 @@ mod tests {
             })
             .unwrap_err();
         assert!(
-            matches!(rejected, ControlError::AlreadyExists(ref path) if *path == output),
+            // Compare canonical forms: Windows reports `\\?\` or 8.3 short paths.
+            matches!(
+                rejected,
+                ControlError::AlreadyExists(ref path)
+                    if path.canonicalize().ok() == output.canonicalize().ok()
+            ),
             "{rejected:?}"
         );
 

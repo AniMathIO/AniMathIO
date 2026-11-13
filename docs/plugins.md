@@ -5,7 +5,8 @@ AniMathIO 2.0 plugins are sandboxed **WebAssembly components** (wasmtime,
 is compiled to `wasm32-wasip2` and packaged as an `.amplugin` — a zip containing
 `plugin.toml` (metadata) and `plugin.wasm` (the component).
 
-A plugin is a pure function of `(params, time)` returning vector scenes; it never
+A plugin is a pure function of `(params, time)` returning vector scenes — or, for an
+*effect* plugin, a pure function of `(pixels, params, time)` returning pixels. It never
 touches files, sockets, the GPU or a font engine directly. Everything it needs is
 provided by **host imports**.
 
@@ -14,7 +15,7 @@ provided by **host imports**.
 The contract is `crates/plugin-api/wit/plugin.wit`:
 
 ```wit
-package animathio:plugin@0.2.0;
+package animathio:plugin@0.2.1;
 
 interface types { /* shared vector + schema types, see below */ }
 
@@ -35,12 +36,31 @@ world plugin {
     export apply-effect: func(input: scene, params: param-map, time-ticks: s64, size: size) -> scene;
     export evaluate-curve: func(time-ticks: s64, duration-ticks: s64, params: param-map) -> f64;
 }
+
+// Effect plugins implement this world instead (see "Effect plugins" below).
+world effect-plugin {
+    import host;
+    use types.{manifest};
+    export describe: func() -> manifest;
+    export frame-effects;
+}
 ```
 
-A component implements the four exports. The first three are selected by the
+A clip-source or animation component implements the four exports of `world plugin`. The first three are selected by the
 plugin's declared `kinds` (`clip-source` uses `render-clip`, `effect` uses
 `apply-effect`, `animation` uses `evaluate-curve`), but the world requires all four
-— the unused ones can be stubs (return the input scene / `0.0`).
+— the unused ones can be stubs (return the input scene / `0.0`). `apply-effect`
+(vector-scene effects) is reserved and not called by the host; pixel effects use the
+separate `effect-plugin` world below.
+
+### API versions
+
+The WIT package is `animathio:plugin@0.2.1`. `0.2.1` is purely additive over `0.2.0`
+(it adds the `frame-effects` interface and the `effect-plugin` world), and the component
+model matches imports by semver-compatible version, so components built against
+`0.2.0` still link and run unchanged — the repository keeps a prebuilt `0.2.0` hello
+component as a test fixture. `plugin.toml` accepts any `0.2.x` `api_version`; effect
+plugins must declare `0.2.1` or later.
 
 ### Host imports
 
@@ -153,17 +173,61 @@ let t = time_ticks as f64 / TICKS_PER_SECOND;
 The manifest stored at the archive root of an `.amplugin`:
 
 ```toml
-api_version = "0.2.0"          # must start with "0.2"
+api_version = "0.2.0"          # any "0.2.x"; effect plugins need "0.2.1"
 id = "com.example.hello"       # reverse-domain; [a-zA-Z0-9._-]
 name = "Hello"
 version = "0.1.0"
 description = "Minimal example plugin: a filled circle"
-kinds = ["clip-source"]        # "clip-source" | "effect" | "animation"
+kinds = ["clip-source"]        # "clip-source" | "effect" | "animation"; an effect plugin declares only ["effect"]
 capabilities = []              # requested host grants; empty = sandbox only
 ```
 
 `api_version`, `id`, `name`, `version` and `kinds` are required; `description` and
 `capabilities` are optional. The `id` must be unique within a host.
+
+## Effect plugins
+
+An effect plugin is a pixel-filter library. It declares `kinds = ["effect"]`, implements
+the `effect-plugin` world and is built like any other plugin
+(`wit_bindgen::generate!({ path: ..., world: "effect-plugin" })`). Its exports:
+
+```wit
+interface frame-effects {
+    use types.{size, param-map, param-spec};
+    record effect-descriptor { id: string, name: string, description: string, params: list<param-spec> }
+    list-effects: func() -> list<effect-descriptor>;
+    apply-frame: func(effect: string, pixels: list<u8>, size: size,
+                      params: param-map, time-ticks: s64) -> result<list<u8>, string>;
+}
+```
+
+- `list-effects` advertises each filter: a stable `id` (`[a-z0-9_-]`, stored in projects),
+  a display name, and its parameters. Only `number` parameters are supported (effect
+  parameters are keyframeable numbers); `min`/`max`/`step` are UI hints and `default`
+  seeds new instances. The editor's Effects tab and context menu and the MCP
+  `list_effects` tool are generated from these descriptors — nothing is hard-coded.
+- `apply-frame` receives `size.width * size.height * 4` bytes of row-major,
+  straight-alpha sRGB RGBA8, the evaluated numeric parameters (keyframes already
+  sampled) and the clip-local source time in ticks. It must return a buffer of exactly
+  the same length, or an `Err` diagnostic for invalid parameters. It must be a pure
+  function of its arguments: preview and export both rely on identical output.
+- Missing parameters should fall back to the declared defaults.
+
+Projects reference an effect by plugin id and effect id (`EffectInstance { plugin,
+effect, params }`), so a project saved with `org.animathio.effects-basic/grayscale`
+renders anywhere that plugin is installed, and fails with a clear
+`effect plugin ... is not loaded` error where it is not.
+
+The host runs every call in a fresh store: the component is compiled once (disk-cached)
+and its imports are resolved once, then each call copies the frame in, runs the filter
+and copies the result out. The frame is never shared with the guest.
+
+First-party `org.animathio.effects-basic` provides `grayscale`, `sepia`, `invert`,
+`saturate`, `brightness`, `contrast` (all `amount`), `blur` (`radius`, a fraction of the
+canvas height) and `opacity` (`amount`). Color filters work in linear light with an exact
+`powf`-free sRGB table lookup, `invert` on encoded channels, `blur` on premultiplied
+linear light with edge replication. Its output is checked bit-for-bit against the former
+builtin implementation by `crates/plugin-host/tests/effects.rs` and by the render goldens.
 
 ## Building an `.amplugin`
 
@@ -215,6 +279,18 @@ Plugins run with no ambient authority. Defaults (in `plugin-host`,
 Fuel metering traps runaway loops deterministically and long before the epoch
 backstop fires; after a trap the host discards the store and continues. The
 `trap` plugin (`plugins/trap`, an infinite-loop fixture) exercises exactly this.
+
+Pixel-effect calls use a frame-scaled budget (`SandboxLimits`):
+
+| Limit | Default |
+| --- | --- |
+| Frame size | 16 Mpx (`max_effect_pixels`); larger frames are rejected before any plugin code runs |
+| Memory | 64 MiB + 48 bytes per pixel, capped at 1 GiB (`effect_memory_bytes`) |
+| Fuel | `fuel_per_call` + 4,096 per pixel (`effect_fuel_per_pixel`) |
+| Epoch deadline | 1,000 ticks → ~10 s backstop (`effect_epoch_deadline_ticks`) |
+
+A trap, limit violation, wrong-sized output or `Err` result fails the frame with
+`render::Error::Effect`, and the caller's pixels are left untouched.
 
 Host imports are separately capped:
 
@@ -422,8 +498,9 @@ scale with it. Normalized shapes remain static unless their parameters are keyfr
 `[{"MoveTo":[0,0]},{"QuadTo":[[0.5,1],[1,0]]},"Close"]`.
 `CurveTo` carries three points (two controls and endpoint).
 
-The component ABI is now `animathio:plugin@0.2.0`, including explicit scene units
-and text alignment. Rebuild components against the current WIT and set
-`api_version = "0.2.0"` in `plugin.toml`; old 0.1 packages are rejected.
+The component ABI is now `animathio:plugin@0.2.1`: `0.2.0` (explicit scene units
+and text alignment) plus the additive `effect-plugin` world. Rebuild components against
+the current WIT and set `api_version` to `0.2.0` or `0.2.1` in `plugin.toml`; old 0.1
+packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.

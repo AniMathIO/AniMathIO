@@ -13,7 +13,8 @@
 //! When `--project` is given it runs headless against that file; otherwise it
 //! connects to a running editor's control socket. The tool surface covers
 //! v1's 13 tools, adapted to v2 [`animathio_core::Command`]s, plus
-//! `render_frame`, `undo`/`redo`, `set_param`, `add_keyframe` and `import_v1`.
+//! `render_frame`, `undo`/`redo`, `set_param`, `add_keyframe`, `import_v1`, and the
+//! plugin-driven `list_effects`/`add_effect`.
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -195,6 +196,18 @@ pub(crate) struct SetParam {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) value: f64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddEffect {
+    /// Clip id.
+    pub(crate) id: String,
+    /// Plugin id from `list_effects`, e.g. `org.animathio.effects-basic`.
+    pub(crate) plugin: String,
+    /// Effect id from `list_effects`, e.g. `grayscale`.
+    pub(crate) effect: String,
+    /// Parameter overrides by parameter id; other parameters keep their defaults.
+    pub(crate) params: Option<std::collections::BTreeMap<String, f64>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1049,6 +1062,36 @@ impl McpServer {
             })
             .map_err(mcp_error)?;
         tool_text(json!({"clip_id": clip_id.0}))
+    }
+
+    #[tool(
+        description = "List the clip effects provided by loaded effect plugins: plugin id, effect id, name, description and numeric parameters (id, min, max, default). Pass the plugin and effect ids to add_effect."
+    )]
+    async fn list_effects(&self) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let effects = backend.effects_list().map_err(mcp_error)?;
+        tool_text(json!({"effects": effects}))
+    }
+
+    #[tool(
+        description = "Add a pixel effect to a clip as one undo step. Effects come from plugins; call list_effects for the available plugin/effect ids and their parameters. Unspecified parameters keep the plugin default. Effects apply in chain order after the clip is drawn. Returns the effect id."
+    )]
+    async fn add_effect(
+        &self,
+        Parameters(p): Parameters<AddEffect>,
+    ) -> Result<CallToolResult, McpError> {
+        let clip = parse_clip_id(&p.id)?;
+        let mut backend = self.backend.lock().await;
+        let added = backend
+            .effects_add(animathio_control::EffectAddParams {
+                clip,
+                plugin: p.plugin,
+                effect: p.effect,
+                params: p.params.unwrap_or_default(),
+                index: None,
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({"clip_id": added.clip.0, "effect_id": added.effect_id.0}))
     }
 
     #[tool(

@@ -11,6 +11,7 @@ impl Editor {
     ) {
         window.focus(&self.panel_focus[0], cx);
         self.context_menu = None;
+        self.zoom_motion = None;
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
         if y < layout.ruler_height {
@@ -223,6 +224,10 @@ impl Editor {
             return None;
         }
         let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+        let key_y = layout.ruler_height + (row + 1) as f32 * layout.row_height - 13.0;
+        if (y - key_y).abs() > 7.0 {
+            return None;
+        }
         let mut found = None;
         for (clip_row, clip) in self
             .project
@@ -416,7 +421,7 @@ impl Editor {
                 cx.notify();
             }
             Some(TimelineGesture::Scrub) => self.scrub_to(x, cx),
-            None => {}
+            Some(TimelineGesture::Overview) | None => {}
         }
     }
 
@@ -548,14 +553,14 @@ impl Editor {
             ScrollDelta::Lines(point) => (point.x * 20.0, point.y * 20.0),
         };
         if event.modifiers.control || event.modifiers.platform {
-            let layout = self.current_layout();
-            let anchor = timeline::x_to_time(&layout, x);
             let factor = (dy * 0.002).exp();
-            self.timeline_zoom = (self.timeline_zoom * factor).clamp(1.0, 64.0);
-            let new_layout = self.current_layout();
-            let new_x = timeline::time_to_x(&new_layout, anchor);
-            self.timeline_scroll += new_x - x;
+            let target = self
+                .zoom_motion
+                .as_ref()
+                .map_or(self.timeline_zoom, |m| m.to.0);
+            self.animate_timeline_zoom((target * factor).clamp(1.0, 64.0), x, cx);
         } else if event.modifiers.alt || dx != 0.0 {
+            self.zoom_motion = None;
             self.timeline_scroll -= dy;
             if dx != 0.0 {
                 self.timeline_scroll -= dx;
@@ -569,6 +574,61 @@ impl Editor {
             .timeline_scroll
             .clamp(0.0, timeline::max_scroll(&layout));
         cx.notify();
+    }
+
+    /// Animate zoom and scroll toward `zoom`, keeping the time under `anchor_x` fixed.
+    pub(super) fn animate_timeline_zoom(
+        &mut self,
+        zoom: f32,
+        anchor_x: f32,
+        cx: &mut Context<Self>,
+    ) {
+        let layout = self.current_layout();
+        let (zoom, scroll) = timeline::zoom_at(&layout, zoom, anchor_x);
+        self.zoom_motion = Some(ZoomMotion {
+            started: Instant::now(),
+            from: (self.timeline_zoom, self.timeline_scroll),
+            to: (zoom, scroll),
+        });
+        cx.notify();
+    }
+
+    pub(super) fn advance_timeline_zoom(&mut self, window: &mut Window) {
+        if let Some(motion) = &self.zoom_motion {
+            let t = (motion.started.elapsed().as_secs_f32() * 1000.0
+                / crate::style::motion::BASE_MS as f32)
+                .min(1.0);
+            let ease = 1.0 - (1.0 - t).powi(3);
+            self.timeline_zoom = motion.from.0 + (motion.to.0 - motion.from.0) * ease;
+            self.timeline_scroll = motion.from.1 + (motion.to.1 - motion.from.1) * ease;
+            if t >= 1.0 {
+                self.zoom_motion = None;
+            } else {
+                window.request_animation_frame();
+            }
+        }
+    }
+
+    fn scroll_overview(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let width = f32::from(self.timeline_bounds.size.width).max(1.0);
+        let x = f32::from(position.x - self.timeline_bounds.origin.x);
+        self.timeline_scroll =
+            (x * self.timeline_zoom - width / 2.0).clamp(0.0, width * (self.timeline_zoom - 1.0));
+        cx.notify();
+    }
+
+    fn finish_gain_drag(&mut self, cx: &mut Context<Self>) {
+        if let Some(drag) = self.gain_drag.take()
+            && (drag.current - drag.original).abs() > f64::EPSILON
+        {
+            self.execute(
+                &Command::SetTrackGain {
+                    id: drag.id,
+                    gain: drag.current,
+                },
+                cx,
+            );
+        }
     }
 
     /// Cached downsampled peaks for a decoded audio asset.
@@ -602,13 +662,25 @@ impl Editor {
     pub(super) fn build_timeline_snapshot(&self, cx: &App) -> TimelineSnapshot {
         let duration = timeline::project_duration(&self.project);
         let mut clips = Vec::new();
+        let mut overview = Vec::new();
+        let mut transitions = Vec::new();
+        let layout = self.current_layout();
         let selected = self.selected_ids();
         let single = selected.len() <= 1;
         let rows = self.project.tracks().len();
         let any_solo = self.project.tracks().iter().any(Track::is_solo);
         for (row, track) in self.project.tracks().iter().enumerate() {
             let silenced = track.is_muted() || (any_solo && !track.is_solo());
+            for transition in track.transitions() {
+                if let Some(from) = track.clips().get(&transition.from) {
+                    transitions.push(TransitionPaint {
+                        row,
+                        range: transition.window(from.range.end),
+                    });
+                }
+            }
             for clip in track.clips().values() {
+                overview.push((row, clip.range, clip_color(&clip.kind, cx.theme())));
                 let mut paint_row = row;
                 let (start, end) = if let Some(TimelineGesture::Drag(drag)) = &self.gesture
                     && drag.members.contains(&clip.id)
@@ -629,6 +701,10 @@ impl Editor {
                 } else {
                     (clip.range.start, clip.range.end)
                 };
+                // Cull before allocating labels, animation markers or requesting media.
+                if !timeline::visible_span(&layout, start, end) {
+                    continue;
+                }
                 let mut keyframes = Vec::new();
                 if single && self.selected == Some(clip.id) {
                     for animation in &clip.animations {
@@ -671,13 +747,44 @@ impl Editor {
                     ClipKind::Audio(asset) => self.waveform_for(asset),
                     _ => None,
                 };
+                let thumbnails = match &clip.kind {
+                    ClipKind::Video(asset) | ClipKind::Image(asset)
+                        if timeline::time_to_x(&layout, end)
+                            - timeline::time_to_x(&layout, start)
+                            > 40.0
+                            && layout.row_height > 36.0 =>
+                    {
+                        let still = matches!(clip.kind, ClipKind::Image(_));
+                        let height = (layout.row_height - 26.0).clamp(16.0, 96.0) as u32;
+                        (0..5)
+                            .map(|index| {
+                                let tick = clip.source_offset.0 + (end.0 - start.0) / 5 * index;
+                                self.thumbnails.borrow_mut().get(
+                                    asset,
+                                    Time(tick),
+                                    height,
+                                    still,
+                                    &self.assets,
+                                )
+                            })
+                            .collect()
+                    }
+                    _ => Vec::new(),
+                };
                 clips.push(ClipPaint {
                     row: paint_row,
                     start,
                     end,
                     selected: selected.contains(&clip.id),
                     hovered: self.hovered_clip == Some(clip.id),
-                    label: clip_label(&self.project, clip).into(),
+                    label: format!(
+                        "{}   {}",
+                        clip_title(&self.project, clip, layout.row_height),
+                        timecode::format_timecode(Time(end.0 - start.0), self.project.frame_rate())
+                    )
+                    .into(),
+                    preview: timeline_content_preview(clip).into(),
+                    thumbnails,
                     kind: clip.kind.clone(),
                     icon: icons::kind_icon(&clip.kind),
                     keyframes,
@@ -694,6 +801,10 @@ impl Editor {
             duration,
             rows: self.project.tracks().len(),
             clips,
+            overview,
+            transitions,
+            scrubbing: matches!(self.gesture, Some(TimelineGesture::Scrub)),
+            waveform_paths: self.waveform_paths.clone(),
             position: self.position,
             frame_rate: self.project.frame_rate(),
             row_height: self.dock.track_height.pixels(),
@@ -712,6 +823,9 @@ impl Editor {
         let weak_paint = weak.clone();
         let snapping = self.snapping;
         let ripple_all = self.ripple_scope == RippleScope::AllTracks;
+        let overview = snapshot.overview.clone();
+        let overview_rows = snapshot.rows;
+        let duration = snapshot.duration;
         let content_height =
             RULER_H + self.project.tracks().len() as f32 * self.dock.track_height.pixels();
         let pool_dragging = self.pool_drag.is_some();
@@ -794,9 +908,7 @@ impl Editor {
                         icons::icon(IconName::FoldHorizontal),
                         "Zoom to fit",
                         cx.listener(|this, _, _, cx| {
-                            this.timeline_zoom = 1.0;
-                            this.timeline_scroll = 0.0;
-                            cx.notify();
+                            this.animate_timeline_zoom(1.0, 0.0, cx);
                         }),
                     ))
                     .child(
@@ -852,8 +964,7 @@ impl Editor {
                         icons::icon(IconName::ZoomOut),
                         "Zoom out",
                         cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.timeline_zoom = (this.timeline_zoom / 1.25).clamp(1.0, 64.0);
-                            cx.notify();
+                            this.zoom_timeline(0.8, cx);
                         }),
                     ))
                     .child(div().text_color(cx.theme().muted_foreground).child(format!(
@@ -867,10 +978,81 @@ impl Editor {
                         icons::icon(IconName::ZoomIn),
                         "Zoom in",
                         cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.timeline_zoom = (this.timeline_zoom * 1.25).clamp(1.0, 64.0);
-                            cx.notify();
+                            this.zoom_timeline(1.25, cx);
                         }),
                     )),
+            )
+            .child(
+                div()
+                    .h(px(22.))
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .bg(crate::style::hex(crate::style::color::BG))
+                    .child(
+                        div()
+                            .w(px(HEADER_W))
+                            .flex_shrink_0()
+                            .px_2()
+                            .text_xs()
+                            .text_color(crate::style::hex(crate::style::color::TEXT_MUTED))
+                            .child("OVERVIEW"),
+                    )
+                    .child(
+                        div()
+                            .id("timeline-overview")
+                            .flex_1()
+                            .h_full()
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                                    this.zoom_motion = None;
+                                    this.gesture = Some(TimelineGesture::Overview);
+                                    this.scroll_overview(event.position, cx);
+                                }),
+                            )
+                            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                                if event.dragging()
+                                    && matches!(this.gesture, Some(TimelineGesture::Overview))
+                                {
+                                    this.scroll_overview(event.position, cx);
+                                }
+                            }))
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.gesture = None;
+                                    cx.notify();
+                                }),
+                            )
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    if matches!(this.gesture, Some(TimelineGesture::Overview)) {
+                                        this.gesture = None;
+                                        cx.notify();
+                                    }
+                                }),
+                            )
+                            .child(
+                                canvas(
+                                    |_, _, _| {},
+                                    move |bounds, (), window, _| {
+                                        paint_overview(
+                                            bounds,
+                                            &overview,
+                                            overview_rows,
+                                            duration,
+                                            zoom,
+                                            scroll,
+                                            window,
+                                        );
+                                    },
+                                )
+                                .size_full(),
+                            ),
+                    ),
             )
             .child(
                 div()
@@ -998,7 +1180,20 @@ impl Editor {
         for track in self.project.tracks() {
             let id = track.id();
             let name = track.name().to_owned();
-            let gain = track.gain();
+            let gain = self
+                .gain_drag
+                .as_ref()
+                .filter(|drag| drag.id == id)
+                .map_or(track.gain(), |drag| drag.current);
+            let kind = track
+                .clips()
+                .values()
+                .max_by_key(|clip| clip.range.end.0 - clip.range.start.0)
+                .map(|clip| &clip.kind);
+            let color = kind.map_or(
+                crate::style::hex(crate::style::color::CLIP_PLUGIN),
+                |kind| clip_color(kind, cx.theme()),
+            );
             let muted = track.is_muted();
             let solo = track.is_solo();
             let locked = track.is_locked();
@@ -1014,77 +1209,153 @@ impl Editor {
                 .items_center()
                 .child(
                     div()
-                        .w(px(28.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("{gain:.1}")),
-                )
-                .child(header_button(
-                    "gain-",
-                    icons::icon(IconName::Minus),
-                    "Lower track gain",
-                    cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.nudge_track_gain(id, -0.1, cx);
-                    }),
-                ))
-                .child(header_button(
-                    "gain+",
-                    icons::icon(IconName::Plus),
-                    "Raise track gain",
-                    cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.nudge_track_gain(id, 0.1, cx);
-                    }),
-                ))
-                .child(div().flex_1())
-                .child(
-                    header_button(
-                        "track-mute",
-                        icons::icon(if muted {
-                            IconName::VolumeX
-                        } else {
-                            IconName::Volume2
-                        }),
-                        if muted { "Unmute track" } else { "Mute track" },
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
-                        }),
-                    )
-                    .selected(muted)
-                    .toggled(muted),
-                )
-                .child(
-                    header_button(
-                        "track-solo",
-                        icons::icon(IconName::Headphones),
-                        if solo { "Unsolo track" } else { "Solo track" },
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
-                        }),
-                    )
-                    .selected(solo)
-                    .toggled(solo),
-                )
-                .child(
-                    header_button(
-                        "track-lock",
-                        icons::icon(if locked {
-                            IconName::Lock
-                        } else {
-                            IconName::LockOpen
-                        }),
-                        if locked { "Unlock track" } else { "Lock track" },
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.execute(
-                                &Command::SetTrackLocked {
-                                    id,
-                                    locked: !locked,
+                        .id(("track-gain", id.0))
+                        .w(px(62.))
+                        .h(px(22.))
+                        .flex_shrink_0()
+                        .cursor_pointer()
+                        .tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(format!(
+                                "Gain {gain:.2}x. Drag to adjust; double-click to reset"
+                            ))
+                            .build(window, cx)
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                cx.stop_propagation();
+                                if event.click_count == 2 {
+                                    this.gain_drag = None;
+                                    this.nudge_track_gain(id, 1.0 - gain, cx);
+                                } else {
+                                    this.gain_drag = Some(GainDrag {
+                                        id,
+                                        x: f32::from(event.position.x),
+                                        original: gain,
+                                        current: gain,
+                                    });
+                                }
+                            }),
+                        )
+                        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                            if event.dragging()
+                                && let Some(drag) = &mut this.gain_drag
+                            {
+                                drag.current = timeline::gain_from_drag(
+                                    drag.original,
+                                    f32::from(event.position.x) - drag.x,
+                                );
+                                cx.notify();
+                            }
+                        }))
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| this.finish_gain_drag(cx)),
+                        )
+                        .on_mouse_up_out(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| this.finish_gain_drag(cx)),
+                        )
+                        .child(
+                            canvas(
+                                |_, _, _| {},
+                                move |bounds, (), window, _| {
+                                    let y = bounds.center().y;
+                                    let left = bounds.left() + px(4.);
+                                    let right = bounds.right() - px(4.);
+                                    window.paint_quad(
+                                        fill(
+                                            Bounds::from_corners(
+                                                point(left, y - px(1.5)),
+                                                point(right, y + px(1.5)),
+                                            ),
+                                            crate::style::hex(crate::style::color::BORDER),
+                                        )
+                                        .corner_radii(px(2.)),
+                                    );
+                                    // Unity-gain tick at the midpoint of the 0-2x range.
+                                    window.paint_quad(fill(
+                                        Bounds::new(
+                                            point(
+                                                f32::midpoint(f32::from(left), f32::from(right))
+                                                    .into(),
+                                                y - px(3.5),
+                                            ),
+                                            size(px(1.), px(7.)),
+                                        ),
+                                        crate::style::hex(crate::style::color::TEXT_MUTED),
+                                    ));
+                                    let x = left + (right - left) * (gain as f32 / 2.0);
+                                    window.paint_quad(
+                                        fill(
+                                            Bounds::from_corners(
+                                                point(left, y - px(1.5)),
+                                                point(x, y + px(1.5)),
+                                            ),
+                                            color,
+                                        )
+                                        .corner_radii(px(2.)),
+                                    );
+                                    window.paint_quad(
+                                        fill(
+                                            Bounds::new(
+                                                point(x - px(3.), y - px(4.)),
+                                                size(px(6.), px(8.)),
+                                            ),
+                                            crate::style::hex(crate::style::color::TEXT),
+                                        )
+                                        .corner_radii(px(3.)),
+                                    );
                                 },
-                                cx,
-                            );
-                        }),
-                    )
-                    .selected(locked)
-                    .toggled(locked),
-                );
+                            )
+                            .size_full(),
+                        ),
+                )
+                .child(div().flex_1())
+                .child(header_pill(
+                    ("track-mute", id.0),
+                    if muted {
+                        IconName::VolumeX
+                    } else {
+                        IconName::Volume2
+                    },
+                    if muted { "Unmute track" } else { "Mute track" },
+                    muted,
+                    crate::style::color::WARNING,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
+                    }),
+                ))
+                .child(header_pill(
+                    ("track-solo", id.0),
+                    IconName::Headphones,
+                    if solo { "Unsolo track" } else { "Solo track" },
+                    solo,
+                    crate::style::color::SUCCESS,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
+                    }),
+                ))
+                .child(header_pill(
+                    ("track-lock", id.0),
+                    if locked {
+                        IconName::Lock
+                    } else {
+                        IconName::LockOpen
+                    },
+                    if locked { "Unlock track" } else { "Lock track" },
+                    locked,
+                    crate::style::color::ACCENT,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.execute(
+                            &Command::SetTrackLocked {
+                                id,
+                                locked: !locked,
+                            },
+                            cx,
+                        );
+                    }),
+                ));
             let renaming = self
                 .track_rename
                 .as_ref()
@@ -1124,6 +1395,15 @@ impl Editor {
                     .truncate()
                     .text_xs()
                     .text_color(cx.theme().foreground)
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        icons::icon(kind.map_or(IconName::Layers, icons::kind_icon))
+                            .xsmall()
+                            .text_color(color),
+                    )
                     .child(name.clone())
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         if event.click_count() == 2 {
@@ -1162,8 +1442,9 @@ impl Editor {
                     .items_center()
                     .justify_center()
                     .px_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_l(px(3.))
+                    .border_color(color)
+                    .bg(crate::style::hex(crate::style::color::PANEL))
                     .child(name_label)
                     .child(controls),
             );

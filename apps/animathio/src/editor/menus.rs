@@ -280,12 +280,13 @@ impl Editor {
                         .text_color(cx.theme().muted_foreground)
                         .child("Add effect"),
                 );
-                for kind in effect_kinds() {
+                for descriptor in self.available_effects() {
+                    let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
                     menu = menu.child(context_item(
                         IconName::Sparkles,
-                        effect_label(kind),
+                        &descriptor.name,
                         cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
-                            this.add_effect_to_clip(id, kind, cx);
+                            this.add_effect_to_clip(id, &plugin, &effect, cx);
                             this.context_menu = None;
                             cx.notify();
                         }),

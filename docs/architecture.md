@@ -8,15 +8,15 @@ the render/audio/export data flow. The authority for these rules is
 
 | Crate | Owns |
 | --- | --- |
-| `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. **No IO, GPU, decoder or UI dependencies.** |
-| `format` | Versioned `project.json` (schema version 2) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
-| `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
+| `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
+| `format` | Versioned `project.json` (schema version 3) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
+| `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
 | `audio` | Engine-owned decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb device playback. No audio resources live in `Project`. |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
 | `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
 | `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema, guest SDK and first-party clip authoring helpers (`sources`). |
-| `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, log) and plugin scene resolution. |
+| `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, log) plugin scene resolution, and pixel-effect plugins (`PluginHost::effects`, `effect_processor`: instance-pre cached components, a fresh fuel/memory/epoch-limited store per call, frame-size caps). |
 | `typeset` | Host-side math typesetting: Typst as a library plus MiTeX for LaTeX→Typst conversion, turned into vector path outlines plus a tight bbox. |
 | `import-v1` | One-way importer for v1 `.animathio` projects (deflated JSON + base64 media). |
 | `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with tree-sitter. |
@@ -82,7 +82,11 @@ Rules that keep the layers honest:
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `inspector_view`, `media_pool`, `dialogs`, `commands`, `project_io`,
 `control_bridge` and `playback_glue`. Shared drawing/resource helpers live in
-`support`; `color_edit` owns the live-preview transaction. `editing.rs` holds pure
+`support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
+number scrubbing and the viewer's transform gizmo all preview through it, so one
+gesture is one history entry). The gizmo maths in `viewer` shares the renderer's
+canvas mapping and builds its edit with `inspector::transform_edit_commands`, which
+merges plain properties into one `SetTransform` and keyframes animated ones. `editing.rs` holds pure
 shuttle, in/out, blade and ripple command planning. In/out points and tool mode stay
 in view state. Ripple trim uses one `Command::Batch` on the source track;
 Shift+Delete uses `RippleDelete`. The ruler and export range share half-open bounds.
@@ -91,6 +95,18 @@ monotonic clock stands in.
 
 Audible shuttle lives in `crates/audio` (`Speed`, `BlockGenerator`, `varispeed`).
 `Player::set_speed` restarts the session at the latency-corrected position like a seek.
+Timeline painting uses GPUI canvas quads/paths and culls clips before building
+labels or requesting previews. A separate `timeline_thumbnails` worker decodes
+five source-time samples per visible video clip, resizes them to low-resolution
+BGRA tiles and repeats one tile for still images. Keys include asset, source time
+and track height; the queue holds 16 requests and the UI retains at most 256 tiles.
+The worker keeps at most eight video decoders and eight small still images.
+Waveforms reuse the editor's cached 4096-peak audio summaries and a bounded cache
+of 128 paint-ready paths, invalidated by clip geometry, zoom, scroll or window
+position changes. These resources
+never enter the project model. The overview uses only lightweight clip ranges;
+zoom interpolates view state over the design token's 180ms motion duration.
+
 The mixer worker (never the device callback) renders blocks: it mixes the timeline span a
 block covers and resamples it by the signed rate with linear interpolation, carrying the
 fractional position so blocks join seamlessly. Negative speeds read backwards, so the block
@@ -295,8 +311,9 @@ flowchart LR
   Export and tests always use the CPU backend. The editor preview uses `GpuBackend`
   (Vello compute on a headless wgpu device, texture readback to RGBA8) when
   `preview_backend(BackendKind::Gpu)` finds an adapter, and falls back to CPU with the
-  reason otherwise or when a GPU render fails. Clips with effects are rasterized and
-  filtered on the CPU effect path and composited by the GPU backend as an image.
+  reason otherwise or when a GPU render fails. Clips with effects are rasterized, run
+  through the effect plugins (the same `EffectProcessor` path as the CPU backend) and
+  composited by the GPU backend as an image.
 - **Audio.** `AudioPool::prepare(rate, channels)` decodes/resamples outside playback;
   `Mixer::mix(project, range)` produces immutable snapshots shared by preview and
   export; `Player` consumes the ring buffer and updates the latency-corrected
@@ -313,7 +330,7 @@ flowchart LR
 (`f32` channels in `[0, 1]`), resolution-independent 2D points, booleans, enum
 choices, strings, and optional content-addressed asset references. `Clip::params`
 and evaluated `SceneClip::params` contain typed values; each `Animation` stores
-`Keyframes<ParamValue>`. Transform and built-in effect targets still require
+`Keyframes<ParamValue>`. Transform and effect targets still require
 numbers. Validation rejects nonfinite values, mixed-type curves, and curves whose
 type differs from their typed base parameter. Plugin curves may also target an
 implicit schema default without a stored base value.
@@ -359,9 +376,37 @@ Schema 2 writes plugin clips. `format` migrates schema-1 builtin text, rectangle
 ellipses and arbitrary quadratic/cubic paths, preserving local stroke widths,
 fill/outline transparency, transforms, source offsets, keyframes and effects.
 Legacy domain types and their validation exist only in the format reader. Existing
-plugin payloads remain opaque and untouched. Effects continue in `render::effects`.
+plugin payloads remain opaque and untouched.
 
-Integration tests use `plugin-host`'s `test-support` feature to build text and shapes
+## Effects
+
+A clip's effect chain is `Vec<EffectInstance>`; each instance names a plugin and one
+of its filters (`plugin: "org.animathio.effects-basic"`, `effect: "grayscale"`) plus
+keyframeable numeric parameters. `core` validates only identifiers and finiteness —
+parameter names, ranges and defaults belong to the plugin, which publishes them through
+`list-effects` so the editor menus, the Effects tab and the MCP `list_effects` tool show
+exactly what the loaded plugins provide.
+
+Rendering stays a pure function of the project. A backend rasterizes a clip with effects
+alone into a canvas-sized straight-alpha sRGB RGBA8 layer, then `render::effects` hands
+each instance, in order, to the `RenderCtx`'s `EffectProcessor` (`ctx.set_effect_processor`;
+`PluginHost::effect_processor()` returns the implementation) and composites the result.
+The CPU reference and the GPU preview use this same path. A clip with effects but no
+processor, a missing plugin, a rejected parameter or a sandbox violation fails the frame
+with `render::Error::Effect`; the frame is never silently rendered unfiltered.
+
+The eight former builtins (`grayscale`, `sepia`, `invert`, `saturate`, `brightness`,
+`contrast`, `blur`, `opacity`) are the first-party `org.animathio.effects-basic` plugin
+(`plugins/effects-basic`). Schema-2 projects migrate by mapping the old `kind` to the
+plugin id and a lower-case effect id; parameter names are unchanged. Light handling is
+documented in the plugin source: color filters run in linear light, `invert` on encoded
+channels, `blur` on premultiplied linear light.
+
+Plugin effect calls are host-bounded: frames above 16 Mpx are rejected, fuel scales with
+the pixel count, the memory ceiling is 64 MiB plus 48 bytes per pixel (at most 1 GiB), and
+the epoch deadline is ~10 s. See `docs/plugins.md`.
+
+Integration tests use `plugin-host`'s `test-support` feature to build text, shapes and effects
 for `wasm32-wasip2` with a shared target directory and resource limits. Subprocess
 CLI tests receive an explicit bundle directory. CI builds bundles on both Linux
 and Windows; the WASI target must be installed for local tests too.

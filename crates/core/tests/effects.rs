@@ -32,7 +32,7 @@ fn add_remove_and_set_effect_param_are_reversible() {
     let original = project.clone();
     let mut history = History::default();
 
-    let grayscale = EffectInstance::new(EffectId(1), EffectKind::Grayscale);
+    let grayscale = EffectInstance::basic(EffectId(1), "grayscale");
     history
         .execute(
             &mut project,
@@ -71,55 +71,96 @@ fn add_remove_and_set_effect_param_are_reversible() {
 }
 
 #[test]
-fn effect_parameters_are_validated_transactionally() {
+fn effect_identity_and_finiteness_are_validated_transactionally() {
     let mut project = project_with_clip();
     let before = project.clone();
 
-    let mut bad = EffectInstance::new(EffectId(1), EffectKind::Grayscale);
-    bad.params.insert("amount".into(), 2.0);
-    assert!(
-        Command::AddEffect {
-            id: ClipId(0),
-            index: 0,
-            effect: bad,
-        }
-        .apply(&mut project)
-        .is_err()
-    );
-
-    let mut missing = EffectInstance::new(EffectId(1), EffectKind::Blur);
-    missing.params.clear();
-    assert!(
-        Command::AddEffect {
-            id: ClipId(0),
-            index: 0,
-            effect: missing,
-        }
-        .apply(&mut project)
-        .is_err()
-    );
+    // Plugin and effect ids must be plain identifiers; parameters must be finite.
+    for effect in [
+        EffectInstance::new(
+            EffectId(1),
+            "",
+            "grayscale",
+            std::collections::BTreeMap::new(),
+        ),
+        EffectInstance::new(
+            EffectId(1),
+            "org.animathio.effects-basic",
+            "bad id",
+            std::collections::BTreeMap::new(),
+        ),
+        EffectInstance::new(
+            EffectId(1),
+            "org.animathio.effects-basic",
+            "grayscale",
+            [("amount".to_owned(), f64::NAN)].into(),
+        ),
+    ] {
+        assert!(
+            Command::AddEffect {
+                id: ClipId(0),
+                index: 0,
+                effect,
+            }
+            .apply(&mut project)
+            .is_err()
+        );
+    }
     assert_eq!(project, before);
 
-    // Duplicate ids within one clip are rejected.
+    // Parameter ranges belong to the plugin, so the core accepts any finite value.
     Command::AddEffect {
         id: ClipId(0),
         index: 0,
-        effect: EffectInstance::new(EffectId(1), EffectKind::Invert),
+        effect: EffectInstance::new(
+            EffectId(1),
+            "com.example.fx",
+            "swirl",
+            [("turns".to_owned(), -3.5)].into(),
+        ),
     }
     .apply(&mut project)
     .unwrap();
+
+    // Duplicate ids within one clip are rejected.
     let with_effect = project.clone();
     assert!(
         Command::AddEffect {
             id: ClipId(0),
             index: 1,
-            effect: EffectInstance::new(EffectId(1), EffectKind::Sepia),
+            effect: EffectInstance::basic(EffectId(1), "sepia"),
         }
         .apply(&mut project)
         .is_err()
     );
+    assert_eq!(project, with_effect);
+}
 
-    // Removing the only required parameter is rejected by validation.
+#[test]
+fn animated_effect_parameters_cannot_be_removed() {
+    let mut project = project_with_clip();
+    Command::AddEffect {
+        id: ClipId(0),
+        index: 0,
+        effect: EffectInstance::basic(EffectId(1), "invert"),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddKeyframe {
+        id: ClipId(0),
+        target: Target::Effect {
+            effect: EffectId(1),
+            param: "amount".into(),
+        },
+        time: Time(0),
+        keyframe: Keyframe {
+            value: (0.5).into(),
+            interpolation: Interpolation::Linear,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
     assert!(
         Command::SetEffectParam {
             id: ClipId(0),
@@ -130,8 +171,7 @@ fn effect_parameters_are_validated_transactionally() {
         .apply(&mut project)
         .is_err()
     );
-
-    assert_eq!(project, with_effect);
+    assert_eq!(project, before);
 }
 
 #[test]
@@ -140,7 +180,7 @@ fn effect_parameters_are_keyframeable_in_the_evaluated_scene() {
     Command::AddEffect {
         id: ClipId(0),
         index: 0,
-        effect: EffectInstance::new(EffectId(1), EffectKind::Grayscale),
+        effect: EffectInstance::basic(EffectId(1), "grayscale"),
     }
     .apply(&mut project)
     .unwrap();
@@ -175,7 +215,7 @@ fn removing_an_animated_effect_is_rejected() {
     Command::AddEffect {
         id: ClipId(0),
         index: 0,
-        effect: EffectInstance::new(EffectId(1), EffectKind::Invert),
+        effect: EffectInstance::basic(EffectId(1), "invert"),
     }
     .apply(&mut project)
     .unwrap();

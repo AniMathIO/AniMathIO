@@ -65,6 +65,9 @@ impl RenderWorker {
 fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
     let mut ctx = RenderCtx::default();
     let (mut host, _, _) = crate::editor::load_plugins();
+    if let Some(host) = &host {
+        ctx.set_effect_processor(host.effect_processor());
+    }
     while let Ok(msg) = rx.recv() {
         // Drain whatever is queued now, keep only the newest render, and apply any
         // asset load before it. Older requests are discarded unrendered.
@@ -90,6 +93,9 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
                     let current =
                         ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
                     loaded.set_backend(current);
+                    if let Some(host) = &host {
+                        loaded.set_effect_processor(host.effect_processor());
+                    }
                     ctx = loaded;
                 }
                 Err(error) => eprintln!("render resources: {error}"),
@@ -127,7 +133,10 @@ fn render_image(ctx: &mut RenderCtx, request: &RenderRequest) -> Option<Arc<Rend
             ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
             render(&request.scene, ctx, request.size).ok()?
         }
-        Err(_) => return None,
+        Err(error) => {
+            eprintln!("preview render failed: {error}");
+            return None;
+        }
     };
     let mut pixels = frame.pixels;
     // GPUI's RenderImage path expects BGRA bytes despite image::RgbaImage's name.

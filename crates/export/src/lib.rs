@@ -153,6 +153,16 @@ impl Exporter {
         })
     }
 
+    /// Install the plugin runner for clip effects (see
+    /// `PluginHost::effect_processor`). Exporting a project whose clips have effects
+    /// fails without one.
+    pub fn set_effect_processor(
+        &mut self,
+        processor: impl animathio_core::EffectProcessor + 'static,
+    ) {
+        self.ctx.set_effect_processor(processor);
+    }
+
     /// Render exactly the frame used as encoder input. Uses the same evaluation and renderer as preview.
     pub fn render_frame(
         &mut self,

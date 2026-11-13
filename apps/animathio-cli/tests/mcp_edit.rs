@@ -378,3 +378,100 @@ fn media_edit_save_reopen_and_export() {
         std::fs::read(second).unwrap()
     );
 }
+
+#[test]
+fn effects_come_from_loaded_plugins_and_render() {
+    let dir = tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .env(
+            "ANIMATHIO_PLUGIN_DIR",
+            animathio_plugin_host::test_support::plugin_dir(),
+        )
+        .args(["mcp", "--project"])
+        .arg(empty_project(dir.path()))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut session = Session {
+        stdout: BufReader::new(child.stdout.take().unwrap()),
+        stdin: child.stdin.take().unwrap(),
+        next: 0,
+    };
+    session.request(
+        "initialize",
+        json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"effects-test","version":"0.0.0"}}),
+    );
+
+    let listed = session.json_tool("list_effects", json!({}));
+    let effects = listed["effects"].as_array().unwrap();
+    let ids: Vec<_> = effects
+        .iter()
+        .map(|e| e["effect"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "grayscale",
+            "sepia",
+            "invert",
+            "saturate",
+            "brightness",
+            "contrast",
+            "blur",
+            "opacity"
+        ]
+    );
+    assert!(
+        effects
+            .iter()
+            .all(|e| e["plugin"] == "org.animathio.effects-basic")
+    );
+    assert_eq!(effects[6]["params"][0]["id"], "radius");
+
+    let title = session.json_tool(
+        "add_title",
+        json!({"text": "fx", "start_ms": 0.0, "duration_ms": 1000.0}),
+    );
+    let clip = title["clip_id"].as_u64().unwrap().to_string();
+    let added = session.json_tool(
+        "add_effect",
+        json!({"id": clip, "plugin": "org.animathio.effects-basic", "effect": "saturate", "params": {"amount": 0.0}}),
+    );
+    assert_eq!(added["effect_id"], 0);
+    let state = session.json_tool("get_project_state", json!({}));
+    assert!(state.to_string().contains("saturate"), "{state}");
+
+    // Unknown effects and parameters are rejected with a message naming the fix.
+    for arguments in [
+        json!({"id": clip, "plugin": "org.animathio.effects-basic", "effect": "vignette"}),
+        json!({"id": clip, "plugin": "org.animathio.effects-basic", "effect": "blur", "params": {"amount": 1.0}}),
+    ] {
+        let response = session.request(
+            "tools/call",
+            json!({"name": "add_effect", "arguments": arguments}),
+        );
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "{response}"
+        );
+    }
+
+    // The effect runs through the sandbox when the frame renders.
+    let frame = session.json_tool(
+        "render_frame",
+        json!({"frame": 0, "width": 64, "height": 36}),
+    );
+    assert!(
+        frame["base64"].as_str().is_some_and(|b| !b.is_empty()),
+        "{frame}"
+    );
+
+    // Undo removes the effect again.
+    session.json_tool("undo", json!({}));
+    let state = session.json_tool("get_project_state", json!({}));
+    assert!(!state.to_string().contains("saturate"), "{state}");
+    drop(session);
+    let _ = child.wait();
+}

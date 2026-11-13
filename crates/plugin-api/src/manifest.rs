@@ -16,6 +16,9 @@ pub enum ManifestError {
     /// Invalid semantic version string.
     #[error("invalid semver version: {0}")]
     InvalidVersion(String),
+    /// Inconsistent plugin kinds.
+    #[error("invalid plugin kinds: {0}")]
+    InvalidKinds(String),
     /// TOML deserialization error.
     #[error("toml parse error: {0}")]
     ParseError(String),
@@ -27,7 +30,8 @@ pub enum ManifestError {
 pub enum PluginKind {
     /// Generates vector graphics scene.
     ClipSource,
-    /// Transforms an input vector scene.
+    /// Pixel filter exported through the `effect-plugin` world (`frame-effects`).
+    /// An effect plugin implements only that world, so it declares exactly this kind.
     Effect,
     /// Evaluates a 1D value animation curve.
     Animation,
@@ -36,7 +40,8 @@ pub enum PluginKind {
 /// Plugin manifest stored as `plugin.toml` inside `.amplugin` packages.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifestToml {
-    /// Plugin API version contract, e.g. "0.2.0".
+    /// Plugin API version contract, e.g. "0.2.1". Any `0.2.x` is accepted;
+    /// `effect` plugins need `0.2.1` or newer.
     pub api_version: String,
     /// Reverse-domain plugin identifier, e.g. "org.animathio.shapes".
     pub id: String,
@@ -97,6 +102,18 @@ impl PluginManifestToml {
         }
         if self.kinds.is_empty() {
             return Err(ManifestError::MissingField("kinds"));
+        }
+        if self.kinds.contains(&PluginKind::Effect) {
+            if self.kinds.len() != 1 {
+                return Err(ManifestError::InvalidKinds(
+                    "an effect plugin implements only the effect-plugin world".to_owned(),
+                ));
+            }
+            if self.api_version == "0.2.0" {
+                return Err(ManifestError::UnsupportedApiVersion(
+                    "effect plugins require api_version 0.2.1".to_owned(),
+                ));
+            }
         }
         Ok(())
     }

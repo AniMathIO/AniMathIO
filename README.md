@@ -24,7 +24,7 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 2) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 3) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding, mixing, playback (cpal) | ✅ `audio` (prototype limits) |
@@ -35,9 +35,10 @@ Editor and headless engine prototype. What works today:
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
 | Media decoding / video export | ✅ native decoding and offline H.264/AAC MP4 export |
 
-Text and shapes use the bundled WASM components end to end, including CLI renders
-and exports. Build them with `scripts/build-plugins.sh`; schema-1 projects migrate
-automatically to plugin clips when loaded. Effects remain in the renderer.
+Text, shapes and the eight clip effects (grayscale, sepia, invert, saturate, brightness,
+contrast, blur, opacity) use the bundled WASM components end to end, including CLI renders
+and exports. Build them with `scripts/build-plugins.sh`; schema-1 and schema-2 projects
+migrate automatically to plugin clips and plugin effects when loaded.
 
 ## Screenshot
 
@@ -54,9 +55,9 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Viewer and inspector](docs/screenshots/editor-viewer.png) | ![Timeline](docs/screenshots/editor-timeline.png) |
 
-| Multi-selection (rubber band, inspector summary) |
-| --- |
-| ![Multi-selection](docs/screenshots/editor-multiselect.png) |
+| Multi-selection (rubber band, inspector summary) | Media pool (thumbnail grid) |
+| --- | --- |
+| ![Multi-selection](docs/screenshots/editor-multiselect.png) | ![Media pool](docs/screenshots/editor-media.png) |
 
 ## Documentation
 
@@ -127,6 +128,21 @@ never overwrites), and Ctrl/Cmd+D duplicates the selection right after itself. T
 JSON is also written to the system clipboard, so it can be pasted into another project
 window.
 
+**Viewer, inspector and media pool.** The selected visual clip shows an on-canvas
+transform gizmo: drag inside to move (snapping to the canvas centre and edges, with
+accent guide lines), drag a corner or edge handle to scale (Shift keeps the aspect
+ratio), drag the handle above the box to rotate (Shift snaps to 15 degrees). A small
+pill shows the live values. A drag previews without touching the history and lands as
+one undo step on release. The viewer header has the zoom menu, safe-area, rule-of-thirds
+and checkerboard toggles. The transport shows a large timecode (click it to type one),
+prev/next edit, frame step, the circular play button, loop, the shuttle-speed badge,
+the duration and a monitor-only volume (it never changes export). Inspector sections are
+collapsible cards with a reset button each. Drag a field label (Shift = fine, Ctrl =
+coarse) or the grip beside a value to scrub it as one undo step; 0 to 1 parameters also get a slider;
+every animatable property has a keyframe diamond with previous/next-key arrows. The
+media pool offers a grid or list, a search field, kind filter chips, per-card type
+badges, duration and resolution, audio waveforms, and hover-scrubbing of video posters.
+
 **Tracks.** Double-click a track name to rename it inline (Enter commits, Esc cancels).
 Drag a track header onto another to reorder, or use the header's right-click menu
 (Rename, Move up, Move down).
@@ -140,8 +156,14 @@ I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Alt+X
 the range; looping uses it and export defaults to it. Select (A), Blade (B), Ripple
 trim (T) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
 splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later clips
-on the same track as one undo step. N toggles snapping and an engaged snap draws a
-yellow line. Ctrl/Cmd+plus/minus zooms and Shift+Z fits the timeline.
+on the same track as one undo step. N toggles snapping and an engaged snap draws an
+accent line. Ctrl/Cmd+plus/minus zooms and Shift+Z fits the timeline.
+Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
+tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
+waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
+clip to show its keyframe diamonds. Track headers have mute/solo/lock buttons and
+a horizontal gain slider (drag to adjust, double-click to reset to unity); a drag
+is one undo step. Use large tracks for the most detailed clip previews.
 
 Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
 `youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square` presets (30 fps, CRF 18).

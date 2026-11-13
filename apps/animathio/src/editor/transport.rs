@@ -1,6 +1,8 @@
 //! Transport.
 
 use super::*;
+use crate::style::{self, color, hex, hexa};
+use gpui_component::tooltip::Tooltip;
 
 impl Editor {
     pub(super) fn toggle_play(&mut self, cx: &mut Context<Self>) {
@@ -198,34 +200,191 @@ impl Editor {
         self.toggle_play(cx);
     }
 
+    /// A monitor-only snapshot: adjusting listening volume never changes export.
+    pub(super) fn monitor_project(&self) -> Project {
+        let mut project = self.project.clone();
+        let commands = self
+            .project
+            .tracks()
+            .iter()
+            .map(|track| Command::SetTrackGain {
+                id: track.id(),
+                gain: track.gain() * self.viewer_state.volume,
+            })
+            .collect();
+        let _ = Command::Batch { commands }.apply(&mut project);
+        project
+    }
+
+    pub(super) fn set_monitor_volume(&mut self, value: f64, cx: &mut Context<Self>) {
+        self.viewer_state.volume = value.clamp(0., 1.);
+        self.clock.set_project(Arc::new(self.monitor_project()));
+        cx.notify();
+    }
+
     pub(super) fn transport_controls(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let play_icon = if self.playing {
-            icons::icon(IconName::Pause)
-        } else {
-            icons::icon(IconName::Play)
-        };
-        let play_tooltip = if self.playing { "Pause" } else { "Play" };
         let value = timecode::format_timecode(self.position, self.project.frame_rate());
-        let state = self.input_state("timecode", InputTarget::Timecode, value, 0.0, window, cx);
+        let mono = cx.theme().mono_font_family.clone();
+        let timecode_el = if self.viewer_state.timecode_editing {
+            let state = self.input_state("timecode", InputTarget::Timecode, value, 0.0, window, cx);
+            if std::mem::take(&mut self.viewer_state.focus_timecode) {
+                let handle = state.read(cx).focus_handle(cx);
+                window.focus(&handle, cx);
+            }
+            div()
+                .w(px(176.))
+                .font_family(mono.clone())
+                .child(gpui_component::input::Input::new(&state))
+                .into_any_element()
+        } else {
+            div()
+                .id("timecode-display")
+                .h(px(36.))
+                .px_2()
+                .flex()
+                .items_center()
+                .rounded(px(style::radius::CONTROL))
+                .cursor_text()
+                .font_family(mono.clone())
+                .text_size(px(22.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(hex(color::TEXT))
+                .hover(|this| this.bg(hexa(color::HOVER, 0.7)))
+                .tooltip(|window, cx| Tooltip::new("Click to type a timecode").build(window, cx))
+                .child(value)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.viewer_state.timecode_editing = true;
+                    this.viewer_state.focus_timecode = true;
+                    cx.notify();
+                }))
+                .into_any_element()
+        };
+        let volume =
+            self.slider_control("monitor-volume", None, self.viewer_state.volume, window, cx);
+        let duration = timecode::format_timecode(
+            Time(timeline::project_duration(&self.project)),
+            self.project.frame_rate(),
+        );
+        let speed = if self.playing {
+            self.shuttle.label()
+        } else {
+            "1x".into()
+        };
+        let speed_active = self.playing && speed != "1x";
+        let muted = self.viewer_state.volume == 0.;
         div()
-            .h(px(40.))
+            .h(px(60.))
             .w_full()
+            .flex_shrink_0()
             .flex()
-            .flex_row()
             .items_center()
-            .gap_1()
-            .px_1()
-            .bg(cx.theme().background)
+            .gap_2()
+            .px_3()
+            .bg(hex(color::PANEL))
+            .border_t_1()
+            .border_color(hex(color::BORDER))
             .child(
                 div()
-                    .w(px(124.))
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .child(timecode_el),
+            )
+            .child(
+                div()
                     .flex_shrink_0()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .child(gpui_component::input::Input::new(&state).small()),
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap_1()
+                    .child(icon_button(
+                        "prev-edit",
+                        icons::icon(IconName::SkipBack),
+                        "Previous edit (Up)",
+                        cx.listener(|this, _, _, cx| this.step_edit(-1, cx)),
+                    ))
+                    .child(icon_button(
+                        "step-back",
+                        icons::icon(IconName::StepBack),
+                        "Previous frame (Left)",
+                        cx.listener(|this, _, _, cx| this.step_frame(-1, cx)),
+                    ))
+                    .child(
+                        div().px_1().child(
+                            style::primary_button("play", cx)
+                                .rounded_full()
+                                .w(px(42.))
+                                .h(px(42.))
+                                .shadow_md()
+                                .icon(
+                                    icons::icon(if self.playing {
+                                        IconName::Pause
+                                    } else {
+                                        IconName::Play
+                                    })
+                                    .size(px(18.)),
+                                )
+                                .tooltip(if self.playing {
+                                    "Pause (Space)"
+                                } else {
+                                    "Play (Space)"
+                                })
+                                .on_click(cx.listener(Self::on_play_click)),
+                        ),
+                    )
+                    .child(icon_button(
+                        "step-fwd",
+                        icons::icon(IconName::StepForward),
+                        "Next frame (Right)",
+                        cx.listener(|this, _, _, cx| this.step_frame(1, cx)),
+                    ))
+                    .child(icon_button(
+                        "next-edit",
+                        icons::icon(IconName::SkipForward),
+                        "Next edit (Down)",
+                        cx.listener(|this, _, _, cx| this.step_edit(1, cx)),
+                    ))
+                    .child(
+                        icon_button(
+                            "loop",
+                            icons::icon(IconName::Repeat),
+                            "Loop playback",
+                            cx.listener(|this, _, _, cx| this.toggle_loop(cx)),
+                        )
+                        .selected(self.loop_playback),
+                    )
+                    .child(
+                        div()
+                            .id("shuttle-speed")
+                            .min_w(px(34.))
+                            .h(px(22.))
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .bg(if speed_active {
+                                hexa(color::ACCENT, 0.18)
+                            } else {
+                                hex(color::RAISED)
+                            })
+                            .text_size(px(11.))
+                            .font_family(mono.clone())
+                            .text_color(if speed_active {
+                                hex(color::ACCENT)
+                            } else {
+                                hex(color::TEXT_SECONDARY)
+                            })
+                            .tooltip(|window, cx| {
+                                Tooltip::new("Shuttle speed (J / K / L)").build(window, cx)
+                            })
+                            .child(speed),
+                    ),
             )
             .child(
                 div()
@@ -233,74 +392,35 @@ impl Editor {
                     .min_w_0()
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .gap_1()
-                    .child(icon_button(
-                        "jump-start",
-                        icons::icon(IconName::SkipBack),
-                        "Go to start",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_start(cx)),
-                    ))
-                    .child(icon_button(
-                        "step-back",
-                        icons::icon(IconName::StepBack),
-                        "Step back one frame",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(-1, cx)),
-                    ))
-                    .child(
-                        icon_button(
-                            "play",
-                            play_icon,
-                            play_tooltip,
-                            cx.listener(Self::on_play_click),
-                        )
-                        .when(self.playing, ButtonVariants::primary),
-                    )
-                    .child(icon_button(
-                        "step-fwd",
-                        icons::icon(IconName::StepForward),
-                        "Step forward one frame",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.step_frame(1, cx)),
-                    ))
-                    .child(icon_button(
-                        "jump-end",
-                        icons::icon(IconName::SkipForward),
-                        "Go to end",
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.jump_to_end(cx)),
-                    ))
-                    .child(
-                        icon_button(
-                            "loop",
-                            icons::icon(IconName::Repeat),
-                            if self.loop_playback {
-                                "Loop: on"
-                            } else {
-                                "Loop: off"
-                            },
-                            cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_loop(cx)),
-                        )
-                        .selected(self.loop_playback)
-                        .toggled(self.loop_playback),
-                    ),
-            )
-            .child(
-                div()
-                    .w(px(110.))
-                    .flex_shrink_0()
-                    .h_full()
-                    .flex()
-                    .items_center()
                     .justify_end()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if self.playing && self.shuttle != Shuttle(1, false) {
-                        self.shuttle.label()
-                    } else {
-                        timecode::format_timecode(
-                            Time(timeline::project_duration(&self.project)),
-                            self.project.frame_rate(),
+                    .gap_2()
+                    .child(
+                        div()
+                            .font_family(mono)
+                            .text_size(px(12.))
+                            .text_color(hex(color::TEXT_MUTED))
+                            .child(duration),
+                    )
+                    .child(
+                        icon_button(
+                            "monitor-mute",
+                            icons::icon(if muted {
+                                IconName::VolumeX
+                            } else {
+                                IconName::Volume2
+                            }),
+                            if muted {
+                                "Unmute monitor"
+                            } else {
+                                "Mute monitor"
+                            },
+                            cx.listener(move |this, _, _, cx| {
+                                this.set_monitor_volume(if muted { 1. } else { 0. }, cx);
+                            }),
                         )
-                    }),
+                        .selected(muted),
+                    )
+                    .child(div().w(px(84.)).child(volume)),
             )
     }
 }

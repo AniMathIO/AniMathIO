@@ -3,8 +3,9 @@
 //! It maps exactly the same scene items as [`CpuBackend`], which stays the reference
 //! for tests and export. The device, queue, Vello renderer, scene encoding and the
 //! target texture/readback buffer are reused across frames. Clips with effects are
-//! rasterized and filtered on the CPU effect path and composited as a full-canvas
-//! image; WGSL effect ports are a follow-up.
+//! rasterized on the CPU, filtered by the effect plugins (the same `EffectProcessor` path
+//! the CPU backend uses) and composited as a full-canvas image; WGSL effect ports are a
+//! follow-up.
 
 use crate::cpu::{
     ShapedRun, check_vector_font_size, pixel_transform, relative_text_pixel_size, unit_transform,
@@ -168,12 +169,12 @@ impl GpuBackend {
             if clip.effects.is_empty() {
                 self.draw_clip(transform, size, clip, pool, video)?;
             } else {
-                // Effects run on the CPU path for now (WGSL ports are a follow-up):
-                // rasterize the clip alone, filter it, then composite it here.
+                // Effects run through the plugin processor on CPU pixels for now (WGSL
+                // ports are a follow-up): rasterize the clip alone, filter it, composite it.
                 let mut layer = self
                     .cpu
                     .render_effect_layer(clip, pool, video, size, transform)?;
-                crate::effects::apply_chain(&mut layer, &clip.effects)?;
+                crate::effects::apply_chain(&mut layer, clip, pool)?;
                 let image = image_data(Arc::new(layer))?;
                 self.scene
                     .draw_image(&ImageBrush::new(image), Affine::IDENTITY);

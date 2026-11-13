@@ -1,6 +1,96 @@
 //! Media pool.
 
 use super::*;
+use crate::style::{color, hex};
+use gpui_component::input::{Input, InputEvent, InputState};
+
+#[derive(Default)]
+pub(super) struct MediaView {
+    list: bool,
+    query: String,
+    kind: &'static str,
+    search: Option<Entity<InputState>>,
+    subscription: Option<Subscription>,
+    thumbnails: BTreeMap<AssetId, Option<MediaThumbnail>>,
+    hovered: Option<(AssetId, usize)>,
+}
+
+struct MediaThumbnail {
+    frames: Vec<Arc<RenderImage>>,
+    detail: String,
+    duration: Time,
+    peaks: Arc<[f32]>,
+}
+
+fn thumbnail_image(image: image::DynamicImage) -> Arc<RenderImage> {
+    let mut image = image.thumbnail(320, 180).to_rgba8();
+    for pixel in image.pixels_mut() {
+        pixel.0.swap(0, 2);
+    }
+    Arc::new(RenderImage::new([image::Frame::new(image)]))
+}
+
+fn load_thumbnail(name: &str, media_type: &str, bytes: Vec<u8>) -> MediaThumbnail {
+    use animathio_media::MediaBackend;
+    let mut result = MediaThumbnail {
+        frames: Vec::new(),
+        detail: "Preview unavailable".into(),
+        duration: Time(0),
+        peaks: Arc::from([]),
+    };
+    if media_type.starts_with("image/") {
+        if let Ok(image) = image::load_from_memory(&bytes) {
+            result.detail = format!("{} x {}", image.width(), image.height());
+            result.frames.push(thumbnail_image(image));
+        }
+    } else if media_type.starts_with("audio/") {
+        use animathio_audio::AudioSource;
+        if let Ok(source) = SymphoniaSource::from_bytes_with_limits(
+            bytes,
+            animathio_audio::DecodeLimits {
+                max_duration: Duration::from_secs(600),
+                max_samples: 48_000 * 2 * 600,
+            },
+        ) && let Ok(pcm) = source.decode_all()
+        {
+            let wave = Waveform::from_pcm(&pcm, 96);
+            result.duration = Time(wave.duration_ticks);
+            result.peaks = wave.peaks.into();
+            result.detail = format!("{} Hz / {} ch", pcm.rate(), pcm.channels());
+        }
+    } else if media_type.starts_with("video/") {
+        let backend = animathio_media::FilmCraftBackend::new();
+        let bytes: Arc<[u8]> = bytes.into();
+        if let Ok(info) = backend.probe_bytes(name, bytes.clone()) {
+            result.duration = info.duration;
+            if let Some(video) = info.video {
+                result.detail = format!("{} x {}", video.width, video.height);
+            }
+            if let Ok(decoder) = backend.open_video_bytes(name, bytes) {
+                for index in 0..8 {
+                    let time = Time((i128::from(info.duration.0) * index / 8) as i64);
+                    if let Ok(frame) = decoder.frame_at(time)
+                        && let Some(image) = image::RgbaImage::from_raw(
+                            frame.width,
+                            frame.height,
+                            frame.pixels.to_vec(),
+                        )
+                    {
+                        result
+                            .frames
+                            .push(thumbnail_image(image::DynamicImage::ImageRgba8(image)));
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+fn media_matches(name: &str, media_type: &str, query: &str, kind: &str) -> bool {
+    name.to_lowercase().contains(&query.to_lowercase())
+        && (kind.is_empty() || media_type.starts_with(kind))
+}
 
 impl Editor {
     pub(super) fn add_asset_at_playhead(&mut self, asset_id: AssetId, cx: &mut Context<Self>) {
@@ -69,10 +159,10 @@ impl Editor {
         match drag {
             PoolDrag::Asset(asset_id) => self.drop_asset(asset_id, track, time, cx),
             PoolDrag::Plugin(plugin_id) => self.drop_plugin(plugin_id, track, time, cx),
-            PoolDrag::Effect(kind) => {
+            PoolDrag::Effect { plugin, effect } => {
                 let hit = timeline::hit_test(&layout, &self.project, x, y);
                 if let Some(clip) = hit.map(|hit| hit.clip).or(self.selected) {
-                    self.add_effect_to_clip(clip, kind, cx);
+                    self.add_effect_to_clip(clip, &plugin, &effect, cx);
                 } else {
                     self.error = Some("drop an effect on a clip".into());
                     cx.notify();
@@ -189,10 +279,27 @@ impl Editor {
         self.execute(&Command::AddClip { track, clip }, cx);
     }
 
-    /// Add a built-in effect to the selected clip's chain.
+    /// Effects offered by the loaded effect plugins, in plugin then listing order.
+    pub(super) fn available_effects(&self) -> Vec<animathio_plugin_host::EffectDescriptor> {
+        self.plugin_host
+            .as_ref()
+            .map(PluginHost::effects)
+            .unwrap_or_default()
+    }
+
+    /// Display name for an effect, falling back to its id when the plugin is not loaded.
+    pub(super) fn effect_label(&self, plugin: &str, effect: &str) -> String {
+        self.available_effects()
+            .into_iter()
+            .find(|e| e.plugin_id == plugin && e.effect_id == effect)
+            .map_or_else(|| effect.to_owned(), |e| e.name)
+    }
+
+    /// Add a plugin effect to the selected clip's chain.
     pub(super) fn add_effect_to_selected(
         &mut self,
-        kind: animathio_core::EffectKind,
+        plugin: &str,
+        effect: &str,
         cx: &mut Context<Self>,
     ) {
         let Some(id) = self.selected else {
@@ -200,19 +307,28 @@ impl Editor {
             cx.notify();
             return;
         };
-        self.add_effect_to_clip(id, kind, cx);
+        self.add_effect_to_clip(id, plugin, effect, cx);
     }
 
-    /// Add a built-in effect to a specific clip's chain.
+    /// Add a plugin effect, with the plugin's default parameters, to a clip's chain.
     pub(super) fn add_effect_to_clip(
         &mut self,
         id: ClipId,
-        kind: animathio_core::EffectKind,
+        plugin: &str,
+        effect: &str,
         cx: &mut Context<Self>,
     ) {
+        let Some(descriptor) = self
+            .available_effects()
+            .into_iter()
+            .find(|e| e.plugin_id == plugin && e.effect_id == effect)
+        else {
+            self.error = Some(format!("effect {plugin}/{effect} is not available"));
+            cx.notify();
+            return;
+        };
         let index = self.find_clip(id).map_or(0, |clip| clip.effects.len());
-        let effect =
-            animathio_core::EffectInstance::new(animathio_core::EffectId(self.next_id), kind);
+        let effect = descriptor.instance(animathio_core::EffectId(self.next_id));
         self.next_id = self.next_id.saturating_add(1);
         self.execute(&Command::AddEffect { id, index, effect }, cx);
     }
@@ -263,7 +379,65 @@ impl Editor {
         self.add_plugin_clip(&descriptor, cx);
     }
 
-    pub(super) fn media_pool(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn media_pool(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        self.media_view
+            .thumbnails
+            .retain(|id, _| self.project.assets().contains_key(id));
+        if self.media_view.search.is_none() {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search media…"));
+            self.media_view.subscription =
+                Some(cx.subscribe(&input, |this, input, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.media_view.query = input.read(cx).value().to_string();
+                        cx.notify();
+                    }
+                }));
+            self.media_view.search = Some(input);
+        }
+        // One worker processes missing cards in order, bounded to 128 cached assets.
+        let missing: Vec<_> = self
+            .project
+            .assets()
+            .iter()
+            .filter(|(id, _)| !self.media_view.thumbnails.contains_key(*id))
+            .take(128_usize.saturating_sub(self.media_view.thumbnails.len()))
+            .filter(|(id, _)| self.assets.contains_key(*id))
+            .map(|(id, asset)| (id.clone(), asset.clone()))
+            .collect();
+        if !missing.is_empty() {
+            for (id, _) in &missing {
+                self.media_view.thumbnails.insert(id.clone(), None);
+            }
+            let assets = self.assets.clone();
+            cx.spawn(async move |this, cx| {
+                for (id, asset) in missing {
+                    let assets = assets.clone();
+                    let load_id = id.clone();
+                    let thumbnail = cx
+                        .background_spawn(async move {
+                            load_thumbnail(
+                                &asset.name,
+                                &asset.media_type,
+                                assets.get(&load_id).cloned().unwrap_or_default(),
+                            )
+                        })
+                        .await;
+                    if this
+                        .update(cx, |this, cx| {
+                            if let Some(slot) = this.media_view.thumbnails.get_mut(&id) {
+                                *slot = Some(thumbnail);
+                                cx.notify();
+                            }
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+
         let tab_row = self.library_tabs(cx);
 
         let mut body = div()
@@ -274,48 +448,235 @@ impl Editor {
             .overflow_y_scroll();
         match self.left_tab {
             LeftTab::Assets => {
-                if self.project.assets().is_empty() {
-                    body = body.child(empty_state("Drop media here", cx));
+                let assets: Vec<_> = self
+                    .project
+                    .assets()
+                    .iter()
+                    .filter(|(_, asset)| {
+                        media_matches(
+                            &asset.name,
+                            &asset.media_type,
+                            &self.media_view.query,
+                            self.media_view.kind,
+                        )
+                    })
+                    .collect();
+                if assets.is_empty() {
+                    body = body.child(
+                        div()
+                            .p_4()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                icons::icon(IconName::FolderOpen)
+                                    .text_color(hex(color::TEXT_MUTED)),
+                            )
+                            .child(div().text_color(hex(color::TEXT)).child(
+                                if self.project.assets().is_empty() {
+                                    "Build your media library"
+                                } else {
+                                    "No matching media"
+                                },
+                            ))
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(hex(color::TEXT_SECONDARY))
+                                    .child("Drop video, images or audio here"),
+                            )
+                            .child(
+                                Button::new("pool-import")
+                                    .primary()
+                                    .icon(icons::icon(IconName::Import))
+                                    .label("Import media")
+                                    .on_click(cx.listener(|this, _, _, cx| this.import_media(cx))),
+                            ),
+                    );
                 }
-                for (id, asset) in self.project.assets() {
-                    let asset_id = id.clone();
+                let mut cards = div().flex().flex_wrap().gap_2().w_full();
+                for (id, asset) in assets {
+                    let add_id = id.clone();
                     let drop_id = id.clone();
-                    let name = asset.name.clone();
-                    let kind = asset_kind_label(&asset.media_type);
+                    let hover_id = id.clone();
+                    let thumb = self.media_view.thumbnails.get(id).and_then(Option::as_ref);
                     let icon = if asset.media_type.starts_with("video/") {
                         IconName::Video
                     } else if asset.media_type.starts_with("image/") {
                         IconName::Image
-                    } else if asset.media_type.starts_with("audio/") {
-                        IconName::AudioWaveform
                     } else {
-                        IconName::File
+                        IconName::AudioWaveform
                     };
-                    body = body.child(
-                        div()
-                            .px_2()
-                            .py_1()
-                            .cursor_pointer()
-                            .hover(|this| this.bg(cx.theme().muted))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(icons::icon(icon).small())
-                            .child(div().flex_1().child(name))
-                            .child(div().text_color(cx.theme().muted_foreground).child(kind))
-                            .id("asset-item")
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.add_asset_at_playhead(asset_id.clone(), cx);
-                            }))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                                    this.arm_pool_drag(PoolDrag::Asset(drop_id.clone()), cx);
-                                }),
-                            ),
+                    let tint = if asset.media_type.starts_with("video/") {
+                        color::CLIP_VIDEO
+                    } else if asset.media_type.starts_with("image/") {
+                        color::CLIP_IMAGE
+                    } else {
+                        color::CLIP_AUDIO
+                    };
+                    let frame_index = self
+                        .media_view
+                        .hovered
+                        .as_ref()
+                        .filter(|(hover, _)| hover == id)
+                        .map_or(0, |(_, frame)| *frame);
+                    let frame = thumb
+                        .and_then(|thumb| {
+                            thumb
+                                .frames
+                                .get(frame_index.min(thumb.frames.len().saturating_sub(1)))
+                        })
+                        .cloned();
+                    let hover_bounds =
+                        std::rc::Rc::new(std::cell::Cell::new(Bounds::<Pixels>::default()));
+                    let paint_bounds = hover_bounds.clone();
+                    let mut preview = div()
+                        .h(px(if self.media_view.list { 42. } else { 84. }))
+                        .w_full()
+                        .relative()
+                        .overflow_hidden()
+                        .bg(hex(color::BG))
+                        .flex()
+                        .items_center()
+                        .justify_center();
+                    if let Some(frame) = frame {
+                        preview =
+                            preview.child(img(frame).size_full().object_fit(ObjectFit::Contain));
+                    } else if let Some(thumb) = thumb.filter(|t| !t.peaks.is_empty()) {
+                        let peaks = thumb.peaks.clone();
+                        preview = preview.child(
+                            canvas(
+                                |_, _, _| {},
+                                move |bounds, (), window, _| {
+                                    let width = f32::from(bounds.size.width) / peaks.len() as f32;
+                                    for (index, peak) in peaks.iter().enumerate() {
+                                        let height =
+                                            f32::from(bounds.size.height) * peak.max(0.02) * 0.8;
+                                        window.paint_quad(fill(
+                                            Bounds::new(
+                                                bounds.origin
+                                                    + point(
+                                                        px(index as f32 * width),
+                                                        px((f32::from(bounds.size.height)
+                                                            - height)
+                                                            / 2.),
+                                                    ),
+                                                size(px((width - 1.).max(1.)), px(height)),
+                                            ),
+                                            hex(color::CLIP_AUDIO),
+                                        ));
+                                    }
+                                },
+                            )
+                            .size_full(),
+                        );
+                    } else {
+                        preview = preview.child(icons::icon(icon).text_color(hex(tint)));
+                    }
+                    let detail =
+                        thumb.map_or_else(|| "Loading preview…".into(), |t| t.detail.clone());
+                    let duration = thumb.map_or(Time(0), |t| t.duration);
+                    preview = preview
+                        .child(
+                            div()
+                                .absolute()
+                                .top(px(4.))
+                                .left(px(4.))
+                                .px_1()
+                                .rounded(px(3.))
+                                .bg(hex(color::RAISED))
+                                .text_size(px(9.))
+                                .text_color(hex(tint))
+                                .child(asset_kind_label(&asset.media_type)),
+                        )
+                        .when(duration.0 > 0, |p| {
+                            p.child(
+                                div()
+                                    .absolute()
+                                    .bottom(px(4.))
+                                    .right(px(4.))
+                                    .px_1()
+                                    .bg(hex(color::RAISED))
+                                    .text_size(px(10.))
+                                    .child(timecode::format_timecode(
+                                        duration,
+                                        self.project.frame_rate(),
+                                    )),
+                            )
+                        });
+                    preview = preview.child(
+                        canvas(
+                            move |bounds, _, _| {
+                                paint_bounds.set(bounds);
+                            },
+                            |_, (), _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
                     );
+                    let card = div()
+                        .id(SharedString::from(format!("asset-{}", id.as_str())))
+                        .rounded(px(6.))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(hex(color::BORDER))
+                        .bg(hex(color::RAISED))
+                        .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
+                        .cursor_pointer()
+                        .when(self.media_view.list, Styled::w_full)
+                        .when(!self.media_view.list, |s| {
+                            s.flex_1().min_w(px(104.)).max_w(px(176.))
+                        })
+                        .child(preview)
+                        .child(
+                            div()
+                                .p_2()
+                                .text_size(px(11.))
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_color(hex(color::TEXT))
+                                        .child(asset.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(px(10.))
+                                        .text_color(hex(color::TEXT_SECONDARY))
+                                        .child(detail),
+                                ),
+                        )
+                        .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                            // Scrub by horizontal position within the card; no continuous timer.
+                            let bounds = hover_bounds.get();
+                            let fraction = f32::from(event.position.x - bounds.origin.x)
+                                / f32::from(bounds.size.width).max(1.);
+                            let frame = (fraction.clamp(0., 0.999) * 8.) as usize;
+                            let next = Some((hover_id.clone(), frame.min(7)));
+                            if this.media_view.hovered != next {
+                                this.media_view.hovered = next;
+                                cx.notify();
+                            }
+                        }))
+                        .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                            if !hovered {
+                                this.media_view.hovered = None;
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.add_asset_at_playhead(add_id.clone(), cx);
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.arm_pool_drag(PoolDrag::Asset(drop_id.clone()), cx);
+                            }),
+                        );
+                    cards = cards.child(card);
                 }
+                body = body.child(cards);
             }
             LeftTab::Plugins => {
                 body = body.child(
@@ -330,6 +691,7 @@ impl Editor {
                 if self.plugins.is_empty() {
                     body = body.child(empty_state("No clip plugins loaded", cx));
                 }
+                let mut cards = div().flex().flex_wrap().gap_2().w_full().pt_1();
                 for descriptor in &self.plugins {
                     let id = descriptor.id.clone();
                     let drop_id = id.clone();
@@ -338,22 +700,47 @@ impl Editor {
                         IconName::Sigma
                     } else if id.contains("graph") {
                         IconName::ChartNoAxesColumn
+                    } else if id.contains("shape") {
+                        IconName::Shapes
+                    } else if id.contains("text") {
+                        IconName::Type
                     } else {
-                        IconName::Sparkles
+                        IconName::Puzzle
                     };
-                    body = body.child(
+                    cards = cards.child(
                         div()
-                            .px_2()
-                            .py_1()
+                            .id(SharedString::from(format!("plugin-{id}")))
+                            .flex_1()
+                            .min_w(px(104.))
+                            .max_w(px(176.))
+                            .rounded(px(6.))
+                            .overflow_hidden()
+                            .border_1()
+                            .border_color(hex(color::BORDER))
+                            .bg(hex(color::RAISED))
                             .cursor_pointer()
-                            .hover(|this| this.bg(cx.theme().muted))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(icons::icon(icon).small())
-                            .child(name)
-                            .id("plugin-item")
+                            .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
+                            .child(
+                                div()
+                                    .h(px(64.))
+                                    .bg(hex(color::BG))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        icons::icon(icon)
+                                            .size(px(26.))
+                                            .text_color(hex(color::CLIP_PLUGIN)),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .p_2()
+                                    .text_size(px(11.))
+                                    .truncate()
+                                    .text_color(hex(color::TEXT))
+                                    .child(name),
+                            )
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.add_plugin_clip_by_id(&id, cx);
                             }))
@@ -365,19 +752,16 @@ impl Editor {
                             ),
                     );
                 }
+                body = body.child(cards);
             }
             LeftTab::Effects => {
-                let kinds = [
-                    animathio_core::EffectKind::Grayscale,
-                    animathio_core::EffectKind::Sepia,
-                    animathio_core::EffectKind::Invert,
-                    animathio_core::EffectKind::Saturate,
-                    animathio_core::EffectKind::Brightness,
-                    animathio_core::EffectKind::Contrast,
-                    animathio_core::EffectKind::Blur,
-                    animathio_core::EffectKind::Opacity,
-                ];
-                for kind in kinds {
+                let effects = self.available_effects();
+                if effects.is_empty() {
+                    body = body.child(empty_state("No effect plugins loaded", cx));
+                }
+                for descriptor in effects {
+                    let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
+                    let (click_plugin, click_effect) = (plugin.clone(), effect.clone());
                     body = body.child(
                         div()
                             .px_2()
@@ -389,15 +773,21 @@ impl Editor {
                             .items_center()
                             .gap_2()
                             .child(icons::icon(IconName::Sparkles).small())
-                            .child(effect_label(kind))
-                            .id("effect-item")
+                            .child(descriptor.name)
+                            .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.add_effect_to_selected(kind, cx);
+                                this.add_effect_to_selected(&click_plugin, &click_effect, cx);
                             }))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                                    this.arm_pool_drag(PoolDrag::Effect(kind), cx);
+                                    this.arm_pool_drag(
+                                        PoolDrag::Effect {
+                                            plugin: plugin.clone(),
+                                            effect: effect.clone(),
+                                        },
+                                        cx,
+                                    );
                                 }),
                             ),
                     );
@@ -419,7 +809,65 @@ impl Editor {
             .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 this.import_paths(paths.paths(), None, cx);
             }))
+            .bg(hex(color::PANEL))
             .child(tab_row)
+            .child(
+                div()
+                    .px_2()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(div().flex_1().min_w_0().child(
+                        Input::new(self.media_view.search.as_ref().expect("search state")).small(),
+                    ))
+                    .child(
+                        icon_button(
+                            "pool-grid",
+                            icons::icon(IconName::LayoutGrid),
+                            "Thumbnail grid",
+                            cx.listener(|this, _, _, cx| {
+                                this.media_view.list = false;
+                                cx.notify();
+                            }),
+                        )
+                        .selected(!self.media_view.list),
+                    )
+                    .child(
+                        icon_button(
+                            "pool-list",
+                            icons::icon(IconName::List),
+                            "List view",
+                            cx.listener(|this, _, _, cx| {
+                                this.media_view.list = true;
+                                cx.notify();
+                            }),
+                        )
+                        .selected(self.media_view.list),
+                    ),
+            )
+            .child(
+                div().px_2().pb_2().flex().gap_1().children(
+                    [
+                        ("", "All"),
+                        ("video/", "Video"),
+                        ("image/", "Images"),
+                        ("audio/", "Audio"),
+                    ]
+                    .into_iter()
+                    .map(|(kind, label)| {
+                        Button::new(SharedString::from(format!("filter-{label}")))
+                            .ghost()
+                            .compact()
+                            .label(label)
+                            .selected(self.media_view.kind == kind)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.media_view.kind = kind;
+                                cx.notify();
+                            }))
+                    }),
+                ),
+            )
             .child(body)
     }
 
@@ -440,7 +888,9 @@ impl Editor {
                     .find(|plugin| &plugin.id == id)
                     .map_or_else(|| id.clone(), |plugin| plugin.name.clone()),
             ),
-            PoolDrag::Effect(kind) => (IconName::Sparkles, effect_label(*kind).to_owned()),
+            PoolDrag::Effect { plugin, effect } => {
+                (IconName::Sparkles, self.effect_label(plugin, effect))
+            }
         };
         let over_timeline = self.timeline_bounds.contains(&self.pool_drag_pos);
         Some(
@@ -464,5 +914,24 @@ impl Editor {
                 .child(icons::icon(icon).small())
                 .child(label),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[core::prelude::v1::test]
+    fn media_search_combines_name_and_kind() {
+        assert!(media_matches("Lesson.MP4", "video/mp4", "LESS", "video/"));
+        assert!(!media_matches("Lesson.MP4", "video/mp4", "less", "audio/"));
+        assert!(!media_matches("Lesson.MP4", "video/mp4", "image", ""));
+        assert!(media_matches("Score.wav", "audio/wav", "", ""));
+    }
+    #[core::prelude::v1::test]
+    fn thumbnails_bound_pixel_storage_and_preserve_aspect() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::new(1920, 1080));
+        let thumb = thumbnail_image(image);
+        assert_eq!(thumb.size(0).width, gpui::DevicePixels(320));
+        assert_eq!(thumb.size(0).height, gpui::DevicePixels(180));
     }
 }

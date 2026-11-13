@@ -58,6 +58,8 @@ gets a JSON-RPC error instead of a result.
 | `project.import_v1` | `{ path }` | — (replaces the current project) |
 | `math.add` | `{ params: { latex, mode?, size?, color?, x?, y?, start?, duration?, reveal_duration? } }` | `{ track_id, clip_id }` |
 | `graph.add` | `{ params: { x_min?, x_max?, y_min?, y_max?, items?, show_grid?, show_axes?, show_labels?, color?, x?, y?, start?, duration?, draw_duration? } }` | `{ track_id, clip_id }` |
+| `effects.list` | — | `[EffectInfo]` (plugin, effect, name, description, params with id/label/min/max/default) from loaded effect plugins |
+| `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
 
 `command` is a serialized `animathio_core::Command` — the same enum undo/redo,
@@ -105,6 +107,8 @@ clears its undo history.
 | `remove_element` | Remove a clip by id | |
 | `set_canvas` | Canvas width/height, background color, duration | `background_color`: `#RRGGBB`/`#RRGGBBAA`; `max_time_ms`: duration in ms |
 | `set_param` | Set/change a clip's named numeric parameter | |
+| `list_effects` | List effects provided by loaded effect plugins | plugin id, effect id, name, description and numeric parameters (id, min, max, default); nothing is hard-coded, so installing an effect plugin adds entries |
+| `add_effect` | Add a plugin effect to a clip (one undo step) | `id` (clip), `plugin`, `effect`, optional `params` overrides; returns the effect id; rejects ids not in `list_effects` |
 | `add_keyframe` | Add a keyframe to a clip | target: `x`, `y`, `scale_x`, `scale_y`, `rotation`, `opacity` or a param name |
 | `undo` / `redo` | Undo / redo the last edit | |
 | `seek` | Move the playhead (ms) | |

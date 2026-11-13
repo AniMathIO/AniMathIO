@@ -31,7 +31,12 @@ impl ColorEdit {
         history: &mut History,
     ) -> Result<(), animathio_core::Error> {
         self.inverse.apply(project)?;
-        history.execute(project, &self.latest)
+        history.execute(
+            project,
+            &Command::Batch {
+                commands: vec![self.latest],
+            },
+        )
     }
 }
 
@@ -62,6 +67,15 @@ impl Editor {
     /// Register capture handlers at window scope: the picker's popover lives
     /// outside the editor's element subtree and can consume bubble events.
     pub(super) fn capture_color_gesture(weak: WeakEntity<Self>, window: &mut Window) {
+        let move_view = weak.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            if phase == DispatchPhase::Capture {
+                let _ = move_view.update(cx, |this, cx| {
+                    this.move_gizmo(event, cx);
+                    this.move_number_scrub(event, cx);
+                });
+            }
+        });
         let down_view = weak.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
             if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
@@ -71,6 +85,8 @@ impl Editor {
         window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
             if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
                 let _ = weak.update(cx, |this, cx| {
+                    this.end_gizmo();
+                    this.fields.scrub = None;
                     this.pointer_down = false;
                     this.finish_color_edit(cx);
                 });

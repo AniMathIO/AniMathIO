@@ -50,6 +50,7 @@ mod playback_glue;
 mod project_io;
 mod start_screen;
 mod support;
+mod timeline_thumbnails;
 mod timeline_view;
 mod transport;
 mod viewer;
@@ -299,6 +300,7 @@ struct FadeDrag {
 
 enum TimelineGesture {
     Pan { x: f32, scroll: f32 },
+    Overview,
     Scrub,
     Drag(ClipDrag),
     Trim(TrimDrag),
@@ -319,7 +321,11 @@ enum ContextMenu {
 enum PoolDrag {
     Asset(AssetId),
     Plugin(String),
-    Effect(animathio_core::EffectKind),
+    /// A plugin effect, by plugin id and effect id.
+    Effect {
+        plugin: String,
+        effect: String,
+    },
 }
 
 struct KeyframePaint {
@@ -339,6 +345,8 @@ struct ClipPaint {
     keyframes: Vec<KeyframePaint>,
     /// Downsampled peaks for audio clips, once the asset is decoded.
     waveform: Option<Arc<Waveform>>,
+    thumbnails: Vec<Option<Arc<RenderImage>>>,
+    preview: SharedString,
     source_offset: i64,
     fade_in: i64,
     fade_out: i64,
@@ -348,10 +356,32 @@ struct ClipPaint {
     silenced: bool,
 }
 
+struct TransitionPaint {
+    row: usize,
+    range: TimeRange,
+}
+
+struct ZoomMotion {
+    started: Instant,
+    from: (f32, f32),
+    to: (f32, f32),
+}
+
+struct GainDrag {
+    id: TrackId,
+    x: f32,
+    original: f64,
+    current: f64,
+}
+
 struct TimelineSnapshot {
     duration: i64,
     rows: usize,
     clips: Vec<ClipPaint>,
+    overview: Vec<(usize, TimeRange, Hsla)>,
+    transitions: Vec<TransitionPaint>,
+    scrubbing: bool,
+    waveform_paths: WavePathCache,
     position: Time,
     frame_rate: FrameRate,
     row_height: f32,
@@ -439,6 +469,9 @@ pub(crate) struct Editor {
     last_requested: Option<Time>,
     timeline_bounds: Bounds<Pixels>,
     timeline_zoom: f32,
+    zoom_motion: Option<ZoomMotion>,
+    gain_drag: Option<GainDrag>,
+    thumbnails: std::cell::RefCell<timeline_thumbnails::Thumbnails>,
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
     plugin_host: Option<PluginHost>,
@@ -485,6 +518,8 @@ pub(crate) struct Editor {
     snapping: bool,
     hovered_clip: Option<ClipId>,
     viewer_fit: ViewerFit,
+    viewer_state: viewer::ViewerState,
+    media_view: media_pool::MediaView,
     safe_areas: bool,
     viewer_menu_open: bool,
     closed_sections: BTreeSet<String>,
@@ -494,6 +529,7 @@ pub(crate) struct Editor {
     pool_drag_pos: Point<Pixels>,
     fields: fields::FieldPool,
     waveforms: std::cell::RefCell<BTreeMap<AssetId, Arc<Waveform>>>,
+    waveform_paths: WavePathCache,
 }
 
 impl Editor {
@@ -547,6 +583,9 @@ impl Editor {
             last_requested: None,
             timeline_bounds: Bounds::default(),
             timeline_zoom: 1.0,
+            zoom_motion: None,
+            gain_drag: None,
+            thumbnails: std::cell::RefCell::default(),
             timeline_scroll: 0.0,
             gesture: None,
             plugin_host,
@@ -594,6 +633,8 @@ impl Editor {
             snapping: true,
             hovered_clip: None,
             viewer_fit: ViewerFit::Contain,
+            viewer_state: viewer::ViewerState::default(),
+            media_view: media_pool::MediaView::default(),
             safe_areas: false,
             viewer_menu_open: false,
             closed_sections: BTreeSet::new(),
@@ -603,6 +644,7 @@ impl Editor {
             pool_drag_pos: Point::default(),
             fields: fields::FieldPool::default(),
             waveforms: std::cell::RefCell::default(),
+            waveform_paths: std::rc::Rc::default(),
         };
         if recovered {
             this.notices
@@ -626,6 +668,9 @@ impl Editor {
                     .await;
                 if this
                     .update_in(cx, |this, window, cx| {
+                        if this.thumbnails.borrow_mut().poll() {
+                            cx.notify();
+                        }
                         if this.pump_results(window) {
                             cx.notify();
                         }
@@ -666,6 +711,7 @@ impl Focusable for Editor {
 
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.advance_timeline_zoom(window);
         self.pump_results(window);
         self.drain_control(cx);
         if self.bench.is_some() {

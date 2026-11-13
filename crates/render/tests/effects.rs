@@ -1,16 +1,15 @@
 //! Golden PNGs for each builtin effect, applied to a committed fixture image.
 use animathio_core::{
-    ClipId, ClipKind, EffectId, EffectInstance, EffectKind, Scene, SceneClip, Time, TrackId,
-    Transform,
+    ClipId, ClipKind, EffectId, EffectInstance, Scene, SceneClip, Time, TrackId, Transform,
 };
 use animathio_render::{RenderCtx, render};
 use std::path::Path;
 
-fn render_effect(kind: EffectKind, params: &[(&str, f64)], name: &str) {
+fn render_effect(kind: &str, params: &[(&str, f64)], name: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let bytes = std::fs::read(root.join("fixtures").join("effects.png")).unwrap();
 
-    let mut effect = EffectInstance::new(EffectId(1), kind);
+    let mut effect = EffectInstance::basic(EffectId(1), kind);
     for (param, value) in params {
         effect.params.insert((*param).to_owned(), *value);
     }
@@ -28,6 +27,7 @@ fn render_effect(kind: EffectKind, params: &[(&str, f64)], name: &str) {
     };
 
     let mut ctx = RenderCtx::default();
+    ctx.set_effect_processor(animathio_plugin_host::test_support::effect_processor());
     ctx.resources
         .insert(animathio_core::AssetId::of(&bytes), bytes)
         .unwrap();
@@ -59,48 +59,40 @@ fn render_effect(kind: EffectKind, params: &[(&str, f64)], name: &str) {
 
 #[test]
 fn grayscale_effect() {
-    render_effect(
-        EffectKind::Grayscale,
-        &[("amount", 1.0)],
-        "effects-grayscale",
-    );
+    render_effect("grayscale", &[("amount", 1.0)], "effects-grayscale");
 }
 
 #[test]
 fn sepia_effect() {
-    render_effect(EffectKind::Sepia, &[("amount", 1.0)], "effects-sepia");
+    render_effect("sepia", &[("amount", 1.0)], "effects-sepia");
 }
 
 #[test]
 fn invert_effect() {
-    render_effect(EffectKind::Invert, &[("amount", 1.0)], "effects-invert");
+    render_effect("invert", &[("amount", 1.0)], "effects-invert");
 }
 
 #[test]
 fn saturate_effect() {
-    render_effect(EffectKind::Saturate, &[("amount", 2.0)], "effects-saturate");
+    render_effect("saturate", &[("amount", 2.0)], "effects-saturate");
 }
 
 #[test]
 fn brightness_effect() {
-    render_effect(
-        EffectKind::Brightness,
-        &[("amount", 0.7)],
-        "effects-brightness",
-    );
+    render_effect("brightness", &[("amount", 0.7)], "effects-brightness");
 }
 
 #[test]
 fn contrast_effect() {
-    render_effect(EffectKind::Contrast, &[("amount", 1.5)], "effects-contrast");
+    render_effect("contrast", &[("amount", 1.5)], "effects-contrast");
 }
 
 #[test]
 fn blur_effect() {
-    render_effect(EffectKind::Blur, &[("radius", 0.05)], "effects-blur");
+    render_effect("blur", &[("radius", 0.05)], "effects-blur");
 }
 
 #[test]
 fn opacity_effect() {
-    render_effect(EffectKind::Opacity, &[("amount", 0.5)], "effects-opacity");
+    render_effect("opacity", &[("amount", 0.5)], "effects-opacity");
 }
