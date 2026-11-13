@@ -231,11 +231,14 @@ impl EffectRuntime {
             })
             .collect();
 
+        let _timer = animathio_core::timing::Timer::new("effects");
+        let setup = animathio_core::timing::Timer::new("effects-setup");
         let mut store = self.store(count);
         let instance = entry
             .pre
             .instantiate(&mut store)
             .map_err(|e| format!("instantiating {:?}: {e}", effect.plugin))?;
+        drop(setup);
         let output = instance
             .animathio_plugin_frame_effects()
             .call_apply_frame(

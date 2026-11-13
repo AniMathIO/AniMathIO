@@ -415,6 +415,18 @@ and Windows; the WASI target must be installed for local tests too.
 
 Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.
 
+Offline export renders and mixes on its caller while an encoder worker consumes
+owned RGBA/PCM buffers through a channel with capacity one. Frame and audio order
+are unchanged; progress reports only encoded frames. The worker is joined on
+success, failure and cancellation. Output remains atomic, and a serial/pipelined
+MP4 comparison test protects byte determinism.
+
+The per-frame colour conversions on the export path (decoded YUV to RGBA, and RGBA to
+the encoder's 4:2:0) use byte-indexed lookup tables and avoid libm `round`, with unit
+tests asserting bit-for-bit equality with the direct formulas. The RGBA-to-YUV step
+splits the frame into bands of luma-row pairs across at most four scoped threads; each
+band uses identical arithmetic, so output does not depend on the thread count.
+
 Title preset composition is owned by `control`, outside the core. Embedded JSON
 specifies text, shapes and LaTeX layers, integer ramp durations and explicit
 entry/resting/exit transform curves (absolute, offset or scale factor). The shared

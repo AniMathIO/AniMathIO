@@ -142,6 +142,7 @@ Options:
       --preset <PRESET>  Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` or `portrait`
       --crf <CRF>        Constant quality, 0..=51; lower is better (defaults to preset quality or 23)
       --overwrite        Replace an existing output file instead of failing
+      --bench            Report wall time, fps and opt-in stage timings
   -h, --help             Print help
 ```
 <!-- /help:export -->
@@ -295,3 +296,19 @@ Options:
 animathio-cli mcp                    # attach to a running editor
 animathio-cli mcp --project sample.amio
 ```
+
+Export profiling: `export PROJECT -o OUTPUT --bench` reports total wall time and
+frames per second (including media preparation, excluding plugin discovery).
+Set `ANIMATHIO_EXPORT_TIMING=1` to also print process-wide stage timers:
+`decode` (`decode-codec` + `decode-yuv-to-rgba`, on the media pool workers),
+`render-inclusive` (the render call, including effects and decode waits),
+`effects` / `effects-setup` (plugin calls and instantiation), `resolve-plugins`
+(text/vector plugin resolution), `audio-mix`, and the encoder worker's
+`encode-video` (`encode-rgba-to-yuv` + `encode-h264`), `encode-audio` and
+`encode-flush-mux`. Stages run on different threads and nest, so the numbers
+overlap and must not be added together; compare them with the wall time.
+
+For the reproducible 10-second 1080p30 MP4/audio, text title, one-second dissolve
+and grayscale effect workload, build the release CLI and first-party plugins,
+then run `python3 scripts/bench-export.py [OUTPUT_DIRECTORY]` (requires ffmpeg).
+The script retains the source, project and exported MP4 for inspection.
