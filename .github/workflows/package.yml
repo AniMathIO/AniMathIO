@@ -199,10 +199,11 @@ jobs:
             ls "$bundle/Contents/Resources/plugins"/*.amplugin
           }
 
-          # stdin is closed so an unexpected license prompt fails instead of hanging.
+          # The bundled LICENSE becomes a dmg EULA; answer its prompt with `yes`
+          # (process substitution, so yes's SIGPIPE doesn't trip pipefail).
           mountroot="$(mktemp -d)"
           hdiutil imageinfo "$dmg" | sed -n 1,20p || true
-          hdiutil attach "$dmg" -nobrowse -readonly -noverify -mountroot "$mountroot" < /dev/null || { echo "hdiutil attach failed with $?" >&2; exit 1; }
+          hdiutil attach "$dmg" -nobrowse -readonly -noverify -mountroot "$mountroot" < <(yes) > /dev/null || { echo "hdiutil attach failed with $?" >&2; exit 1; }
           find "$mountroot" -maxdepth 2 -print
           trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
           mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
