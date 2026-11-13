@@ -317,7 +317,8 @@ pub(crate) struct Batch {
     /// Examples: `{"RemoveClip":{"id":3}}`, `{"MoveClip":{"id":3,"track":1,"start":0}}`,
     /// `{"SplitAt":{"times":[705600000]}}`,
     /// `{"RemoveRange":{"range":{"start":0,"end":352800000},"ripple":true}}`,
-    /// `{"RippleDelete":{"clip":4}}`, `{"SetTrackGain":{"id":1,"gain":0.5}}`.
+    /// `{"RippleDelete":{"clip":4}}`, `{"SetTrackGain":{"id":1,"gain":0.5}}`,
+    /// `{"RenameTrack":{"id":1,"name":"Titles"}}`, `{"MoveTrack":{"id":1,"index":0}}`.
     pub(crate) ops: Vec<serde_json::Value>,
 }
 

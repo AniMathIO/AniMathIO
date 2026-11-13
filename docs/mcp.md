@@ -145,7 +145,10 @@ when it references relative assets. Source size is limited by the importer.
 `cut_at`, `remove_range`, `trim_silence` and `batch` are built on the core commands
 `SplitAt`, `RemoveRange`, `RippleDelete` and `Batch`; `Batch` applies its commands in
 order, validates the project once at the end, and returns a `Batch` of the inverses as
-the single undo step. The same commands work over `command.apply`. Edits that would
+the single undo step. The same commands work over `command.apply`. Track layout edits
+use the same path: `{"RenameTrack":{"id":1,"name":"Titles"}}` and
+`{"MoveTrack":{"id":1,"index":0}}` (`index` is the layer's position after the move) are
+valid `batch` ops and `command.apply` commands; `{"SetTrackLocked":...}` locks a track. Edits that would
 leave a transition without both adjacent clips (for example removing the whole
 outgoing clip) are rejected as a whole and the project is unchanged; remove the
 transition first.

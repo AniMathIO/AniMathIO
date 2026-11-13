@@ -20,6 +20,15 @@ actions!(
         RippleTool,
         HandTool,
         RippleDelete,
+        ToggleRippleScope,
+        SelectAllClips,
+        ClearSelection,
+        CopyClips,
+        CutClips,
+        PasteClips,
+        DuplicateClips,
+        BackTenFrames,
+        ForwardTenFrames,
         Preferences,
         ImportV1,
         ImportManim,
@@ -124,6 +133,13 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("t", Box::new(RippleTool), "Timeline"),
         ("h", Box::new(HandTool), "Timeline"),
         ("shift-delete", Box::new(RippleDelete), "Timeline"),
+        ("shift-backspace", Box::new(RippleDelete), "Timeline"),
+        ("secondary-a", Box::new(SelectAllClips), "Timeline"),
+        ("escape", Box::new(ClearSelection), "Timeline"),
+        ("secondary-c", Box::new(CopyClips), "Timeline"),
+        ("secondary-x", Box::new(CutClips), "Timeline"),
+        ("secondary-v", Box::new(PasteClips), "Timeline"),
+        ("secondary-d", Box::new(DuplicateClips), "Timeline"),
         ("secondary-,", Box::new(Preferences), "Editor"),
         ("secondary-n", Box::new(NewProject), "Editor"),
         ("secondary-o", Box::new(OpenProject), "Editor"),
@@ -140,6 +156,10 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("left", Box::new(PreviousFrame), "Timeline"),
         ("right", Box::new(NextFrame), "Viewer"),
         ("right", Box::new(NextFrame), "Timeline"),
+        ("shift-left", Box::new(BackTenFrames), "Viewer"),
+        ("shift-left", Box::new(BackTenFrames), "Timeline"),
+        ("shift-right", Box::new(ForwardTenFrames), "Viewer"),
+        ("shift-right", Box::new(ForwardTenFrames), "Timeline"),
         ("home", Box::new(GoToStart), "Viewer"),
         ("home", Box::new(GoToStart), "Timeline"),
         ("end", Box::new(GoToEnd), "Viewer"),
@@ -224,6 +244,9 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             cx.propagate();
             return;
         }
+        if this.timeline_focused(window, cx) && this.nudge_selection(-1, cx) {
+            return;
+        }
         this.step_frame(-1, cx);
     }))
     .on_action(cx.listener(|this, _: &NextFrame, window, cx| {
@@ -231,7 +254,75 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             cx.propagate();
             return;
         }
+        if this.timeline_focused(window, cx) && this.nudge_selection(1, cx) {
+            return;
+        }
         this.step_frame(1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &BackTenFrames, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        if this.timeline_focused(window, cx) && this.nudge_selection(-10, cx) {
+            return;
+        }
+        this.step_frame(-10, cx);
+    }))
+    .on_action(cx.listener(|this, _: &ForwardTenFrames, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        if this.timeline_focused(window, cx) && this.nudge_selection(10, cx) {
+            return;
+        }
+        this.step_frame(10, cx);
+    }))
+    .on_action(cx.listener(|this, _: &SelectAllClips, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.select_all(cx);
+    }))
+    .on_action(cx.listener(|this, _: &ClearSelection, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.escape(cx);
+    }))
+    .on_action(cx.listener(|this, _: &CopyClips, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.copy_selection(cx);
+    }))
+    .on_action(cx.listener(|this, _: &CutClips, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.cut_selection(cx);
+    }))
+    .on_action(cx.listener(|this, _: &PasteClips, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.paste_clips(cx);
+    }))
+    .on_action(cx.listener(|this, _: &DuplicateClips, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.duplicate_selection(cx);
+    }))
+    .on_action(cx.listener(|this, _: &ToggleRippleScope, _window, cx| {
+        this.toggle_ripple_scope(cx);
     }))
     .on_action(cx.listener(|this, _: &GoToStart, window, cx| {
         if this.fields.any_focused(window, cx) {
@@ -448,17 +539,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             cx.propagate();
             return;
         }
-        let range = this
-            .marks
-            .marked()
-            .then(|| {
-                this.marks
-                    .range(animathio_export::duration(&this.project).0)
-            })
-            .flatten();
-        if let Some(command) = editing::ripple_delete_command(this.selected, range) {
-            this.execute(&command, cx);
-        }
+        this.ripple_delete_selection(cx);
     }))
     .on_action(cx.listener(|this, _: &Preferences, window, cx| this.open_preferences(window, cx)))
     .on_action(cx.listener(|this, _: &ImportV1, _, cx| this.import_legacy(cx)))
