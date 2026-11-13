@@ -66,7 +66,7 @@ enum Action {
         /// Output rate, e.g. 30 or 30000/1001.
         #[arg(long, value_parser = parse_rate)]
         fps: Option<animathio_core::FrameRate>,
-        /// Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical` or square.
+        /// Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` or `portrait`.
         #[arg(long, value_parser = parse_export_preset)]
         preset: Option<animathio_control::ExportPreset>,
         /// Constant quality, 0..=51; lower is better (defaults to preset quality or 23).

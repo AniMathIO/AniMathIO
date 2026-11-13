@@ -17,15 +17,18 @@ pub enum ExportPreset {
     ShortsVertical,
     /// 1080x1080 at 30 fps.
     Square,
+    /// 1080x1350 portrait at 30 fps.
+    Portrait,
 }
 
 impl ExportPreset {
     /// Shared delivery preset table for the editor, CLI and MCP.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Youtube1080p,
         Self::Youtube4k,
         Self::ShortsVertical,
         Self::Square,
+        Self::Portrait,
     ];
 
     /// Stable name used in JSON and user-facing preset selectors.
@@ -36,6 +39,19 @@ impl ExportPreset {
             Self::Youtube4k => "youtube_4k",
             Self::ShortsVertical => "shorts_vertical",
             Self::Square => "square",
+            Self::Portrait => "portrait",
+        }
+    }
+
+    /// Human-readable delivery choice.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Youtube1080p => "YouTube 1920x1080 30fps",
+            Self::Youtube4k => "4K 3840x2160 30fps",
+            Self::ShortsVertical => "Shorts/Reels/TikTok 1080x1920 30fps",
+            Self::Square => "Square 1080x1080 30fps",
+            Self::Portrait => "Portrait 4:5 1080x1350 30fps",
         }
     }
 
@@ -53,6 +69,7 @@ impl ExportPreset {
             Self::Youtube4k => (3840, 2160),
             Self::ShortsVertical => (1080, 1920),
             Self::Square => (1080, 1080),
+            Self::Portrait => (1080, 1350),
         }
     }
 

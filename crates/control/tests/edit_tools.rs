@@ -323,6 +323,7 @@ fn delivery_preset_table_has_stable_unique_names_and_settings() {
         ("youtube_4k", (3840, 2160)),
         ("shorts_vertical", (1080, 1920)),
         ("square", (1080, 1080)),
+        ("portrait", (1080, 1350)),
     ];
     for (preset, (name, size)) in ExportPreset::ALL.into_iter().zip(expected) {
         assert_eq!(preset.name(), name);
