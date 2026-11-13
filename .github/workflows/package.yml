@@ -182,16 +182,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # cargo-packager builds `AniMathIO.app` in the output directory and
-          # hands it to create-dmg, so both the bundle and the image are there.
-          app='target/packages/AniMathIO.app'
+          # cargo-packager removes the intermediate `AniMathIO.app` once the dmg
+          # is built, so test the bundle a user gets out of the image.
           dmg="$(find target/packages -maxdepth 1 -name '*.dmg' -print -quit)"
-          echo "app=$app dmg=$dmg"
-          find target/packages -maxdepth 1 -print
-          test -d "$app"
+          echo "dmg=$dmg"
           test -n "$dmg"
-          find "$app" -not -path '*/plugins/*' -print
-          plutil -p "$app/Contents/Info.plist"
 
           check_bundle() {
             local bundle="$1"
@@ -204,15 +199,13 @@ jobs:
             ls "$bundle/Contents/Resources/plugins"/*.amplugin
           }
 
-          check_bundle "$app"
-
-          # Repeat against what a user actually gets out of the image.
           # `-acceptlicense` because the bundled license becomes a dmg EULA.
           mountroot="$(mktemp -d)"
           hdiutil attach "$dmg" -nobrowse -readonly -acceptlicense -mountroot "$mountroot" -quiet
           trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
           mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
           test -n "$mounted_app"
+          plutil -p "$mounted_app/Contents/Info.plist"
           check_bundle "$mounted_app"
       - name: Attest build provenance
         # `id-token: write` is not granted to pull requests from forks.
