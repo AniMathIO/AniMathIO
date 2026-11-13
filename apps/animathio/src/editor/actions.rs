@@ -29,6 +29,7 @@ actions!(
         SaveProject,
         ImportMedia,
         ExportVideo,
+        ToggleExportQueue,
         ProjectSettings,
         Undo,
         Redo,
@@ -172,6 +173,10 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &ImportMedia, _window, cx| {
         this.import_media(cx);
+    }))
+    .on_action(cx.listener(|this, _: &ToggleExportQueue, _, cx| {
+        this.export_queue_open = !this.export_queue_open;
+        cx.notify();
     }))
     .on_action(cx.listener(|this, _: &ExportVideo, window, cx| {
         this.open_export_dialog(window, cx);
@@ -344,6 +349,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             cx.propagate();
             return;
         }
+        this.k_held = true;
         this.shuttle(0, cx);
     }))
     .on_action(cx.listener(|this, _: &ShuttleForward, window, cx| {

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use animathio_audio::{AudioPool, Pcm, SymphoniaSource, Waveform};
+use animathio_audio::{AudioPool, Pcm, Speed, SymphoniaSource, Waveform};
 use animathio_control::{
     AssetInfo, Call, ControlError, ProjectState, RenderFrameParams, RenderFrameResult,
     media_type_of, read_bounded, timeline_of, validate_existing_file, validate_output_file,
@@ -37,6 +37,7 @@ mod color_edit;
 mod commands;
 mod control_bridge;
 mod dialogs;
+mod export_panel;
 mod fields;
 mod inspector_view;
 mod media_pool;
@@ -360,13 +361,17 @@ pub(crate) struct Editor {
     tool: Tool,
     marks: InOut,
     shuttle: Shuttle,
+    /// Whether K is currently held, so J/L jog at half speed.
+    k_held: bool,
     snap_line: Option<Time>,
     preferences: crate::preferences::Preferences,
     /// Persisted "GPU preview" toggle.
     preview: crate::preview_settings::PreviewSettings,
-    export_options: Option<dialogs::ExportOptions>,
-    export_task: Option<crate::export_worker::ExportTask>,
-    confirm_overwrite: Option<PathBuf>,
+    export_queue: crate::export_queue::ExportQueue,
+    export_queue_open: bool,
+    /// A queued-export spec waiting for the user to confirm replacing its file.
+    pending_export: Option<(crate::export_queue::JobSpec, bool)>,
+    last_export_tick: Instant,
     keyframe_drag: Option<KeyframeDrag>,
     selected_keyframe: Option<KeyframeSelection>,
     error: Option<String>,
@@ -455,12 +460,14 @@ impl Editor {
             tool: Tool::default(),
             marks: InOut::default(),
             shuttle: Shuttle::default(),
+            k_held: false,
             snap_line: None,
             preferences: crate::preferences::Preferences::load(),
             preview,
-            export_options: None,
-            export_task: None,
-            confirm_overwrite: None,
+            export_queue: crate::export_queue::ExportQueue::default(),
+            export_queue_open: false,
+            pending_export: None,
+            last_export_tick: Instant::now(),
             keyframe_drag: None,
             selected_keyframe: None,
             error,
@@ -528,6 +535,15 @@ impl Editor {
                             cx.notify();
                         }
                         this.autosave_tick(cx);
+                        // Export progress is redrawn at 4 Hz, not every frame.
+                        if (this.pump_export_queue()
+                            || this.export_queue.is_busy()
+                                && this.last_export_tick.elapsed() >= Duration::from_millis(250))
+                            && !this.is_start_screen()
+                        {
+                            this.last_export_tick = Instant::now();
+                            cx.notify();
+                        }
                     })
                     .is_err()
                 {
@@ -554,28 +570,7 @@ impl Render for Editor {
         if self.bench.is_some() {
             self.bench_tick(window, cx);
         }
-        if let Some(task) = &self.export_task {
-            match task.result.try_recv() {
-                Ok(result) => {
-                    match result {
-                        Ok(path) => {
-                            self.notices
-                                .push(gpui_component::notification::Notification::success(
-                                    format!("Exported {}", path.display()),
-                                ));
-                        }
-                        Err(error) => self.error = Some(error),
-                    }
-                    self.export_task = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.error = Some("export worker stopped unexpectedly".into());
-                    self.export_task = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => window.request_animation_frame(),
-            }
-        }
-
+        self.pump_export_queue();
         self.flush_notices(window, cx);
 
         if self.playing {
@@ -595,7 +590,7 @@ impl Render for Editor {
             if stopped {
                 let _ = self.clock.pause();
                 self.playing = false;
-                self.shuttle.0 = 0;
+                self.shuttle = Shuttle::default();
             }
             self.position = now;
             let due = due_frame(&self.project, now);
@@ -639,10 +634,18 @@ impl Render for Editor {
             .text_color(cx.theme().foreground)
             .text_size(cx.theme().font_size)
             .key_context("Editor")
+            .on_key_up(cx.listener(|this, event: &KeyUpEvent, _, _| {
+                if event.keystroke.key == "k" {
+                    this.k_held = false;
+                }
+            }))
             .track_focus(&self.focus_handle)
             .child(self.menu_bar(cx))
             .child(workspace);
         root = root.child(self.status_line(cx));
+        if let Some(panel) = self.export_queue_panel(cx) {
+            root = root.child(panel);
+        }
         if let Some(menu) = self.context_menu_dropdown(cx) {
             root = root.child(menu);
         }

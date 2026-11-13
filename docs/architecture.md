@@ -86,7 +86,23 @@ under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 shuttle, in/out, blade and ripple command planning. In/out points and tool mode stay
 in view state. Ripple trim uses one `Command::Batch` on the source track;
 Shift+Delete uses `RippleDelete`. The ruler and export range share half-open bounds.
-The rate clock uses audio at 1x and a silent signed monotonic clock for shuttle.
+The audio device clock stays master at every shuttle speed; with no output device a signed
+monotonic clock stands in.
+
+Audible shuttle lives in `crates/audio` (`Speed`, `BlockGenerator`, `varispeed`).
+`Player::set_speed` restarts the session at the latency-corrected position like a seek.
+The mixer worker (never the device callback) renders blocks: it mixes the timeline span a
+block covers and resamples it by the signed rate with linear interpolation, carrying the
+fractional position so blocks join seamlessly. Negative speeds read backwards, so the block
+is the reversed PCM. Forward up to 8x and reverse up to 4x are audible (pitch follows
+speed); faster rates push silence. The callback's clock is `origin + frames * speed`
+computed with a rational speed (reverse counts down), so video stays exact at each rate.
+Half-speed K+J/K+L jog uses `Speed::HALF`.
+
+Exports run through `export_queue`: each job owns a project snapshot, jobs run sequentially
+on the export worker (`crates/export` honours the cancel flag through its progress
+callback and leaves no partial file), and the editor polls the queue to drive the Export
+queue popover and toasts. Control-protocol exports appear in the same queue.
 
 `start_screen` provides project presets, recents and importer entry points. Workflow
 dialogs use gpui-component forms; export works on an immutable snapshot, so selecting

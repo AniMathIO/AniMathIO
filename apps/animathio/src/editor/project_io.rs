@@ -8,7 +8,6 @@ impl Editor {
         let _ = self.clock.pause();
         self.marks = InOut::default();
         self.shuttle = Shuttle::default();
-        self.export_options = None;
         self.project = Project::new(self.project.frame_rate());
         Command::AddTrack {
             track: Track::new(TrackId(1), "Video 1"),
@@ -118,7 +117,6 @@ impl Editor {
                 self.audio_generation = self.audio_generation.wrapping_add(1);
                 self.marks = InOut::default();
                 self.shuttle = Shuttle::default();
-                self.export_options = None;
                 self.project = project;
                 self.history = History::default();
                 self.assets = Arc::new(assets.clone());
