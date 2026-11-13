@@ -65,6 +65,14 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Multi-selection](docs/screenshots/editor-multiselect.png) | ![Media pool](docs/screenshots/editor-media.png) |
 
+| Titles tab and a lower third (inspector text fields) | Export queue (status-bar popover) |
+| --- | --- |
+| ![Titles](docs/screenshots/editor-titles.png) | ![Export queue](docs/screenshots/editor-export-queue.png) |
+
+| Missing effect plugin warning (badge, inspector row, toast) |
+| --- |
+| ![Effect warning](docs/screenshots/editor-effect-warning.png) |
+
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — crate map, time model, engine rules and data flow
@@ -72,6 +80,8 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 - [`docs/cli.md`](docs/cli.md) — every `animathio-cli` subcommand
 - [`docs/mcp.md`](docs/mcp.md) — control protocol and MCP tool surface
 - [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md) — what maps from 1.x and what doesn't
+- [`docs/design.md`](docs/design.md) — visual design tokens and UI rules
+- [`docs/release-checklist.md`](docs/release-checklist.md) — what is left before the 2.0 swap
 
 ## Building
 
@@ -172,7 +182,7 @@ a horizontal gain slider (drag to adjust, double-click to reset to unity); a dra
 is one undo step. Use large tracks for the most detailed clip previews.
 
 Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
-`youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square` presets (30 fps, CRF 18).
+`youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` and `portrait` presets (30 fps, CRF 18).
 Presets apply to an export snapshot, keeping project settings unchanged. Existing
 files require confirmation. Exports never block the editor: "Add to queue" or "Export now"
 snapshots the project into a job, and the Export queue popover (status bar, View menu) runs
@@ -188,6 +198,20 @@ tab's **Write on…** action replaces a selected LaTeX clip's reveal animation w
 0-to-1 keyframes over a chosen duration, in one undo step. Help → Keyboard shortcuts
 shows the registered bindings. Text fields support selection, paste and IME.
 
+### Titles and social formats
+
+The library's **Titles** tab offers eight animated compositions: centered title,
+title + subtitle, lower third, caption bar, chapter card, end card, kinetic word
+pop and math title. Double-click a card to add five seconds at the playhead, or
+drag it to a timeline position. The inspector exposes the linked composition's
+text fields. All layers move together and insertion undoes in one step.
+Thumbnails render on the CPU in the background and are cached per canvas size.
+Text/shapes plugins are required; math titles also need the LaTeX plugin.
+
+The launcher, project settings and export dialog share 1080p, 4K, 9:16, square and
+4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
+and `fields`; see [the control guide](docs/mcp.md#title-preset-library).
+
 ### The CLI
 
 ```bash
@@ -201,9 +225,9 @@ cargo build -p animathio-cli --locked
 
 `--frame`, `--from` and `--to` use zero-based project frame indices; sequence end is
 exclusive. `--time` accepts exact decimal seconds or integer ticks with a `ticks`
-suffix (705,600,000 ticks/second). Output defaults to 640×360; dimensions are
-command options until project canvas settings exist. See [`docs/cli.md`](docs/cli.md)
-for the full reference.
+suffix (705,600,000 ticks/second). Output uses the project's canvas size (640×360 when
+it is unset); `--width`/`--height` override it. See [`docs/cli.md`](docs/cli.md)
+for the full reference, including `export`, `import-media` and `mcp`.
 
 ## Importing projects
 
@@ -229,7 +253,6 @@ Video imports include a linked companion audio clip when the file contains audio
 ## Contributing
 
 Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See `AGENTS.md` for branch rules, automation and commands.
-
 
 ## License
 

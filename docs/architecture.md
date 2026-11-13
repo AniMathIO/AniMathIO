@@ -22,7 +22,7 @@ the render/audio/export data flow. The authority for these rules is
 | `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with tree-sitter. |
 | `apps/animathio-cli` | Headless validation, PNG rendering, MP4 export, importers and the MCP sidecar. |
 | `apps/animathio` | The GPUI desktop editor: a thin view over the command-only core, plus an export worker and dialog. |
-| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `trap` (sandbox fixture), and `examples/hello`. |
+| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `trap` (sandbox fixture), and `examples/hello`. |
 
 Video clips decode through `render::FrameSource` via the `media` crate's
 `MediaPool`, so real video frames appear in preview, the CLI and headless
@@ -80,8 +80,9 @@ Rules that keep the layers honest:
 
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
-`fields`, `inspector_view`, `media_pool`, `dialogs`, `commands`, `project_io`,
-`control_bridge` and `playback_glue`. Shared drawing/resource helpers live in
+`fields`, `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
+(export queue popover), `start_screen`, `clip_ops`, `commands`, `project_io`,
+`control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
 number scrubbing and the viewer's transform gizmo all preview through it, so one
 gesture is one history entry). The gizmo maths in `viewer` shares the renderer's
@@ -201,7 +202,8 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
 `SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
 `AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `Batch`, `SplitAt`,
-`RemoveRange` and `RippleDelete`.
+`RemoveRange`, `RippleDelete`, plus the link-group variants `SetClipLink` and `RestoreClips`
+and `Exact` (replays one inverse edit without link propagation).
 
 Track flags: a muted track is silent in the mixer and skipped by `evaluate`;
 while any track is soloed only soloed tracks are mixed and rendered (solo beats
@@ -460,3 +462,23 @@ CLI tests receive an explicit bundle directory. CI builds bundles on both Linux
 and Windows; the WASI target must be installed for local tests too.
 
 Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.
+
+Offline export renders and mixes on its caller while an encoder worker consumes
+owned RGBA/PCM buffers through a channel with capacity one. Frame and audio order
+are unchanged; progress reports only encoded frames. The worker is joined on
+success, failure and cancellation. Output remains atomic, and a serial/pipelined
+MP4 comparison test protects byte determinism.
+
+The per-frame colour conversions on the export path (decoded YUV to RGBA, and RGBA to
+the encoder's 4:2:0) use byte-indexed lookup tables and avoid libm `round`, with unit
+tests asserting bit-for-bit equality with the direct formulas. The RGBA-to-YUV step
+splits the frame into bands of luma-row pairs across at most four scoped threads; each
+band uses identical arithmetic, so output does not depend on the thread count.
+
+Title preset composition is owned by `control`, outside the core. Embedded JSON
+specifies text, shapes and LaTeX layers, integer ramp durations and explicit
+entry/resting/exit transform curves (absolute, offset or scale factor). The shared
+builder returns one `Command::Batch` and a fresh link group; it stores no runtime
+resources in the project. `_title_preset` / `_title_field` are opaque plugin JSON
+metadata for the editor's grouped text inspector. CPU library thumbnails are
+rendered off-thread and cached in editor session state by project canvas size.

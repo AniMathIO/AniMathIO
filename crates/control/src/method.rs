@@ -233,6 +233,15 @@ pub struct ClipInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params")]
 pub enum Call {
+    /// List bundled title compositions and their editable fields.
+    #[serde(rename = "titles.list")]
+    TitlesList,
+    /// Add a linked title composition as one undo step.
+    #[serde(rename = "titles.add")]
+    TitlesAdd {
+        /// Preset, field overrides and timeline range.
+        params: crate::TitleAddParams,
+    },
     /// Read the project and session state.
     #[serde(rename = "project.get")]
     ProjectGet,

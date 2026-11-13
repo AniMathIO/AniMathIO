@@ -3,6 +3,88 @@ use super::*;
 use animathio_media::{FilmCraftBackend, MediaBackend, VideoDecoder};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
+/// Retained decoded tiles.
+const MAX_TILES: usize = 256;
+
+/// A small least-recently-used map: `get` and `insert` refresh an entry, and
+/// inserting into a full map evicts the entry that was used longest ago.
+struct Lru<K: Ord + Clone, V> {
+    capacity: usize,
+    clock: u64,
+    entries: BTreeMap<K, (u64, V)>,
+}
+
+impl<K: Ord + Clone, V> Lru<K, V> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            clock: 0,
+            entries: BTreeMap::new(),
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[cfg(test)]
+    fn contains_key(&self, key: &K) -> bool {
+        self.entries.contains_key(key)
+    }
+
+    #[cfg(test)]
+    fn values(&self) -> impl Iterator<Item = &V> {
+        self.entries.values().map(|(_, value)| value)
+    }
+
+    fn get(&mut self, key: &K) -> Option<&V> {
+        self.clock += 1;
+        let clock = self.clock;
+        let (stamp, value) = self.entries.get_mut(key)?;
+        *stamp = clock;
+        Some(&*value)
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        if self.entries.len() >= self.capacity && !self.entries.contains_key(&key) {
+            let oldest = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (stamp, _))| *stamp)
+                .map(|(key, _)| key.clone());
+            if let Some(oldest) = oldest {
+                self.entries.remove(&oldest);
+            }
+        }
+        self.clock += 1;
+        self.entries.insert(key, (self.clock, value));
+    }
+}
+
+/// Opened decoders kept alive by the worker.
+const MAX_DECODERS: usize = 6;
+/// Small decoded stills kept by the worker.
+const MAX_STILLS: usize = 16;
+
+/// Worker-side caches. `bytes` holds one shared copy of each encoded video asset;
+/// the decoders and any later re-open share that allocation instead of copying it.
+struct WorkerCaches {
+    bytes: Lru<AssetId, Arc<[u8]>>,
+    decoders: Lru<AssetId, Arc<dyn VideoDecoder>>,
+    stills: Lru<AssetId, image::RgbaImage>,
+}
+
+impl WorkerCaches {
+    fn new() -> Self {
+        Self {
+            bytes: Lru::new(MAX_DECODERS),
+            decoders: Lru::new(MAX_DECODERS),
+            stills: Lru::new(MAX_STILLS),
+        }
+    }
+}
+
 type Key = (AssetId, Time, u32);
 type ResultImage = (Key, Option<Arc<RenderImage>>);
 struct Request {
@@ -14,7 +96,8 @@ struct Request {
 pub(super) struct Thumbnails {
     tx: SyncSender<Request>,
     rx: Receiver<ResultImage>,
-    images: BTreeMap<Key, Option<Arc<RenderImage>>>,
+    /// Decoded tiles, least recently used evicted first.
+    images: Lru<Key, Option<Arc<RenderImage>>>,
     pending: BTreeSet<Key>,
 }
 impl Default for Thumbnails {
@@ -24,10 +107,9 @@ impl Default for Thumbnails {
         std::thread::Builder::new()
             .name("timeline-thumbnails".into())
             .spawn(move || {
-                let mut decoders: BTreeMap<AssetId, Box<dyn VideoDecoder>> = BTreeMap::new();
-                let mut stills = BTreeMap::new();
+                let mut caches = WorkerCaches::new();
                 while let Ok(request) = requests.recv() {
-                    let image = decode(&request, &mut decoders, &mut stills);
+                    let image = decode(&request, &mut caches);
                     if results.send((request.key, image)).is_err() {
                         break;
                     }
@@ -37,7 +119,7 @@ impl Default for Thumbnails {
         Self {
             tx,
             rx,
-            images: BTreeMap::new(),
+            images: Lru::new(MAX_TILES),
             pending: BTreeSet::new(),
         }
     }
@@ -47,15 +129,16 @@ impl Thumbnails {
         let mut changed = false;
         while let Ok((key, image)) = self.rx.try_recv() {
             self.pending.remove(&key);
-            // 256 low-resolution tiles bound the retained CPU/GPU resources.
-            if self.images.len() >= 256 {
-                self.images.pop_first();
-            }
-            self.images.insert(key, image);
+            self.insert(key, image);
             changed = true;
         }
         changed
     }
+    /// Store a decoded tile, evicting the least recently used one when full.
+    fn insert(&mut self, key: Key, image: Option<Arc<RenderImage>>) {
+        self.images.insert(key, image);
+    }
+
     pub(super) fn get(
         &mut self,
         asset: &AssetId,
@@ -83,37 +166,33 @@ impl Thumbnails {
         None
     }
 }
-fn decode(
-    request: &Request,
-    decoders: &mut BTreeMap<AssetId, Box<dyn VideoDecoder>>,
-    stills: &mut BTreeMap<AssetId, image::RgbaImage>,
-) -> Option<Arc<RenderImage>> {
+fn decode(request: &Request, caches: &mut WorkerCaches) -> Option<Arc<RenderImage>> {
     let (asset, time, height) = &request.key;
     let bytes = request.assets.get(asset)?;
     let rgba = if request.image {
-        if !stills.contains_key(asset) {
-            if stills.len() >= 8 {
-                stills.clear();
-            }
+        if caches.stills.get(asset).is_none() {
             // Retain only a small source thumbnail, never the full decoded still.
             let small = image::load_from_memory(bytes)
                 .ok()?
                 .thumbnail(256, 144)
                 .to_rgba8();
-            stills.insert(asset.clone(), small);
+            caches.stills.insert(asset.clone(), small);
         }
-        stills.get(asset)?.clone()
+        caches.stills.get(asset)?.clone()
     } else {
-        if !decoders.contains_key(asset) {
-            if decoders.len() >= 8 {
-                decoders.clear();
+        if caches.decoders.get(asset).is_none() {
+            // One shared copy of the encoded asset, reused if the decoder is reopened.
+            if caches.bytes.get(asset).is_none() {
+                caches
+                    .bytes
+                    .insert(asset.clone(), Arc::from(bytes.as_slice()));
             }
-            let decoder = FilmCraftBackend
-                .open_video_bytes("timeline", Arc::from(bytes.as_slice()))
-                .ok()?;
-            decoders.insert(asset.clone(), decoder);
+            let shared = Arc::clone(caches.bytes.get(asset)?);
+            let decoder = FilmCraftBackend.open_video_bytes("timeline", shared).ok()?;
+            caches.decoders.insert(asset.clone(), Arc::from(decoder));
         }
-        let frame = decoders.get(asset)?.frame_at(*time).ok()?;
+        let decoder = Arc::clone(caches.decoders.get(asset)?);
+        let frame = decoder.frame_at(*time).ok()?;
         image::RgbaImage::from_raw(frame.width, frame.height, frame.pixels.to_vec())?
     };
     let height = (*height).clamp(16, 96);
@@ -132,6 +211,62 @@ mod tests {
     use super::*;
     // `gpui::test` is glob-imported through `super::*`; keep the std attribute.
     use core::prelude::v1::test;
+
+    #[test]
+    fn lru_evicts_the_entry_used_longest_ago_not_the_smallest_key() {
+        let mut lru = Lru::new(3);
+        for key in [1, 2, 3] {
+            lru.insert(key, key * 10);
+        }
+        assert_eq!(lru.get(&1), Some(&10)); // 2 is now the oldest
+        lru.insert(4, 40);
+        assert!(lru.contains_key(&1) && lru.contains_key(&3) && lru.contains_key(&4));
+        assert!(!lru.contains_key(&2));
+        // Re-inserting an existing key replaces it without evicting anything.
+        lru.insert(3, 31);
+        assert_eq!(lru.len(), 3);
+        assert_eq!(lru.get(&3), Some(&31));
+    }
+
+    #[test]
+    fn video_decoders_share_one_copy_of_the_asset() {
+        let bytes = include_bytes!("../../../../crates/media/tests/fixtures/sample.mp4").to_vec();
+        let video = AssetId::of(&bytes);
+        let request = |time: i64| Request {
+            key: (video.clone(), Time(time), 24),
+            image: false,
+            assets: Arc::new(BTreeMap::from([(video.clone(), bytes.clone())])),
+        };
+        let mut caches = WorkerCaches::new();
+        assert!(decode(&request(0), &mut caches).is_some());
+        assert!(decode(&request(TICKS_PER_SECOND / 2), &mut caches).is_some());
+        assert_eq!(caches.decoders.len(), 1);
+        assert_eq!(caches.bytes.len(), 1);
+        // The cache and the open decoder reference the same allocation.
+        let shared = Arc::clone(caches.bytes.get(&video).unwrap());
+        assert!(
+            Arc::strong_count(&shared) >= 3,
+            "{}",
+            Arc::strong_count(&shared)
+        );
+    }
+
+    #[test]
+    fn cache_evicts_least_recently_used_tile() {
+        let mut cache = Thumbnails::default();
+        let assets = Arc::new(BTreeMap::new());
+        let asset = AssetId::of(b"lru");
+        let key = |i: i64| (asset.clone(), Time(i), 24);
+        for i in 0..i64::try_from(MAX_TILES).unwrap() {
+            cache.insert(key(i), None);
+        }
+        // Touch the oldest tile, then overflow: tile 1 goes, tile 0 stays.
+        cache.get(&asset, Time(0), 24, false, &assets);
+        cache.insert(key(10_000), None);
+        assert_eq!(cache.images.len(), MAX_TILES);
+        assert!(cache.images.contains_key(&key(0)));
+        assert!(!cache.images.contains_key(&key(1)));
+    }
 
     #[test]
     fn image_tiles_repeat_and_video_samples_decode_on_worker() {

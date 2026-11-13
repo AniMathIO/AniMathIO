@@ -246,6 +246,8 @@ impl Mp4Encoder {
 
     /// Encode one RGBA8 frame in presentation order.
     pub fn encode_video_frame(&mut self, rgba: &[u8]) -> Result<()> {
+        let _timer = animathio_core::timing::Timer::new("encode-video");
+
         let expected = crate::limits::frame_bytes(self.width, self.height)?;
         if self.frame_index >= crate::limits::MAX_FRAMES {
             return Err(crate::limits::invalid());
@@ -256,7 +258,10 @@ impl Mp4Encoder {
                 len = rgba.len()
             )));
         }
+        let convert = animathio_core::timing::Timer::new("encode-rgba-to-yuv");
         let (y, u, v) = rgba_to_yuv420(rgba, self.width, self.height);
+        drop(convert);
+        let _h264 = animathio_core::timing::Timer::new("encode-h264");
         let yuv = YuvFrame {
             y: &y,
             u: &u,
@@ -282,6 +287,8 @@ impl Mp4Encoder {
 
     /// Feed interleaved f32 PCM samples (a whole number of frames).
     pub fn encode_audio(&mut self, interleaved: &[f32]) -> Result<()> {
+        let _timer = animathio_core::timing::Timer::new("encode-audio");
+
         if self.audio_track.is_none() {
             return Err(MediaError::NoStream("audio"));
         }
@@ -317,6 +324,7 @@ impl Mp4Encoder {
 
     /// Flush encoders and finish the MP4, returning the file bytes.
     pub fn finish(mut self) -> Result<Vec<u8>> {
+        let _timer = animathio_core::timing::Timer::new("encode-flush-mux");
         if self.audio_track.is_some() {
             let channels = self.audio_channels;
             let frame_len = channels * filmcraft_aac::FRAME_LEN;
@@ -406,30 +414,83 @@ impl Mp4Encoder {
     }
 }
 
+/// `i / 255` for every byte value; the same `f64` the per-pixel division produced.
+fn unit_table() -> [f64; 256] {
+    let mut table = [0.0; 256];
+    for (value, slot) in table.iter_mut().enumerate() {
+        *slot = value as f64 / 255.0;
+    }
+    table
+}
+
 /// Convert straight-alpha RGBA8 to planar 4:2:0 YUV with BT.709 limited-range coefficients and
-/// 2×2 chroma averaging.
+/// 2×2 chroma averaging. Output is independent of the worker count:
+/// each band of two luma rows is converted by exactly the same arithmetic.
 fn rgba_to_yuv420(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let (w, h) = (width as usize, height as usize);
+    let (cw, ch) = (w / 2, h / 2);
     let mut y = vec![0u8; w * h];
-    let cw = w / 2;
-    let ch = h / 2;
     let mut u = vec![0u8; cw * ch];
     let mut v = vec![0u8; cw * ch];
+    let lut = unit_table();
+    // Small frames are not worth the thread spawn.
+    let workers = if w * h >= 640 * 360 {
+        std::thread::available_parallelism()
+            .map_or(1, usize::from)
+            .clamp(1, 4)
+    } else {
+        1
+    };
+    let bands = ch.div_ceil(workers).max(1);
+    std::thread::scope(|scope| {
+        let mut y_rest = y.as_mut_slice();
+        let mut u_rest = u.as_mut_slice();
+        let mut v_rest = v.as_mut_slice();
+        let mut first = 0;
+        while first < ch {
+            let rows = bands.min(ch - first);
+            let (yb, yr) = y_rest.split_at_mut(rows * 2 * w);
+            let (ub, ur) = u_rest.split_at_mut(rows * cw);
+            let (vb, vr) = v_rest.split_at_mut(rows * cw);
+            (y_rest, u_rest, v_rest) = (yr, ur, vr);
+            let src = &rgba[first * 2 * w * 4..(first + rows) * 2 * w * 4];
+            let lut = &lut;
+            if first + rows == ch {
+                yuv_band(src, w, yb, ub, vb, lut);
+            } else {
+                scope.spawn(move || yuv_band(src, w, yb, ub, vb, lut));
+            }
+            first += rows;
+        }
+    });
+    (y, u, v)
+}
 
-    for row in 0..h {
-        for col in 0..w {
-            let (rf, gf, bf) = rgb_at(rgba, w, row, col);
+/// Convert whole pairs of luma rows (`src` holds `2 * chroma_rows` rows of RGBA).
+fn yuv_band(src: &[u8], w: usize, y: &mut [u8], u: &mut [u8], v: &mut [u8], lut: &[f64; 256]) {
+    let cw = w / 2;
+    let rgb = |row: usize, col: usize| {
+        let p = &src[(row * w + col) * 4..(row * w + col) * 4 + 3];
+        (
+            lut[usize::from(p[0])],
+            lut[usize::from(p[1])],
+            lut[usize::from(p[2])],
+        )
+    };
+    for (row, out) in y.chunks_exact_mut(w).enumerate() {
+        for (col, slot) in out.iter_mut().enumerate() {
+            let (rf, gf, bf) = rgb(row, col);
             let yv = 0.2126 * rf + 0.7152 * gf + 0.0722 * bf;
-            y[row * w + col] = (16.0 + 219.0 * yv).round().clamp(0.0, 255.0) as u8;
+            *slot = crate::color::round_u8(16.0 + 219.0 * yv);
         }
     }
-
-    for row in (0..ch).map(|r| r * 2) {
-        for col in (0..cw).map(|c| c * 2) {
+    for crow in 0..u.len() / cw.max(1) {
+        for ccol in 0..cw {
+            let (row, col) = (crow * 2, ccol * 2);
             let (mut rf, mut gf, mut bf) = (0.0, 0.0, 0.0);
             for dy in 0..2 {
                 for dx in 0..2 {
-                    let (r, g, b) = rgb_at(rgba, w, row + dy, col + dx);
+                    let (r, g, b) = rgb(row + dy, col + dx);
                     rf += r;
                     gf += g;
                     bf += b;
@@ -441,20 +502,84 @@ fn rgba_to_yuv420(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Ve
             let yv = 0.2126 * rf + 0.7152 * gf + 0.0722 * bf;
             let cb = (bf - yv) / 1.8556;
             let cr = (rf - yv) / 1.5748;
-            let idx = (row / 2) * cw + col / 2;
-            u[idx] = (128.0 + 224.0 * cb).round().clamp(0.0, 255.0) as u8;
-            v[idx] = (128.0 + 224.0 * cr).round().clamp(0.0, 255.0) as u8;
+            let idx = crow * cw + ccol;
+            u[idx] = crate::color::round_u8(128.0 + 224.0 * cb);
+            v[idx] = crate::color::round_u8(128.0 + 224.0 * cr);
         }
     }
-
-    (y, u, v)
 }
 
-fn rgb_at(rgba: &[u8], w: usize, row: usize, col: usize) -> (f64, f64, f64) {
-    let p = &rgba[(row * w + col) * 4..(row * w + col) * 4 + 3];
-    (
-        f64::from(p[0]) / 255.0,
-        f64::from(p[1]) / 255.0,
-        f64::from(p[2]) / 255.0,
-    )
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference_yuv420(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let (w, h) = (width as usize, height as usize);
+        let mut y = vec![0u8; w * h];
+        let cw = w / 2;
+        let ch = h / 2;
+        let mut u = vec![0u8; cw * ch];
+        let mut v = vec![0u8; cw * ch];
+
+        for row in 0..h {
+            for col in 0..w {
+                let (rf, gf, bf) = rgb_at(rgba, w, row, col);
+                let yv = 0.2126 * rf + 0.7152 * gf + 0.0722 * bf;
+                y[row * w + col] = (16.0 + 219.0 * yv).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+
+        for row in (0..ch).map(|r| r * 2) {
+            for col in (0..cw).map(|c| c * 2) {
+                let (mut rf, mut gf, mut bf) = (0.0, 0.0, 0.0);
+                for dy in 0..2 {
+                    for dx in 0..2 {
+                        let (r, g, b) = rgb_at(rgba, w, row + dy, col + dx);
+                        rf += r;
+                        gf += g;
+                        bf += b;
+                    }
+                }
+                rf /= 4.0;
+                gf /= 4.0;
+                bf /= 4.0;
+                let yv = 0.2126 * rf + 0.7152 * gf + 0.0722 * bf;
+                let cb = (bf - yv) / 1.8556;
+                let cr = (rf - yv) / 1.5748;
+                let idx = (row / 2) * cw + col / 2;
+                u[idx] = (128.0 + 224.0 * cb).round().clamp(0.0, 255.0) as u8;
+                v[idx] = (128.0 + 224.0 * cr).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+
+        (y, u, v)
+    }
+
+    fn rgb_at(rgba: &[u8], w: usize, row: usize, col: usize) -> (f64, f64, f64) {
+        let p = &rgba[(row * w + col) * 4..(row * w + col) * 4 + 3];
+        (
+            f64::from(p[0]) / 255.0,
+            f64::from(p[1]) / 255.0,
+            f64::from(p[2]) / 255.0,
+        )
+    }
+
+    #[test]
+    fn banded_table_conversion_matches_the_per_pixel_reference() {
+        // Large enough to take the threaded path, with an odd band split.
+        for (w, h) in [(646u32, 362u32), (64, 36)] {
+            let mut seed = 7_u32;
+            let rgba: Vec<u8> = (0..w * h * 4)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (seed >> 24) as u8
+                })
+                .collect();
+            assert_eq!(
+                rgba_to_yuv420(&rgba, w, h),
+                reference_yuv420(&rgba, w, h),
+                "{w}x{h}"
+            );
+        }
+    }
 }

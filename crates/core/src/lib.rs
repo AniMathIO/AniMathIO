@@ -26,3 +26,5 @@ pub struct Error(pub String);
 pub(crate) fn invalid(message: &str) -> Error {
     Error(message.to_owned())
 }
+
+pub mod timing;

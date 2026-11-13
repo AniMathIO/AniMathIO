@@ -576,7 +576,14 @@ Notes for real plugins:
 `right`) and `units` (`pixels` or `normalized`). Pixel mode retains centered outline
 layout. Normalized mode produces a generic text run with embedded-font shaping,
 wrapping and line alignment; font size is a fraction of canvas height. Migrated
-builtin text uses normalized units and left alignment.
+builtin text uses normalized units and left alignment. Optional `fit_width` and `fit_height` (0 by default) select a fitted title box,
+expressed as fractions of the full canvas. In that mode the plugin emits normalized
+glyph outlines sized for a clip with the matching width/height scale, centres explicit
+lines in the box, and shrinks long text to fit. Title presets use this mode to keep
+edited fields and transform handles inside safe areas.
+The LaTeX plugin also accepts `units`: `pixels` preserves existing projects;
+`normalized` interprets `size` relative to the shorter render-canvas edge and fits
+formula outlines within 84% width and 22% height.
 
 `org.animathio.shapes` accepts `shape` (`rect`, `ellipse`, `polygon`, `star`, `arrow`,
 `line`, `path`), `units`, position/dimensions, `fill`, `stroke` and `stroke_width`.

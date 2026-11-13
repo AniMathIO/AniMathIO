@@ -291,6 +291,7 @@ dependencies = [
  "directories",
  "getrandom 0.3.4",
  "interprocess",
+ "image",
  "rustix 1.1.6",
  "serde",
  "serde_json",

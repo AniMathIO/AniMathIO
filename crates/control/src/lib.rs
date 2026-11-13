@@ -21,7 +21,12 @@ mod headless;
 mod method;
 mod path;
 mod server;
+mod title_presets;
 mod token;
+pub use title_presets::{
+    TitleAddParams, TitleCurve, TitleCurveSpace, TitleLayer, TitlePreset, title_preset_command,
+    title_presets,
+};
 
 pub use authoring::apply_authoring_call;
 pub use client::ControlClient;

@@ -24,6 +24,15 @@ API they describe must exist. Update them alongside behaviour changes:
 - `docs/cli.md` — every `animathio-cli` subcommand (regenerate from `--help`)
 - `docs/mcp.md` — control protocol (JSON-RPC, socket, token) and the MCP tool surface
 - `docs/migrating-from-v1.md` — what maps from 1.x and known gaps
+- `docs/release-checklist.md` — manual and automatable steps left before the 2.0 swap
+
+`scripts/check-docs.sh` fails when a document names a path, `animathio-cli` subcommand
+or flag, MCP tool, control method, environment variable, cargo target, plugin id, core
+`Command`, WIT item or Rust symbol that does not exist in the code, or when the docs omit
+a tool, method, crate, plugin or editor module. CI runs it with `--require-binary` after
+building `animathio-cli`; `docs/cli.md` embeds the real `--help` output between
+`<!-- help:NAME -->` markers, regenerated with `scripts/check-docs.sh --fix-cli`. Run it
+after any change to the CLI, MCP, control methods or crate layout.
 
 The minimal plugin example under `plugins/examples/hello` must keep compiling for
 `wasm32-wasip2`; it is referenced verbatim by `docs/plugins.md`.
@@ -41,12 +50,14 @@ Automation is configured in `renovate.json`, `release-plz.toml` and `.github/wor
 - **Renovate** (`renovate.json`) targets `baseBranchPatterns: ["v2"]` (Renovate's current name for what was formerly `baseBranches`). Patch/minor/security updates are grouped and auto-merged once CI passes (GitHub auto-merge); majors are never auto-merged and get a `needs-human` label. Lockfile maintenance runs weekly and vulnerability alerts are on. GitHub Actions are pinned by digest.
   - **Manual step:** the GitHub **Renovate** app must be enabled for the repo (an agent cannot enable it). Renovate reads config from the default branch, so it activates when `v2` becomes the default at the swap; change `baseBranchPatterns` to `["main"]` then. Auto-merge needs "Allow auto-merge" enabled in the repo settings and CI as a required status check.
 - **Dependabot is v1-only.** `.github/dependabot.yml` lives on `main`/`staging`; do not add one on `v2` — Renovate covers it.
-- **release-plz** (`release-plz.toml` + `.github/workflows/release-plz.yml`) opens a release PR (version bump + git-cliff changelog) on pushes to `v2`. Tagging, GitHub releases and crates.io publishing are disabled until the swap; the single tag is `v{{version}}`, starting at `2.0.0` (workspace version is already `2.0.0`, unreleased). Enablement steps are commented in both files.
+- **release-plz** (`release-plz.toml` + `.github/workflows/release-plz.yml`) opens a release PR (version bump + git-cliff changelog) on pushes to `v2` **once a `v2.*` tag exists**; until the baseline `v2.0.0` tag is created at the swap it is a no-op (verified with a local `release-plz update`). Tagging, GitHub releases and crates.io publishing are disabled until the swap; the single tag is `v{{version}}`, starting at `2.0.0` (workspace version is already `2.0.0`, unreleased). Enablement and bootstrap steps are commented in both files and listed in `docs/release-checklist.md`.
+  - **Changelog rules live in `cliff.toml`** (read by release-plz via `changelog_config`, runnable standalone): `feat`→Added, `fix`→Fixed, `perf`→Performance, `*(security)`→Security, breaking `type!:` kept; `chore`, `ci`, `build`, `docs`, `test`, `style`, `refactor`, clippy fixes and the `ci`/`dev`/`spikes`/`package`/`deps` scopes are hidden; v1 tags never count as releases. Preview with `git cliff --config cliff.toml --tag v2.0.0 origin/main..origin/v2` (install with `cargo install --locked git-cliff`).
 - **Packaging** (`apps/animathio/Cargo.toml` `[package.metadata.packager]` + `.github/workflows/package.yml`) builds the installers for the canonical desktop package, which ships both `animathio` and `animathio-cli`: AppImage + deb on Linux, an NSIS installer on Windows, and an unsigned dmg on macOS. Each job builds the first-party plugin bundles with `scripts/build-plugins.sh` first (cargo-packager's `resources` target `plugins`), then runs `cargo packager --release --packages animathio`, installs/extracts the result, runs `animathio --version` and `animathio-cli --version` headlessly, counts the packaged `.amplugin` files, and attests build provenance. It runs on `workflow_dispatch`, on release PRs and on PRs touching packaging inputs.
   - Config paths are relative to `apps/animathio` (cargo-packager `cd`s there), so `out-dir` is `../../target/packages` and resources are `../../target/plugins`; `binaries` paths are relative to the workspace `target/release`.
   - Resources land in `plugins/` beside the executable on Windows, `usr/lib/animathio/plugins` in the deb/AppImage and `Contents/Resources/plugins` in the macOS app; `crates/plugin-host/src/discovery.rs` searches all of those relative to the running executable.
   - Artifacts: `animathio_<version>_<arch>.AppImage`, `animathio_<version>_amd64.deb`, `animathio_<version>_x64-setup.exe`, `AniMathIO_<version>_<arch>.dmg`, uploaded as `installers-{linux,windows,macos}`. The deb declares its runtime libraries in `[package.metadata.packager.deb] depends`; the AppImage still expects the host to provide them.
   - Icons are placeholders checked in under `apps/animathio/assets/icons` and regenerated by `apps/animathio/assets/gen-icons.py` (`.png` set for AppImage/deb/macOS, `.ico` for NSIS, `.icns` for the app bundle).
+- **Swap rehearsal** (`scripts/swap-rehearsal.sh`) performs the documented 2.0 swap against a throwaway clone in a temp dir: tag the final v1, create `legacy`, land a simulated v1 hotfix on `main`, `git merge -s ours main` on `v2`, retarget workflows/Renovate to `main`, enable release-plz tagging, merge `v2` into `main` with a merge commit and delete `staging`/`release-please--branches--*`. Its "remote" is a bare repo in the temp dir and git is isolated from your global config, so it can never push to the real remote. It then verifies the result (README/LICENSE/AGENTS.md/CLAUDE.md present, no v1 files or workflows, workflows and Renovate scoped to `main`, one tag-producing release-plz package, TOML/YAML parse, workspace at 2.0.0, `scripts/check-docs.sh` passes) and prints WARN lines for manual follow-ups. Run `scripts/swap-rehearsal.sh --v2 HEAD` (add `--keep` to inspect the clone) whenever the release/branch automation changes. `docs/release-checklist.md` lists the manual steps.
 - **Security** (`.github/workflows/security-audit.yml`) runs daily: `cargo deny check advisories` once `deny.toml` exists (added in the media PR), else `cargo audit`.
 
 ## Porting from v1
@@ -105,8 +116,9 @@ Text, shapes and the clip effects are first-party WASM plugins (`org.animathio.t
 each `EffectInstance` (plugin id + effect id) goes to the `RenderCtx`'s `EffectProcessor`
 (`ctx.set_effect_processor(host.effect_processor())`), so every `RenderCtx` or `Exporter`
 that renders clips with effects needs one. Schema-1 builtin clips and schema-2 builtin
-effects migrate in `format` to plugin clips/effects on load. Video uses a
-labelled checkerboard until a media decoder is integrated. Do not add runtime
+effects migrate in `format` to plugin clips/effects on load. Video frames come from the
+`media` crate's `MediaPool` through `render::FrameSource`; a labelled checkerboard is only
+the fallback when no frame source is attached. Do not add runtime
 resources to `Project` or store evaluated animation state in the renderer.
 
 Audio effects are `org.animathio.audio-basic` (build it with `scripts/build-plugins.sh`).

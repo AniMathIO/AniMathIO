@@ -104,6 +104,20 @@ impl FieldPool {
             .any(|field| field.state.read(cx).focus_handle(cx).is_focused(window))
     }
 
+    pub(super) fn retain_clips(&mut self, clips: &BTreeSet<ClipId>) {
+        let keep = |key: &String| {
+            !key.starts_with('c')
+                || clips
+                    .iter()
+                    .any(|id| key.starts_with(&format!("c{}:", id.0)))
+        };
+        self.inputs.retain(|key, _| keep(key));
+        self.colors.retain(|key, _| keep(key));
+        self.sliders.retain(|key, _| keep(key));
+        self.assets.retain(|key, _| keep(key));
+        self.enums.retain(|key, _| keep(key));
+    }
+
     /// Drop widgets that belong to clips other than `clip`.
     fn retain_clip(&mut self, clip: ClipId) {
         let prefix = format!("c{}:", clip.0);
@@ -327,7 +341,8 @@ impl Editor {
                             .child(NumberInput::new(&state).small()),
                     ),
             )
-            .children(slider_control)
+            // Align the slider with the input, past the 14px scrub grip and the gap.
+            .children(slider_control.map(|slider| div().pl(px(18.)).pb_1().child(slider)))
     }
 
     pub(super) fn slider_control(
@@ -418,6 +433,7 @@ impl Editor {
     }
 
     fn scrub_field_command(&self, id: ClipId, field: &Field, value: f64) -> Option<Command> {
+        let value = field_model_value(field, value);
         let clip = self.find_clip(id)?;
         let (target, value) = match field {
             Field::Transform(property) => (
@@ -438,7 +454,7 @@ impl Editor {
         ))
     }
 
-    fn text_control(
+    pub(super) fn text_control(
         &mut self,
         key: &str,
         target: InputTarget,
@@ -888,7 +904,10 @@ impl Editor {
             (Field::Transform(TransformProperty::Y), "Position Y"),
             (Field::Transform(TransformProperty::ScaleX), "Scale X"),
             (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
-            (Field::Transform(TransformProperty::Rotation), "Rotation"),
+            (
+                Field::Transform(TransformProperty::Rotation),
+                "Rotation (deg)",
+            ),
         ];
         transform
             .into_iter()
@@ -897,12 +916,14 @@ impl Editor {
                     Field::Transform(property) => Target::Transform(*property),
                     Field::Param(name) => Target::Param(name.clone()),
                 };
-                let value = inspector::sampled_numeric(
+                // Sample in model units (radians), then convert for display.
+                let model = inspector::sampled_numeric(
                     &clip,
                     &target,
                     self.position,
-                    field_value(&clip, &field),
+                    field_model_value(&field, field_value(&clip, &field)),
                 );
+                let value = field_display_value(&field, model);
                 self.number_row(id, field, label, value, window, cx)
             })
             .collect()
@@ -1176,7 +1197,10 @@ impl Editor {
             (Field::Transform(TransformProperty::Y), "Position Y"),
             (Field::Transform(TransformProperty::ScaleX), "Scale X"),
             (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
-            (Field::Transform(TransformProperty::Rotation), "Rotation"),
+            (
+                Field::Transform(TransformProperty::Rotation),
+                "Rotation (deg)",
+            ),
             (Field::Transform(TransformProperty::Opacity), "Opacity"),
         ];
         let all_audio = clips
@@ -1256,9 +1280,16 @@ impl Editor {
                     .child("Select a clip to edit its properties"),
             );
         };
-        self.fields.retain_clip(id);
+        let title_fields = self.title_field_rows(id, window, cx);
+        let is_title = title_fields.is_some();
+        if title_fields.is_none() {
+            self.fields.retain_clip(id);
+        }
         let ids = self.selected_ids();
         if ids.len() > 1 {
+            if let Some(rows) = title_fields {
+                return pane.child(rows);
+            }
             return self.multi_inspector(&ids, pane, window, cx);
         }
         let Some(clip) = self.find_clip(id).cloned() else {
@@ -1318,6 +1349,9 @@ impl Editor {
             .pb_3()
             .bg(hex(color::PANEL))
             .child(transform);
+        if let Some(rows) = title_fields {
+            body = body.child(rows);
+        }
         let opacity = inspector::sampled_numeric(
             &clip,
             &Target::Transform(TransformProperty::Opacity),
@@ -1332,22 +1366,8 @@ impl Editor {
             window,
             cx,
         );
-        body = body.child(
-            self.section(
-                "opacity",
-                "Opacity / Blend",
-                div().child(opacity_row).child(
-                    div()
-                        .px_3()
-                        .pt_1()
-                        .text_size(px(11.))
-                        .text_color(hex(color::TEXT_MUTED))
-                        .child("Blend: Normal"),
-                ),
-                cx,
-            ),
-        );
-        if matches!(clip.kind, ClipKind::Plugin { .. }) {
+        body = body.child(self.section("opacity", "Compositing", div().child(opacity_row), cx));
+        if matches!(clip.kind, ClipKind::Plugin { .. }) && !is_title {
             let rows = self.plugin_rows(id, window, cx);
             body = body.child(self.section(
                 "params",
