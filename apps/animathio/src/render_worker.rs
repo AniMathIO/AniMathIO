@@ -136,7 +136,7 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
                     .map(|clip| clip.id)
                     .collect()
             } else {
-                Default::default()
+                std::collections::BTreeSet::default()
             };
             let _ = tx.send(RenderResult {
                 failed_effect_clips,

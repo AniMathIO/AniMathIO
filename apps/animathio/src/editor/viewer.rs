@@ -31,6 +31,8 @@ struct GizmoDrag {
     origin: Point<Pixels>,
     transform: Transform,
     handle: Handle,
+    /// Last unwrapped rotation delta of a rotate drag, in radians.
+    rotation: std::cell::Cell<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -103,6 +105,79 @@ fn contains_clip(t: Transform, canvas: Bounds<Pixels>, pointer: Point<Pixels>) -
             <= (t.scale_y * f64::from(f32::from(canvas.size.height)) / 2.).abs()
 }
 
+/// Visible clips under `pointer`, topmost first. Media clips hit anywhere inside
+/// their transformed bounds; plugin and vector clips (text, shapes, ...) have a
+/// canvas-sized box but only draw part of it, so `has_ink` decides for those.
+fn clips_under_pointer(
+    project: &Project,
+    time: Time,
+    canvas: Bounds<Pixels>,
+    pointer: Point<Pixels>,
+    has_ink: &mut dyn FnMut(&animathio_core::SceneClip) -> bool,
+) -> Vec<ClipId> {
+    if !canvas.contains(&pointer) {
+        return Vec::new();
+    }
+    evaluate(project, time)
+        .clips
+        .into_iter()
+        .rev()
+        .filter(|clip| {
+            !matches!(clip.kind, ClipKind::Audio(_))
+                && clip.transform.opacity > 0.
+                && contains_clip(clip.transform, canvas, pointer)
+                && (!matches!(clip.kind, ClipKind::Plugin { .. } | ClipKind::Vector(_))
+                    || has_ink(clip))
+        })
+        .map(|clip| clip.id)
+        .collect()
+}
+
+/// Whether `clip`, rendered alone at preview-thumbnail size, has visible pixels
+/// within a few pixels of `pointer`. Rendering problems count as a hit so a clip
+/// is never unselectable.
+fn scene_clip_has_ink(
+    host: &mut Option<PluginHost>,
+    clip: &animathio_core::SceneClip,
+    project_size: (u32, u32),
+    canvas: Bounds<Pixels>,
+    pointer: Point<Pixels>,
+) -> bool {
+    const LONG_EDGE: f32 = 480.;
+    const RADIUS: i64 = 4;
+    let (width, height) = project_size;
+    let scale = LONG_EDGE / width.max(height).max(1) as f32;
+    let size = (
+        ((width as f32 * scale).round() as u32).max(1),
+        ((height as f32 * scale).round() as u32).max(1),
+    );
+    let mut single = clip.clone();
+    // Effects and opacity must not hide the clip's own shape.
+    single.effects.clear();
+    single.transform.opacity = 1.;
+    let mut scene = Scene {
+        clips: vec![single],
+    };
+    if let Some(host) = host {
+        scene = host.resolve(&scene, size);
+    }
+    let Ok(frame) =
+        animathio_render::render(&scene, &mut animathio_render::RenderCtx::default(), size)
+    else {
+        return true;
+    };
+    let fx = f32::from(pointer.x - canvas.origin.x) / f32::from(canvas.size.width).max(1.);
+    let fy = f32::from(pointer.y - canvas.origin.y) / f32::from(canvas.size.height).max(1.);
+    let (cx, cy) = ((fx * size.0 as f32) as i64, (fy * size.1 as f32) as i64);
+    (cy - RADIUS..=cy + RADIUS).any(|y| {
+        (cx - RADIUS..=cx + RADIUS).any(|x| {
+            (0..i64::from(size.0)).contains(&x)
+                && (0..i64::from(size.1)).contains(&y)
+                && frame.pixels[((y * i64::from(size.0) + x) * 4 + 3) as usize] > 8
+        })
+    })
+}
+
 fn pick_from_stack(hits: &[ClipId], selected: Option<ClipId>, cycle: bool) -> Option<ClipId> {
     let index = if cycle {
         selected
@@ -144,6 +219,27 @@ fn snap_axis(value: f64, extent: f64, threshold: f64) -> (f64, Option<f64>) {
     (value, None)
 }
 
+/// Smallest scale magnitude a handle drag may reach; the sign (mirroring) is kept.
+const MIN_SCALE: f64 = 0.001;
+
+/// `value` with its magnitude at least [`MIN_SCALE`] and its sign preserved.
+fn min_magnitude(value: f64) -> f64 {
+    if value.abs() >= MIN_SCALE {
+        value
+    } else if value.is_sign_negative() {
+        -MIN_SCALE
+    } else {
+        MIN_SCALE
+    }
+}
+
+/// The angle equal to `raw` modulo a full turn that lies nearest `previous`, so a
+/// drag crossing the -x axis continues past pi instead of jumping by 2 pi.
+fn unwrap_angle(raw: f64, previous: f64) -> f64 {
+    let turn = std::f64::consts::TAU;
+    raw + turn * ((previous - raw) / turn).round()
+}
+
 #[allow(clippy::many_single_char_names)]
 fn dragged_transform(
     drag: &GizmoDrag,
@@ -174,17 +270,18 @@ fn dragged_transform(
             let (sin, cos) = t.rotation.sin_cos();
             let local_x = dx * cos + dy * sin;
             let local_y = -dx * sin + dy * cos;
+            // Scale may be negative (mirrored); only keep it away from zero.
             if x != 0. {
-                t.scale_x = (t.scale_x + local_x / (w * x)).max(0.001);
+                t.scale_x = min_magnitude(t.scale_x + local_x / (w * x));
             }
             if y != 0. {
-                t.scale_y = (t.scale_y + local_y / (h * y)).max(0.001);
+                t.scale_y = min_magnitude(t.scale_y + local_y / (h * y));
             }
             if shift {
                 let factor = if x == 0. {
-                    t.scale_y / drag.transform.scale_y.max(0.001)
+                    t.scale_y / min_magnitude(drag.transform.scale_y)
                 } else {
-                    t.scale_x / drag.transform.scale_x.max(0.001)
+                    t.scale_x / min_magnitude(drag.transform.scale_x)
                 };
                 t.scale_x = drag.transform.scale_x * factor;
                 t.scale_y = drag.transform.scale_y * factor;
@@ -195,7 +292,9 @@ fn dragged_transform(
             let angle = |p: Point<Pixels>| {
                 f64::from(f32::from(p.y - c.y)).atan2(f64::from(f32::from(p.x - c.x)))
             };
-            t.rotation += angle(pointer) - angle(drag.origin);
+            let delta = unwrap_angle(angle(pointer) - angle(drag.origin), drag.rotation.get());
+            drag.rotation.set(delta);
+            t.rotation += delta;
             if shift {
                 t.rotation = (t.rotation / (std::f64::consts::PI / 12.)).round()
                     * (std::f64::consts::PI / 12.);
@@ -269,22 +368,16 @@ impl Editor {
                     if this.playing {
                         this.seek_to(this.position, cx);
                     }
-                    let hits: Vec<_> = evaluate(&this.project, this.position)
-                        .clips
-                        .into_iter()
-                        .rev()
-                        .filter(|clip| {
-                            !matches!(clip.kind, ClipKind::Audio(_))
-                                && clip.transform.opacity > 0.
-                                && this.viewer_state.bounds.contains(&event.position)
-                                && contains_clip(
-                                    clip.transform,
-                                    this.viewer_state.bounds,
-                                    event.position,
-                                )
-                        })
-                        .map(|clip| clip.id)
-                        .collect();
+                    let bounds = this.viewer_state.bounds;
+                    let size = project_size(&this.project);
+                    let host = &mut this.plugin_host;
+                    let hits = clips_under_pointer(
+                        &this.project,
+                        this.position,
+                        bounds,
+                        event.position,
+                        &mut |clip| scene_clip_has_ink(host, clip, size, bounds, event.position),
+                    );
                     let selected_handle = this
                         .selected_visual()
                         .and_then(|(_, t)| hit_handle(t, this.viewer_state.bounds, event.position));
@@ -311,6 +404,7 @@ impl Editor {
                             origin: event.position,
                             transform,
                             handle,
+                            rotation: std::cell::Cell::new(0.),
                         });
                         this.pointer_down = true;
                         cx.notify();
@@ -617,6 +711,70 @@ fn paint_gizmo(t: Transform, canvas: Bounds<Pixels>, dragging: bool, window: &mu
 mod tests {
     use super::*;
     #[core::prelude::v1::test]
+    fn pointer_hits_respect_stacking_bounds_audio_and_time() {
+        let mut project = Project::default();
+        for (track, clip_id, scale, kind) in [
+            (1, 1, 1.0, ClipKind::Image(AssetId::of(b"back"))),
+            (2, 2, 0.5, ClipKind::Image(AssetId::of(b"front"))),
+            (3, 3, 1.0, ClipKind::Audio(AssetId::of(b"sound"))),
+            (
+                4,
+                4,
+                1.0,
+                animathio_plugin_api::sources::text("Hi".into(), 0.1, [255; 4]),
+            ),
+        ] {
+            Command::AddTrack {
+                track: Track::new(TrackId(track), "T"),
+                index: (track - 1) as usize,
+            }
+            .apply(&mut project)
+            .unwrap();
+            if let ClipKind::Image(id) | ClipKind::Audio(id) = &kind {
+                Command::AddAsset {
+                    id: id.clone(),
+                    asset: animathio_core::Asset {
+                        name: "a".into(),
+                        media_type: "application/octet-stream".into(),
+                    },
+                }
+                .apply(&mut project)
+                .unwrap();
+            }
+            let mut clip = Clip::new(
+                ClipId(clip_id),
+                kind,
+                animathio_core::TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+            );
+            clip.transform.scale_x = scale;
+            clip.transform.scale_y = scale;
+            Command::AddClip {
+                track: TrackId(track),
+                clip,
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let stage = Bounds::new(point(px(0.), px(0.)), size(px(800.), px(450.)));
+        let ink = std::cell::Cell::new(true);
+        let at = |x: f32, y: f32, time: Time| {
+            clips_under_pointer(&project, time, stage, point(px(x), px(y)), &mut |_| {
+                ink.get()
+            })
+        };
+        // Centre: text on top, then both media clips, upper track first; audio never picks.
+        assert_eq!(at(400., 225., Time(0)), [ClipId(4), ClipId(2), ClipId(1)]);
+        // Transparent text pixels do not pick the text clip, media still does.
+        ink.set(false);
+        assert_eq!(at(400., 225., Time(0)), [ClipId(2), ClipId(1)]);
+        // Outside the half-size clip only the large one remains.
+        assert_eq!(at(50., 50., Time(0)), [ClipId(1)]);
+        // Outside the canvas and after the clips end: nothing.
+        assert_eq!(at(-5., 10., Time(0)).len(), 0);
+        assert_eq!(at(400., 225., Time(2 * TICKS_PER_SECOND)).len(), 0);
+    }
+
+    #[core::prelude::v1::test]
     fn picking_selects_frontmost_cycles_and_clears_empty() {
         let hits = [ClipId(3), ClipId(2), ClipId(1)];
         assert_eq!(
@@ -669,6 +827,59 @@ mod tests {
         ));
     }
     #[core::prelude::v1::test]
+    fn mirrored_scale_keeps_its_sign_and_never_reaches_zero() {
+        let frame = Bounds::new(Point::default(), size(px(1000.), px(500.)));
+        let drag = GizmoDrag {
+            id: ClipId(1),
+            origin: Point::default(),
+            transform: Transform {
+                scale_x: -0.4,
+                scale_y: 0.4,
+                ..Transform::default()
+            },
+            handle: Handle::Scale(0.5, 0.),
+            rotation: std::cell::Cell::new(0.),
+        };
+        // The right handle of a mirrored clip sits at -0.2 of the canvas width;
+        // dragging it 100 px (0.1) further left grows the mirrored width.
+        let (t, _) = dragged_transform(&drag, frame, point(px(-100.), px(0.)), false, false);
+        assert!((t.scale_x + 0.6).abs() < 1e-9, "{}", t.scale_x);
+        // Dragging it past the centre flips the mirror instead of clamping at +0.001.
+        let (t, _) = dragged_transform(&drag, frame, point(px(1000.), px(0.)), false, false);
+        assert!((t.scale_x - 1.6).abs() < 1e-9, "{}", t.scale_x);
+        // Landing within the dead zone keeps the sign of the dragged value.
+        let (t, _) = dragged_transform(&drag, frame, point(px(199.8), px(0.)), false, false);
+        assert_eq!(t.scale_x, -MIN_SCALE);
+        let (t, _) = dragged_transform(&drag, frame, point(px(200.2), px(0.)), false, false);
+        assert_eq!(t.scale_x, MIN_SCALE);
+        // Shift keeps the aspect ratio of a mirrored clip, sign included.
+        let (t, _) = dragged_transform(&drag, frame, point(px(-100.), px(0.)), true, false);
+        assert!((t.scale_x / t.scale_y + 1.).abs() < 1e-9);
+        assert!((t.scale_x + 0.6).abs() < 1e-9);
+        assert!(min_magnitude(0.) > 0. && min_magnitude(-0.) < 0.);
+    }
+
+    #[core::prelude::v1::test]
+    fn rotation_unwraps_across_the_negative_x_axis() {
+        use std::f64::consts::{PI, TAU};
+        assert!((unwrap_angle(0.5, 0.) - 0.5).abs() < 1e-12);
+        // Raw atan2 differences jump by 2 pi at the -x axis; unwrapping continues.
+        let start = 3. * PI / 4.; // pointer angle at drag start, near the -x axis
+        let mut previous = 0.;
+        let mut path = Vec::new();
+        for step in 0..=24 {
+            let true_delta = f64::from(step) * PI / 12.; // 0..2 pi, counter-clockwise
+            let now = (start + true_delta).sin().atan2((start + true_delta).cos());
+            let raw = now - start;
+            previous = unwrap_angle(raw, previous);
+            path.push(previous);
+            assert!((previous - true_delta).abs() < 1e-9, "{step}: {previous}");
+        }
+        assert!(path.windows(2).all(|pair| pair[1] > pair[0]));
+        assert!((path[24] - TAU).abs() < 1e-9);
+    }
+
+    #[core::prelude::v1::test]
     fn move_snaps_edges_and_shift_scale_preserves_aspect() {
         let frame = Bounds::new(Point::default(), size(px(1000.), px(500.)));
         let drag = GizmoDrag {
@@ -681,12 +892,14 @@ mod tests {
                 ..Transform::default()
             },
             handle: Handle::Move,
+            rotation: std::cell::Cell::new(0.),
         };
         let (t, guides) = dragged_transform(&drag, frame, point(px(99.), px(0.)), false, true);
         assert!((t.x - 0.4).abs() < 0.0001);
         assert_eq!(guides[0], Some(0.5));
         let drag = GizmoDrag {
             handle: Handle::Scale(0.5, 0.5),
+            rotation: std::cell::Cell::new(0.),
             ..drag
         };
         let (t, _) = dragged_transform(&drag, frame, point(px(50.), px(10.)), true, false);

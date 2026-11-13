@@ -272,21 +272,37 @@ impl Editor {
         }
     }
 
-    pub(super) fn clip_effect_warning(&self, clip: &Clip) -> bool {
-        !clip.effects.is_empty()
-            && (self.failed_effect_clips.contains(&clip.id)
-                || clip.effects.iter().any(|instance| {
-                    !self.available_effects().iter().any(|effect| {
-                        effect.plugin_id == instance.plugin && effect.effect_id == instance.effect
-                    })
-                }))
+    /// `(plugin, effect)` pairs offered by the loaded effect plugins.
+    pub(super) fn loaded_effect_ids(&self) -> BTreeSet<(String, String)> {
+        self.available_effects()
+            .into_iter()
+            .map(|effect| (effect.plugin_id, effect.effect_id))
+            .collect()
     }
 
-    /// Read-only summary of the selected clip's effect chain.
+    /// Whether a clip's effect chain references an effect that is not loaded,
+    /// or the last preview frame failed inside one of its effects.
+    pub(super) fn clip_effect_warning(
+        &self,
+        clip: &Clip,
+        loaded: &BTreeSet<(String, String)>,
+    ) -> bool {
+        !clip.effects.is_empty()
+            && (self.failed_effect_clips.contains(&clip.id)
+                || clip
+                    .effects
+                    .iter()
+                    .any(|e| !loaded.contains(&(e.plugin.clone(), e.effect.clone()))))
+    }
+
+    /// Read-only summary of the selected clip's effect chain. Effects whose plugin
+    /// is not loaded, or that failed on the last preview frame, carry a warning.
     pub(super) fn effect_rows(&self, id: ClipId, _cx: &mut Context<Self>) -> Vec<Div> {
         let Some(clip) = self.find_clip(id) else {
             return Vec::new();
         };
+        let loaded = self.loaded_effect_ids();
+        let failed = self.failed_effect_clips.contains(&clip.id);
         clip.effects
             .iter()
             .map(|instance| {
@@ -301,25 +317,45 @@ impl Editor {
                 } else {
                     format!("{label} ({})", params.join(", "))
                 };
-                div()
-                    .px_2()
-                    .py_1()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        icons::icon(if self.clip_effect_warning(clip) {
-                            IconName::TriangleAlert
-                        } else {
-                            IconName::Sparkles
-                        })
-                        .small(),
-                    )
-                    .when(self.clip_effect_warning(clip), |row| {
-                        row.child("Effect unavailable / failed")
-                    })
-                    .child(summary)
+                let warning =
+                    if !loaded.contains(&(instance.plugin.clone(), instance.effect.clone())) {
+                        Some(format!("Plugin {} is not loaded", instance.plugin))
+                    } else if failed {
+                        Some("Failed on the last preview frame".to_owned())
+                    } else {
+                        None
+                    };
+                let row = div().px_2().py_1().flex().flex_col().gap_1().child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            icons::icon(if warning.is_some() {
+                                IconName::TriangleAlert
+                            } else {
+                                IconName::Sparkles
+                            })
+                            .small()
+                            .text_color(hex(if warning.is_some() {
+                                color::WARNING
+                            } else {
+                                color::TEXT_SECONDARY
+                            })),
+                        )
+                        .child(div().flex_1().min_w_0().truncate().child(summary)),
+                );
+                match warning {
+                    Some(text) => row.child(
+                        div()
+                            .pl_6()
+                            .text_size(px(11.))
+                            .text_color(hex(color::WARNING))
+                            .child(text),
+                    ),
+                    None => row,
+                }
             })
             .collect()
     }

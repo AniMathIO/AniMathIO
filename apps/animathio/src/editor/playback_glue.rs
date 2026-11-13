@@ -51,11 +51,17 @@ impl Editor {
                     }
                     Err(error) => {
                         if self.effect_warning.as_ref() != Some(&error) {
-                            self.notices.push(crate::style::Toast::warning(format!(
-                                "Preview failed: {error}"
-                            )));
+                            let what = if self.failed_effect_clips.is_empty() {
+                                "Preview failed"
+                            } else {
+                                "Clip effect unavailable"
+                            };
+                            self.notices
+                                .push(crate::style::Toast::warning(format!("{what}: {error}")));
                         }
                         self.effect_warning = Some(error);
+                        // Redraw so the warning badges and the toast appear.
+                        changed = true;
                         continue;
                     }
                 };

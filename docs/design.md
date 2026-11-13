@@ -28,7 +28,7 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
 - **States:** every interactive element has hover, active, focus and disabled styles.
   Empty states get an icon, one line of text and a primary action.
 - **Timeline:** video/image clips show a filmstrip of low-resolution thumbnails
-  (decoded off-thread, cached by asset, time and row height); audio clips a filled,
+  (one tile per visible slot, decoded off-thread, cached by asset, time and row height); audio clips a filled,
   mirrored waveform in the clip colour; text, LaTeX and shape clips their snippet.
   Fades are smooth curves with handles, transitions a violet to cyan gradient over
   the overlap, keyframes rotated-square diamonds on the selected clip. Track headers
@@ -68,21 +68,33 @@ The Export button, dialog primaries and "Create" actions share `style::primary_b
 over a static wash; Reduce motion keeps only the wash. Preset cards carry an aspect
 chip, and the drop zone is dashed and lights up while files are dragged over it.
 
-## Viewer and timeline follow-ups
+## Viewer, inspector and timeline follow-ups
 
-Inspector transform rotation uses degrees (including numeric scrubbing); project
-transforms and keyframes continue to store radians. Click the preview to select
-the frontmost visual clip within its transformed bounds, Alt-click to cycle the
-stack, or click empty canvas to clear selection. Selection handles retain priority
-for scaling and rotation. Blend controls are hidden until the model supports them.
-
-The filmstrip requests a separate source time for each visible tile, retaining the
-bounded asynchronous thumbnail cache. Fade outlines sample the level keyframes,
-including their interpolation. Preview failures produce a toast; affected effect
-chains carry a warning icon in the timeline and inspector. Missing effect plugins
-are also marked when their clip is outside the current preview frame.
-
-The title bar uses gpui-component's client-decoration controls. Minimize and
-maximize are shown when the window manager advertises support; close is always
-available for client-decorated windows. A bare Xvfb server has no window manager
-and cannot exercise minimize/maximize behavior.
+- **Rotation** is shown and typed in degrees everywhere in the UI (inspector rows,
+  numeric scrubbing, multi-selection, the gizmo pill). Transforms and keyframes still
+  store radians; conversion lives in `field_display_value` / `field_model_value`.
+- **Click-to-pick:** clicking the preview selects the topmost visible clip under the
+  pointer, Alt-click cycles through the stack, and a click on empty canvas clears the
+  selection. Media clips hit anywhere inside their transformed bounds. Text, LaTeX,
+  graph and shape clips have a canvas-sized box but draw little, so they are rendered
+  alone at thumbnail size and only count when they have ink within a few pixels of the
+  pointer. Handles of the selected clip keep priority for scale and rotate drags.
+- **Compositing:** the model has no blend modes, so the inspector shows only the
+  opacity row (section "Compositing"); a blend dropdown waits for core support.
+- **Effect warnings:** a clip whose effect plugin is not loaded, or whose last preview
+  frame failed inside an effect, gets an amber warning badge next to its kind icon in
+  the timeline, a warning row (icon plus reason) in the inspector Effects section and a
+  toast when the preview first fails.
+- **Filmstrip:** one thumbnail per visible tile, requested per source time, decoded on
+  a worker and kept in a 256-tile least-recently-used cache; the worker also keeps
+  LRU caches of open decoders and stills and one shared copy of each encoded video. Fades are drawn by
+  sampling the clip's actual fade keyframes, so linear, ease and hold fades differ.
+- **Gizmo:** scale handles work on mirrored (negative-scale) clips and keep their sign;
+  rotate drags are unwrapped so crossing the -x axis never jumps by a full turn.
+- **Window controls:** the window is client-decorated and the gpui-component title bar
+  supplies minimise, maximise/restore and close (theme hover colours; close hovers in
+  `DANGER`). Minimise and maximise appear when the window manager advertises them;
+  close is always shown. On X11 client decorations need a compositing window manager,
+  so a bare Xvfb shows none. To test them there, run
+  `scripts/virtual-display.sh` with a tiny helper that sets `_NET_WM_CM_OWNER`,
+  `_NET_SUPPORTING_WM_CHECK` and `_GTK_FRAME_EXTENTS` on the root window.

@@ -319,11 +319,7 @@ pub(super) fn paint_clip(
     let lx = x0.max(bounds.left());
     if !clip.preview.is_empty() && y1 - y0 > px(38.) {
         paint_icon(
-            if clip.effect_warning {
-                IconName::TriangleAlert
-            } else {
-                clip.icon
-            },
+            clip.icon,
             Bounds::new(point(lx + px(12.), y0 + px(25.)), size(px(18.), px(18.))),
             kind_color.opacity(0.7),
             window,
@@ -370,21 +366,24 @@ pub(super) fn paint_clip(
     // Kind icon and label, only when the block is wide enough to hold them.
     if x1 - x0 > px(28.0) {
         let icon_bounds = Bounds::new(point(lx + px(7.0), y0 + px(3.0)), size(px(12.0), px(12.0)));
-        paint_icon(
-            if clip.effect_warning {
-                IconName::TriangleAlert
-            } else {
-                clip.icon
-            },
-            icon_bounds,
-            cx.theme().foreground,
-            window,
-            cx,
-        );
+        paint_icon(clip.icon, icon_bounds, cx.theme().foreground, window, cx);
+        let warned = clip.effect_warning && x1 - x0 > px(64.0);
+        if warned {
+            // Missing or failed effect plugin: amber badge beside the kind icon.
+            let badge = Bounds::new(point(lx + px(23.0), y0 + px(2.0)), size(px(16.0), px(14.0)));
+            window.paint_quad(fill(badge, style::hex(colors::WARNING)).corner_radii(px(4.0)));
+            paint_icon(
+                IconName::TriangleAlert,
+                Bounds::new(point(lx + px(25.0), y0 + px(3.0)), size(px(12.0), px(12.0))),
+                style::hex(colors::BG),
+                window,
+                cx,
+            );
+        }
         if !clip.label.is_empty() {
             paint_clip_label(
                 clip.label.clone(),
-                point(lx + px(22.0), y0 + px(3.0)),
+                point(lx + px(if warned { 44.0 } else { 22.0 }), y0 + px(3.0)),
                 x1 - px(4.0),
                 font(cx.theme().font_family.clone()),
                 window,
@@ -426,25 +425,26 @@ pub(super) fn paint_clip(
 
 /// Content labels are kept here so plugin migration touches one small match.
 pub(super) fn timeline_content_preview(clip: &Clip) -> String {
+    const KEYS: [&str; 4] = ["text", "source", "latex", "expression"];
+    let first_line = |text: &str| -> String {
+        text.lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(100)
+            .collect()
+    };
     match &clip.kind {
         ClipKind::Vector(_) => "Vector shape".into(),
-        ClipKind::Plugin { plugin_id, .. } => ["text", "source", "latex", "expression"]
+        ClipKind::Plugin { plugin_id, params } => KEYS
             .iter()
-            .find_map(|key| {
-                clip.params.get(*key).and_then(|value| {
-                    if let animathio_core::ParamValue::String(text) = value {
-                        Some(
-                            text.lines()
-                                .next()
-                                .unwrap_or("")
-                                .chars()
-                                .take(100)
-                                .collect(),
-                        )
-                    } else {
-                        None
-                    }
-                })
+            .find_map(|key| match clip.params.get(*key) {
+                Some(animathio_core::ParamValue::String(text)) => Some(first_line(text)),
+                // Plugin sources keep their text in the clip kind's JSON data.
+                _ => params
+                    .get(*key)
+                    .and_then(serde_json::Value::as_str)
+                    .map(first_line),
             })
             .unwrap_or_else(|| {
                 if plugin_id.ends_with("shapes") {
@@ -968,7 +968,10 @@ pub(super) fn kind_label(kind: &ClipKind) -> String {
         ClipKind::Plugin { plugin_id, .. } => match plugin_id.as_str() {
             "org.animathio.text" => "text".into(),
             "org.animathio.shapes" => "shape".into(),
-            _ => format!("plugin {plugin_id}"),
+            "org.animathio.latex" => "math".into(),
+            "org.animathio.graph" => "graph".into(),
+            // Third-party plugins: the last segment of the reverse-DNS id.
+            other => other.rsplit('.').next().unwrap_or(other).to_owned(),
         },
         ClipKind::Vector(_) => "vector".into(),
         ClipKind::Error(_) => "error".into(),
@@ -1345,6 +1348,16 @@ pub(super) fn write_project(
     Ok(())
 }
 
+/// Inspector (display) value for a model value: rotation shows in degrees.
+pub(super) fn field_display_value(field: &Field, model: f64) -> f64 {
+    if matches!(field, Field::Transform(TransformProperty::Rotation)) {
+        model.to_degrees()
+    } else {
+        model
+    }
+}
+
+/// Model value for an inspector (display) value: rotation is stored in radians.
 pub(super) fn field_model_value(field: &Field, value: f64) -> f64 {
     if matches!(field, Field::Transform(TransformProperty::Rotation)) {
         value.to_radians()

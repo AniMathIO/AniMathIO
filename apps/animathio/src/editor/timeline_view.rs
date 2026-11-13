@@ -668,6 +668,7 @@ impl Editor {
         let selected = self.selected_ids();
         let single = selected.len() <= 1;
         let rows = self.project.tracks().len();
+        let loaded_effects = self.loaded_effect_ids();
         let any_solo = self.project.tracks().iter().any(Track::is_solo);
         for (row, track) in self.project.tracks().iter().enumerate() {
             let silenced = track.is_muted() || (any_solo && !track.is_solo());
@@ -784,7 +785,7 @@ impl Editor {
                 };
                 clips.push(ClipPaint {
                     thumbnail_first,
-                    effect_warning: self.clip_effect_warning(clip),
+                    effect_warning: self.clip_effect_warning(clip, &loaded_effects),
                     row: paint_row,
                     start,
                     end,

@@ -327,7 +327,8 @@ impl Editor {
                             .child(NumberInput::new(&state).small()),
                     ),
             )
-            .children(slider_control)
+            // Align the slider with the input, past the 14px scrub grip and the gap.
+            .children(slider_control.map(|slider| div().pl(px(18.)).pb_1().child(slider)))
     }
 
     pub(super) fn slider_control(
@@ -898,20 +899,14 @@ impl Editor {
                     Field::Transform(property) => Target::Transform(*property),
                     Field::Param(name) => Target::Param(name.clone()),
                 };
-                let value = inspector::sampled_numeric(
+                // Sample in model units (radians), then convert for display.
+                let model = inspector::sampled_numeric(
                     &clip,
                     &target,
                     self.position,
-                    match &field {
-                        Field::Transform(TransformProperty::Rotation) => clip.transform.rotation,
-                        _ => field_value(&clip, &field),
-                    },
+                    field_model_value(&field, field_value(&clip, &field)),
                 );
-                let value = if matches!(field, Field::Transform(TransformProperty::Rotation)) {
-                    value.to_degrees()
-                } else {
-                    value
-                };
+                let value = field_display_value(&field, model);
                 self.number_row(id, field, label, value, window, cx)
             })
             .collect()
@@ -1344,7 +1339,7 @@ impl Editor {
             window,
             cx,
         );
-        body = body.child(self.section("opacity", "Opacity", div().child(opacity_row), cx));
+        body = body.child(self.section("opacity", "Compositing", div().child(opacity_row), cx));
         if matches!(clip.kind, ClipKind::Plugin { .. }) {
             let rows = self.plugin_rows(id, window, cx);
             body = body.child(self.section(
