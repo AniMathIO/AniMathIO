@@ -201,7 +201,9 @@ jobs:
 
           # `-acceptlicense` because the bundled license becomes a dmg EULA.
           mountroot="$(mktemp -d)"
-          hdiutil attach "$dmg" -nobrowse -readonly -acceptlicense -mountroot "$mountroot" -quiet
+          hdiutil imageinfo "$dmg" | head -20
+          hdiutil attach "$dmg" -nobrowse -readonly -noverify -acceptlicense -mountroot "$mountroot" || { echo "hdiutil attach failed with $?" >&2; exit 1; }
+          find "$mountroot" -maxdepth 2 -print
           trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
           mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
           test -n "$mounted_app"
