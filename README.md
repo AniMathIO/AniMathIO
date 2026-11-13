@@ -59,9 +59,9 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Multi-selection](docs/screenshots/editor-multiselect.png) | ![Media pool](docs/screenshots/editor-media.png) |
 
-| Titles tab and a lower third (inspector text fields) |
-| --- |
-| ![Titles](docs/screenshots/editor-titles.png) |
+| Titles tab and a lower third (inspector text fields) | Export queue (status-bar popover) |
+| --- | --- |
+| ![Titles](docs/screenshots/editor-titles.png) | ![Export queue](docs/screenshots/editor-export-queue.png) |
 
 ## Documentation
 
@@ -70,6 +70,8 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 - [`docs/cli.md`](docs/cli.md) — every `animathio-cli` subcommand
 - [`docs/mcp.md`](docs/mcp.md) — control protocol and MCP tool surface
 - [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md) — what maps from 1.x and what doesn't
+- [`docs/design.md`](docs/design.md) — visual design tokens and UI rules
+- [`docs/release-checklist.md`](docs/release-checklist.md) — what is left before the 2.0 swap
 
 ## Building
 
@@ -213,9 +215,9 @@ cargo build -p animathio-cli --locked
 
 `--frame`, `--from` and `--to` use zero-based project frame indices; sequence end is
 exclusive. `--time` accepts exact decimal seconds or integer ticks with a `ticks`
-suffix (705,600,000 ticks/second). Output defaults to 640×360; dimensions are
-command options until project canvas settings exist. See [`docs/cli.md`](docs/cli.md)
-for the full reference.
+suffix (705,600,000 ticks/second). Output uses the project's canvas size (640×360 when
+it is unset); `--width`/`--height` override it. See [`docs/cli.md`](docs/cli.md)
+for the full reference, including `export`, `import-media` and `mcp`.
 
 ## Importing projects
 

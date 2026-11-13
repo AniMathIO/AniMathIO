@@ -22,7 +22,7 @@ the render/audio/export data flow. The authority for these rules is
 | `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with tree-sitter. |
 | `apps/animathio-cli` | Headless validation, PNG rendering, MP4 export, importers and the MCP sidecar. |
 | `apps/animathio` | The GPUI desktop editor: a thin view over the command-only core, plus an export worker and dialog. |
-| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `trap` (sandbox fixture), and `examples/hello`. |
+| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `trap` (sandbox fixture), and `examples/hello`. |
 
 Video clips decode through `render::FrameSource` via the `media` crate's
 `MediaPool`, so real video frames appear in preview, the CLI and headless
@@ -80,8 +80,9 @@ Rules that keep the layers honest:
 
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
-`fields`, `inspector_view`, `media_pool`, `dialogs`, `commands`, `project_io`,
-`control_bridge` and `playback_glue`. Shared drawing/resource helpers live in
+`fields`, `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
+(export queue popover), `start_screen`, `clip_ops`, `commands`, `project_io`,
+`control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
 number scrubbing and the viewer's transform gizmo all preview through it, so one
 gesture is one history entry). The gizmo maths in `viewer` shares the renderer's
@@ -201,7 +202,8 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
 `SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
 `AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `Batch`, `SplitAt`,
-`RemoveRange` and `RippleDelete`.
+`RemoveRange`, `RippleDelete`, plus the link-group variants `SetClipLink` and `RestoreClips`
+and `Exact` (replays one inverse edit without link propagation).
 
 Track flags: a muted track is silent in the mixer and skipped by `evaluate`;
 while any track is soloed only soloed tracks are mixed and rendered (solo beats
