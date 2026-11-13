@@ -288,8 +288,7 @@ impl Editor {
     pub(super) fn available_effects(&self) -> Vec<animathio_plugin_host::EffectDescriptor> {
         self.plugin_host
             .as_ref()
-            .map(PluginHost::effects)
-            .unwrap_or_default()
+            .map_or_default(PluginHost::effects)
     }
 
     /// Display name for an effect, falling back to its id when the plugin is not loaded.

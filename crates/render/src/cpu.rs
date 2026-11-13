@@ -471,6 +471,7 @@ impl CpuBackend {
     }
     /// Shape `text` with the embedded font. Shared by the CPU and GPU backends so both
     /// position identical glyphs.
+    #[cfg(feature = "gpu")]
     pub(crate) fn shape(
         &mut self,
         text: &str,
