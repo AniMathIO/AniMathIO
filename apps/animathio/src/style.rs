@@ -42,6 +42,8 @@ pub mod color {
     pub const CLIP_GRAPH: u32 = 0x06B6D4;
     pub const CLIP_PLUGIN: u32 = 0x64748B;
     pub const CLIP_ERROR: u32 = 0xEF4444;
+    pub const VIEWER_STAGE: u32 = 0x090B10;
+    pub const VIEWER_SHADOW: u32 = 0x000000;
 }
 
 /// Corner radii in pixels.

@@ -9,15 +9,17 @@
 //! `clip id + parameter`. A control is created the first time it is rendered and
 //! re-synchronised from the project on every frame it is not being edited.
 
-use gpui_component::IndexPath;
 use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{
     Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction,
 };
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
+use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::switch::Switch;
+use gpui_component::{Disableable, IndexPath};
 
 use super::*;
+use crate::style::{color, hex};
 
 const CONTROL_W: f32 = 120.0;
 
@@ -67,10 +69,30 @@ struct AssetField {
 /// Live widget state for the inspector, keyed by `c<clip>:<kind>:<name>`.
 #[derive(Default)]
 pub(super) struct FieldPool {
+    pub(super) scrub: Option<NumberScrub>,
     inputs: BTreeMap<String, InputField>,
     colors: BTreeMap<String, ColorField>,
     enums: BTreeMap<String, EnumField>,
     assets: BTreeMap<String, AssetField>,
+    sliders: BTreeMap<String, (Entity<SliderState>, Subscription)>,
+}
+
+pub(super) struct NumberScrub {
+    target: InputTarget,
+    origin: f32,
+    value: f64,
+    step: f64,
+}
+
+fn scrub_value(value: f64, delta: f32, step: f64, shift: bool, ctrl: bool) -> f64 {
+    let sensitivity = if shift {
+        0.1
+    } else if ctrl {
+        10.0
+    } else {
+        1.0
+    };
+    value + f64::from(delta) * step * sensitivity
 }
 
 impl FieldPool {
@@ -88,6 +110,8 @@ impl FieldPool {
         self.inputs
             .retain(|key, _| !key.starts_with('c') || key.starts_with(&prefix));
         self.colors.retain(|key, _| key.starts_with(&prefix));
+        self.sliders
+            .retain(|key, _| !key.starts_with('c') || key.starts_with(&prefix));
         self.assets.retain(|key, _| key.starts_with(&prefix));
         self.enums.retain(|key, _| key.starts_with(&prefix));
     }
@@ -139,6 +163,10 @@ impl Editor {
                 move |this, _state, event: &InputEvent, _window, cx| {
                     if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                         this.commit_input(&commit_key, cx);
+                        if commit_key == "timecode" {
+                            this.viewer_state.timecode_editing = false;
+                            cx.notify();
+                        }
                     }
                 },
             ));
@@ -236,10 +264,175 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        let scrub_target = target.clone();
+        let slider = matches!(
+            &target,
+            InputTarget::Field {
+                field: Field::Transform(TransformProperty::Opacity),
+                ..
+            } | InputTarget::SelectionField {
+                field: Field::Transform(TransformProperty::Opacity)
+            }
+        );
         let state = self.input_state(key, target, format_number(value), step, window, cx);
+        let slider_control = slider.then(|| {
+            self.slider_control(
+                key,
+                Some(self.fields.inputs[key].target.clone()),
+                value,
+                window,
+                cx,
+            )
+        });
         div()
             .w(px(CONTROL_W))
-            .child(NumberInput::new(&state).small())
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("scrub-{key}")))
+                            .w(px(14.))
+                            .h(px(24.))
+                            .flex()
+                            .items_center()
+                            .cursor_ew_resize()
+                            .child(
+                                icons::icon(IconName::GripVertical)
+                                    .xsmall()
+                                    .text_color(hex(color::TEXT_MUTED)),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                    this.pointer_down = true;
+                                    this.fields.scrub = Some(NumberScrub {
+                                        target: scrub_target.clone(),
+                                        origin: f32::from(event.position.x),
+                                        value,
+                                        step,
+                                    });
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(NumberInput::new(&state).small()),
+                    ),
+            )
+            .children(slider_control)
+    }
+
+    pub(super) fn slider_control(
+        &mut self,
+        key: &str,
+        target: Option<InputTarget>,
+        value: f64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        if !self.fields.sliders.contains_key(key) {
+            let state = cx.new(|_| {
+                SliderState::new()
+                    .min(0.)
+                    .max(1.)
+                    .step(0.01)
+                    .default_value(value as f32)
+            });
+            let sub = cx.subscribe(
+                &state,
+                move |this, _, event: &SliderEvent, cx| match event {
+                    SliderEvent::Change(value) => {
+                        if let Some(target) = &target {
+                            if let Some(command) = this
+                                .numeric_gesture_command(target.clone(), f64::from(value.start()))
+                            {
+                                this.preview_color(command, cx);
+                            }
+                        } else {
+                            this.set_monitor_volume(f64::from(value.start()), cx);
+                        }
+                    }
+                    SliderEvent::Release(_) => this.finish_color_edit(cx),
+                },
+            );
+            self.fields.sliders.insert(key.to_owned(), (state, sub));
+        }
+        let state = self.fields.sliders[key].0.clone();
+        if (f64::from(state.read(cx).value().start()) - value).abs() > 0.001 {
+            state.update(cx, |state, cx| state.set_value(value as f32, window, cx));
+        }
+        div()
+            .h(px(14.))
+            .w_full()
+            .child(Slider::new(&state).horizontal())
+    }
+
+    pub(super) fn move_number_scrub(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(scrub) = &self.fields.scrub else {
+            return;
+        };
+        let value = scrub_value(
+            scrub.value,
+            f32::from(event.position.x) - scrub.origin,
+            scrub.step,
+            event.modifiers.shift,
+            event.modifiers.control,
+        );
+        let target = scrub.target.clone();
+        let command = self.numeric_gesture_command(target, value);
+        if let Some(command) = command {
+            self.preview_color(command, cx);
+        }
+    }
+
+    fn numeric_gesture_command(&self, target: InputTarget, value: f64) -> Option<Command> {
+        match target {
+            InputTarget::Field { id, field } => self.scrub_field_command(id, &field, value),
+            InputTarget::SelectionField { field } => {
+                let commands = self
+                    .selected_ids()
+                    .into_iter()
+                    .filter_map(|id| self.scrub_field_command(id, &field, value))
+                    .collect();
+                Some(Command::Batch { commands })
+            }
+            InputTarget::PluginNumber { id, name } => self.plugin_number_command(id, &name, value),
+            InputTarget::PluginPoint { id, name, axis } => {
+                let mut point = self.plugin_point_value(id, &name);
+                point[axis] = value as f32;
+                Some(self.plugin_param_command(id, name, json!(point)))
+            }
+            _ => None,
+        }
+    }
+
+    fn scrub_field_command(&self, id: ClipId, field: &Field, value: f64) -> Option<Command> {
+        let clip = self.find_clip(id)?;
+        let (target, value) = match field {
+            Field::Transform(property) => (
+                Target::Transform(*property),
+                if *property == TransformProperty::Opacity {
+                    value.clamp(0., 1.)
+                } else {
+                    value
+                },
+            ),
+            Field::Param(name) => (Target::Param(name.clone()), value),
+        };
+        Some(inspector::numeric_edit_command(
+            clip,
+            target,
+            value,
+            self.position,
+        ))
     }
 
     fn text_control(
@@ -493,48 +686,143 @@ impl Editor {
 
     /// Keyframe diamond for one animatable property: filled when a keyframe sits
     /// at the playhead.
-    fn row_diamond(&self, id: ClipId, target: &Target, cx: &mut Context<Self>) -> Button {
+    #[allow(clippy::if_not_else)]
+    fn row_diamond(&self, id: ClipId, target: &Target, cx: &mut Context<Self>) -> Div {
         let active = self
             .find_clip(id)
             .is_some_and(|clip| inspector::keyframed(clip, target, self.position));
         let element_id = SharedString::from(format!("kf-{}-{target:?}", id.0));
-        let target = target.clone();
-        Button::new(element_id)
-            .ghost()
-            .compact()
-            .icon(icons::diamond(active))
-            .tooltip(if active {
-                "Remove keyframe at playhead"
+        let mut controls = div().flex().items_center().gap_0();
+        for (forward, icon) in [
+            (false, IconName::ChevronLeft),
+            (true, IconName::ChevronRight),
+        ] {
+            let time = self
+                .find_clip(id)
+                .and_then(|clip| inspector::adjacent_key(clip, target, self.position, forward));
+            if !forward {
+                controls = controls.child(
+                    Button::new(SharedString::from(format!("prev-{element_id}")))
+                        .ghost()
+                        .compact()
+                        .w(px(14.))
+                        .icon(icons::icon(icon).xsmall())
+                        .disabled(time.is_none())
+                        .tooltip("Previous keyframe")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(time) = time {
+                                this.seek_to(time, cx);
+                            }
+                        })),
+                );
+                let target = target.clone();
+                controls = controls.child(
+                    Button::new(element_id.clone())
+                        .ghost()
+                        .compact()
+                        .w(px(18.))
+                        .icon(icons::diamond(active).xsmall())
+                        .tooltip(if active {
+                            "Remove keyframe at playhead"
+                        } else {
+                            "Add keyframe at playhead"
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_keyframe(id, target.clone(), cx);
+                        })),
+                );
             } else {
-                "Add keyframe at playhead"
-            })
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.toggle_keyframe(id, target.clone(), cx);
-            }))
+                controls = controls.child(
+                    Button::new(SharedString::from(format!("next-{element_id}")))
+                        .ghost()
+                        .compact()
+                        .w(px(14.))
+                        .icon(icons::icon(icon).xsmall())
+                        .disabled(time.is_none())
+                        .tooltip("Next keyframe")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(time) = time {
+                                this.seek_to(time, cx);
+                            }
+                        })),
+                );
+            }
+        }
+        controls
     }
 
     /// One `[diamond] label ........ control` inspector row.
     fn param_row(
-        diamond: Option<Button>,
-        label: &str,
+        diamond: Option<Div>,
+        label: impl IntoElement,
         control: impl IntoElement,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Div {
         div()
-            .h(px(30.))
+            .min_h(px(32.))
             .flex()
             .flex_row()
             .items_center()
             .gap_1()
             .px_2()
-            .child(div().w(px(26.)).children(diamond))
+            .child(div().w(px(46.)).flex_shrink_0().children(diamond))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .text_color(cx.theme().sidebar_foreground)
-                    .child(label.to_owned()),
+                    .text_size(px(11.))
+                    .text_color(hex(color::TEXT_SECONDARY))
+                    .child(label),
+            )
+            .child(control)
+    }
+
+    /// A row label that scrubs its number when dragged horizontally.
+    fn scrub_label(
+        key: &str,
+        text: String,
+        target: InputTarget,
+        value: f64,
+        step: f64,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        div()
+            .id(SharedString::from(format!("label-{key}")))
+            .cursor_ew_resize()
+            .child(text)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.pointer_down = true;
+                    this.fields.scrub = Some(NumberScrub {
+                        target: target.clone(),
+                        origin: f32::from(event.position.x),
+                        value,
+                        step,
+                    });
+                    cx.stop_propagation();
+                }),
+            )
+    }
+
+    /// A `label ........ control` row without the keyframe column.
+    fn param_row_flush(label: impl IntoElement, control: impl IntoElement) -> Div {
+        div()
+            .min_h(px(32.))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_size(px(11.))
+                    .text_color(hex(color::TEXT_SECONDARY))
+                    .child(label),
             )
             .child(control)
     }
@@ -569,6 +857,17 @@ impl Editor {
             cx,
         );
         let diamond = self.row_diamond(id, &target, cx);
+        let label = Self::scrub_label(
+            &key,
+            label.to_owned(),
+            InputTarget::Field {
+                id,
+                field: field.clone(),
+            },
+            value,
+            field_step(&field),
+            cx,
+        );
         Self::param_row(Some(diamond), label, control, cx)
     }
 
@@ -587,12 +886,20 @@ impl Editor {
             (Field::Transform(TransformProperty::ScaleX), "Scale X"),
             (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
             (Field::Transform(TransformProperty::Rotation), "Rotation"),
-            (Field::Transform(TransformProperty::Opacity), "Opacity"),
         ];
         transform
             .into_iter()
             .map(|(field, label)| {
-                let value = field_value(&clip, &field);
+                let target = match &field {
+                    Field::Transform(property) => Target::Transform(*property),
+                    Field::Param(name) => Target::Param(name.clone()),
+                };
+                let value = inspector::sampled_numeric(
+                    &clip,
+                    &target,
+                    self.position,
+                    field_value(&clip, &field),
+                );
                 self.number_row(id, field, label, value, window, cx)
             })
             .collect()
@@ -644,7 +951,7 @@ impl Editor {
                             );
                         })),
                 );
-                rows.push(Self::param_row(None, label, control, cx));
+                rows.push(Self::param_row(None, label.to_owned(), control, cx));
             } else {
                 rows.push(self.number_row(id, field, label, value, window, cx));
             }
@@ -683,10 +990,24 @@ impl Editor {
     ) -> Div {
         let name = model.id().to_owned();
         let diamond = self.row_diamond(id, &Target::Param(name.clone()), cx);
+        let mut label = model.label().to_owned().into_any_element();
         let control = match model {
-            ParamModel::Number { step, .. } => {
+            ParamModel::Number { step, min, max, .. } => {
                 let value = self.plugin_number_value(id, &name);
-                self.number_control(
+                let unit = (*min - 0.).abs() < f64::EPSILON && (*max - 1.).abs() < f64::EPSILON;
+                label = Self::scrub_label(
+                    &format!("c{}:pn:{name}", id.0),
+                    model.label().to_owned(),
+                    InputTarget::PluginNumber {
+                        id,
+                        name: name.clone(),
+                    },
+                    value,
+                    *step,
+                    cx,
+                )
+                .into_any_element();
+                let number = self.number_control(
                     &format!("c{}:pn:{name}", id.0),
                     InputTarget::PluginNumber {
                         id,
@@ -696,7 +1017,22 @@ impl Editor {
                     *step,
                     window,
                     cx,
-                )
+                );
+                if unit {
+                    let slider = self.slider_control(
+                        &format!("c{}:ps:{name}", id.0),
+                        Some(InputTarget::PluginNumber {
+                            id,
+                            name: name.clone(),
+                        }),
+                        value,
+                        window,
+                        cx,
+                    );
+                    number.child(slider)
+                } else {
+                    number
+                }
             }
             ParamModel::Color { default, .. } => {
                 let color = self.plugin_color_value(
@@ -757,7 +1093,7 @@ impl Editor {
                 .w(px(CONTROL_W))
                 .child(self.plugin_asset_control(id, name.clone(), media_type, window, cx)),
         };
-        Self::param_row(Some(diamond), model.label(), control, cx)
+        Self::param_row(Some(diamond), label, control, cx)
     }
 
     /// Inspector for several selected clips: a read-only summary plus the
@@ -874,7 +1210,7 @@ impl Editor {
                 } else {
                     label.to_owned()
                 };
-                Self::param_row(None, &label, control, cx)
+                Self::param_row_flush(label, control)
             })
             .collect();
         let body = div()
@@ -904,10 +1240,11 @@ impl Editor {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .bg(cx.theme().sidebar)
+            .bg(hex(color::PANEL))
             .border_l_1()
             .border_color(cx.theme().sidebar_border)
-            .text_color(cx.theme().sidebar_foreground);
+            .text_color(hex(color::TEXT))
+            .text_size(px(12.));
         let Some(id) = self.selected else {
             return pane.child(
                 div()
@@ -974,12 +1311,44 @@ impl Editor {
             .overflow_y_scroll()
             .flex()
             .flex_col()
+            .p_1()
+            .pb_3()
+            .bg(hex(color::PANEL))
             .child(transform);
+        let opacity = inspector::sampled_numeric(
+            &clip,
+            &Target::Transform(TransformProperty::Opacity),
+            self.position,
+            clip.transform.opacity,
+        );
+        let opacity_row = self.number_row(
+            id,
+            Field::Transform(TransformProperty::Opacity),
+            "Opacity",
+            opacity,
+            window,
+            cx,
+        );
+        body = body.child(
+            self.section(
+                "opacity",
+                "Opacity / Blend",
+                div().child(opacity_row).child(
+                    div()
+                        .px_3()
+                        .pt_1()
+                        .text_size(px(11.))
+                        .text_color(hex(color::TEXT_MUTED))
+                        .child("Blend: Normal"),
+                ),
+                cx,
+            ),
+        );
         if matches!(clip.kind, ClipKind::Plugin { .. }) {
             let rows = self.plugin_rows(id, window, cx);
             body = body.child(self.section(
                 "params",
-                "Plugin parameters",
+                "Text / Content",
                 div().flex().flex_col().children(rows),
                 cx,
             ));
@@ -988,7 +1357,7 @@ impl Editor {
             if !rows.is_empty() {
                 body = body.child(self.section(
                     "params",
-                    "Parameters",
+                    "Content",
                     div().flex().flex_col().children(rows),
                     cx,
                 ));
@@ -1003,8 +1372,17 @@ impl Editor {
                 cx,
             ));
         }
-        if !clip.effects.is_empty() {
-            let rows = self.effect_rows(id, cx);
+        {
+            let mut rows = self.effect_rows(id, cx);
+            if rows.is_empty() {
+                rows.push(
+                    div()
+                        .px_3()
+                        .text_size(px(11.))
+                        .text_color(hex(color::TEXT_MUTED))
+                        .child("Drop an effect from the media pool"),
+                );
+            }
             body = body.child(self.section(
                 "effects",
                 "Effects",
@@ -1012,6 +1390,34 @@ impl Editor {
                 cx,
             ));
         }
+        let transitions: Vec<_> = self
+            .project
+            .tracks()
+            .iter()
+            .flat_map(Track::transitions)
+            .filter(|t| t.from == id || t.to == id)
+            .map(|t| {
+                div()
+                    .px_3()
+                    .text_size(px(11.))
+                    .text_color(hex(color::TEXT_SECONDARY))
+                    .child(format!(
+                        "{:?} / {}",
+                        t.kind,
+                        timecode::format_timecode(t.duration, self.project.frame_rate())
+                    ))
+            })
+            .collect();
+        let transition_content = if transitions.is_empty() {
+            div()
+                .px_3()
+                .text_size(px(11.))
+                .text_color(hex(color::TEXT_MUTED))
+                .child("No transition on this clip")
+        } else {
+            div().children(transitions)
+        };
+        body = body.child(self.section("transition", "Transition", transition_content, cx));
         if let Some(selection) = self.selected_keyframe.clone()
             && selection.clip_id == id
         {
@@ -1043,6 +1449,13 @@ pub(super) fn to_hsla(color: [u8; 4]) -> Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[core::prelude::v1::test]
+    fn scrubbing_modifiers_are_predictable() {
+        assert!((scrub_value(0.5, 10., 0.01, false, false) - 0.6).abs() < 1e-9);
+        assert!((scrub_value(0.5, 10., 0.01, true, false) - 0.51).abs() < 1e-9);
+        assert!((scrub_value(0.5, -2., 0.01, false, true) - 0.3).abs() < 1e-9);
+    }
 
     #[core::prelude::v1::test]
     fn numbers_format_compactly() {

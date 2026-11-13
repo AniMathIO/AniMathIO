@@ -82,7 +82,11 @@ Rules that keep the layers honest:
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `inspector_view`, `media_pool`, `dialogs`, `commands`, `project_io`,
 `control_bridge` and `playback_glue`. Shared drawing/resource helpers live in
-`support`; `color_edit` owns the live-preview transaction. `editing.rs` holds pure
+`support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
+number scrubbing and the viewer's transform gizmo all preview through it, so one
+gesture is one history entry). The gizmo maths in `viewer` shares the renderer's
+canvas mapping and builds its edit with `inspector::transform_edit_commands`, which
+merges plain properties into one `SetTransform` and keyframes animated ones. `editing.rs` holds pure
 shuttle, in/out, blade and ripple command planning. In/out points and tool mode stay
 in view state. Ripple trim uses one `Command::Batch` on the source track;
 Shift+Delete uses `RippleDelete`. The ruler and export range share half-open bounds.

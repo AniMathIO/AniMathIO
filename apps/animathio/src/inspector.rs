@@ -429,6 +429,35 @@ pub(crate) fn numeric_edit_command(
     }
 }
 
+/// Commands that set several transform properties at once. Animated
+/// properties get a keyframe at the playhead; the rest are merged into a single
+/// `SetTransform`, so they cannot overwrite each other.
+pub(crate) fn transform_edit_commands(
+    clip: &Clip,
+    values: &[(TransformProperty, f64)],
+    playhead: Time,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let mut base = clip.transform;
+    let mut plain = false;
+    for (property, value) in values {
+        let target = Target::Transform(*property);
+        if clip.animations.iter().any(|a| a.target == target) {
+            commands.push(numeric_edit_command(clip, target, *value, playhead));
+        } else {
+            base = with_transform(base, *property, *value);
+            plain = true;
+        }
+    }
+    if plain {
+        commands.push(Command::SetTransform {
+            id: clip.id,
+            transform: base,
+        });
+    }
+    commands
+}
+
 /// Build the command that sets a keyframe's outgoing interpolation in place.
 pub(crate) fn interpolation_command(
     clip: &Clip,
@@ -514,6 +543,36 @@ mod tests {
             step: 1.0,
             default: 10.0,
         }
+    }
+
+    #[test]
+    fn transform_edit_merges_plain_properties_and_keys_animated_ones() {
+        let mut clip = clip_with_params();
+        clip.transform.scale_x = 0.5;
+        let plain = transform_edit_commands(
+            &clip,
+            &[(TransformProperty::X, 0.7), (TransformProperty::Y, 0.2)],
+            Time(0),
+        );
+        let [Command::SetTransform { transform, .. }] = plain.as_slice() else {
+            panic!("plain properties must collapse into one SetTransform: {plain:?}");
+        };
+        assert!((transform.x - 0.7).abs() < 1e-9 && (transform.y - 0.2).abs() < 1e-9);
+        assert!((transform.scale_x - 0.5).abs() < 1e-9);
+        clip.animations.push(animathio_core::Animation {
+            target: Target::Transform(TransformProperty::Rotation),
+            keys: animathio_core::Keyframes::default(),
+        });
+        let mixed = transform_edit_commands(
+            &clip,
+            &[
+                (TransformProperty::Rotation, 1.0),
+                (TransformProperty::X, 0.1),
+            ],
+            Time(0),
+        );
+        assert!(matches!(mixed[0], Command::AddKeyframe { .. }));
+        assert!(matches!(mixed[1], Command::SetTransform { .. }));
     }
 
     #[test]
@@ -779,5 +838,175 @@ mod typed_tests {
             );
             command.apply(&mut project).unwrap();
         }
+    }
+}
+
+/// Nearest key on one property, in project ticks. Keys outside a trimmed clip
+/// remain in the model but are not useful navigation targets in the inspector.
+pub(crate) fn adjacent_key(
+    clip: &Clip,
+    target: &Target,
+    playhead: Time,
+    forward: bool,
+) -> Option<Time> {
+    clip.animations
+        .iter()
+        .filter(|animation| &animation.target == target)
+        .flat_map(|animation| animation.keys.keys().keys())
+        .filter_map(|local| local.0.checked_add(clip.range.start.0).map(Time))
+        .filter(|time| *time >= clip.range.start && *time < clip.range.end)
+        .filter(|time| {
+            if forward {
+                *time > playhead
+            } else {
+                *time < playhead
+            }
+        })
+        .reduce(|a, b| if forward { a.min(b) } else { a.max(b) })
+}
+
+/// Reset chosen transform properties, including their animation, in one command.
+pub(crate) fn reset_transform(clip: &Clip, opacity: bool) -> Command {
+    let mut commands = Vec::new();
+    for animation in &clip.animations {
+        if matches!(&animation.target, Target::Transform(property) if (*property == TransformProperty::Opacity) == opacity)
+        {
+            for time in animation.keys.keys().keys() {
+                commands.push(Command::RemoveKeyframe {
+                    id: clip.id,
+                    target: animation.target.clone(),
+                    time: *time,
+                });
+            }
+        }
+    }
+    let mut transform = if opacity {
+        clip.transform
+    } else {
+        Transform {
+            opacity: clip.transform.opacity,
+            ..Transform::default()
+        }
+    };
+    if opacity {
+        transform.opacity = 1.;
+    }
+    commands.push(Command::SetTransform {
+        id: clip.id,
+        transform,
+    });
+    Command::Batch { commands }
+}
+
+#[cfg(test)]
+mod viewer_inspector_tests {
+    use super::*;
+    use animathio_core::{ClipId, ClipKind, History, Project, TimeRange, Track, TrackId};
+
+    #[test]
+    fn property_navigation_skips_trimmed_keys_and_uses_project_ticks() {
+        let mut project = Project::default();
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Visual"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let clip = Clip::new(
+            ClipId(1),
+            ClipKind::Error("fixture".into()),
+            TimeRange::new(Time(100), Time(300)).unwrap(),
+        );
+        Command::AddClip {
+            track: TrackId(1),
+            clip,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let target = Target::Transform(TransformProperty::X);
+        for local in [0, 80, 180, 240] {
+            Command::AddKeyframe {
+                id: ClipId(1),
+                target: target.clone(),
+                time: Time(local),
+                keyframe: Keyframe {
+                    value: 0.5.into(),
+                    interpolation: Interpolation::Linear,
+                },
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let clip = project.tracks()[0].clips().values().next().unwrap();
+        assert_eq!(
+            adjacent_key(clip, &target, Time(180), false),
+            Some(Time(100))
+        );
+        assert_eq!(
+            adjacent_key(clip, &target, Time(180), true),
+            Some(Time(280))
+        );
+        assert_eq!(adjacent_key(clip, &target, Time(280), true), None);
+        assert_eq!(
+            adjacent_key(
+                clip,
+                &Target::Transform(TransformProperty::Y),
+                Time(180),
+                true
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn reset_is_one_undo_step_and_preserves_other_sections() {
+        let mut project = Project::default();
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Visual"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let mut clip = Clip::new(
+            ClipId(1),
+            ClipKind::Error("fixture".into()),
+            TimeRange::new(Time(0), Time(1000)).unwrap(),
+        );
+        clip.transform.x = 0.8;
+        clip.transform.opacity = 0.4;
+        Command::AddClip {
+            track: TrackId(1),
+            clip,
+        }
+        .apply(&mut project)
+        .unwrap();
+        for property in [TransformProperty::X, TransformProperty::Opacity] {
+            Command::AddKeyframe {
+                id: ClipId(1),
+                target: Target::Transform(property),
+                time: Time(0),
+                keyframe: Keyframe {
+                    value: 0.3.into(),
+                    interpolation: Interpolation::Hold,
+                },
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let original = project.clone();
+        let clip = project.tracks()[0].clips().values().next().unwrap();
+        let command = reset_transform(clip, false);
+        let mut history = History::default();
+        history.execute(&mut project, &command).unwrap();
+        let clip = project.tracks()[0].clips().values().next().unwrap();
+        assert_eq!(clip.transform.x, 0.5);
+        assert_eq!(clip.transform.opacity, 0.4);
+        assert_eq!(clip.animations.len(), 1);
+        assert_eq!(
+            clip.animations[0].target,
+            Target::Transform(TransformProperty::Opacity)
+        );
+        history.undo(&mut project).unwrap();
+        assert_eq!(project, original);
     }
 }
