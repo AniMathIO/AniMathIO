@@ -95,6 +95,16 @@ impl Clipboard {
         for copied in &self.clips {
             by_track.entry(copied.track).or_default().push(copied);
         }
+        // Pasted clips must never join the originals' link groups. Copied clips
+        // that shared a group get a fresh group of their own; a lone member is
+        // unlinked.
+        let mut group_sizes: BTreeMap<ClipId, usize> = BTreeMap::new();
+        for copied in &self.clips {
+            if let Some(group) = copied.clip.link_group {
+                *group_sizes.entry(group).or_default() += 1;
+            }
+        }
+        let mut fresh_groups: BTreeMap<ClipId, ClipId> = BTreeMap::new();
         let mut commands = Vec::new();
         let mut pasted = BTreeSet::new();
         let mut appended = project.tracks().len();
@@ -128,6 +138,10 @@ impl Clipboard {
                 let mut clip = copied.clip.clone();
                 clip.id = ClipId(new_id());
                 clip.range = range;
+                clip.link_group = clip
+                    .link_group
+                    .filter(|group| group_sizes.get(group).copied().unwrap_or(0) > 1)
+                    .map(|group| *fresh_groups.entry(group).or_insert(clip.id));
                 pasted.insert(clip.id);
                 commands.push(Command::AddClip {
                     track: target_id,
@@ -210,6 +224,49 @@ mod tests {
         assert!(Clipboard::from_json("not json").is_none());
         assert!(Clipboard::from_json("{\"format\":\"other\",\"clips\":[]}").is_none());
         assert!(Clipboard::copy(&project, &set(&[99])).is_none());
+    }
+
+    #[test]
+    fn pasted_clips_never_join_the_originals_link_groups() {
+        let mut project =
+            project_with(&[(1, &[(1, 0, 10)][..]), (2, &[(2, 0, 10), (3, 20, 30)][..])]);
+        let mut history = History::default();
+        for id in [1, 2] {
+            let link = Command::SetClipLink {
+                id: ClipId(id),
+                group: Some(ClipId(1)),
+            };
+            history.execute(&mut project, &link).unwrap();
+        }
+        let group_of = |project: &Project, id: ClipId| {
+            project
+                .tracks()
+                .iter()
+                .find_map(|track| track.clips().get(&id))
+                .and_then(|clip| clip.link_group)
+        };
+
+        // Both linked clips copied: the copies form their own fresh group.
+        let board = Clipboard::copy(&project, &set(&[1, 2])).unwrap();
+        let (command, pasted) = board.paste(&project, Time(100), counter(&project)).unwrap();
+        history.execute(&mut project, &command).unwrap();
+        let groups: BTreeSet<_> = pasted.iter().map(|id| group_of(&project, *id)).collect();
+        assert_eq!(groups.len(), 1);
+        let fresh = groups
+            .into_iter()
+            .next()
+            .flatten()
+            .expect("copies stay linked");
+        assert_ne!(fresh, ClipId(1));
+        assert!(pasted.contains(&fresh));
+
+        // Only one member copied: the copy is unlinked.
+        let board = Clipboard::copy(&project, &set(&[1])).unwrap();
+        let (command, pasted) = board.paste(&project, Time(200), counter(&project)).unwrap();
+        history.execute(&mut project, &command).unwrap();
+        assert!(pasted.iter().all(|id| group_of(&project, *id).is_none()));
+        assert_eq!(group_of(&project, ClipId(1)), Some(ClipId(1)));
+        assert_eq!(group_of(&project, ClipId(2)), Some(ClipId(1)));
     }
 
     #[test]
