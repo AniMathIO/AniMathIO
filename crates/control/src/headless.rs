@@ -635,7 +635,12 @@ mod tests {
             })
             .unwrap_err();
         assert!(
-            matches!(rejected, ControlError::AlreadyExists(ref path) if *path == output),
+            // Compare canonical forms: Windows reports `\\?\` or 8.3 short paths.
+            matches!(
+                rejected,
+                ControlError::AlreadyExists(ref path)
+                    if path.canonicalize().ok() == output.canonicalize().ok()
+            ),
             "{rejected:?}"
         );
 
