@@ -262,8 +262,7 @@ fn clip_name(project: &Project, clip: &Clip) -> String {
             .or_else(|| params.get("text"))
             .or_else(|| params.get("items"))
             .and_then(serde_json::Value::as_str)
-            .map(shorten)
-            .unwrap_or_default(),
+            .map_or_default(shorten),
         ClipKind::Vector(_) => String::new(),
         ClipKind::Error(message) => shorten(message),
     }
