@@ -263,6 +263,16 @@ pub(crate) fn resolve(bytes: &[u8], resolved: fc::ColorInfo) -> (ColorInfo, bool
     }
 }
 
+/// `x.round().clamp(0.0, 255.0) as u8` without the libm `round` call (baseline x86-64 has no
+/// rounding instruction). After clamping `x` is non-negative, so truncating and testing the
+/// exact fractional part reproduces round-half-away-from-zero bit for bit.
+#[inline]
+pub(crate) fn round_u8(x: f64) -> u8 {
+    let x = x.clamp(0.0, 255.0);
+    let t = x as u8;
+    t + u8::from(x - f64::from(t) >= 0.5)
+}
+
 /// Convert an 8-bit planar Y'CbCr frame to straight-alpha RGBA8 using an explicit matrix and
 /// range. This is the direct display path (no linearisation), matching FFmpeg's `-pix_fmt`
 /// default and FilmCraft's own fast path.
@@ -286,21 +296,31 @@ pub(crate) fn yuv8_to_rgba8(
     };
     let (crr, cbb) = (2.0 * (1.0 - kr) * cs, 2.0 * (1.0 - kb) * cs);
     let (cgr, cgb) = (crr * kr / kg, cbb * kb / kg);
+    // Per-sample terms depend on one byte only, so tabulate them. Every table entry and
+    // every sum below uses the same f64 operations in the same order as the direct formula,
+    // which keeps the output bit-identical.
+    let luma: [f64; 256] = std::array::from_fn(|i| (i as f64 - yo) * ys);
+    let chroma_of = |k: f64| -> [f64; 256] { std::array::from_fn(|i| k * (i as f64 - 128.0)) };
+    let (r_v, g_v, g_u, b_u) = (
+        chroma_of(crr),
+        chroma_of(cgr),
+        chroma_of(cgb),
+        chroma_of(cbb),
+    );
     let mut out = vec![0u8; w * h * 4];
-    for y in 0..h {
+    for (y, orow) in out.chunks_exact_mut(w * 4).enumerate() {
         let cy = y >> sy;
         let yrow = &planes[0][y * w..y * w + w];
         let urow = &planes[1][cy * cw..cy * cw + cw];
         let vrow = &planes[2][cy * cw..cy * cw + cw];
-        for x in 0..w {
-            let yy = (f64::from(yrow[x]) - yo) * ys;
-            let u = f64::from(urow[x >> sx]) - 128.0;
-            let v = f64::from(vrow[x >> sx]) - 128.0;
-            let o = &mut out[(y * w + x) * 4..(y * w + x) * 4 + 4];
-            o[0] = (yy + crr * v).round().clamp(0.0, 255.0) as u8;
-            o[1] = (yy - cgr * v - cgb * u).round().clamp(0.0, 255.0) as u8;
-            o[2] = (yy + cbb * u).round().clamp(0.0, 255.0) as u8;
-            o[3] = alpha.map_or(255, |a| a[y * w + x]);
+        let arow = alpha.map(|a| &a[y * w..y * w + w]);
+        for (x, o) in orow.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let yy = luma[usize::from(yrow[x])];
+            let (u, v) = (usize::from(urow[x >> sx]), usize::from(vrow[x >> sx]));
+            o[0] = round_u8(yy + r_v[v]);
+            o[1] = round_u8(yy - g_v[v] - g_u[u]);
+            o[2] = round_u8(yy + b_u[u]);
+            o[3] = arow.map_or(255, |a| a[x]);
         }
     }
     out
@@ -386,5 +406,97 @@ fn kr_kb(matrix: Matrix) -> (f64, f64) {
         Matrix::Bt601 => (0.299, 0.114),
         Matrix::Bt709 => (0.2126, 0.0722),
         Matrix::Bt2020Ncl => (0.2627, 0.0593),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pre-optimisation scalar formula.
+    fn reference(
+        w: usize,
+        h: usize,
+        planes: &[Arc<Vec<u8>>; 3],
+        chroma: Chroma,
+        matrix: Matrix,
+        range: ColorRange,
+    ) -> Vec<u8> {
+        let (sx, sy) = chroma.shifts();
+        let cw = w.div_ceil(1 << sx);
+        let (kr, kb) = kr_kb(matrix);
+        let kg = 1.0 - kr - kb;
+        let (ys, yo, cs) = match range {
+            ColorRange::Limited => (255.0 / 219.0, 16.0, 255.0 / 224.0),
+            ColorRange::Full => (1.0, 0.0, 1.0),
+        };
+        let (crr, cbb) = (2.0 * (1.0 - kr) * cs, 2.0 * (1.0 - kb) * cs);
+        let (cgr, cgb) = (crr * kr / kg, cbb * kb / kg);
+        let mut out = vec![0u8; w * h * 4];
+        for y in 0..h {
+            let cy = y >> sy;
+            for x in 0..w {
+                let yy = (f64::from(planes[0][y * w + x]) - yo) * ys;
+                let u = f64::from(planes[1][cy * cw + (x >> sx)]) - 128.0;
+                let v = f64::from(planes[2][cy * cw + (x >> sx)]) - 128.0;
+                let o = &mut out[(y * w + x) * 4..(y * w + x) * 4 + 4];
+                o[0] = (yy + crr * v).round().clamp(0.0, 255.0) as u8;
+                o[1] = (yy - cgr * v - cgb * u).round().clamp(0.0, 255.0) as u8;
+                o[2] = (yy + cbb * u).round().clamp(0.0, 255.0) as u8;
+                o[3] = 255;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn round_u8_matches_round_clamp() {
+        let mut values = vec![
+            -1.0,
+            0.0,
+            0.499_999_999_999_999_94,
+            0.5,
+            1.5,
+            254.5,
+            254.999,
+            255.0,
+            300.0,
+        ];
+        values.extend((0..200_000).map(|i| f64::from(i) * 0.00137 - 3.0));
+        for x in values {
+            assert_eq!(round_u8(x), x.round().clamp(0.0, 255.0) as u8, "{x}");
+        }
+    }
+
+    #[test]
+    fn table_driven_yuv_to_rgba_matches_the_direct_formula() {
+        let (w, h) = (64usize, 36usize);
+        let mut seed = 0x1234_5678_u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 24) as u8
+        };
+        let planes: [Arc<Vec<u8>>; 3] = [
+            Arc::new((0..w * h).map(|_| next()).collect()),
+            Arc::new((0..w * h / 4).map(|_| next()).collect()),
+            Arc::new((0..w * h / 4).map(|_| next()).collect()),
+        ];
+        for matrix in [Matrix::Bt601, Matrix::Bt709, Matrix::Bt2020Ncl] {
+            for range in [ColorRange::Limited, ColorRange::Full] {
+                let actual = yuv8_to_rgba8(
+                    w as u32,
+                    h as u32,
+                    &planes,
+                    Chroma::C420,
+                    None,
+                    matrix,
+                    range,
+                );
+                assert_eq!(
+                    actual,
+                    reference(w, h, &planes, Chroma::C420, matrix, range)
+                );
+            }
+        }
     }
 }

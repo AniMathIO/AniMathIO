@@ -418,3 +418,9 @@ owned RGBA/PCM buffers through a channel with capacity one. Frame and audio orde
 are unchanged; progress reports only encoded frames. The worker is joined on
 success, failure and cancellation. Output remains atomic, and a serial/pipelined
 MP4 comparison test protects byte determinism.
+
+The per-frame colour conversions on the export path (decoded YUV to RGBA, and RGBA to
+the encoder's 4:2:0) use byte-indexed lookup tables and avoid libm `round`, with unit
+tests asserting bit-for-bit equality with the direct formulas. The RGBA-to-YUV step
+splits the frame into bands of luma-row pairs across at most four scoped threads; each
+band uses identical arithmetic, so output does not depend on the thread count.

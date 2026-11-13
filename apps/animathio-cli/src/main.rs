@@ -264,7 +264,9 @@ fn run(cli: Cli) -> Result<()> {
             let mut plugins = plugin_host()?;
             let started = std::time::Instant::now();
             let mut frames = 0;
+            let prepare = animathio_core::timing::Timer::new("prepare-exporter");
             let mut exporter = animathio_export::Exporter::new(&bundle.project, &bundle.assets)?;
+            drop(prepare);
             exporter.set_effect_processor(plugins.effect_processor());
             exporter.export_to_file(
                 &bundle.project,
@@ -287,10 +289,7 @@ fn run(cli: Cli) -> Result<()> {
                 let elapsed = started.elapsed().as_secs_f64();
                 #[allow(clippy::cast_precision_loss)]
                 let fps = frames as f64 / elapsed;
-                eprintln!(
-                    "export bench: {frames} frames in {elapsed:.3}s ({:.2} fps)",
-                    fps
-                );
+                eprintln!("export bench: {frames} frames in {elapsed:.3}s ({fps:.2} fps)");
                 animathio_core::timing::report();
             }
         }

@@ -242,9 +242,14 @@ Creates a new `.amio` project from video or audio. Video with audio creates link
 
 Export profiling: `export PROJECT -o OUTPUT --bench` reports total wall time and
 frames per second (including media preparation, excluding plugin discovery).
-Set `ANIMATHIO_EXPORT_TIMING=1` for process-wide decode, render, effects, encoding
-and audio mixing timers. Render includes decode waits and effects; worker decode
-timers can overlap, so these numbers must not be added together.
+Set `ANIMATHIO_EXPORT_TIMING=1` to also print process-wide stage timers:
+`decode` (`decode-codec` + `decode-yuv-to-rgba`, on the media pool workers),
+`render-inclusive` (the render call, including effects and decode waits),
+`effects` / `effects-setup` (plugin calls and instantiation), `resolve-plugins`
+(text/vector plugin resolution), `audio-mix`, and the encoder worker's
+`encode-video` (`encode-rgba-to-yuv` + `encode-h264`), `encode-audio` and
+`encode-flush-mux`. Stages run on different threads and nest, so the numbers
+overlap and must not be added together; compare them with the wall time.
 
 For the reproducible 10-second 1080p30 MP4/audio, text title, one-second dissolve
 and grayscale effect workload, build the release CLI and first-party plugins,

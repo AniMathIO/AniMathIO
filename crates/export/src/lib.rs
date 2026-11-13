@@ -170,7 +170,9 @@ impl Exporter {
         time: Time,
         resolve: &mut impl FnMut(Scene) -> Scene,
     ) -> Result<Frame, Error> {
+        let resolve_timer = animathio_core::timing::Timer::new("resolve-plugins");
         let scene = resolve(evaluate(project, time));
+        drop(resolve_timer);
         Ok(render(&scene, &mut self.ctx, resolution(project))?)
     }
 

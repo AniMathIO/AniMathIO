@@ -182,11 +182,14 @@ impl VideoDecoder for FilmCraftVideoDecoder {
         if media_time.0 < 0 {
             return Err(crate::limits::invalid());
         }
+        let demux = animathio_core::timing::Timer::new("decode-codec");
         let frame = self
             .source
             .video_frame(FrameRequest::full(to_filmcraft(media_time)))
             .map_err(map_media_error)?;
+        drop(demux);
         crate::limits::frame_bytes(frame.width, frame.height)?;
+        let _convert = animathio_core::timing::Timer::new("decode-yuv-to-rgba");
         let rgba = color::frame_to_rgba8(&frame, self.color)?;
         Ok(Arc::new(Frame {
             width: frame.width,
