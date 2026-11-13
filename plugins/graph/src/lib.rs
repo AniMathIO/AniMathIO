@@ -738,7 +738,7 @@ impl Guest for GraphPlugin {
         let items_text = get_string(&params, "items", "plot y=x^2");
 
         if x_max <= x_min || y_max <= y_min {
-            return Scene { elements: Vec::new() };
+            return Scene { coordinate_space: CoordinateSpace::Canvas, elements: Vec::new() };
         }
         let bounds = (x_min, x_max, y_min, y_max);
 
@@ -949,7 +949,7 @@ impl Guest for GraphPlugin {
             }
         }
 
-        Scene { elements }
+        Scene { coordinate_space: CoordinateSpace::Canvas, elements }
     }
 
     fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {

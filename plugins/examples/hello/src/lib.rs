@@ -138,6 +138,7 @@ impl Guest for HelloPlugin {
         ));
 
         Scene {
+            coordinate_space: CoordinateSpace::Canvas,
             elements: vec![DrawCommand::FillPath((
                 circle(size.width as f32 / 2.0, size.height as f32 / 2.0, radius),
                 color,

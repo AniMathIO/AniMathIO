@@ -1,4 +1,4 @@
-package animathio:plugin@0.1.0;
+package animathio:plugin@0.2.0;
 
 /// Shared data types for vector graphics, parameter schemas and plugin manifests.
 interface types {
@@ -56,8 +56,12 @@ interface types {
         join: stroke-join,
     }
 
+    /// Horizontal alignment in the available canvas width.
+    enum text-alignment { left, center, right }
+
     /// Text run layout element.
     record text-element {
+        align: text-alignment,
         text: string,
         font-size: f32,
         x: f32,
@@ -72,8 +76,12 @@ interface types {
         text-run(text-element),
     }
 
+    /// Generic drawing coordinates.
+    enum coordinate-space { canvas, normalized }
+
     /// Evaluated vector scene composed of ordered draw commands.
     record scene {
+        coordinate-space: coordinate-space,
         elements: list<draw-command>,
     }
 

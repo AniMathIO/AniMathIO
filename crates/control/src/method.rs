@@ -387,11 +387,11 @@ pub fn clip_kind_label(kind: &animathio_core::ClipKind) -> String {
         animathio_core::ClipKind::Video(_) => "video".to_owned(),
         animathio_core::ClipKind::Image(_) => "image".to_owned(),
         animathio_core::ClipKind::Audio(_) => "audio".to_owned(),
-        animathio_core::ClipKind::Builtin(builtin) => match builtin {
-            animathio_core::builtin::Builtin::Text { .. } => "text".to_owned(),
-            animathio_core::builtin::Builtin::Shape { .. } => "shape".to_owned(),
+        animathio_core::ClipKind::Plugin { plugin_id, .. } => match plugin_id.as_str() {
+            "org.animathio.text" => "text".into(),
+            "org.animathio.shapes" => "shape".into(),
+            _ => format!("plugin {plugin_id}"),
         },
-        animathio_core::ClipKind::Plugin { plugin_id, .. } => format!("plugin {plugin_id}"),
         animathio_core::ClipKind::Vector(_) => "vector".to_owned(),
         animathio_core::ClipKind::Error(_) => "error".to_owned(),
     }

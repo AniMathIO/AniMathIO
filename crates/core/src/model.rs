@@ -1,4 +1,3 @@
-use crate::builtin::Color;
 use crate::{EffectId, EffectInstance, Error, FrameRate, Keyframes, ParamValue, Time, invalid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -141,8 +140,6 @@ pub enum ClipKind {
     Image(AssetId),
     /// Audio source, included in the scene for a future audio mixer.
     Audio(AssetId),
-    /// Temporary text/shape sources; replaced by plugins after the prototype.
-    Builtin(crate::builtin::Builtin),
     /// Namespaced plugin identity and opaque, plugin-versioned JSON data.
     Plugin {
         /// Reverse-domain plugin identifier.
@@ -320,7 +317,7 @@ pub struct Project {
     /// Output height in pixels, or `0` when unset.
     pub(crate) height: u32,
     /// Straight-alpha sRGB canvas background; alpha `0` is transparent.
-    pub(crate) background: Color,
+    pub(crate) background: [u8; 4],
     /// Explicit project duration in ticks; `0` means derive from clips.
     pub(crate) duration: Time,
 }
@@ -334,7 +331,7 @@ struct ProjectData {
     #[serde(default)]
     height: u32,
     #[serde(default)]
-    background: Color,
+    background: [u8; 4],
     #[serde(default)]
     duration: Time,
 }
@@ -403,7 +400,7 @@ impl Project {
     }
     /// Straight-alpha sRGB canvas background.
     #[must_use]
-    pub const fn background(&self) -> Color {
+    pub const fn background(&self) -> [u8; 4] {
         self.background
     }
     /// Explicit project duration in ticks; `0` means derive from clips.
@@ -463,7 +460,6 @@ impl Project {
                         return Err(invalid("empty plugin id"));
                     }
                     ClipKind::Plugin { .. } | ClipKind::Error(_) => {}
-                    ClipKind::Builtin(source) => source.validate()?,
                     ClipKind::Vector(scene) => scene.validate()?,
                 }
                 validate_clip_effects_and_animations(clip)?;

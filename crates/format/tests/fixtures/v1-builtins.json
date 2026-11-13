@@ -1,0 +1,349 @@
+{
+  "format": "animathio",
+  "schemaVersion": 1,
+  "frame_rate": {
+    "numerator": 30,
+    "denominator": 1
+  },
+  "tracks": [
+    {
+      "id": 1,
+      "name": "Demo 1",
+      "clips": {
+        "1": {
+          "id": 1,
+          "kind": {
+            "Builtin": {
+              "Shape": {
+                "shape": "Rect",
+                "fill": [
+                  17,
+                  24,
+                  39,
+                  255
+                ],
+                "stroke": null
+              }
+            }
+          },
+          "range": {
+            "start": 0,
+            "end": 2116800000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.5,
+            "y": 0.5,
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "animations": [
+            {
+              "target": {
+                "Transform": "Opacity"
+              },
+              "keys": {
+                "0": {
+                  "value": 0.8,
+                  "interpolation": "EaseInOut"
+                },
+                "1411200000": {
+                  "value": 1.0,
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "Demo 3",
+      "clips": {
+        "3": {
+          "id": 3,
+          "kind": {
+            "Builtin": {
+              "Shape": {
+                "shape": "Rect",
+                "fill": [
+                  42,
+                  186,
+                  170,
+                  220
+                ],
+                "stroke": {
+                  "color": [
+                    220,
+                    255,
+                    255,
+                    255
+                  ],
+                  "width": 0.025
+                }
+              }
+            }
+          },
+          "range": {
+            "start": 0,
+            "end": 2116800000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.5,
+            "y": 0.56,
+            "scale_x": 0.17,
+            "scale_y": 0.3,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "animations": [
+            {
+              "target": {
+                "Transform": "ScaleX"
+              },
+              "keys": {
+                "0": {
+                  "value": 0.08,
+                  "interpolation": "EaseInOut"
+                },
+                "1411200000": {
+                  "value": 0.2,
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "Demo 4",
+      "clips": {
+        "4": {
+          "id": 4,
+          "kind": {
+            "Builtin": {
+              "Shape": {
+                "shape": "Ellipse",
+                "fill": [
+                  251,
+                  146,
+                  60,
+                  240
+                ],
+                "stroke": {
+                  "color": [
+                    255,
+                    230,
+                    180,
+                    255
+                  ],
+                  "width": 0.03
+                }
+              }
+            }
+          },
+          "range": {
+            "start": 0,
+            "end": 2116800000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.76,
+            "y": 0.6,
+            "scale_x": 0.18,
+            "scale_y": 0.3,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "animations": [
+            {
+              "target": {
+                "Transform": "Y"
+              },
+              "keys": {
+                "0": {
+                  "value": 0.64,
+                  "interpolation": "EaseInOut"
+                },
+                "1411200000": {
+                  "value": 0.5,
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "Demo 5",
+      "clips": {
+        "5": {
+          "id": 5,
+          "kind": {
+            "Builtin": {
+              "Shape": {
+                "shape": {
+                  "Path": [
+                    {
+                      "MoveTo": [
+                        0.0,
+                        0.8
+                      ]
+                    },
+                    {
+                      "CurveTo": [
+                        [
+                          0.25,
+                          -0.5
+                        ],
+                        [
+                          0.6,
+                          1.5
+                        ],
+                        [
+                          1.0,
+                          0.2
+                        ]
+                      ]
+                    },
+                    {
+                      "LineTo": [
+                        1.0,
+                        1.0
+                      ]
+                    },
+                    {
+                      "QuadTo": [
+                        [
+                          0.5,
+                          0.5
+                        ],
+                        [
+                          0.0,
+                          1.0
+                        ]
+                      ]
+                    },
+                    "Close"
+                  ]
+                },
+                "fill": [
+                  129,
+                  140,
+                  248,
+                  130
+                ],
+                "stroke": {
+                  "color": [
+                    192,
+                    200,
+                    255,
+                    255
+                  ],
+                  "width": 0.035
+                }
+              }
+            }
+          },
+          "range": {
+            "start": 0,
+            "end": 2116800000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.5,
+            "y": 0.8,
+            "scale_x": 0.3,
+            "scale_y": 0.18,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "animations": [
+            {
+              "target": {
+                "Transform": "Rotation"
+              },
+              "keys": {
+                "0": {
+                  "value": -0.1,
+                  "interpolation": "EaseInOut"
+                },
+                "1411200000": {
+                  "value": 0.1,
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "Demo 6",
+      "clips": {
+        "6": {
+          "id": 6,
+          "kind": {
+            "Builtin": {
+              "Text": {
+                "text": "AniMathIO 2.0\nAnimate \u03b1 + \u03b2 = \u03b3",
+                "font_size": 0.08,
+                "color": [
+                  240,
+                  245,
+                  255,
+                  255
+                ]
+              }
+            }
+          },
+          "range": {
+            "start": 0,
+            "end": 2116800000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.6,
+            "y": 0.58,
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "animations": [
+            {
+              "target": {
+                "Transform": "Opacity"
+              },
+              "keys": {
+                "0": {
+                  "value": 0.25,
+                  "interpolation": "EaseInOut"
+                },
+                "1411200000": {
+                  "value": 1.0,
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "assets": {}
+}

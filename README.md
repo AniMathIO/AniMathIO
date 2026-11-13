@@ -24,7 +24,7 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 1) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 2) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding, mixing, playback (cpal) | ✅ `audio` (prototype limits) |
@@ -35,7 +35,9 @@ Editor and headless engine prototype. What works today:
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
 | Media decoding / video export | ✅ native decoding and offline H.264/AAC MP4 export |
 
-Text and shapes under `core::builtin` are temporary stand-ins for the plugin equivalents.
+Text and shapes use the bundled WASM components end to end, including CLI renders
+and exports. Build them with `scripts/build-plugins.sh`; schema-1 projects migrate
+automatically to plugin clips when loaded. Effects remain in the renderer.
 
 ## Screenshot
 
@@ -65,6 +67,16 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 Stable Rust (edition 2024). On shared Linux machines keep the resource limits shown
 below; on other platforms run the same Cargo commands directly. Linux builds also
 need `libasound2-dev` (CI installs it) for the audio crate.
+
+Build the bundled WASM components before rendering text or shapes:
+
+```bash
+scripts/build-plugins.sh
+```
+
+Debug binaries discover `target/plugins` relative to the executable. For an
+unpackaged release binary, set `ANIMATHIO_PLUGIN_DIR=target/plugins` explicitly.
+Installed packages discover the components in their bundled resource directories.
 
 ### The desktop editor
 

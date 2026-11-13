@@ -24,7 +24,7 @@ embedded asset, ≤ 10,000 media entries.
 | `image` element | `ClipKind::Image` |
 | `video` element | `ClipKind::Video` (renders a checkerboard until the media decoder lands) |
 | `audio` element | `ClipKind::Audio` with `gain` + `muted` clip params; `masterVolume` → `SetTrackGain` |
-| `text` element | `ClipKind::Builtin(Builtin::Text)` with normalized font size and color |
+| `text` element | `ClipKind::Plugin` (`org.animathio.text`) with normalized font size and color |
 | `mafs` graph element | `ClipKind::Image` (see gaps below) |
 | `fadeIn` / `fadeOut` | Opacity keyframes |
 | `slideIn` / `slideOut` | X/Y keyframes (directions `left`/`right`/`top`/`bottom`) |
@@ -46,7 +46,7 @@ where they matter.
   `amount = 2`).
 - **Rotation is approximated as center-based.** v1 rotated around the Konva
   top-left corner; the importer warns and uses the element center.
-- **`fontWeight` is dropped** — the v2 builtin text source has no weight
+- **`fontWeight` is dropped** — the v2 text component has no weight
   equivalent.
 - **Per-character text animation is flattened.** A character-level slide is
   imported as a whole-element slide (warning).

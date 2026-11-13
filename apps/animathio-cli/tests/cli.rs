@@ -19,6 +19,10 @@ const MINIMAL_PNG: &[u8] = &[
 fn cli(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
         .args(args)
+        .env(
+            "ANIMATHIO_PLUGIN_DIR",
+            animathio_plugin_host::test_support::plugin_dir(),
+        )
         .output()
         .unwrap()
 }
@@ -88,9 +92,12 @@ fn sample_archive_validates_and_json_and_frame_time_inputs_match() {
         ctx.resources.insert(id, bytes).unwrap();
     }
     let frame = animathio_render::render(
-        &animathio_core::evaluate(
-            &bundle.project,
-            animathio_core::Time(animathio_core::TICKS_PER_SECOND),
+        &animathio_plugin_host::test_support::resolve(
+            &animathio_core::evaluate(
+                &bundle.project,
+                animathio_core::Time(animathio_core::TICKS_PER_SECOND),
+            ),
+            (160, 90),
         ),
         &mut ctx,
         (160, 90),

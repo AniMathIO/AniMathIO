@@ -4,7 +4,7 @@ use std::io::Write;
 #[test]
 fn manifest_toml_roundtrip_and_validation() {
     let toml_str = r#"
-api_version = "0.1.0"
+api_version = "0.2.0"
 id = "org.animathio.shapes"
 name = "Shapes"
 version = "0.1.0"
@@ -29,7 +29,7 @@ fn manifest_validation_rejects_invalid() {
 
     // Bad id character
     let bad_id = r#"
-api_version = "0.1.0"
+api_version = "0.2.0"
 id = "org/animathio/bad"
 name = "Bad"
 version = "0.1.0"
@@ -39,7 +39,7 @@ kinds = ["clip-source"]
 
     // Empty kinds
     let empty_kinds = r#"
-api_version = "0.1.0"
+api_version = "0.2.0"
 id = "org.animathio.bad"
 name = "Bad"
 version = "0.1.0"
@@ -51,7 +51,7 @@ kinds = []
 #[test]
 fn package_roundtrip_zip_archive() {
     let manifest = PluginManifestToml {
-        api_version: "0.1.0".into(),
+        api_version: "0.2.0".into(),
         id: "org.animathio.test".into(),
         name: "Test Plugin".into(),
         version: "0.1.0".into(),
@@ -129,7 +129,7 @@ fn zip_bytes(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
 }
 
 const MINIMAL_MANIFEST: &str = r#"
-api_version = "0.1.0"
+api_version = "0.2.0"
 id = "org.animathio.ziptest"
 name = "Zip Test"
 version = "0.1.0"
@@ -209,4 +209,18 @@ fn too_many_entries_is_rejected() {
         PluginPackage::from_bytes(&bytes),
         Err(PackageError::TooManyEntries)
     ));
+}
+
+#[test]
+fn rejects_the_incompatible_previous_component_abi() {
+    let manifest = PluginManifestToml {
+        api_version: "0.1.0".into(),
+        id: "org.example.old".into(),
+        name: "Old".into(),
+        version: "1.0.0".into(),
+        description: String::new(),
+        kinds: vec![PluginKind::ClipSource],
+        capabilities: vec![],
+    };
+    assert!(manifest.validate().is_err());
 }

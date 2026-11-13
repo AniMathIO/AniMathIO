@@ -256,9 +256,12 @@ dependencies = [
  "animathio-format",
  "animathio-import-manim",
  "animathio-import-v1",
+ "animathio-plugin-api",
+ "animathio-plugin-host",
  "animathio-render",
  "base64 0.22.1",
  "clap",
+ "directories",
  "image",
  "rmcp",
  "schemars",
@@ -278,6 +281,7 @@ dependencies = [
  "animathio-format",
  "animathio-import-manim",
  "animathio-import-v1",
+ "animathio-plugin-api",
  "animathio-plugin-host",
  "animathio-render",
  "animathio-typeset",
@@ -311,6 +315,8 @@ dependencies = [
  "animathio-audio",
  "animathio-core",
  "animathio-media",
+ "animathio-plugin-api",
+ "animathio-plugin-host",
  "animathio-render",
  "serde",
  "serde_json",
@@ -323,6 +329,7 @@ name = "animathio-format"
 version = "2.0.0"
 dependencies = [
  "animathio-core",
+ "animathio-plugin-api",
  "proptest",
  "serde",
  "serde_json",
@@ -337,6 +344,7 @@ version = "2.0.0"
 dependencies = [
  "animathio-core",
  "animathio-format",
+ "animathio-plugin-api",
  "serde",
  "serde_json",
  "tempfile",
@@ -351,6 +359,7 @@ version = "2.0.0"
 dependencies = [
  "animathio-core",
  "animathio-format",
+ "animathio-plugin-api",
  "base64 0.22.1",
  "blake3",
  "flate2",
@@ -385,6 +394,7 @@ dependencies = [
 name = "animathio-plugin-api"
 version = "2.0.0"
 dependencies = [
+ "animathio-core",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -426,6 +436,8 @@ dependencies = [
  "animathio-core",
  "animathio-format",
  "animathio-media",
+ "animathio-plugin-api",
+ "animathio-plugin-host",
  "fearless_simd 1.2.0",
  "image",
  "parley",

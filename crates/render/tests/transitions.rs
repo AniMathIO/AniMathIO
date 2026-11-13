@@ -1,11 +1,12 @@
 //! Transition compositing goldens at 25/50/75% progress (maximum channel error: 2).
+mod common;
 use animathio_core::{
-    Clip, ClipId, ClipKind, Command, Project, TICKS_PER_SECOND, Time, TimeRange, Track, TrackId,
-    Transition, TransitionId, TransitionKind, WipeDirection,
-    builtin::{Builtin, Shape},
-    evaluate,
+    Clip, ClipId, Command, Project, TICKS_PER_SECOND, Time, TimeRange, Track, TrackId, Transition,
+    TransitionId, TransitionKind, WipeDirection, evaluate,
 };
-use animathio_render::{Frame, RenderCtx, render};
+use animathio_plugin_api::sources::Shape;
+use animathio_render::{Frame, RenderCtx};
+use common::render;
 use std::path::Path;
 
 const SIZE: (u32, u32) = (320, 180);
@@ -13,11 +14,7 @@ const SIZE: (u32, u32) = (320, 180);
 fn shape(id: u64, shape: Shape, color: [u8; 4], start: i64) -> Clip {
     Clip::new(
         ClipId(id),
-        ClipKind::Builtin(Builtin::Shape {
-            shape,
-            fill: Some(color),
-            stroke: None,
-        }),
+        animathio_plugin_api::sources::shape(shape, Some(color), None),
         TimeRange::new(Time(start), Time(start + TICKS_PER_SECOND)).unwrap(),
     )
 }

@@ -144,9 +144,24 @@ impl PathVerb {
     }
 }
 
+/// Horizontal alignment of a text run within the canvas width.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextAlignment {
+    /// Align to the leading edge.
+    #[default]
+    Left,
+    /// Center each line.
+    Center,
+    /// Align to the trailing edge.
+    Right,
+}
+
 /// Text run element.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextElement {
+    /// Horizontal layout alignment.
+    #[serde(default)]
+    pub align: TextAlignment,
     /// Text content.
     pub text: String,
     /// Font size in pixels.
@@ -185,9 +200,22 @@ pub const MAX_VECTOR_ELEMENTS: usize = 10_000;
 /// Maximum number of path verbs accepted in a single vector path.
 pub const MAX_PATH_VERBS: usize = 100_000;
 
+/// Coordinate system of a resolved drawing scene.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CoordinateSpace {
+    /// Canvas pixels.
+    #[default]
+    Canvas,
+    /// Local unit square; strokes and text scale with the canvas and clip.
+    Normalized,
+}
+
 /// Vector graphics scene composed of vector draw elements.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct VectorScene {
+    /// Coordinates shared by all drawing elements.
+    #[serde(default)]
+    pub coordinate_space: CoordinateSpace,
     /// Ordered drawing elements.
     pub elements: Vec<VectorElement>,
 }
@@ -250,6 +278,7 @@ mod tests {
     #[test]
     fn validate_rejects_nonfinite_coordinates_and_caps() {
         let scene = VectorScene {
+            coordinate_space: CoordinateSpace::Canvas,
             elements: vec![VectorElement::FillPath {
                 path: vec![PathVerb::MoveTo(Point::new(f64::NAN, 0.0))],
                 color: Color::rgb(0, 0, 0),
@@ -258,6 +287,7 @@ mod tests {
         assert!(scene.validate().is_err());
 
         let scene = VectorScene {
+            coordinate_space: CoordinateSpace::Canvas,
             elements: vec![VectorElement::FillPath {
                 path: vec![PathVerb::Close; MAX_PATH_VERBS + 1],
                 color: Color::rgb(0, 0, 0),
@@ -266,6 +296,7 @@ mod tests {
         assert!(scene.validate().is_err());
 
         let scene = VectorScene {
+            coordinate_space: CoordinateSpace::Canvas,
             elements: vec![
                 VectorElement::FillPath {
                     path: Vec::new(),

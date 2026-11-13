@@ -25,7 +25,7 @@ use animathio_control::{
 use animathio_core::{
     Asset, Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Project, Rounding,
     TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform, TransformProperty,
-    Transition, TransitionId, TransitionKind, WipeDirection, builtin::Builtin,
+    Transition, TransitionId, TransitionKind, WipeDirection,
 };
 use rmcp::{
     ErrorData as McpError, ServerHandler,
@@ -605,11 +605,7 @@ impl McpServer {
         let clip_id = ClipId(base + 1);
         let mut clip = Clip::new(
             clip_id,
-            ClipKind::Builtin(Builtin::Text {
-                text: p.text,
-                font_size,
-                color,
-            }),
+            animathio_plugin_api::sources::text(p.text, font_size, color),
             TimeRange::new(Time(0), duration).map_err(|e| mcp_error(e.into()))?,
         );
         clip.transform = transform;

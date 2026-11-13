@@ -12,7 +12,7 @@
 
 use animathio_core::{
     AssetId, Clip, ClipKind, FrameRate, Project, TICKS_PER_SECOND, Target, Time, TrackId,
-    TransformProperty, builtin::Builtin,
+    TransformProperty,
 };
 use animathio_import_manim::{ManimOptions, import_manim, import_manim_with_options};
 use std::collections::BTreeMap;
@@ -403,7 +403,7 @@ class Second(Scene):
 }
 
 #[test]
-fn parses_text_and_shape_builtin_kinds() {
+fn parses_text_and_shape_plugin_kinds() {
     let source = r#"
 class S(Scene):
     def construct(self):
@@ -417,16 +417,17 @@ class S(Scene):
 
     let clips = tracks(&project);
     assert_eq!(clips.len(), 2);
-    let ClipKind::Builtin(Builtin::Text { text, color, .. }) = &clips[0].1.kind else {
-        panic!("expected builtin text");
+    let ClipKind::Plugin { plugin_id, params } = &clips[0].1.kind else {
+        panic!("text plugin")
     };
-    assert_eq!(text, "hi");
-    assert_eq!(*color, [252, 98, 85, 255]); // Manim RED
-
-    let ClipKind::Builtin(Builtin::Shape { shape, .. }) = &clips[1].1.kind else {
-        panic!("expected builtin shape");
+    assert_eq!(plugin_id, "org.animathio.text");
+    assert_eq!(params["text"], "hi");
+    assert_eq!(params["color"], serde_json::json!([252, 98, 85, 255]));
+    let ClipKind::Plugin { plugin_id, params } = &clips[1].1.kind else {
+        panic!("shapes plugin")
     };
-    assert!(matches!(shape, animathio_core::builtin::Shape::Ellipse));
+    assert_eq!(plugin_id, "org.animathio.shapes");
+    assert_eq!(params["shape"], "ellipse");
 }
 
 #[test]
@@ -630,10 +631,11 @@ class S(Scene):
     );
     assert_eq!(clips[0].1.range.start, Time(0));
     assert_eq!(clips[0].1.range.end, Time(ticks(1.0)));
-    let ClipKind::Builtin(Builtin::Shape { shape, .. }) = &clips[0].1.kind else {
-        panic!("expected a builtin shape");
+    let ClipKind::Plugin { plugin_id, params } = &clips[0].1.kind else {
+        panic!("shapes plugin")
     };
-    assert!(matches!(shape, animathio_core::builtin::Shape::Ellipse));
+    assert_eq!(plugin_id, "org.animathio.shapes");
+    assert_eq!(params["shape"], "ellipse");
 }
 
 #[test]

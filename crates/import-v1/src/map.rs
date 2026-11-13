@@ -11,8 +11,8 @@ use animathio_core::{
     Asset as CoreAsset, AssetId, Clip, ClipId, ClipKind, Command, EffectId, EffectInstance,
     EffectKind, FrameRate, Interpolation, Keyframe, Project, TICKS_PER_SECOND, Target, Time,
     TimeRange, Track, TrackId, Transform, TransformProperty,
-    builtin::{Builtin, Color},
 };
+use animathio_plugin_api::sources::Color;
 use base64::Engine;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
@@ -714,7 +714,7 @@ fn built_text(
         && (weight - 400.0).abs() > 1e-9
     {
         report.warn(format!(
-            "element {}: fontWeight {weight} has no v2 builtin text equivalent; dropped",
+            "element {}: fontWeight {weight} has no v2 text plugin equivalent; dropped",
             element.id
         ));
     }
@@ -725,11 +725,7 @@ fn built_text(
         ));
     }
     Some((
-        ClipKind::Builtin(Builtin::Text {
-            text,
-            font_size: fraction,
-            color,
-        }),
+        animathio_plugin_api::sources::text(text, fraction, color),
         text_transform(placement, canvas_width, canvas_height),
         BTreeMap::new(),
         Vec::new(),
