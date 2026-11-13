@@ -57,10 +57,11 @@ fn main() {
         None
     };
     gpui_platform::application()
-        .with_assets(gpui_kit_assets::AllAssets)
+        .with_assets(style::Assets)
         .run(move |cx: &mut App| {
             gpui_component::init(cx);
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            let preferences = preferences::Preferences::load();
+            style::install_theme(cx, preferences.compact, preferences.reduce_motion);
             cx.on_window_closed(|cx, _window_id| {
                 if cx.windows().is_empty() {
                     cx.quit();
@@ -70,12 +71,6 @@ fn main() {
 
             let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
             editor::actions::init(cx);
-            cx.global_mut::<gpui_component::Theme>().font_size =
-                px(if preferences::Preferences::load().compact {
-                    12.
-                } else {
-                    14.
-                });
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),

@@ -34,8 +34,12 @@ impl Editor {
             .items_center()
             .gap_1()
             .px_2()
+            .h(px(22.))
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(crate::style::hex(crate::style::color::PANEL))
             .cursor_pointer()
-            .rounded_sm()
+            .rounded(px(crate::style::radius::CONTROL))
             .hover(|this| this.bg(cx.theme().muted))
             .when(self.export_queue_open, |this| this.bg(cx.theme().muted))
             .text_color(if active {
@@ -94,7 +98,7 @@ impl Editor {
                 .text_color(theme.popover_foreground)
                 .border_1()
                 .border_color(theme.border)
-                .rounded_md()
+                .rounded(px(crate::style::radius::PANEL))
                 .shadow_lg()
                 .occlude()
                 .child(
@@ -225,7 +229,7 @@ impl Editor {
             .flex_col()
             .gap_1()
             .p_2()
-            .rounded_sm()
+            .rounded(px(crate::style::radius::CONTROL))
             .border_1()
             .border_color(theme.border)
             .child(

@@ -143,6 +143,10 @@ impl Editor {
     }
 
     pub(super) fn select_left_tab(&mut self, tab: LeftTab, cx: &mut Context<Self>) {
+        if self.left_tab != tab {
+            self.previous_left_tab = self.left_tab;
+            self.tab_changed = Instant::now();
+        }
         self.left_tab = tab;
         cx.notify();
     }
