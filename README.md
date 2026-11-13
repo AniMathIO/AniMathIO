@@ -166,7 +166,7 @@ a horizontal gain slider (drag to adjust, double-click to reset to unity); a dra
 is one undo step. Use large tracks for the most detailed clip previews.
 
 Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
-`youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square` presets (30 fps, CRF 18).
+`youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` and `portrait` presets (30 fps, CRF 18).
 Presets apply to an export snapshot, keeping project settings unchanged. Existing
 files require confirmation. Exports never block the editor: "Add to queue" or "Export now"
 snapshots the project into a job, and the Export queue popover (status bar, View menu) runs
@@ -228,3 +228,17 @@ Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, 
 ## License
 
 [MIT](LICENSE)
+
+### Titles and social formats
+
+The library's **Titles** tab offers eight animated compositions: centered title,
+title + subtitle, lower third, caption bar, chapter card, end card, kinetic word
+pop and math title. Double-click a card to add five seconds at the playhead, or
+drag it to a timeline position. The inspector exposes the linked composition's
+text fields. All layers move together and insertion undoes in one step.
+Thumbnails render on the CPU in the background and are cached per canvas size.
+Text/shapes plugins are required; math titles also need the LaTeX plugin.
+
+The launcher, project settings and export dialog share 1080p, 4K, 9:16, square and
+4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
+and `fields`; see [the control guide](docs/mcp.md#title-preset-library).

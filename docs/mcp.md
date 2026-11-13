@@ -58,6 +58,8 @@ gets a JSON-RPC error instead of a result.
 | `project.import_v1` | `{ path }` | — (replaces the current project) |
 | `math.add` | `{ params: { latex, mode?, size?, color?, x?, y?, start?, duration?, reveal_duration? } }` | `{ track_id, clip_id }` |
 | `graph.add` | `{ params: { x_min?, x_max?, y_min?, y_max?, items?, show_grid?, show_axes?, show_labels?, color?, x?, y?, start?, duration?, draw_duration? } }` | `{ track_id, clip_id }` |
+| `titles.list` | — | Bundled title presets and editable fields |
+| `titles.add` | `{params: {preset, fields?, range: {start, end}}}` | `{track_id, clip_id}`; linked plugin composition, one undo step |
 | `effects.list` | — | `[EffectInfo]` (plugin, effect, name, description, params with id/label/min/max/default) from loaded effect plugins |
 | `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
@@ -123,9 +125,10 @@ clears its undo history.
 | `cut_at` | Split every clip on every track at each time, as one undo step | `times_ms`: array; only clips that strictly contain a time are split |
 | `remove_range` | Cut a section out of every track | `from_ms`, `to_ms`, `ripple` (default true: later content shifts left and an explicit canvas duration shrinks) |
 | `trim_silence` | Remove pauses detected in the audio, ripple-closing the gaps, in one undo step | `threshold_db` (-40), `min_silence_ms` (400), `padding_ms` (100), optional audio `track` id |
-| `add_title` | Add an on-screen text clip | `text`, `start_ms`, `duration_ms`, `style`: `title` (default), `lower_third`, `caption` (captions share one track) |
+| `list_title_presets` | List title compositions and their editable fields | — |
+| `add_title` | Add animated linked title compositions, or legacy single text clips | `start_ms`, `duration_ms`; `preset` + `fields` (see below), or `text` + legacy `style`: `title` (default), `lower_third`, `caption` (captions share one track) |
 | `batch` | Apply several core `Command`s as one undo step | `ops`: serde externally-tagged commands with integer ticks (705600000 per second), e.g. `{"RemoveClip":{"id":3}}`, `{"SplitAt":{"times":[705600000]}}`, `{"RippleDelete":{"clip":4}}` |
-| `set_export_preset` | Set canvas size and frame rate for delivery | `preset`: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` |
+| `set_export_preset` | Set canvas size and frame rate for delivery | `preset`: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square`, `portrait` |
 | `import_manim_scene` | Import a supported Manim scene without executing Python | Exactly one of `path` or inline `source`; optional `script_dir`, `scene`, `replace` (default false) |
 
 `add_math` validates source through `crates/typeset` before changing the project;
@@ -265,3 +268,41 @@ The editor drains calls on a timer even while its window is occluded. Frame rend
 asset reads and saves run on workers against project snapshots.
 
 `add_media` probes video files and creates aligned video and companion audio clips when the source has audio. Asset, tracks and clips are one undoable batch. Video without an audio stream stays video-only. Companion audio starts with gain 1 and muted 0.
+
+### Title preset library
+
+`list_title_presets` returns the bundled composition definitions, including stable
+ids, editable `field` names/defaults, plugin layers and entry/exit motion.
+`add_title` accepts `preset` and a `fields` object; omitted fields use the preset's
+defaults. `text`, when supplied, fills the first text field unless that field is
+already in `fields`. The returned `clip_id` identifies an editable text layer.
+Every layer shares a fresh `link_group`; the complete composition, including its
+tracks and keyframes, is one undo step. Existing calls using only `style` retain
+their single-clip behavior.
+
+```json
+{"name":"add_title","arguments":{"preset":"lower_third","fields":{"name":"Jane Doe","role":"Researcher"},"start_ms":5000,"duration_ms":4000}}
+```
+
+| Preset id | Editable fields | Motion |
+|---|---|---|
+| `centered_title` | `title` | Fade |
+| `title_subtitle` | `title`, `subtitle` | Fade |
+| `lower_third` | `name`, `role` | Fade + slide; rounded backdrop |
+| `caption` | `caption` | Fade; translucent backdrop |
+| `chapter_card` | `title`, `subtitle` | Fade; full-frame backdrop |
+| `end_card` | `title`, `cta` | Fade |
+| `kinetic_word_pop` | `word` | Fade + scale |
+| `math_title` | `latex`, `caption` | Fade; requires the LaTeX plugin |
+
+The same surface is available directly over control as `titles.list` (no params)
+and `titles.add` with `{"params":{"preset":"lower_third","fields":{"name":"Jane Doe","role":"Researcher"},"range":{"start":3528000000,"end":6350400000}}}`.
+Control ranges and animation keys use integer ticks. Unknown presets/fields,
+blank fields and fields longer than 4096 bytes are rejected without changing the
+project. New title layers use the text/shapes/LaTeX plugins and adapt to the canvas
+aspect ratio, with an eight-percent resting safe area. Backdrops for chapter cards
+intentionally cover the whole canvas.
+
+The shared project/export choices now include `portrait` (1080x1350, 4:5) alongside
+`youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square`, all at 30 fps when applied.
+The editor labels vertical delivery “Shorts/Reels/TikTok 1080x1920 30fps”.

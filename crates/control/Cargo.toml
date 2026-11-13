@@ -28,6 +28,7 @@ rustix = { version = "1", features = ["fs", "process"] }
 subtle = "2"
 
 [dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
 animathio-plugin-host = { path = "../plugin-host", features = ["test-support"] }
 tempfile = "3"
 

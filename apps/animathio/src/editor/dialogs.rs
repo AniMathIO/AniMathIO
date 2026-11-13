@@ -73,7 +73,7 @@ impl Editor {
             .unwrap_or_else(|| TimeRange::new(Time(0), Time(duration)).unwrap());
         let rate = self.project.frame_rate();
         let mut presets = vec!["Project settings".to_owned()];
-        presets.extend(ExportPreset::ALL.map(|preset| preset.name().to_owned()));
+        presets.extend(ExportPreset::ALL.map(|preset| preset.label().to_owned()));
         let preset = choices(presets, 0, window, cx);
         let range = choices(
             vec!["Whole project".into(), "In/out".into(), "Custom".into()],
@@ -112,7 +112,7 @@ impl Editor {
                     let preset_name = selected(&preset, cx);
                     let preset = ExportPreset::ALL
                         .into_iter()
-                        .find(|p| p.name() == preset_name);
+                        .find(|p| p.label() == preset_name);
                     let choice = selected(&range, cx);
                     let from = timecode::parse_timecode(&from.read(cx).value(), rate);
                     let to = timecode::parse_timecode(&to.read(cx).value(), rate);
@@ -291,7 +291,7 @@ impl Editor {
         let rate = self.project.frame_rate();
         let summary = format!(
             "{}, {} to {}",
-            preset.map_or("Project settings", ExportPreset::name),
+            preset.map_or("Project settings", ExportPreset::label),
             timecode::format_timecode(range.start, rate),
             timecode::format_timecode(range.end, rate),
         );
@@ -426,7 +426,7 @@ impl Editor {
                 .default_value(fields::to_hsla(background))
         });
         let presets = choices(
-            ExportPreset::ALL.map(|p| p.name().to_owned()).to_vec(),
+            ExportPreset::ALL.map(|p| p.label().to_owned()).to_vec(),
             0,
             window,
             cx,
@@ -453,7 +453,7 @@ impl Editor {
                                     move |_, window, cx| {
                                         if let Some(p) = ExportPreset::ALL
                                             .into_iter()
-                                            .find(|p| p.name() == selected(&preset, cx))
+                                            .find(|p| p.label() == selected(&preset, cx))
                                         {
                                             let (width, height) = p.resolution();
                                             pw.update(cx, |s, cx| {

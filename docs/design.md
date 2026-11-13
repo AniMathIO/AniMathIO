@@ -50,12 +50,12 @@ sources under `apps/animathio/assets/fonts`. The bundled gradient brand is
 
 The workspace wraps each resizable pane in a rounded panel with a consistent
 icon/title/action header and 6px shared gutters. The library uses a sliding active
-pill for Assets, Plugins and Effects. The title bar shows the project name, an
+pill for Assets, Plugins, Effects and Titles. The title bar shows the project name, an
 unsaved dot, MCP listener status and Export. The bottom chips report the canvas,
 frame rate, duration, autosave policy, requested preview renderer and export queue.
 “GPU requested” describes the preview preference: the worker can fall back to CPU.
 
-The launcher offers four aspect-ratio canvas cards, recent-project cards with
+The launcher offers five canvas preset cards, recent-project cards with
 cached modification times, media drops and Open / Import v1 / Import Manim.
 Its quiet gradient glow runs only while the launcher is visible. Card lifts and
 tab changes settle in 180ms. Preferences > Motion > Reduce motion makes the glow
@@ -67,3 +67,8 @@ The Export button, dialog primaries and "Create" actions share `style::primary_b
 (violet-to-cyan gradient, dark lettering). The launcher hero adds a slow light sweep
 over a static wash; Reduce motion keeps only the wash. Preset cards carry an aspect
 chip, and the drop zone is dashed and lights up while files are dragged over it.
+
+The Titles tab uses CPU-rendered preset cards cached by canvas size. Double-click
+adds at the playhead; dragging uses timeline snapping. The inspector presents all
+linked composition text fields before the usual clip properties. Preset data lives
+in `crates/control/presets/titles.json`; applying a composition is one command batch.

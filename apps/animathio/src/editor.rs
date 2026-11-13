@@ -52,6 +52,7 @@ mod start_screen;
 mod support;
 mod timeline_thumbnails;
 mod timeline_view;
+mod titles;
 mod transport;
 mod viewer;
 mod workspace;
@@ -135,6 +136,7 @@ type ClipAction = fn(&mut Editor, ClipId, &mut Context<Editor>);
 /// Tabs in the left media-pool panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LeftTab {
+    Titles,
     Assets,
     Plugins,
     Effects,
@@ -319,6 +321,7 @@ enum ContextMenu {
 /// An item being dragged from the media pool onto the timeline.
 #[derive(Clone, PartialEq)]
 enum PoolDrag {
+    Title(String),
     Asset(AssetId),
     Plugin(String),
     /// A plugin effect, by plugin id and effect id.
@@ -520,6 +523,7 @@ pub(crate) struct Editor {
     viewer_fit: ViewerFit,
     viewer_state: viewer::ViewerState,
     media_view: media_pool::MediaView,
+    title_library: titles::TitleLibrary,
     safe_areas: bool,
     viewer_menu_open: bool,
     closed_sections: BTreeSet<String>,
@@ -635,6 +639,7 @@ impl Editor {
             viewer_fit: ViewerFit::Contain,
             viewer_state: viewer::ViewerState::default(),
             media_view: media_pool::MediaView::default(),
+            title_library: titles::TitleLibrary::default(),
             safe_areas: false,
             viewer_menu_open: false,
             closed_sections: BTreeSet::new(),

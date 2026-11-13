@@ -90,6 +90,76 @@ fn offset_verb(v: &PathVerb, ox: f32, oy: f32) -> PathVerb {
     }
 }
 
+// Fitted titles use a real clip-local box, so the editor's transform handles and
+// safe-area coordinates describe the visible composition rather than an empty
+// full-canvas text source. Ordinary normalized text keeps the wrapped TextRun path.
+fn fitted_text(
+    text: &str,
+    font_size: f32,
+    width: f32,
+    height: f32,
+    color: Color,
+    size: Size,
+) -> Scene {
+    let box_width = width * size.width as f32;
+    let box_height = height * size.height as f32;
+    let lines: Vec<_> = text.lines().collect();
+    let longest = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(1)
+        .max(1) as f32;
+    let count = lines.len().max(1) as f32;
+    let font = (font_size * size.height as f32)
+        .min(box_width / longest)
+        .min(box_height / (count * 1.5));
+    let line_height = font * 1.5;
+    let top = (box_height - count * line_height) / 2.0;
+    let mut elements = Vec::new();
+    for (line, text) in lines.iter().enumerate() {
+        let contours = host::shape_text(text, font);
+        let min_x = contours
+            .iter()
+            .flatten()
+            .map(verb_x)
+            .fold(f32::MAX, f32::min);
+        let max_x = contours
+            .iter()
+            .flatten()
+            .map(verb_x)
+            .fold(f32::MIN, f32::max);
+        if max_x < min_x {
+            continue;
+        }
+        let ox = (box_width - (max_x - min_x)) / 2.0 - min_x;
+        let oy = top + line as f32 * line_height + font;
+        let point = |p: Point| Point {
+            x: (p.x + ox) / box_width,
+            y: (p.y + oy) / box_height,
+        };
+        for contour in contours {
+            let path = contour
+                .into_iter()
+                .map(|verb| match verb {
+                    PathVerb::MoveTo(p) => PathVerb::MoveTo(point(p)),
+                    PathVerb::LineTo(p) => PathVerb::LineTo(point(p)),
+                    PathVerb::QuadTo((c, p)) => PathVerb::QuadTo((point(c), point(p))),
+                    PathVerb::CubicTo((a, b, p)) => {
+                        PathVerb::CubicTo((point(a), point(b), point(p)))
+                    }
+                    PathVerb::Close => PathVerb::Close,
+                })
+                .collect();
+            elements.push(DrawCommand::FillPath((path, color)));
+        }
+    }
+    Scene {
+        coordinate_space: CoordinateSpace::Normalized,
+        elements,
+    }
+}
+
 impl Guest for TextPlugin {
     fn describe() -> Manifest {
         Manifest {
@@ -98,6 +168,26 @@ impl Guest for TextPlugin {
             description: "Host-shaped text with size, colour and alignment".to_string(),
             kinds: vec![PluginKind::ClipSource],
             params: vec![
+                ParamSpec {
+                    id: "fit_width".into(),
+                    label: "Fit width".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 0.0,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
+                    id: "fit_height".into(),
+                    label: "Fit height".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 0.0,
+                        step: 0.01,
+                    }),
+                },
                 ParamSpec {
                     id: "units".into(),
                     label: "Units".into(),
@@ -167,6 +257,11 @@ impl Guest for TextPlugin {
         let align = get_string(&params, "align", "center");
 
         if get_string(&params, "units", "pixels") == "normalized" {
+            let fit_width = get_number(&params, "fit_width", 0.0) as f32;
+            let fit_height = get_number(&params, "fit_height", 0.0) as f32;
+            if fit_width > 0.0 && fit_height > 0.0 {
+                return fitted_text(&text, font_size, fit_width, fit_height, color, size);
+            }
             // Generic TextRun uses the host's wrapped, embedded-font layout.
             // Keep coordinates and font size relative to the unscaled canvas.
             return Scene {

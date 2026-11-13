@@ -221,6 +221,7 @@ impl Editor {
                             ExportPreset::Youtube4k => ("4K Ultra HD", "3840 x 2160"),
                             ExportPreset::ShortsVertical => ("9:16 Vertical", "1080 x 1920"),
                             ExportPreset::Square => ("Square", "1080 x 1080"),
+                            ExportPreset::Portrait => ("4:5 Portrait", "1080 x 1350"),
                         };
                         let preview_width = if width >= height { 114. } else { 48. };
                         let preview_height = preview_width * height as f32 / width as f32;
@@ -330,6 +331,7 @@ impl Editor {
                                             .child(match preset {
                                                 ExportPreset::ShortsVertical => "9:16",
                                                 ExportPreset::Square => "1:1",
+                                                ExportPreset::Portrait => "4:5",
                                                 _ => "16:9",
                                             }),
                                     ),
@@ -350,12 +352,12 @@ impl Editor {
                     }),
             );
 
+        let presets = presets.flex_wrap();
         let recent = div()
             .id("start-recent-list")
             .max_h(px(154.))
             .overflow_y_scroll()
             .flex()
-            .flex_wrap()
             .gap_3()
             .when(self.recent.paths.is_empty(), |row| {
                 row.child(
