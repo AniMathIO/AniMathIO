@@ -19,7 +19,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use animathio_control::{
-    AssetInfo, ControlClient, ControlHandler, ExportPreset, GraphAddParams, HeadlessHandler,
+    AssetInfo, Call, ControlClient, ControlHandler, ExportPreset, GraphAddParams, HeadlessHandler,
     ImportManimParams, MathAddParams, ProjectState, RenderFrameParams, TitleStyle,
     TrimSilenceParams, default_socket_spec,
 };
@@ -313,7 +313,13 @@ pub(crate) enum TitleStyleParam {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddTitle {
+    /// Composition id from `list_title_presets`; omitted keeps the legacy style behavior.
+    pub(crate) preset: Option<String>,
+    /// Named text fields from `list_title_presets`, e.g. name and role.
+    #[serde(default)]
+    pub(crate) fields: std::collections::BTreeMap<String, String>,
     /// Text to show; use \n for line breaks.
+    #[serde(default)]
     pub(crate) text: String,
     /// Timeline start in milliseconds.
     pub(crate) start_ms: f64,
@@ -1369,7 +1375,20 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Add white on-screen text from start_ms for duration_ms, as one undo step. style: `title` (large, centred), `lower_third` (medium, lower left, e.g. a speaker name) or `caption` (small subtitle at the bottom; consecutive captions share one track). Returns the clip id for update_element/add_animation."
+        description = "List the bundled title preset ids, editable field names/defaults, layers and entry/exit animations. Use these ids with add_title preset and fields."
+    )]
+    async fn list_title_presets(&self) -> Result<CallToolResult, McpError> {
+        tool_text(
+            self.backend
+                .lock()
+                .await
+                .handle(Call::TitlesList)
+                .map_err(mcp_error)?,
+        )
+    }
+
+    #[tool(
+        description = "Add on-screen text from start_ms for duration_ms as one undo step. For linked animated compositions, pass preset from list_title_presets and fields (e.g. name and role for lower_third); text fills the first field unless fields already supplies it. Without preset, use legacy style. style: `title` (large, centred), `lower_third` (medium, lower left, e.g. a speaker name) or `caption` (small subtitle at the bottom; consecutive captions share one track). Returns the clip id for update_element/add_animation."
     )]
     async fn add_title(
         &self,
@@ -1379,6 +1398,34 @@ impl McpServer {
         let end = ms_to_ticks(p.start_ms + p.duration_ms)?;
         let range =
             TimeRange::new(start, end).map_err(|_| invalid("duration_ms must be positive"))?;
+        if let Some(preset) = p.preset {
+            let definition = animathio_control::title_presets()
+                .iter()
+                .find(|entry| entry.id == preset)
+                .ok_or_else(|| invalid("unknown title preset; call list_title_presets"))?;
+            let mut fields = p.fields;
+            if !p.text.is_empty() {
+                let primary = definition
+                    .layers
+                    .iter()
+                    .find(|layer| !layer.field.is_empty())
+                    .expect("preset field");
+                fields.entry(primary.field.clone()).or_insert(p.text);
+            }
+            let result = self
+                .backend
+                .lock()
+                .await
+                .handle(Call::TitlesAdd {
+                    params: animathio_control::TitleAddParams {
+                        preset,
+                        fields,
+                        range,
+                    },
+                })
+                .map_err(mcp_error)?;
+            return tool_text(result);
+        }
         let style = match p.style.unwrap_or(TitleStyleParam::Title) {
             TitleStyleParam::Title => TitleStyle::Title,
             TitleStyleParam::LowerThird => TitleStyle::LowerThird,

@@ -412,3 +412,11 @@ CLI tests receive an explicit bundle directory. CI builds bundles on both Linux
 and Windows; the WASI target must be installed for local tests too.
 
 Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.
+
+Title preset composition is owned by `control`, outside the core. Embedded JSON
+specifies text, shapes and LaTeX layers, integer ramp durations and explicit
+entry/resting/exit transform curves (absolute, offset or scale factor). The shared
+builder returns one `Command::Batch` and a fresh link group; it stores no runtime
+resources in the project. `_title_preset` / `_title_field` are opaque plugin JSON
+metadata for the editor's grouped text inspector. CPU library thumbnails are
+rendered off-thread and cached in editor session state by project canvas size.

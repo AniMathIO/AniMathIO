@@ -104,6 +104,20 @@ impl FieldPool {
             .any(|field| field.state.read(cx).focus_handle(cx).is_focused(window))
     }
 
+    pub(super) fn retain_clips(&mut self, clips: &BTreeSet<ClipId>) {
+        let keep = |key: &String| {
+            !key.starts_with('c')
+                || clips
+                    .iter()
+                    .any(|id| key.starts_with(&format!("c{}:", id.0)))
+        };
+        self.inputs.retain(|key, _| keep(key));
+        self.colors.retain(|key, _| keep(key));
+        self.sliders.retain(|key, _| keep(key));
+        self.assets.retain(|key, _| keep(key));
+        self.enums.retain(|key, _| keep(key));
+    }
+
     /// Drop widgets that belong to clips other than `clip`.
     fn retain_clip(&mut self, clip: ClipId) {
         let prefix = format!("c{}:", clip.0);
@@ -437,7 +451,7 @@ impl Editor {
         ))
     }
 
-    fn text_control(
+    pub(super) fn text_control(
         &mut self,
         key: &str,
         target: InputTarget,
@@ -1263,9 +1277,16 @@ impl Editor {
                     .child("Select a clip to edit its properties"),
             );
         };
-        self.fields.retain_clip(id);
+        let title_fields = self.title_field_rows(id, window, cx);
+        let is_title = title_fields.is_some();
+        if title_fields.is_none() {
+            self.fields.retain_clip(id);
+        }
         let ids = self.selected_ids();
         if ids.len() > 1 {
+            if let Some(rows) = title_fields {
+                return pane.child(rows);
+            }
             return self.multi_inspector(&ids, pane, window, cx);
         }
         let Some(clip) = self.find_clip(id).cloned() else {
@@ -1325,6 +1346,9 @@ impl Editor {
             .pb_3()
             .bg(hex(color::PANEL))
             .child(transform);
+        if let Some(rows) = title_fields {
+            body = body.child(rows);
+        }
         let opacity = inspector::sampled_numeric(
             &clip,
             &Target::Transform(TransformProperty::Opacity),
@@ -1340,7 +1364,7 @@ impl Editor {
             cx,
         );
         body = body.child(self.section("opacity", "Compositing", div().child(opacity_row), cx));
-        if matches!(clip.kind, ClipKind::Plugin { .. }) {
+        if matches!(clip.kind, ClipKind::Plugin { .. }) && !is_title {
             let rows = self.plugin_rows(id, window, cx);
             body = body.child(self.section(
                 "params",

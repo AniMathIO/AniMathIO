@@ -1,0 +1,197 @@
+{
+  "format": "animathio",
+  "schemaVersion": 3,
+  "frame_rate": {
+    "numerator": 30,
+    "denominator": 1
+  },
+  "tracks": [
+    {
+      "id": 1,
+      "name": "Caption / subtitle bar / Backdrop",
+      "clips": {
+        "2": {
+          "id": 2,
+          "link_group": 2,
+          "kind": {
+            "Plugin": {
+              "plugin_id": "org.animathio.shapes",
+              "params": {
+                "units": "normalized",
+                "shape": "path",
+                "path": "[{\"MoveTo\":[0.035,0.0]},{\"LineTo\":[0.965,0.0]},{\"QuadTo\":[[1.0,0.0],[1.0,0.035]]},{\"LineTo\":[1.0,0.965]},{\"QuadTo\":[[1.0,1.0],[0.965,1.0]]},{\"LineTo\":[0.035,1.0]},{\"QuadTo\":[[0.0,1.0],[0.0,0.965]]},{\"LineTo\":[0.0,0.035]},{\"QuadTo\":[[0.0,0.0],[0.035,0.0]]},\"Close\"]",
+                "x": 0.5,
+                "y": 0.5,
+                "width": 1.0,
+                "height": 1.0,
+                "radius": 0.5,
+                "rotation": 0.0,
+                "points": 5.0,
+                "fill": [
+                  22,
+                  28,
+                  48,
+                  180
+                ],
+                "stroke": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "stroke_width": 0.0,
+                "_title_preset": "caption",
+                "_title_field": ""
+              }
+            }
+          },
+          "range": {
+            "start": 3528000000,
+            "end": 7056000000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.5,
+            "y": 0.855,
+            "scale_x": 0.84,
+            "scale_y": 0.13,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "effects": [],
+          "animations": [
+            {
+              "target": {
+                "Transform": "Opacity"
+              },
+              "keys": {
+                "0": {
+                  "value": {
+                    "Number": 0.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "235200000": {
+                  "value": {
+                    "Number": 1.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "3292800000": {
+                  "value": {
+                    "Number": 1.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "3528000000": {
+                  "value": {
+                    "Number": 0.0
+                  },
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "gain": 1.0,
+      "muted": false,
+      "solo": false,
+      "locked": false
+    },
+    {
+      "id": 3,
+      "name": "Caption / subtitle bar / caption",
+      "clips": {
+        "4": {
+          "id": 4,
+          "link_group": 2,
+          "kind": {
+            "Plugin": {
+              "plugin_id": "org.animathio.text",
+              "params": {
+                "text": "Every story starts here",
+                "font_size": 0.04,
+                "color": [
+                  255,
+                  255,
+                  255,
+                  255
+                ],
+                "units": "normalized",
+                "align": "center",
+                "fit_width": 0.84,
+                "fit_height": 0.1,
+                "_title_preset": "caption",
+                "_title_field": "caption"
+              }
+            }
+          },
+          "range": {
+            "start": 3528000000,
+            "end": 7056000000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.5,
+            "y": 0.87,
+            "scale_x": 0.84,
+            "scale_y": 0.1,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "effects": [],
+          "animations": [
+            {
+              "target": {
+                "Transform": "Opacity"
+              },
+              "keys": {
+                "0": {
+                  "value": {
+                    "Number": 0.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "235200000": {
+                  "value": {
+                    "Number": 1.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "3292800000": {
+                  "value": {
+                    "Number": 1.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "3528000000": {
+                  "value": {
+                    "Number": 0.0
+                  },
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "gain": 1.0,
+      "muted": false,
+      "solo": false,
+      "locked": false
+    }
+  ],
+  "assets": {},
+  "width": 1920,
+  "height": 1080,
+  "background": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "duration": 0
+}

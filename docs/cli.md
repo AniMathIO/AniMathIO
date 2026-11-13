@@ -101,7 +101,7 @@ playback. `--from`/`--to` accept the same exact decimal-second or `Nticks` forms
 as `render --time`; the end is exclusive and defaults to the project duration.
 `--fps` overrides the project frame rate (e.g. `30` or `30000/1001`); `--crf` is
 the H.264 constant-quality target (0–51, lower is better). `--preset` uses the same
-`youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square` table as the editor and
+`youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` and `portrait` table as the editor and
 MCP. It sets the export snapshot to the preset resolution and 30 fps without writing
 the project file. Quality defaults to CRF 18 with a preset or 23 otherwise;
 `--fps` and `--crf` override those defaults.
@@ -125,7 +125,7 @@ Options:
       --from <FROM>      Inclusive start in decimal seconds or Nticks [default: 0]
       --to <TO>          Exclusive end in decimal seconds or Nticks; defaults to project duration
       --fps <FPS>        Output rate, e.g. 30 or 30000/1001
-      --preset <PRESET>  Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical` or square
+      --preset <PRESET>  Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` or `portrait`
       --crf <CRF>        Constant quality, 0..=51; lower is better (defaults to preset quality or 23)
       --overwrite        Replace an existing output file instead of failing
   -h, --help             Print help
