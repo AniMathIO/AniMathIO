@@ -38,6 +38,25 @@ impl TimelineLayout {
     }
 }
 
+/// Whether a clip intersects the horizontal viewport.
+pub(crate) fn visible_span(layout: &TimelineLayout, start: Time, end: Time) -> bool {
+    time_to_x(layout, end) >= 0.0 && time_to_x(layout, start) <= layout.width
+}
+
+/// Cursor-anchored zoom. The time under the cursor stays fixed except at edges.
+pub(crate) fn zoom_at(layout: &TimelineLayout, zoom: f32, anchor_x: f32) -> (f32, f32) {
+    let zoom = zoom.clamp(1.0, 64.0);
+    let current = layout.pixels_per_tick * layout.duration_ticks as f64 / f64::from(layout.width);
+    let scroll = ((layout.scroll_x + f64::from(anchor_x)) * f64::from(zoom) / current
+        - f64::from(anchor_x)) as f32;
+    (zoom, scroll.clamp(0.0, layout.width * (zoom - 1.0)))
+}
+
+/// A 54px slider spans linear gain 0–2. Commit the final value as one command.
+pub(crate) fn gain_from_drag(original: f64, delta: f32) -> f64 {
+    (original + f64::from(delta) / 54.0 * 2.0).clamp(0.0, 2.0)
+}
+
 /// Ruler tick positions (multiples of `minor`) inside the visible range only.
 /// The walk is bounded by `width / 4` iterations and uses `checked_add`, so a
 /// huge duration, a tiny zoom or a degenerate step can never stall the UI.
@@ -278,6 +297,7 @@ pub(crate) fn drag_start(layout: &TimelineLayout, grab_offset: i64, x: f32) -> T
 #[cfg(test)]
 mod tests {
     use super::*;
+    use animathio_core::ClipKind;
     use animathio_core::{
         Clip, ClipId, Command, Project, TICKS_PER_SECOND, Time, TimeRange, Track, TrackId,
         builtin::Builtin,
@@ -322,6 +342,69 @@ mod tests {
 
     fn snap_tick(layout: &TimelineLayout) -> i64 {
         (8.0 / layout.pixels_per_tick) as i64
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn zoom_keeps_cursor_time_and_gain_drag_is_bounded() {
+        let layout = TimelineLayout::zoomed(1000., 28., 64., TICKS_PER_SECOND * 20, 2., 250.);
+        let anchor = x_to_time(&layout, 400.);
+        let (zoom, scroll) = zoom_at(&layout, 4., 400.);
+        let zoomed = TimelineLayout::zoomed(1000., 28., 64., layout.duration_ticks, zoom, scroll);
+        assert!((time_to_x(&zoomed, anchor) - 400.).abs() < 0.01);
+        assert_eq!(zoom_at(&zoomed, 1., 400.), (1., 0.));
+        assert!((gain_from_drag(1., 13.5) - 1.5).abs() < f64::EPSILON);
+        assert_eq!(gain_from_drag(1., -1000.), 0.);
+        assert_eq!(gain_from_drag(1., 1000.), 2.);
+    }
+
+    #[test]
+    fn two_hundred_clip_layout_cost() {
+        let mut project = Project::default();
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Synthetic"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        for index in 0..200 {
+            Command::AddClip {
+                track: TrackId(1),
+                clip: Clip::new(
+                    ClipId(index + 10),
+                    ClipKind::Error("synthetic".into()),
+                    TimeRange::new(
+                        Time(index as i64 * TICKS_PER_SECOND),
+                        Time((index + 1) as i64 * TICKS_PER_SECOND),
+                    )
+                    .unwrap(),
+                ),
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let started = std::time::Instant::now();
+        let mut visible = 0;
+        for _ in 0..1000 {
+            let layout =
+                TimelineLayout::zoomed(1600., 28., 64., project_duration(&project), 10., 6400.);
+            visible = project
+                .tracks()
+                .iter()
+                .flat_map(|track| track.clips().values())
+                .filter(|clip| visible_span(&layout, clip.range.start, clip.range.end))
+                .count();
+            std::hint::black_box(&layout);
+            std::hint::black_box(visible);
+        }
+        eprintln!(
+            "200-clip layout + culling: {:?}/iteration (1000 iterations)",
+            started.elapsed() / 1000
+        );
+        assert_eq!(
+            visible, 22,
+            "20 visible clips plus the two touching the viewport edges"
+        );
     }
 
     #[test]
