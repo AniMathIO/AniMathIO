@@ -102,6 +102,16 @@ pub trait ControlHandler {
         Ok(())
     }
 
+    /// List bundled title compositions and fields.
+    fn titles_list(&mut self) -> Result<Vec<crate::TitlePreset>, ControlError> {
+        from_value(self.handle(Call::TitlesList)?)
+    }
+
+    /// Add an animated linked title composition as one undo step.
+    fn titles_add(&mut self, params: crate::TitleAddParams) -> Result<ClipAdded, ControlError> {
+        from_value(self.handle(Call::TitlesAdd { params })?)
+    }
+
     /// List the filters provided by loaded effect plugins.
     fn effects_list(&mut self) -> Result<Vec<crate::EffectInfo>, ControlError> {
         from_value(self.handle(Call::EffectsList)?)

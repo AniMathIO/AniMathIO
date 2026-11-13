@@ -43,38 +43,38 @@ fn get_color(params: &[ParamEntry], id: &str, default: Color) -> Color {
         .unwrap_or(default)
 }
 
-fn offset_verb(v: &PathVerb, ox: f32, oy: f32) -> PathVerb {
+fn offset_verb(v: &PathVerb, ox: f32, oy: f32, scale: f32) -> PathVerb {
     match v {
         PathVerb::MoveTo(p) => PathVerb::MoveTo(Point {
-            x: p.x + ox,
-            y: p.y + oy,
+            x: p.x * scale + ox,
+            y: p.y * scale + oy,
         }),
         PathVerb::LineTo(p) => PathVerb::LineTo(Point {
-            x: p.x + ox,
-            y: p.y + oy,
+            x: p.x * scale + ox,
+            y: p.y * scale + oy,
         }),
         PathVerb::QuadTo((c, to)) => PathVerb::QuadTo((
             Point {
-                x: c.x + ox,
-                y: c.y + oy,
+                x: c.x * scale + ox,
+                y: c.y * scale + oy,
             },
             Point {
-                x: to.x + ox,
-                y: to.y + oy,
+                x: to.x * scale + ox,
+                y: to.y * scale + oy,
             },
         )),
         PathVerb::CubicTo((c1, c2, to)) => PathVerb::CubicTo((
             Point {
-                x: c1.x + ox,
-                y: c1.y + oy,
+                x: c1.x * scale + ox,
+                y: c1.y * scale + oy,
             },
             Point {
-                x: c2.x + ox,
-                y: c2.y + oy,
+                x: c2.x * scale + ox,
+                y: c2.y * scale + oy,
             },
             Point {
-                x: to.x + ox,
-                y: to.y + oy,
+                x: to.x * scale + ox,
+                y: to.y * scale + oy,
             },
         )),
         PathVerb::Close => PathVerb::Close,
@@ -89,6 +89,14 @@ impl Guest for LatexPlugin {
             description: "LaTeX/Typst math typeset by the host into vector outlines".to_string(),
             kinds: vec![PluginKind::ClipSource],
             params: vec![
+                ParamSpec {
+                    id: "units".into(),
+                    label: "Units".into(),
+                    kind: ParamKind::EnumChoice(EnumParam {
+                        options: vec!["pixels".into(), "normalized".into()],
+                        default: "pixels".into(),
+                    }),
+                },
                 ParamSpec {
                     id: "source".to_string(),
                     label: "Source".to_string(),
@@ -108,7 +116,7 @@ impl Guest for LatexPlugin {
                     id: "size".to_string(),
                     label: "Font Size".to_string(),
                     kind: ParamKind::Number(NumberRange {
-                        min: 4.0,
+                        min: 0.0001,
                         max: 400.0,
                         default: 48.0,
                         step: 1.0,
@@ -155,7 +163,10 @@ impl Guest for LatexPlugin {
     fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
         let source = get_string(&params, "source", r"\frac{a}{b}");
         let mode = get_string(&params, "mode", "latex");
-        let font_size = get_number(&params, "size", 48.0) as f32;
+        let mut font_size = get_number(&params, "size", 48.0) as f32;
+        if get_string(&params, "units", "pixels") == "normalized" {
+            font_size *= size.width.min(size.height) as f32;
+        }
         let color = get_color(
             &params,
             "color",
@@ -175,17 +186,29 @@ impl Guest for LatexPlugin {
         };
         let result = host::typeset_math(&source, math_mode, font_size);
         if result.paths.is_empty() {
-            return Scene { coordinate_space: CoordinateSpace::Canvas, elements: Vec::new() };
+            return Scene {
+                coordinate_space: CoordinateSpace::Canvas,
+                elements: Vec::new(),
+            };
         }
 
-        let content_width = result.bbox.max_x - result.bbox.min_x;
-        let content_height = result.bbox.max_y - result.bbox.min_y;
-        let x_offset = match align.as_str() {
-            "right" => (size.width as f32 - content_width) - result.bbox.min_x,
-            "center" => (size.width as f32 - content_width) / 2.0 - result.bbox.min_x,
-            _ => -result.bbox.min_x,
+        let raw_width = result.bbox.max_x - result.bbox.min_x;
+        let raw_height = result.bbox.max_y - result.bbox.min_y;
+        let scale = if get_string(&params, "units", "pixels") == "normalized" {
+            (size.width as f32 * 0.84 / raw_width.max(1.0))
+                .min(size.height as f32 * 0.22 / raw_height.max(1.0))
+                .min(1.0)
+        } else {
+            1.0
         };
-        let y_offset = (size.height as f32 - content_height) / 2.0 - result.bbox.min_y;
+        let content_width = raw_width * scale;
+        let content_height = raw_height * scale;
+        let x_offset = match align.as_str() {
+            "right" => (size.width as f32 - content_width) - result.bbox.min_x * scale,
+            "center" => (size.width as f32 - content_width) / 2.0 - result.bbox.min_x * scale,
+            _ => -result.bbox.min_x * scale,
+        };
+        let y_offset = (size.height as f32 - content_height) / 2.0 - result.bbox.min_y * scale;
 
         let path_count = result.paths.len();
         let full_count = ((reveal * path_count as f32).floor() as usize).min(path_count);
@@ -198,7 +221,7 @@ impl Guest for LatexPlugin {
             }
             let offset: Vec<PathVerb> = path
                 .iter()
-                .map(|verb| offset_verb(verb, x_offset, y_offset))
+                .map(|verb| offset_verb(verb, x_offset, y_offset, scale))
                 .collect();
             if partial && index == full_count {
                 elements.push(DrawCommand::StrokePath((
@@ -215,7 +238,10 @@ impl Guest for LatexPlugin {
             }
         }
 
-        Scene { coordinate_space: CoordinateSpace::Canvas, elements }
+        Scene {
+            coordinate_space: CoordinateSpace::Canvas,
+            elements,
+        }
     }
 
     fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {
