@@ -14,7 +14,7 @@ provided by **host imports**.
 The contract is `crates/plugin-api/wit/plugin.wit`:
 
 ```wit
-package animathio:plugin@0.1.0;
+package animathio:plugin@0.2.0;
 
 interface types { /* shared vector + schema types, see below */ }
 
@@ -66,10 +66,12 @@ The drawing model is a small vector set:
   (one entry per contour)
 - `stroke-style { width: f32, color, cap, join }` with `stroke-cap` (`butt`,
   `round`, `square`) and `stroke-join` (`miter`, `round`, `bevel`)
-- `text-element { text, font-size, x, y, color }`
+- `text-element { align: text-alignment, text, font-size, x, y, color }`
+  with `text-alignment` (`left`, `center`, `right`)
 - `draw-command`: `fill-path(tuple<path, color>)`,
   `stroke-path(tuple<path, stroke-style>)`, `text-run(text-element)`
-- `scene { elements: list<draw-command> }`
+- `scene { coordinate-space: coordinate-space, elements: list<draw-command> }`
+  with `coordinate-space` (`canvas`, `normalized`)
 
 In generated Rust, `draw-command` variants are spelled
 `DrawCommand::FillPath((path, color))`, `DrawCommand::StrokePath((path, style))`
@@ -151,7 +153,7 @@ let t = time_ticks as f64 / TICKS_PER_SECOND;
 The manifest stored at the archive root of an `.amplugin`:
 
 ```toml
-api_version = "0.1.0"          # must start with "0.1"
+api_version = "0.2.0"          # must start with "0.2"
 id = "com.example.hello"       # reverse-domain; [a-zA-Z0-9._-]
 name = "Hello"
 version = "0.1.0"
@@ -259,7 +261,7 @@ wit-bindgen = "0.40.0"
 **`plugins/examples/hello/plugin.toml`**
 
 ```toml
-api_version = "0.1.0"
+api_version = "0.2.0"
 id = "com.example.hello"
 name = "Hello"
 version = "0.1.0"
@@ -359,6 +361,7 @@ impl Guest for HelloPlugin {
             size.width, size.height));
 
         Scene {
+            coordinate_space: CoordinateSpace::Canvas,
             elements: vec![DrawCommand::FillPath((
                 circle(size.width as f32 / 2.0, size.height as f32 / 2.0, radius),
                 color,
@@ -401,3 +404,26 @@ Notes for real plugins:
   `ellipse`, `circle`, `polygon`, `star`, `line` and `arrow` builders. The
   standalone plugins use the generated WIT types directly and write their own
   path helpers, as above.
+
+## First-party text and shapes
+
+`org.animathio.text` accepts `text`, `font_size`, `color`, `align` (`left`, `center`,
+`right`) and `units` (`pixels` or `normalized`). Pixel mode retains centered outline
+layout. Normalized mode produces a generic text run with embedded-font shaping,
+wrapping and line alignment; font size is a fraction of canvas height. Migrated
+builtin text uses normalized units and left alignment.
+
+`org.animathio.shapes` accepts `shape` (`rect`, `ellipse`, `polygon`, `star`, `arrow`,
+`line`, `path`), `units`, position/dimensions, `fill`, `stroke` and `stroke_width`.
+Alpha-zero colors disable fill or stroke; zero width disables the outline. In
+normalized mode rectangle/ellipse defaults fill the unit square and stroke widths
+scale with it. Normalized shapes remain static unless their parameters are keyframed.
+`path` is a JSON string of local verbs, for example
+`[{"MoveTo":[0,0]},{"QuadTo":[[0.5,1],[1,0]]},"Close"]`.
+`CurveTo` carries three points (two controls and endpoint).
+
+The component ABI is now `animathio:plugin@0.2.0`, including explicit scene units
+and text alignment. Rebuild components against the current WIT and set
+`api_version = "0.2.0"` in `plugin.toml`; old 0.1 packages are rejected.
+`plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
+target and use `scripts/build-plugins.sh` to package all first-party components.

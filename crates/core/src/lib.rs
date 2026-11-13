@@ -1,6 +1,5 @@
 //! Plain project data, exact timeline arithmetic, reversible edits and pure evaluation.
 //! No decoder, filesystem, GPU or UI resources belong in this crate.
-pub mod builtin;
 mod command;
 mod effects;
 mod keyframes;

@@ -408,9 +408,7 @@ fn load_plugins() -> Option<PluginHost> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use animathio_core::{
-        Clip, ClipId, Command, TICKS_PER_SECOND, TimeRange, Track, TrackId, builtin::Builtin,
-    };
+    use animathio_core::{Clip, ClipId, Command, TICKS_PER_SECOND, TimeRange, Track, TrackId};
 
     #[test]
     fn command_apply_and_history_round_trip() {
@@ -423,11 +421,7 @@ mod tests {
             .unwrap();
         let clip = Clip::new(
             ClipId(1),
-            animathio_core::ClipKind::Builtin(Builtin::Text {
-                text: "hi".to_owned(),
-                font_size: 0.08,
-                color: [255, 255, 255, 255],
-            }),
+            animathio_plugin_api::sources::text("hi".to_owned(), 0.08, [255, 255, 255, 255]),
             TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
         );
         handler
@@ -524,6 +518,7 @@ mod tests {
 
     fn text_project() -> HeadlessHandler {
         let mut handler = HeadlessHandler::new();
+        handler.plugins = Some(animathio_plugin_host::test_support::host());
         let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 5)).unwrap();
         for command in [
             Command::SetSettings {
@@ -541,11 +536,11 @@ mod tests {
                 track: TrackId(1),
                 clip: Clip::new(
                     ClipId(1),
-                    animathio_core::ClipKind::Builtin(Builtin::Text {
-                        text: "export".to_owned(),
-                        font_size: 0.2,
-                        color: [255, 255, 255, 255],
-                    }),
+                    animathio_plugin_api::sources::text(
+                        "export".to_owned(),
+                        0.2,
+                        [255, 255, 255, 255],
+                    ),
                     range,
                 ),
             },

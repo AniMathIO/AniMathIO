@@ -280,7 +280,6 @@ mod tests {
     use super::*;
     use animathio_core::{
         Clip, ClipId, Command, Project, TICKS_PER_SECOND, Time, TimeRange, Track, TrackId,
-        builtin::Builtin,
     };
 
     fn sample_project() -> Project {
@@ -296,11 +295,11 @@ mod tests {
             track: TrackId(1),
             clip: Clip::new(
                 ClipId(10),
-                animathio_core::ClipKind::Builtin(Builtin::Shape {
-                    shape: animathio_core::builtin::Shape::Rect,
-                    fill: None,
-                    stroke: None,
-                }),
+                animathio_plugin_api::sources::shape(
+                    animathio_plugin_api::sources::Shape::Rect,
+                    None,
+                    None,
+                ),
                 range,
             ),
         }
@@ -428,11 +427,11 @@ mod tests {
             track: TrackId(1),
             clip: Clip::new(
                 ClipId(11),
-                animathio_core::ClipKind::Builtin(Builtin::Shape {
-                    shape: animathio_core::builtin::Shape::Rect,
-                    fill: None,
-                    stroke: None,
-                }),
+                animathio_plugin_api::sources::shape(
+                    animathio_plugin_api::sources::Shape::Rect,
+                    None,
+                    None,
+                ),
                 TimeRange::new(Time(TICKS_PER_SECOND), Time(TICKS_PER_SECOND * 2)).unwrap(),
             ),
         }

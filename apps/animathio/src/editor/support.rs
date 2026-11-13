@@ -429,12 +429,12 @@ pub(super) fn clip_color(kind: &animathio_core::ClipKind, theme: &gpui_component
         animathio_core::ClipKind::Video(_) => theme.blue,
         animathio_core::ClipKind::Image(_) => theme.cyan,
         animathio_core::ClipKind::Audio(_) => theme.green,
-        animathio_core::ClipKind::Builtin(builtin) => match builtin {
-            animathio_core::builtin::Builtin::Text { .. } => theme.magenta,
-            animathio_core::builtin::Builtin::Shape { .. } => theme.yellow,
-        },
         animathio_core::ClipKind::Plugin { plugin_id, .. } => {
-            if plugin_id.contains("latex") || plugin_id.contains("math") {
+            if plugin_id == "org.animathio.text" {
+                theme.magenta
+            } else if plugin_id == "org.animathio.shapes" {
+                theme.yellow
+            } else if plugin_id.contains("latex") || plugin_id.contains("math") {
                 theme.primary
             } else if plugin_id.contains("graph") {
                 theme.chart_2
@@ -541,11 +541,11 @@ pub(super) fn kind_label(kind: &ClipKind) -> String {
         ClipKind::Video(_) => "video".into(),
         ClipKind::Image(_) => "image".into(),
         ClipKind::Audio(_) => "audio".into(),
-        ClipKind::Builtin(builtin) => match builtin {
-            animathio_core::builtin::Builtin::Text { .. } => "text".into(),
-            animathio_core::builtin::Builtin::Shape { .. } => "shape".into(),
+        ClipKind::Plugin { plugin_id, .. } => match plugin_id.as_str() {
+            "org.animathio.text" => "text".into(),
+            "org.animathio.shapes" => "shape".into(),
+            _ => format!("plugin {plugin_id}"),
         },
-        ClipKind::Plugin { plugin_id, .. } => format!("plugin {plugin_id}"),
         ClipKind::Vector(_) => "vector".into(),
         ClipKind::Error(_) => "error".into(),
     }

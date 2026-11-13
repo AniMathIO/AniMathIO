@@ -215,9 +215,7 @@ impl Editor {
     pub(super) fn toggle_ripple_scope(&mut self, cx: &mut Context<Self>) {
         self.ripple_scope = self.ripple_scope.toggled();
         self.notices
-            .push(gpui_component::notification::Notification::info(
-                self.ripple_scope.label(),
-            ));
+            .push(crate::style::Toast::info(self.ripple_scope.label()));
         cx.notify();
     }
 

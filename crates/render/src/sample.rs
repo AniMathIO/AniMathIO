@@ -3,8 +3,8 @@ use crate::{Error, Frame};
 use animathio_core::{
     Asset, AssetId, Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Project,
     TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform, TransformProperty,
-    builtin::{Builtin, PathElement, Shape, Stroke},
 };
+use animathio_plugin_api::sources::{PathElement, Shape, Stroke};
 use std::collections::BTreeMap;
 
 /// Plain demo project and its content-addressed encoded image.
@@ -45,13 +45,7 @@ pub fn build() -> Result<Sample, Error> {
     }
     .apply(&mut project)?;
     let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND * 3))?;
-    let shape = |shape, fill, stroke| {
-        ClipKind::Builtin(Builtin::Shape {
-            shape,
-            fill,
-            stroke,
-        })
-    };
+    let shape = |shape, fill, stroke| animathio_plugin_api::sources::shape(shape, fill, stroke);
     let sources = [
         (
             shape(Shape::Rect, Some([17, 24, 39, 255]), None),
@@ -140,11 +134,11 @@ pub fn build() -> Result<Sample, Error> {
             0.1,
         ),
         (
-            ClipKind::Builtin(Builtin::Text {
-                text: "AniMathIO 2.0\nAnimate α + β = γ".into(),
-                font_size: 0.08,
-                color: [240, 245, 255, 255],
-            }),
+            animathio_plugin_api::sources::text(
+                "AniMathIO 2.0\nAnimate α + β = γ".into(),
+                0.08,
+                [240, 245, 255, 255],
+            ),
             Transform {
                 x: 0.6,
                 y: 0.58,

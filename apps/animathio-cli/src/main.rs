@@ -220,8 +220,12 @@ fn run(cli: Cli) -> Result<()> {
                 time.ok_or("--frame or --time is required")?
             };
             let mut ctx = context(bundle.assets)?;
+            let mut plugins = plugin_host()?;
             render(
-                &evaluate(&bundle.project, time),
+                &plugins.resolve(
+                    &evaluate(&bundle.project, time),
+                    size.tuple(&bundle.project),
+                ),
                 &mut ctx,
                 size.tuple(&bundle.project),
             )?
@@ -252,9 +256,9 @@ fn run(cli: Cli) -> Result<()> {
                 path: output,
                 overwrite,
             };
-            animathio_export::export_to_file(
+            let mut plugins = plugin_host()?;
+            animathio_export::Exporter::new(&bundle.project, &bundle.assets)?.export_to_file(
                 &bundle.project,
-                &bundle.assets,
                 range,
                 animathio_export::Settings {
                     frame_rate: fps,
@@ -267,6 +271,7 @@ fn run(cli: Cli) -> Result<()> {
                     }
                     true
                 },
+                |scene| plugins.resolve(&scene, animathio_export::resolution(&bundle.project)),
             )?;
         }
         Action::Mcp { project } => run_mcp(project)?,
@@ -285,10 +290,14 @@ fn run(cli: Cli) -> Result<()> {
             let rate = bundle.project.frame_rate();
             rate.frame_to_time(to - 1, Rounding::Nearest)?;
             let mut ctx = context(bundle.assets)?;
+            let mut plugins = plugin_host()?;
             let first = render(
-                &evaluate(
-                    &bundle.project,
-                    rate.frame_to_time(from, Rounding::Nearest)?,
+                &plugins.resolve(
+                    &evaluate(
+                        &bundle.project,
+                        rate.frame_to_time(from, Rounding::Nearest)?,
+                    ),
+                    size.tuple(&bundle.project),
                 ),
                 &mut ctx,
                 size.tuple(&bundle.project),
@@ -298,7 +307,10 @@ fn run(cli: Cli) -> Result<()> {
             for frame in from + 1..to {
                 let time = rate.frame_to_time(frame, Rounding::Nearest)?;
                 render(
-                    &evaluate(&bundle.project, time),
+                    &plugins.resolve(
+                        &evaluate(&bundle.project, time),
+                        size.tuple(&bundle.project),
+                    ),
                     &mut ctx,
                     size.tuple(&bundle.project),
                 )?
@@ -450,6 +462,18 @@ fn parse_time(value: &str) -> std::result::Result<Time, String> {
         .and_then(|t| i64::try_from(t).ok())
         .ok_or_else(invalid)?;
     Ok(Time(ticks))
+}
+
+fn plugin_host() -> Result<animathio_plugin_host::PluginHost> {
+    let cache = directories::BaseDirs::new().map_or_else(
+        || std::env::temp_dir().join("animathio-plugin-cache"),
+        |base| base.cache_dir().join("animathio/plugins"),
+    );
+    let mut host = animathio_plugin_host::PluginHost::new(cache)?;
+    for dir in animathio_plugin_host::plugin_search_dirs() {
+        host.load_plugin_directory(&dir)?;
+    }
+    Ok(host)
 }
 
 fn import_media(input: &Path, output: &Path) -> Result<()> {
