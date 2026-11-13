@@ -1,5 +1,5 @@
 use super::*;
-use animathio_core::{Asset, Clip, ClipId, Command, Track, TrackId, builtin::Builtin};
+use animathio_core::{Asset, Clip, ClipId, Command, Track, TrackId};
 use std::process::Command as Process;
 
 fn project() -> (Project, BTreeMap<AssetId, Vec<u8>>) {
@@ -28,11 +28,11 @@ fn project() -> (Project, BTreeMap<AssetId, Vec<u8>>) {
     let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND * 2)).unwrap();
     for (index, kind) in [
         ClipKind::Video(id.clone()),
-        ClipKind::Builtin(Builtin::Text {
-            text: "Video + text + audio".into(),
-            font_size: 0.12,
-            color: [255, 255, 255, 255],
-        }),
+        animathio_plugin_api::sources::text(
+            "Video + text + audio".into(),
+            0.12,
+            [255, 255, 255, 255],
+        ),
         ClipKind::Audio(id.clone()),
     ]
     .into_iter()
@@ -60,11 +60,19 @@ fn two_second_video_text_audio_export_has_aligned_streams() {
     let (project, assets) = project();
     let range = TimeRange::new(Time(0), duration(&project)).unwrap();
     let mut events = Vec::new();
-    let bytes = export(&project, &assets, range, Settings::default(), |p| {
-        events.push(p);
-        true
-    })
-    .unwrap();
+    let bytes = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            range,
+            Settings::default(),
+            |p| {
+                events.push(p);
+                true
+            },
+            |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
+        )
+        .unwrap();
     assert_eq!(
         events.first(),
         Some(&Progress {
@@ -135,11 +143,14 @@ fn encoder_input_frame_n_is_exactly_preview_frame_n() {
             range,
             rate,
             &mut |_| true,
-            &mut |scene| scene,
+            &mut |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
             |frame, pcm| {
                 let offset = rate.frame_to_time(index, Rounding::Nearest).unwrap();
                 let expected = render(
-                    &evaluate(&project, Time(range.start.0 + offset.0)),
+                    &animathio_plugin_host::test_support::resolve(
+                        &evaluate(&project, Time(range.start.0 + offset.0)),
+                        (160, 90),
+                    ),
                     &mut preview,
                     (160, 90),
                 )
@@ -159,12 +170,12 @@ fn cancellation_and_invalid_ranges_fail_without_finishing() {
     let (project, assets) = project();
     let range = TimeRange::new(Time(0), duration(&project)).unwrap();
     assert!(matches!(
-        export(&project, &assets, range, Settings::default(), |_| false),
+        export_with_plugins(&project, &assets, range, Settings::default(), |_| false),
         Err(Error::Cancelled)
     ));
     let mut last = 0;
     assert!(matches!(
-        export(&project, &assets, range, Settings::default(), |p| {
+        export_with_plugins(&project, &assets, range, Settings::default(), |p| {
             last = p.completed;
             p.completed < 2
         }),
@@ -185,7 +196,9 @@ fn cancellation_and_invalid_ranges_fail_without_finishing() {
             end: Time(i64::MAX),
         },
     ] {
-        assert!(export(&project, &assets, range, Settings::default(), |_| true).is_err());
+        assert!(
+            export_with_plugins(&project, &assets, range, Settings::default(), |_| true).is_err()
+        );
     }
 }
 
@@ -205,17 +218,13 @@ fn unset_resolution_falls_back_to_640x360() {
         track: TrackId(0),
         clip: Clip::new(
             ClipId(0),
-            ClipKind::Builtin(Builtin::Text {
-                text: "default canvas".into(),
-                font_size: 0.1,
-                color: [255, 255, 255, 255],
-            }),
+            animathio_plugin_api::sources::text("default canvas".into(), 0.1, [255, 255, 255, 255]),
             range,
         ),
     }
     .apply(&mut project)
     .unwrap();
-    let bytes = export(
+    let bytes = export_with_plugins(
         &project,
         &BTreeMap::new(),
         TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 2)).unwrap(),
@@ -244,7 +253,7 @@ fn rational_frame_steps_and_audio_blocks_are_deterministic() {
             range,
             rate,
             &mut |_| true,
-            &mut |scene| scene,
+            &mut |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
             |_, pcm| {
                 actual.extend_from_slice(pcm);
                 Ok(())
@@ -273,7 +282,7 @@ fn export_to_file_creates_missing_parents_and_never_overwrites_silently() {
     let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 3)).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("nested/deeper/clip.mp4");
-    let path = export_to_file(
+    let path = export_file_with_plugins(
         &project,
         &assets,
         range,
@@ -288,7 +297,7 @@ fn export_to_file_creates_missing_parents_and_never_overwrites_silently() {
     assert_eq!(entries(output.parent().unwrap()), vec![output.clone()]);
 
     let original = std::fs::read(&output).unwrap();
-    let rejected = export_to_file(
+    let rejected = export_file_with_plugins(
         &project,
         &assets,
         range,
@@ -308,7 +317,7 @@ fn export_to_file_creates_missing_parents_and_never_overwrites_silently() {
     assert_eq!(entries(output.parent().unwrap()), vec![output.clone()]);
 
     std::fs::write(&output, b"not an mp4").unwrap();
-    export_to_file(
+    export_file_with_plugins(
         &project,
         &assets,
         range,
@@ -332,7 +341,7 @@ fn failed_export_leaves_no_partial_file_and_no_temp_file() {
     let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 3)).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("fresh/clip.mp4");
-    let error = export_to_file(
+    let error = export_file_with_plugins(
         &project,
         &assets,
         range,
@@ -347,7 +356,7 @@ fn failed_export_leaves_no_partial_file_and_no_temp_file() {
 
     // A cancelled overwrite keeps the previous file and drops its temp file.
     std::fs::write(&output, b"previous").unwrap();
-    let error = export_to_file(
+    let error = export_file_with_plugins(
         &project,
         &assets,
         range,
@@ -359,4 +368,34 @@ fn failed_export_leaves_no_partial_file_and_no_temp_file() {
     assert!(matches!(error, Error::Cancelled), "{error:?}");
     assert_eq!(std::fs::read(&output).unwrap(), b"previous");
     assert_eq!(entries(&dir.path().join("fresh")), vec![output.clone()]);
+}
+
+fn export_with_plugins(
+    project: &Project,
+    assets: &BTreeMap<AssetId, Vec<u8>>,
+    range: TimeRange,
+    settings: Settings,
+    progress: impl FnMut(Progress) -> bool,
+) -> Result<Vec<u8>, Error> {
+    Exporter::new(project, assets)?.export(project, range, settings, progress, |scene| {
+        animathio_plugin_host::test_support::resolve(&scene, resolution(project))
+    })
+}
+
+fn export_file_with_plugins(
+    project: &Project,
+    assets: &BTreeMap<AssetId, Vec<u8>>,
+    range: TimeRange,
+    settings: Settings,
+    destination: &Destination,
+    progress: impl FnMut(Progress) -> bool,
+) -> Result<std::path::PathBuf, Error> {
+    Exporter::new(project, assets)?.export_to_file(
+        project,
+        range,
+        settings,
+        destination,
+        progress,
+        |scene| animathio_plugin_host::test_support::resolve(&scene, resolution(project)),
+    )
 }

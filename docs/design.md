@@ -27,3 +27,33 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
   playhead and meters. Respect a "Reduce motion" preference if one exists.
 - **States:** every interactive element has hover, active, focus and disabled styles.
   Empty states get an icon, one line of text and a primary action.
+
+
+## Application frame and launcher
+
+The dark gpui-component theme is installed from `style.rs` before the first
+window opens. Its solid palette, semantic widget backgrounds, scrollbar and
+resize-handle appearance are updated together using `Theme::update`. Inter
+Variable and JetBrains Mono are embedded; their OFL licenses ship beside the font
+sources under `apps/animathio/assets/fonts`. The bundled gradient brand is
+`apps/animathio/assets/brand.svg`.
+
+The workspace wraps each resizable pane in a rounded panel with a consistent
+icon/title/action header and 6px shared gutters. The library uses a sliding active
+pill for Assets, Plugins and Effects. The title bar shows the project name, an
+unsaved dot, MCP listener status and Export. The bottom chips report the canvas,
+frame rate, duration, autosave policy, requested preview renderer and export queue.
+“GPU requested” describes the preview preference: the worker can fall back to CPU.
+
+The launcher offers four aspect-ratio canvas cards, recent-project cards with
+cached modification times, media drops and Open / Import v1 / Import Manim.
+Its quiet gradient glow runs only while the launcher is visible. Card lifts and
+tab changes settle in 180ms. Preferences > Motion > Reduce motion makes the glow
+static and disables decorative widget transitions through GPUI's motion policy;
+the preference is saved separately from projects. Toasts retain the component
+kit's slide-in/dismiss behavior and add a semantic coloured left border.
+
+The Export button, dialog primaries and "Create" actions share `style::primary_button`
+(violet-to-cyan gradient, dark lettering). The launcher hero adds a slow light sweep
+over a static wash; Reduce motion keeps only the wash. Preset cards carry an aspect
+chip, and the drop zone is dashed and lights up while files are dragged over it.

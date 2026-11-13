@@ -1,7 +1,9 @@
 //! Committed project fixtures and PNG reference frames (maximum channel error: 2).
+mod common;
 use animathio_core::{Rounding, evaluate};
 use animathio_format::{Bundle, Limits, read_amio, read_json};
-use animathio_render::{RenderCtx, render};
+use animathio_render::RenderCtx;
+use common::render;
 use std::{fs::File, path::Path};
 
 fn golden(project: &str, frame: i64, name: &str) {
@@ -33,7 +35,14 @@ fn golden(project: &str, frame: i64, name: &str) {
         .frame_rate()
         .frame_to_time(frame, Rounding::Nearest)
         .unwrap();
-    let actual = render(&evaluate(&bundle.project, time), &mut ctx, (320, 180)).unwrap();
+    let scene = evaluate(&bundle.project, time);
+    // This fixture explicitly tests the renderer's unresolved-plugin placeholder.
+    let actual = if project == "media.json" {
+        animathio_render::render(&scene, &mut ctx, (320, 180))
+    } else {
+        render(&scene, &mut ctx, (320, 180))
+    }
+    .unwrap();
     let path = root.join("golden").join(format!("{name}.png"));
     if std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1") {
         actual.save_png(&path).unwrap();

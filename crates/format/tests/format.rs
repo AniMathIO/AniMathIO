@@ -273,3 +273,73 @@ fn legacy_numeric_parameters_and_keyframes_load_as_typed_numbers() {
     };
     assert_eq!(params["unknown"], json!(["preserve", true]));
 }
+
+#[test]
+fn schema_one_builtins_migrate_through_json_and_amio() {
+    let fixture = include_bytes!("fixtures/v1-builtins.json");
+    let project = read_json(fixture.as_slice()).unwrap();
+    let archived = read_amio(archive(&[("project.json", fixture)]), Limits::default()).unwrap();
+    assert_eq!(archived.project, project);
+    let original: serde_json::Value = serde_json::from_slice(fixture).unwrap();
+    let mut current = Vec::new();
+    write_json(&mut current, &project).unwrap();
+    let current: serde_json::Value = serde_json::from_slice(&current).unwrap();
+    assert_eq!(current["schemaVersion"], 2);
+    for (old, new) in original["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(current["tracks"].as_array().unwrap())
+    {
+        for (id, old) in old["clips"].as_object().unwrap() {
+            let new = &new["clips"][id];
+            for key in ["id", "range", "transform", "source_offset"] {
+                assert_eq!(old[key], new[key], "{key}");
+            }
+            // Schema 1 permits bare numbers; current serialization tags ParamValue.
+            assert_eq!(
+                serde_json::from_value::<Vec<Animation>>(old["animations"].clone()).unwrap(),
+                serde_json::from_value::<Vec<Animation>>(new["animations"].clone()).unwrap()
+            );
+            assert_eq!(
+                serde_json::from_value::<BTreeMap<String, ParamValue>>(old["params"].clone())
+                    .unwrap(),
+                serde_json::from_value::<BTreeMap<String, ParamValue>>(new["params"].clone())
+                    .unwrap()
+            );
+            let params = &new["kind"]["Plugin"]["params"];
+            assert_eq!(params["units"], "normalized");
+            if let Some(text) = old["kind"]["Builtin"].get("Text") {
+                assert_eq!(new["kind"]["Plugin"]["plugin_id"], "org.animathio.text");
+                assert_eq!(params["text"], text["text"]);
+                assert_eq!(params["font_size"], text["font_size"]);
+                assert_eq!(params["color"], text["color"]);
+            } else {
+                assert_eq!(new["kind"]["Plugin"]["plugin_id"], "org.animathio.shapes");
+            }
+        }
+    }
+    assert!(!serde_json::to_string(&current).unwrap().contains("Builtin"));
+}
+
+#[test]
+fn schema_one_migration_rejects_invalid_legacy_sources() {
+    let fixture: serde_json::Value =
+        serde_json::from_slice(include_bytes!("fixtures/v1-builtins.json")).unwrap();
+    for source in [
+        json!({"Text": {"text": "bad", "font_size": 0, "color": [255,255,255,255]}}),
+        json!({"Text": {"text": "bad", "font_size": 17, "color": [255,255,255,255]}}),
+        json!({"Shape": {"shape": {"Path": [{"LineTo": [0,0]}]}, "fill": null, "stroke": null}}),
+        json!({"Shape": {"shape": "Rect", "fill": null, "stroke": {"color": [255,255,255,255], "width": -1}}}),
+    ] {
+        let mut bad = fixture.clone();
+        let clip = bad["tracks"][0]["clips"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .next()
+            .unwrap();
+        clip["kind"] = json!({"Builtin": source});
+        assert!(read_json(serde_json::to_vec(&bad).unwrap().as_slice()).is_err());
+    }
+}

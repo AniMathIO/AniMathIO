@@ -365,6 +365,7 @@ struct TimelineSnapshot {
 /// A small on-disk list of recently opened projects, kept in the XDG config dir.
 struct RecentFiles {
     paths: Vec<PathBuf>,
+    modified: BTreeMap<PathBuf, SystemTime>,
 }
 impl RecentFiles {
     fn config_path() -> Option<PathBuf> {
@@ -372,15 +373,28 @@ impl RecentFiles {
             .map(|dirs| dirs.config_dir().join("recent.json"))
     }
     fn load() -> Self {
-        let paths = Self::config_path()
+        let paths: Vec<PathBuf> = Self::config_path()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
-        Self { paths }
+        let modified = paths
+            .iter()
+            .filter_map(|path| {
+                std::fs::metadata(path)
+                    .ok()?
+                    .modified()
+                    .ok()
+                    .map(|time| (path.clone(), time))
+            })
+            .collect();
+        Self { paths, modified }
     }
     fn add(&mut self, path: &Path) {
         self.paths.retain(|existing| existing != path);
         self.paths.insert(0, path.to_path_buf());
+        if let Ok(time) = std::fs::metadata(path).and_then(|meta| meta.modified()) {
+            self.modified.insert(path.to_path_buf(), time);
+        }
         self.paths.truncate(MAX_RECENT);
         self.save();
     }
@@ -455,6 +469,11 @@ pub(crate) struct Editor {
     recent: RecentFiles,
     dock: DockLayout,
     left_tab: LeftTab,
+    previous_left_tab: LeftTab,
+    tab_changed: Instant,
+    hovered_preset: Option<usize>,
+    previous_hovered_preset: Option<usize>,
+    preset_hover_changed: Instant,
     app_menu: Entity<gpui_component::menu::AppMenuBar>,
     menu_signature: String,
     panel_focus: [FocusHandle; 4],
@@ -557,6 +576,15 @@ impl Editor {
             recent: RecentFiles::load(),
             dock: DockLayout::load(),
             left_tab: LeftTab::Assets,
+            previous_left_tab: LeftTab::Assets,
+            tab_changed: Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
+            hovered_preset: None,
+            previous_hovered_preset: None,
+            preset_hover_changed: Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
             app_menu: gpui_component::menu::AppMenuBar::new(cx),
             menu_signature: String::new(),
             panel_focus: std::array::from_fn(|_| cx.focus_handle()),
@@ -582,9 +610,7 @@ impl Editor {
         };
         if recovered {
             this.notices
-                .push(gpui_component::notification::Notification::info(
-                    "Recovered from autosave",
-                ));
+                .push(crate::style::Toast::info("Recovered from autosave"));
         }
         this.request_render(Time(0));
         window.focus(
@@ -712,6 +738,7 @@ impl Render for Editor {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .text_size(cx.theme().font_size)
+            .font_family(cx.theme().font_family.clone())
             .key_context("Editor")
             .on_key_up(cx.listener(|this, event: &KeyUpEvent, _, _| {
                 if event.keystroke.key == "k" {
@@ -719,7 +746,7 @@ impl Render for Editor {
                 }
             }))
             .track_focus(&self.focus_handle)
-            .child(self.menu_bar(cx))
+            .child(self.menu_bar(window, cx))
             .child(workspace);
         root = root.child(self.status_line(cx));
         if let Some(panel) = self.export_queue_panel(cx) {

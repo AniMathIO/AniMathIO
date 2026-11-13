@@ -3,7 +3,6 @@ use animathio_core::{
     ClipKind, Color as CoreColor, PathVerb, Scene, SceneClip, SceneTransition, StrokeCap,
     StrokeJoin, StrokeStyle, TextElement, Transform, TransitionKind, TransitionRole, VectorElement,
     VectorScene, WipeDirection,
-    builtin::{Builtin, Color, PathElement, Shape},
 };
 use parley::{
     Alignment, AlignmentOptions, FontContext, Layout, LayoutContext, PositionedLayoutItem,
@@ -15,7 +14,7 @@ use vello_cpu::{
     Glyph, Image, ImageSource, Level, PixelMetadata, Pixmap, RenderContext, RenderSettings,
     Resources,
     color::{AlphaColor, Srgb},
-    kurbo::{Affine, BezPath, Cap, Ellipse, Join, Rect, Shape as _, Stroke},
+    kurbo::{Affine, BezPath, Cap, Join, Rect, Shape as _, Stroke},
     peniko::{Blob, ImageAlphaType, ImageSampler},
 };
 
@@ -93,9 +92,13 @@ impl Backend for CpuBackend {
             }
             // Vector scenes are already in canvas pixel coordinates, so they use a
             // pixel-space transform instead of the unit-square transform used by media
-            // and temporary builtin clips.
+            // and normalized vector scenes.
             let transform = match &clip.kind {
-                ClipKind::Vector(_) => pixel_transform(clip.transform, size)?,
+                ClipKind::Vector(scene)
+                    if scene.coordinate_space == animathio_core::CoordinateSpace::Canvas =>
+                {
+                    pixel_transform(clip.transform, size)?
+                }
                 _ => unit_transform(clip.transform, size)?,
             };
             ctx.set_transform(transform);
@@ -133,8 +136,8 @@ pub(crate) struct ShapedRun {
     pub(crate) glyphs: Vec<(u32, f32, f32)>,
 }
 
-/// Convert a builtin text clip's canvas-relative font size into pixels.
-pub(crate) fn text_pixel_size(font_size: f64, size: Size) -> Result<f64, Error> {
+/// Convert a normalized drawing font size into pixels.
+pub(crate) fn relative_text_pixel_size(font_size: f64, size: Size) -> Result<f64, Error> {
     let font_size = font_size * f64::from(size.1);
     if !font_size.is_finite() || font_size <= 0.0 || font_size > 1_048_560.0 {
         return Err(Error::Invalid("invalid scene font size"));
@@ -149,7 +152,7 @@ pub(crate) fn check_vector_font_size(font_size: f64) -> Result<(), Error> {
     Ok(())
 }
 
-fn color(value: Color) -> AlphaColor<Srgb> {
+fn color(value: [u8; 4]) -> AlphaColor<Srgb> {
     AlphaColor::from_rgba8(value[0], value[1], value[2], value[3])
 }
 
@@ -230,32 +233,6 @@ pub(crate) fn vector_stroke(style: &StrokeStyle) -> Stroke {
     Stroke::new(style.width).with_join(join).with_caps(cap)
 }
 
-pub(crate) fn path(shape: &Shape) -> BezPath {
-    match shape {
-        Shape::Rect => Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.001),
-        Shape::Ellipse => Ellipse::new((0.5, 0.5), (0.5, 0.5), 0.0).to_path(0.001),
-        Shape::Path(elements) => {
-            let mut path = BezPath::new();
-            for element in elements {
-                match *element {
-                    PathElement::MoveTo([x, y]) => path.move_to((x, y)),
-                    PathElement::LineTo([x, y]) => path.line_to((x, y)),
-                    PathElement::QuadTo([x, y], [a, b]) => path.quad_to((x, y), (a, b)),
-                    PathElement::CurveTo(first, second, end) => {
-                        path.curve_to(
-                            (first[0], first[1]),
-                            (second[0], second[1]),
-                            (end[0], end[1]),
-                        );
-                    }
-                    PathElement::Close => path.close_path(),
-                }
-            }
-            path
-        }
-    }
-}
-
 fn transparent(size: Size) -> Frame {
     Frame {
         size,
@@ -331,29 +308,6 @@ impl CpuBackend {
                     )?;
                 }
             }
-            ClipKind::Builtin(Builtin::Text {
-                text,
-                font_size,
-                color,
-            }) => {
-                self.text(ctx, resources, size, text, *font_size, *color)?;
-            }
-            ClipKind::Builtin(Builtin::Shape {
-                shape,
-                fill,
-                stroke,
-            }) => {
-                let path = path(shape);
-                if let Some(fill) = fill {
-                    ctx.set_paint(color(*fill));
-                    ctx.fill_path(&path);
-                }
-                if let Some(stroke) = stroke {
-                    ctx.set_paint(color(stroke.color));
-                    ctx.set_stroke(Stroke::new(stroke.width));
-                    ctx.stroke_path(&path);
-                }
-            }
             ClipKind::Plugin { plugin_id, .. } => {
                 self.placeholder(ctx, resources, size, &format!("PLUGIN\n{plugin_id}"))?;
             }
@@ -384,7 +338,11 @@ impl CpuBackend {
             return Ok(transparent(size));
         }
         let transform = match &clip.kind {
-            ClipKind::Vector(_) => pixel_transform(clip.transform, size)?,
+            ClipKind::Vector(scene)
+                if scene.coordinate_space == animathio_core::CoordinateSpace::Canvas =>
+            {
+                pixel_transform(clip.transform, size)?
+            }
             _ => unit_transform(clip.transform, size)?,
         };
         let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;
@@ -519,6 +477,16 @@ impl CpuBackend {
         font_size: f32,
         size: Size,
     ) -> Result<Vec<ShapedRun>, Error> {
+        self.shape_aligned(text, font_size, size, animathio_core::TextAlignment::Left)
+    }
+
+    pub(crate) fn shape_aligned(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        size: Size,
+        align: animathio_core::TextAlignment,
+    ) -> Result<Vec<ShapedRun>, Error> {
         let mut builder = self
             .layout
             .ranged_builder(&mut self.fonts, text, 1.0, false);
@@ -526,7 +494,14 @@ impl CpuBackend {
         builder.push_default(StyleProperty::FontSize(font_size));
         let mut layout: Layout<()> = builder.build(text);
         layout.break_all_lines(Some(f32::from(check_size(size)?.0)));
-        layout.align(Alignment::Start, AlignmentOptions::default());
+        layout.align(
+            match align {
+                animathio_core::TextAlignment::Left => Alignment::Start,
+                animathio_core::TextAlignment::Center => Alignment::Center,
+                animathio_core::TextAlignment::Right => Alignment::End,
+            },
+            AlignmentOptions::default(),
+        );
         let mut runs = Vec::new();
         for line in layout.lines() {
             for item in line.items() {
@@ -565,15 +540,38 @@ impl CpuBackend {
         size: Size,
         text: &str,
         font_size: f64,
-        fill: Color,
+        fill: [u8; 4],
     ) -> Result<(), Error> {
-        let font_size = text_pixel_size(font_size, size)?;
-        let runs = self.shape(text, font_size as f32, size)?;
+        self.normalized_text(
+            ctx,
+            resources,
+            size,
+            &TextElement {
+                text: text.into(),
+                font_size,
+                x: 0.0,
+                y: 0.0,
+                color: CoreColor::rgba(fill[0], fill[1], fill[2], fill[3]),
+                align: animathio_core::TextAlignment::Left,
+            },
+        )
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn normalized_text(
+        &mut self,
+        ctx: &mut RenderContext,
+        resources: &mut Resources,
+        size: Size,
+        text: &TextElement,
+    ) -> Result<(), Error> {
+        let font_size = relative_text_pixel_size(text.font_size, size)?;
+        let runs = self.shape_aligned(&text.text, font_size as f32, size, text.align)?;
         let unit = *ctx.transform();
         ctx.set_transform(
             unit * Affine::scale_non_uniform(1.0 / f64::from(size.0), 1.0 / f64::from(size.1)),
         );
-        ctx.set_paint(color(fill));
+        ctx.set_paint(color_core(text.color));
         Self::fill_runs(ctx, resources, &runs)?;
         ctx.set_transform(unit);
         Ok(())
@@ -598,7 +596,14 @@ impl CpuBackend {
                     ctx.stroke_path(&vector_path(path));
                 }
                 VectorElement::TextRun(text) => {
-                    self.vector_text(ctx, resources, size, text)?;
+                    if scene.coordinate_space == animathio_core::CoordinateSpace::Normalized {
+                        let t = *ctx.transform();
+                        ctx.set_transform(t * Affine::translate((text.x, text.y)));
+                        self.normalized_text(ctx, resources, size, text)?;
+                        ctx.set_transform(t);
+                    } else {
+                        self.vector_text(ctx, resources, size, text)?;
+                    }
                 }
             }
         }
@@ -614,7 +619,7 @@ impl CpuBackend {
         text: &TextElement,
     ) -> Result<(), Error> {
         check_vector_font_size(text.font_size)?;
-        let runs = self.shape(&text.text, text.font_size as f32, size)?;
+        let runs = self.shape_aligned(&text.text, text.font_size as f32, size, text.align)?;
         let unit = *ctx.transform();
         ctx.set_transform(unit * Affine::translate((text.x, text.y)));
         ctx.set_paint(color_core(text.color));

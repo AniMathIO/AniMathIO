@@ -31,6 +31,7 @@ fn vector_scene_roundtrip_and_validation() {
         },
     });
     scene.elements.push(VectorElement::TextRun(TextElement {
+        align: TextAlignment::Left,
         text: "AniMathIO".into(),
         font_size: 24.0,
         x: 50.0,
@@ -49,6 +50,7 @@ fn vector_scene_roundtrip_and_validation() {
 #[test]
 fn vector_scene_rejects_nonfinite_and_invalid() {
     let bad_path = VectorScene {
+        coordinate_space: animathio_core::CoordinateSpace::Canvas,
         elements: vec![VectorElement::FillPath {
             path: vec![PathVerb::MoveTo(Point::new(f64::NAN, 0.0))],
             color: Color::rgb(0, 0, 0),
@@ -57,6 +59,7 @@ fn vector_scene_rejects_nonfinite_and_invalid() {
     assert!(bad_path.validate().is_err());
 
     let bad_stroke = VectorScene {
+        coordinate_space: animathio_core::CoordinateSpace::Canvas,
         elements: vec![VectorElement::StrokePath {
             path: vec![PathVerb::MoveTo(Point::new(0.0, 0.0))],
             style: StrokeStyle {
@@ -70,7 +73,9 @@ fn vector_scene_rejects_nonfinite_and_invalid() {
     assert!(bad_stroke.validate().is_err());
 
     let bad_text = VectorScene {
+        coordinate_space: animathio_core::CoordinateSpace::Canvas,
         elements: vec![VectorElement::TextRun(TextElement {
+            align: TextAlignment::Left,
             text: "test".into(),
             font_size: 0.0,
             x: 0.0,

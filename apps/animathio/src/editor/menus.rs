@@ -2,9 +2,9 @@
 
 use super::actions::*;
 use super::*;
+use crate::style::{self, color};
 use gpui_component::{
-    TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar, notification::Notification,
-    status_bar::StatusBar,
+    TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar, status_bar::StatusBar,
 };
 
 /// A track context-menu entry's handler.
@@ -114,60 +114,88 @@ impl Editor {
         self.app_menu.update(cx, AppMenuBar::reload);
     }
 
-    pub(super) fn menu_bar(&self, cx: &mut Context<Self>) -> TitleBar {
-        let title = self.path.as_ref().and_then(|p| p.file_name()).map_or_else(
-            || "Untitled".to_owned(),
+    pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> TitleBar {
+        let title = self.path.as_ref().and_then(|p| p.file_stem()).map_or_else(
+            || {
+                if self.is_start_screen() {
+                    "Creative workspace".to_owned()
+                } else {
+                    "Untitled project".to_owned()
+                }
+            },
             |n| n.to_string_lossy().into_owned(),
         );
-        TitleBar::new().child(
+        TitleBar::new().h(px(46.)).child(
             div()
+                .relative()
                 .flex()
                 .items_center()
-                .gap_2()
+                .gap_3()
                 .w_full()
+                .h_full()
+                .px_2()
+                .child(img("brand.svg").size(px(30.)).flex_shrink_0())
                 .child(
                     div()
-                        .w(px(460.))
-                        .flex_shrink_0()
+                        .flex_1()
+                        .min_w(px(430.))
                         .h_full()
                         .child(self.app_menu.clone()),
                 )
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .max_w(px(260.))
-                        .truncate()
-                        .text_color(cx.theme().foreground)
-                        .child(title),
-                )
-                .when(self.dirty, |row| {
+                .when(f32::from(window.viewport_size().width) >= 1120., |row| {
                     row.child(
-                        icons::icon(IconName::CircleDot)
-                            .small()
-                            .text_color(cx.theme().warning),
+                        div()
+                            .absolute()
+                            .left(relative(0.38))
+                            .w(relative(0.24))
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .text_size(px(12.))
+                            .text_color(style::hex(color::TEXT_SECONDARY))
+                            .when(self.dirty, |title| {
+                                title.child(
+                                    div()
+                                        .size(px(5.))
+                                        .rounded_full()
+                                        .bg(style::hex(color::ACCENT)),
+                                )
+                            })
+                            .child(div().truncate().child(title)),
                     )
                 })
                 .child(
                     div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
                         .px_2()
                         .py_1()
-                        .rounded_sm()
-                        .bg(cx.theme().muted)
-                        .text_color(if self.control.is_some() {
-                            cx.theme().success
-                        } else {
-                            cx.theme().muted_foreground
-                        })
+                        .rounded_full()
+                        .bg(style::hex(color::RAISED))
+                        .border_1()
+                        .border_color(style::hex(color::BORDER))
+                        .text_size(px(11.))
+                        .text_color(style::hex(color::TEXT_SECONDARY))
+                        .child(div().size(px(5.)).rounded_full().bg(style::hex(
+                            if self.control.is_some() {
+                                color::SUCCESS
+                            } else {
+                                color::TEXT_MUTED
+                            },
+                        )))
                         .child(if self.control.is_some() {
-                            "MCP: listening"
+                            "MCP listening"
                         } else {
-                            "MCP: off"
+                            "MCP off"
                         }),
                 )
                 .child(
-                    Button::new("title-export")
-                        .primary()
+                    style::primary_button("title-export", cx)
                         .small()
+                        .mr_2()
                         .icon(icons::icon(IconName::Upload))
                         .label("Export")
                         .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
@@ -180,7 +208,7 @@ impl Editor {
 
     pub(super) fn flush_notices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(error) = self.error.take() {
-            self.notices.push(Notification::error(error));
+            self.notices.push(style::Toast::error(error));
         }
         for notice in self.notices.drain(..) {
             window.push_notification(notice, cx);
@@ -198,7 +226,8 @@ impl Editor {
             .bg(cx.theme().popover)
             .border_1()
             .border_color(cx.theme().border)
-            .p_1()
+            .p_2()
+            .rounded(px(style::radius::PANEL))
             .flex()
             .flex_col()
             .shadow_lg();
@@ -352,25 +381,59 @@ impl Editor {
             Time(timeline::project_duration(&self.project)),
             self.project.frame_rate(),
         );
+        let chip = |icon, label: String| {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_2()
+                .h(px(22.))
+                .rounded(px(style::radius::CONTROL))
+                .bg(style::hex(color::PANEL))
+                .text_color(style::hex(color::TEXT_SECONDARY))
+                .child(icons::icon(icon).small())
+                .child(label)
+        };
+        let autosave = if self.preferences.autosave_seconds == 0 {
+            "Autosave off".to_owned()
+        } else if self.save_pending {
+            "Saving…".to_owned()
+        } else if self.path.is_some() {
+            format!("Autosave every {}s", self.preferences.autosave_seconds)
+        } else {
+            "Save to enable autosave".to_owned()
+        };
         StatusBar::new()
-            .left(div().text_color(cx.theme().muted_foreground).child(format!(
-                "{width} x {height}   {}",
-                frame_rate_label(self.project.frame_rate())
-            )))
+            .h(px(34.))
+            .flex_shrink_0()
+            .px_3()
+            .left(chip(IconName::Monitor, format!("{width} x {height}")))
+            .left(chip(
+                IconName::Clapperboard,
+                frame_rate_label(self.project.frame_rate()),
+            ))
             .left(
                 div()
                     .font_family(cx.theme().mono_font_family.clone())
-                    .child(duration),
+                    .child(chip(IconName::Clock, duration)),
             )
-            .right(self.export_queue_button(cx))
             .right(
                 div()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if self.path.is_some() {
-                        format!("Autosave: {} s ago", self.last_autosave.elapsed().as_secs())
-                    } else {
-                        "Save project to enable autosave".into()
-                    }),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(icons::icon(IconName::ShieldCheck).small())
+                    .child(autosave),
             )
+            .right(chip(
+                IconName::Cpu,
+                if self.preview.gpu {
+                    "GPU requested"
+                } else {
+                    "CPU preview"
+                }
+                .to_owned(),
+            ))
+            .right(self.export_queue_button(cx))
     }
 }

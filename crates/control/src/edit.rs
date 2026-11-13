@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, fmt::Write as _};
 use animathio_audio::{AudioPool, SymphoniaSource};
 use animathio_core::{
     AssetId, Clip, ClipId, ClipKind, Command, FrameRate, History, Project, TICKS_PER_SECOND, Time,
-    TimeRange, Track, TrackId, Transform, builtin::Builtin,
+    TimeRange, Track, TrackId, Transform,
 };
 use serde::{Deserialize, Serialize};
 
@@ -255,14 +255,25 @@ fn clip_name(project: &Project, clip: &Clip) -> String {
             .assets()
             .get(id)
             .map_or_else(|| "missing asset".to_owned(), |a| a.name.clone()),
-        ClipKind::Builtin(Builtin::Text { text, .. }) => shorten(text),
-        ClipKind::Builtin(Builtin::Shape { .. }) => "shape".to_owned(),
-        ClipKind::Plugin { params, .. } => params
-            .get("source")
-            .or_else(|| params.get("text"))
-            .or_else(|| params.get("items"))
-            .and_then(serde_json::Value::as_str)
-            .map_or_default(shorten),
+        ClipKind::Plugin { plugin_id, params } => ["source", "text", "items"]
+            .into_iter()
+            .find_map(|name| match clip.params.get(name) {
+                Some(
+                    animathio_core::ParamValue::String(value)
+                    | animathio_core::ParamValue::Enum(value),
+                ) => Some(value.as_str()),
+                _ => params.get(name).and_then(serde_json::Value::as_str),
+            })
+            .map_or_else(
+                || {
+                    if plugin_id == "org.animathio.shapes" {
+                        "shape".into()
+                    } else {
+                        String::new()
+                    }
+                },
+                shorten,
+            ),
         ClipKind::Vector(_) => String::new(),
         ClipKind::Error(message) => shorten(message),
     }
@@ -421,11 +432,7 @@ pub fn title_command(
     let clip_id = ClipId(next);
     let mut clip = Clip::new(
         clip_id,
-        ClipKind::Builtin(Builtin::Text {
-            text: text.to_owned(),
-            font_size,
-            color: [255, 255, 255, 255],
-        }),
+        animathio_plugin_api::sources::text(text.to_owned(), font_size, [255; 4]),
         range,
     );
     clip.transform = Transform {

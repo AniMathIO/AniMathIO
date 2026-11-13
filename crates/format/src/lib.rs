@@ -1,5 +1,7 @@
 //! Versioned project JSON and content-addressed `.amio` ZIP containers.
 //! Stream APIs support custom storage; save helpers atomically replace filesystem targets.
+mod legacy;
+
 use animathio_core::{AssetId, Project};
 use serde::Serialize;
 use serde_json::Value;
@@ -10,7 +12,7 @@ use std::{
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 /// Current project schema. Future migrations advance one version at a time.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Persistence errors, including malformed or unsupported project data.
 #[derive(Debug, thiserror::Error)]
@@ -79,16 +81,17 @@ pub fn write_json(writer: impl Write, project: &Project) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read the current schema. No historic production schema exists yet.
+/// Read current or schema-1 projects, migrating legacy clip sources automatically.
 pub fn read_json(reader: impl Read) -> Result<Project, Error> {
     read_json_with_migration(reader, |_, _| {
         Err(invalid("no migration registered for this schema"))
     })
 }
 
-/// Migration hook: transform version N JSON into version N+1 JSON, updating
-/// schemaVersion. Migrations run before domain deserialization and validation.
-/// Future versions are rejected rather than silently losing unknown data.
+/// Additional migration hook for versions without a built-in migration.
+/// Transform version N JSON into N+1 JSON, updating schemaVersion. The built-in
+/// schema-1 migration always runs automatically. All migration steps precede
+/// domain deserialization and validation; future versions are rejected.
 pub fn read_json_with_migration(
     reader: impl Read,
     step: impl FnMut(u32, Value) -> Result<Value, Error>,
@@ -113,7 +116,11 @@ fn decode_json(
         if version == SCHEMA_VERSION {
             break;
         }
-        value = step(version, value)?;
+        value = if version == 1 {
+            legacy::migrate(value)?
+        } else {
+            step(version, value)?
+        };
         if value.get("schemaVersion").and_then(Value::as_u64) != Some(u64::from(version) + 1) {
             return Err(invalid("migration must advance exactly one schema version"));
         }

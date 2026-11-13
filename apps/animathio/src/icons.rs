@@ -30,12 +30,12 @@ pub(crate) fn kind_icon(kind: &ClipKind) -> IconName {
         ClipKind::Video(_) => IconName::Video,
         ClipKind::Image(_) => IconName::Image,
         ClipKind::Audio(_) => IconName::AudioWaveform,
-        ClipKind::Builtin(builtin) => match builtin {
-            animathio_core::builtin::Builtin::Text { .. } => IconName::Type,
-            animathio_core::builtin::Builtin::Shape { .. } => IconName::Shapes,
-        },
         ClipKind::Plugin { plugin_id, .. } => {
-            if plugin_id.contains("latex") || plugin_id.contains("math") {
+            if plugin_id == "org.animathio.text" {
+                IconName::Type
+            } else if plugin_id == "org.animathio.shapes" {
+                IconName::Shapes
+            } else if plugin_id.contains("latex") || plugin_id.contains("math") {
                 IconName::Sigma
             } else if plugin_id.contains("graph") {
                 IconName::ChartNoAxesColumn

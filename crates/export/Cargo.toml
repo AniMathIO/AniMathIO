@@ -16,6 +16,8 @@ serde.workspace = true
 tempfile = "3"
 
 [dev-dependencies]
+animathio-plugin-api = { path = "../plugin-api" }
+animathio-plugin-host = { path = "../plugin-host", features = ["test-support"] }
 serde_json.workspace = true
 
 [lints]

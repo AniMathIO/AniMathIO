@@ -62,7 +62,7 @@ impl Default for DockLayout {
             track_height: TrackHeight::default(),
             left_width: 260.0,
             right_width: 300.0,
-            bottom_height: 240.0,
+            bottom_height: 300.0,
             left_open: true,
             right_open: true,
             bottom_open: true,

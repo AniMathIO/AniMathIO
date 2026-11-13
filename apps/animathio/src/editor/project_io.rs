@@ -88,9 +88,7 @@ impl Editor {
                         editor.recent.add(&path);
                         editor
                             .notices
-                            .push(gpui_component::notification::Notification::success(
-                                "Project saved",
-                            ));
+                            .push(crate::style::Toast::success("Project saved"));
                     }
                     Ok(()) => {}
                     Err(error) => editor.error = Some(error),
@@ -140,9 +138,7 @@ impl Editor {
                 self.recent.add(path);
                 if recovered {
                     self.notices
-                        .push(gpui_component::notification::Notification::info(
-                            "Recovered from autosave",
-                        ));
+                        .push(crate::style::Toast::info("Recovered from autosave"));
                 }
             }
             Err(error) => self.error = Some(error),

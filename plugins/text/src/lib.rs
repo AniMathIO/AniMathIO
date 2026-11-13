@@ -99,6 +99,14 @@ impl Guest for TextPlugin {
             kinds: vec![PluginKind::ClipSource],
             params: vec![
                 ParamSpec {
+                    id: "units".into(),
+                    label: "Units".into(),
+                    kind: ParamKind::EnumChoice(EnumParam {
+                        options: vec!["pixels".into(), "normalized".into()],
+                        default: "pixels".into(),
+                    }),
+                },
+                ParamSpec {
                     id: "text".to_string(),
                     label: "Text".to_string(),
                     kind: ParamKind::String(StringParam {
@@ -109,10 +117,10 @@ impl Guest for TextPlugin {
                     id: "font_size".to_string(),
                     label: "Font Size".to_string(),
                     kind: ParamKind::Number(NumberRange {
-                        min: 4.0,
-                        max: 400.0,
+                        min: 0.0001,
+                        max: 4096.0,
                         default: 48.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
@@ -158,6 +166,26 @@ impl Guest for TextPlugin {
         );
         let align = get_string(&params, "align", "center");
 
+        if get_string(&params, "units", "pixels") == "normalized" {
+            // Generic TextRun uses the host's wrapped, embedded-font layout.
+            // Keep coordinates and font size relative to the unscaled canvas.
+            return Scene {
+                coordinate_space: CoordinateSpace::Normalized,
+                elements: vec![DrawCommand::TextRun(TextElement {
+                    align: match align.as_str() {
+                        "center" => TextAlignment::Center,
+                        "right" => TextAlignment::Right,
+                        _ => TextAlignment::Left,
+                    },
+                    text,
+                    font_size,
+                    x: 0.0,
+                    y: 0.0,
+                    color,
+                })],
+            };
+        }
+
         let contours = host::shape_text(&text, font_size);
 
         let mut min_x = f32::MAX;
@@ -186,7 +214,10 @@ impl Guest for TextPlugin {
             elements.push(DrawCommand::FillPath((offset, color)));
         }
 
-        Scene { elements }
+        Scene {
+            coordinate_space: CoordinateSpace::Canvas,
+            elements,
+        }
     }
 
     fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {

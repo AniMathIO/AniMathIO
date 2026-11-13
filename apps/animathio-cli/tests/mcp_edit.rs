@@ -65,6 +65,10 @@ fn empty_project(dir: &Path) -> std::path::PathBuf {
 fn describe_cut_remove_batch_and_preset() {
     let dir = tempdir().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .env(
+            "ANIMATHIO_PLUGIN_DIR",
+            animathio_plugin_host::test_support::plugin_dir(),
+        )
         .args(["mcp", "--project"])
         .arg(empty_project(dir.path()))
         .stdin(Stdio::piped())
@@ -211,6 +215,10 @@ fn media_edit_save_reopen_and_export() {
     let audio = dir.path().join("tone.wav");
     std::fs::write(&audio, wav).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .env(
+            "ANIMATHIO_PLUGIN_DIR",
+            animathio_plugin_host::test_support::plugin_dir(),
+        )
         .args(["mcp", "--project"])
         .arg(empty_project(dir.path()))
         .stdin(Stdio::piped())
@@ -274,6 +282,16 @@ fn media_edit_save_reopen_and_export() {
         json!({"text":"Real edit","start_ms":0,"duration_ms":1750}),
     );
     let edited = session.json_tool("get_project_state", json!({}))["project"].clone();
+    assert!(
+        edited["tracks"].as_array().unwrap().iter().any(|track| {
+            track["clips"]
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|clip| clip["kind"]["Plugin"]["plugin_id"] == "org.animathio.text")
+        }),
+        "title must be backed by the text plugin"
+    );
     // Every edit round-trips through the command history, including compound edits.
     let mut undo_count = 0;
     loop {
@@ -340,6 +358,10 @@ fn media_edit_save_reopen_and_export() {
     assert_eq!(serde_json::to_value(reopened.project).unwrap(), edited);
     let second = dir.path().join("second.mp4");
     let result = Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .env(
+            "ANIMATHIO_PLUGIN_DIR",
+            animathio_plugin_host::test_support::plugin_dir(),
+        )
         .arg("export")
         .arg(&archive)
         .arg("-o")

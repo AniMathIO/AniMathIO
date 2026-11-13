@@ -441,27 +441,7 @@ impl Editor {
             .detach();
         }
 
-        let tabs = [
-            (LeftTab::Assets, "Assets", IconName::Images),
-            (LeftTab::Plugins, "Plugins", IconName::Puzzle),
-            (LeftTab::Effects, "Effects", IconName::Sparkles),
-        ];
-        let mut tab_row = div().flex().flex_row().w_full().bg(cx.theme().background);
-        for (tab, label, icon) in tabs {
-            let selected = self.left_tab == tab;
-            tab_row = tab_row.child(
-                Button::new(SharedString::from(format!("media-tab-{label}")))
-                    .ghost()
-                    .compact()
-                    .icon(icons::icon(icon))
-                    .label(label)
-                    .selected(selected)
-                    .toggled(selected)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.select_left_tab(tab, cx);
-                    })),
-            );
-        }
+        let tab_row = self.library_tabs(cx);
 
         let mut body = div()
             .flex_1()

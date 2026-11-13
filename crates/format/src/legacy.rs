@@ -1,5 +1,4 @@
-//! Temporary generative clip data for the CPU prototype.
-//! Text and shapes move to plugins once the component API is available.
+//! Schema-1 compatibility data. Never used by the current project model.
 use crate::{Error, invalid};
 use serde::{Deserialize, Serialize};
 
@@ -29,40 +28,7 @@ pub enum Builtin {
     },
 }
 
-/// Basic vector geometry, independent of the rendering library.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Shape {
-    /// Full unit rectangle.
-    Rect,
-    /// Ellipse inscribed in the unit square.
-    Ellipse,
-    /// Arbitrary line, quadratic and cubic segments in local normalized coordinates.
-    Path(Vec<PathElement>),
-}
-
-/// Serializable path command. Paths must begin each contour with a move.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum PathElement {
-    /// Start a contour.
-    MoveTo([f64; 2]),
-    /// Straight segment.
-    LineTo([f64; 2]),
-    /// Quadratic control point and endpoint.
-    QuadTo([f64; 2], [f64; 2]),
-    /// Cubic control points and endpoint.
-    CurveTo([f64; 2], [f64; 2], [f64; 2]),
-    /// Close the current contour.
-    Close,
-}
-
-/// Normalized outline, scaled along with its clip.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Stroke {
-    /// Outline color.
-    pub color: Color,
-    /// Width in local unit-square coordinates.
-    pub width: f64,
-}
+use animathio_plugin_api::sources::{PathElement, Shape, Stroke};
 
 impl Builtin {
     pub(crate) fn validate(&self) -> Result<(), Error> {
@@ -119,4 +85,45 @@ impl Builtin {
 }
 fn finite(point: [f64; 2]) -> bool {
     point.iter().all(|v| v.is_finite())
+}
+
+impl Builtin {
+    pub(super) fn into_plugin(self) -> animathio_core::ClipKind {
+        match self {
+            Self::Text {
+                text,
+                font_size,
+                color,
+            } => animathio_plugin_api::sources::text(text, font_size, color),
+            Self::Shape {
+                shape,
+                fill,
+                stroke,
+            } => animathio_plugin_api::sources::shape(shape, fill, stroke),
+        }
+    }
+}
+
+pub(super) fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value, Error> {
+    if let Some(tracks) = value
+        .get_mut("tracks")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for track in tracks {
+            if let Some(clips) = track
+                .get_mut("clips")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                for clip in clips.values_mut() {
+                    if let Some(old) = clip.get("kind").and_then(|k| k.get("Builtin")) {
+                        let source: Builtin = serde_json::from_value(old.clone())?;
+                        source.validate()?;
+                        clip["kind"] = serde_json::to_value(source.into_plugin())?;
+                    }
+                }
+            }
+        }
+    }
+    value["schemaVersion"] = serde_json::json!(2);
+    Ok(value)
 }
