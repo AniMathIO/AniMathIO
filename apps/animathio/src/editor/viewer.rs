@@ -90,15 +90,28 @@ fn hit_handle(t: Transform, canvas: Bounds<Pixels>, pointer: Point<Pixels>) -> O
             return Some(handle);
         }
     }
+    contains_clip(t, canvas, pointer).then_some(Handle::Move)
+}
+
+fn contains_clip(t: Transform, canvas: Bounds<Pixels>, pointer: Point<Pixels>) -> bool {
     let centre = local_point(t, canvas, 0., 0.);
     let dx = f64::from(f32::from(pointer.x - centre.x));
     let dy = f64::from(f32::from(pointer.y - centre.y));
     let (sin, cos) = t.rotation.sin_cos();
-    ((dx * cos + dy * sin).abs()
-        <= (t.scale_x * f64::from(f32::from(canvas.size.width)) / 2.).abs()
+    (dx * cos + dy * sin).abs() <= (t.scale_x * f64::from(f32::from(canvas.size.width)) / 2.).abs()
         && (-dx * sin + dy * cos).abs()
-            <= (t.scale_y * f64::from(f32::from(canvas.size.height)) / 2.).abs())
-    .then_some(Handle::Move)
+            <= (t.scale_y * f64::from(f32::from(canvas.size.height)) / 2.).abs()
+}
+
+fn pick_from_stack(hits: &[ClipId], selected: Option<ClipId>, cycle: bool) -> Option<ClipId> {
+    let index = if cycle {
+        selected
+            .and_then(|id| hits.iter().position(|hit| *hit == id))
+            .map_or(0, |i| (i + 1) % hits.len().max(1))
+    } else {
+        0
+    };
+    hits.get(index).copied()
 }
 
 fn canvas_bounds(bounds: Bounds<Pixels>, size: (u32, u32), fit: ViewerFit) -> Bounds<Pixels> {
@@ -255,6 +268,32 @@ impl Editor {
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
                     if this.playing {
                         this.seek_to(this.position, cx);
+                    }
+                    let hits: Vec<_> = evaluate(&this.project, this.position)
+                        .clips
+                        .into_iter()
+                        .rev()
+                        .filter(|clip| {
+                            !matches!(clip.kind, ClipKind::Audio(_))
+                                && clip.transform.opacity > 0.
+                                && this.viewer_state.bounds.contains(&event.position)
+                                && contains_clip(
+                                    clip.transform,
+                                    this.viewer_state.bounds,
+                                    event.position,
+                                )
+                        })
+                        .map(|clip| clip.id)
+                        .collect();
+                    let selected_handle = this
+                        .selected_visual()
+                        .and_then(|(_, t)| hit_handle(t, this.viewer_state.bounds, event.position));
+                    if event.modifiers.alt
+                        || !matches!(selected_handle, Some(Handle::Scale(..) | Handle::Rotate))
+                    {
+                        let picked = pick_from_stack(&hits, this.selected, event.modifiers.alt);
+                        this.set_selection(picked.into_iter().collect(), picked);
+                        cx.notify();
                     }
                     let Some((id, transform)) = this.selected_visual() else {
                         return;
@@ -578,6 +617,27 @@ fn paint_gizmo(t: Transform, canvas: Bounds<Pixels>, dragging: bool, window: &mu
 mod tests {
     use super::*;
     #[core::prelude::v1::test]
+    fn picking_selects_frontmost_cycles_and_clears_empty() {
+        let hits = [ClipId(3), ClipId(2), ClipId(1)];
+        assert_eq!(
+            pick_from_stack(&hits, Some(ClipId(1)), false),
+            Some(ClipId(3))
+        );
+        assert_eq!(
+            pick_from_stack(&hits, Some(ClipId(3)), true),
+            Some(ClipId(2))
+        );
+        assert_eq!(
+            pick_from_stack(&hits, Some(ClipId(1)), true),
+            Some(ClipId(3))
+        );
+        assert_eq!(
+            pick_from_stack(&hits, Some(ClipId(99)), true),
+            Some(ClipId(3))
+        );
+        assert_eq!(pick_from_stack(&[], Some(ClipId(1)), true), None);
+    }
+    #[core::prelude::v1::test]
     fn fit_and_rotated_hit_testing_share_canvas_coordinates() {
         let stage = Bounds::new(point(px(20.), px(30.)), size(px(800.), px(600.)));
         let frame = canvas_bounds(stage, (1920, 1080), ViewerFit::Contain);
@@ -597,6 +657,16 @@ mod tests {
             Some(Handle::Scale(-0.5, -0.5))
         );
         assert_eq!(hit_handle(t, frame, stage.origin), None);
+        assert!(contains_clip(t, frame, local_point(t, frame, 0.49, 0.49)));
+        assert!(!contains_clip(t, frame, local_point(t, frame, 0.6, 0.)));
+        assert!(contains_clip(
+            Transform {
+                scale_x: -t.scale_x,
+                ..t
+            },
+            frame,
+            frame.center()
+        ));
     }
     #[core::prelude::v1::test]
     fn move_snaps_edges_and_shift_scale_preserves_aspect() {

@@ -272,6 +272,16 @@ impl Editor {
         }
     }
 
+    pub(super) fn clip_effect_warning(&self, clip: &Clip) -> bool {
+        !clip.effects.is_empty()
+            && (self.failed_effect_clips.contains(&clip.id)
+                || clip.effects.iter().any(|instance| {
+                    !self.available_effects().iter().any(|effect| {
+                        effect.plugin_id == instance.plugin && effect.effect_id == instance.effect
+                    })
+                }))
+    }
+
     /// Read-only summary of the selected clip's effect chain.
     pub(super) fn effect_rows(&self, id: ClipId, _cx: &mut Context<Self>) -> Vec<Div> {
         let Some(clip) = self.find_clip(id) else {
@@ -298,7 +308,17 @@ impl Editor {
                     .flex_row()
                     .items_center()
                     .gap_2()
-                    .child(icons::icon(IconName::Sparkles).small())
+                    .child(
+                        icons::icon(if self.clip_effect_warning(clip) {
+                            IconName::TriangleAlert
+                        } else {
+                            IconName::Sparkles
+                        })
+                        .small(),
+                    )
+                    .when(self.clip_effect_warning(clip), |row| {
+                        row.child("Effect unavailable / failed")
+                    })
                     .child(summary)
             })
             .collect()

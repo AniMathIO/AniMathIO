@@ -43,7 +43,23 @@ impl Editor {
                         bench.cadence_ms.push((now - last).as_secs_f64() * 1000.0);
                     }
                 }
-                if let Some(old) = self.image.replace(result.image) {
+                self.failed_effect_clips = result.failed_effect_clips;
+                let image = match result.image {
+                    Ok(image) => {
+                        self.effect_warning = None;
+                        image
+                    }
+                    Err(error) => {
+                        if self.effect_warning.as_ref() != Some(&error) {
+                            self.notices.push(crate::style::Toast::warning(format!(
+                                "Preview failed: {error}"
+                            )));
+                        }
+                        self.effect_warning = Some(error);
+                        continue;
+                    }
+                };
+                if let Some(old) = self.image.replace(image) {
                     let _ = window.drop_image(old);
                 }
             }

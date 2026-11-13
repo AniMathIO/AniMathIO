@@ -415,6 +415,7 @@ impl Editor {
     }
 
     fn scrub_field_command(&self, id: ClipId, field: &Field, value: f64) -> Option<Command> {
+        let value = field_model_value(field, value);
         let clip = self.find_clip(id)?;
         let (target, value) = match field {
             Field::Transform(property) => (
@@ -885,7 +886,10 @@ impl Editor {
             (Field::Transform(TransformProperty::Y), "Position Y"),
             (Field::Transform(TransformProperty::ScaleX), "Scale X"),
             (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
-            (Field::Transform(TransformProperty::Rotation), "Rotation"),
+            (
+                Field::Transform(TransformProperty::Rotation),
+                "Rotation (deg)",
+            ),
         ];
         transform
             .into_iter()
@@ -898,8 +902,16 @@ impl Editor {
                     &clip,
                     &target,
                     self.position,
-                    field_value(&clip, &field),
+                    match &field {
+                        Field::Transform(TransformProperty::Rotation) => clip.transform.rotation,
+                        _ => field_value(&clip, &field),
+                    },
                 );
+                let value = if matches!(field, Field::Transform(TransformProperty::Rotation)) {
+                    value.to_degrees()
+                } else {
+                    value
+                };
                 self.number_row(id, field, label, value, window, cx)
             })
             .collect()
@@ -1173,7 +1185,10 @@ impl Editor {
             (Field::Transform(TransformProperty::Y), "Position Y"),
             (Field::Transform(TransformProperty::ScaleX), "Scale X"),
             (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
-            (Field::Transform(TransformProperty::Rotation), "Rotation"),
+            (
+                Field::Transform(TransformProperty::Rotation),
+                "Rotation (deg)",
+            ),
             (Field::Transform(TransformProperty::Opacity), "Opacity"),
         ];
         let all_audio = clips
@@ -1329,21 +1344,7 @@ impl Editor {
             window,
             cx,
         );
-        body = body.child(
-            self.section(
-                "opacity",
-                "Opacity / Blend",
-                div().child(opacity_row).child(
-                    div()
-                        .px_3()
-                        .pt_1()
-                        .text_size(px(11.))
-                        .text_color(hex(color::TEXT_MUTED))
-                        .child("Blend: Normal"),
-                ),
-                cx,
-            ),
-        );
+        body = body.child(self.section("opacity", "Opacity", div().child(opacity_row), cx));
         if matches!(clip.kind, ClipKind::Plugin { .. }) {
             let rows = self.plugin_rows(id, window, cx);
             body = body.child(self.section(

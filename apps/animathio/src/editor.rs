@@ -334,6 +334,8 @@ struct KeyframePaint {
 }
 
 struct ClipPaint {
+    effect_warning: bool,
+    thumbnail_first: usize,
     row: usize,
     start: Time,
     end: Time,
@@ -348,6 +350,7 @@ struct ClipPaint {
     thumbnails: Vec<Option<Arc<RenderImage>>>,
     preview: SharedString,
     source_offset: i64,
+    fade_levels: [Vec<f32>; 2],
     fade_in: i64,
     fade_out: i64,
     /// The clip's track is locked.
@@ -519,6 +522,8 @@ pub(crate) struct Editor {
     hovered_clip: Option<ClipId>,
     viewer_fit: ViewerFit,
     viewer_state: viewer::ViewerState,
+    effect_warning: Option<String>,
+    failed_effect_clips: BTreeSet<ClipId>,
     media_view: media_pool::MediaView,
     safe_areas: bool,
     viewer_menu_open: bool,
@@ -634,6 +639,8 @@ impl Editor {
             hovered_clip: None,
             viewer_fit: ViewerFit::Contain,
             viewer_state: viewer::ViewerState::default(),
+            effect_warning: None,
+            failed_effect_clips: BTreeSet::new(),
             media_view: media_pool::MediaView::default(),
             safe_areas: false,
             viewer_menu_open: false,

@@ -67,3 +67,22 @@ The Export button, dialog primaries and "Create" actions share `style::primary_b
 (violet-to-cyan gradient, dark lettering). The launcher hero adds a slow light sweep
 over a static wash; Reduce motion keeps only the wash. Preset cards carry an aspect
 chip, and the drop zone is dashed and lights up while files are dragged over it.
+
+## Viewer and timeline follow-ups
+
+Inspector transform rotation uses degrees (including numeric scrubbing); project
+transforms and keyframes continue to store radians. Click the preview to select
+the frontmost visual clip within its transformed bounds, Alt-click to cycle the
+stack, or click empty canvas to clear selection. Selection handles retain priority
+for scaling and rotation. Blend controls are hidden until the model supports them.
+
+The filmstrip requests a separate source time for each visible tile, retaining the
+bounded asynchronous thumbnail cache. Fade outlines sample the level keyframes,
+including their interpolation. Preview failures produce a toast; affected effect
+chains carry a warning icon in the timeline and inspector. Missing effect plugins
+are also marked when their clip is outside the current preview frame.
+
+The title bar uses gpui-component's client-decoration controls. Minimize and
+maximize are shown when the window manager advertises support; close is always
+available for client-decorated windows. A bare Xvfb server has no window manager
+and cannot exercise minimize/maximize behavior.

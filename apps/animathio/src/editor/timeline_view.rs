@@ -747,6 +747,9 @@ impl Editor {
                     ClipKind::Audio(asset) => self.waveform_for(asset),
                     _ => None,
                 };
+                let tile_width = ((layout.row_height - 29.) * (16. / 9.)).max(32.);
+                let clip_x = timeline::time_to_x(&layout, start) + 5.;
+                let thumbnail_first = ((-clip_x / tile_width).floor().max(0.)) as usize;
                 let thumbnails = match &clip.kind {
                     ClipKind::Video(asset) | ClipKind::Image(asset)
                         if timeline::time_to_x(&layout, end)
@@ -755,10 +758,18 @@ impl Editor {
                             && layout.row_height > 36.0 =>
                     {
                         let still = matches!(clip.kind, ClipKind::Image(_));
-                        let height = (layout.row_height - 26.0).clamp(16.0, 96.0) as u32;
-                        (0..5)
+                        let height = (layout.row_height - 29.0).clamp(16.0, 96.0) as u32;
+                        let count = (layout.width / tile_width).ceil() as usize + 2;
+                        (thumbnail_first..thumbnail_first + count)
+                            .take_while(|index| {
+                                clip_x + *index as f32 * tile_width
+                                    < timeline::time_to_x(&layout, end)
+                            })
                             .map(|index| {
-                                let tick = clip.source_offset.0 + (end.0 - start.0) / 5 * index;
+                                let tick = clip.source_offset.0
+                                    + (index as f64 * f64::from(tile_width)
+                                        / layout.pixels_per_tick)
+                                        as i64;
                                 self.thumbnails.borrow_mut().get(
                                     asset,
                                     Time(tick),
@@ -772,6 +783,8 @@ impl Editor {
                     _ => Vec::new(),
                 };
                 clips.push(ClipPaint {
+                    thumbnail_first,
+                    effect_warning: self.clip_effect_warning(clip),
                     row: paint_row,
                     start,
                     end,
@@ -790,6 +803,14 @@ impl Editor {
                     keyframes,
                     waveform,
                     source_offset: clip.source_offset.0,
+                    fade_levels: [FadeEdge::In, FadeEdge::Out].map(|edge| {
+                        let length = if edge == FadeEdge::In {
+                            fade_in
+                        } else {
+                            fade_out
+                        };
+                        fades::levels(clip, edge, length)
+                    }),
                     fade_in,
                     fade_out,
                     locked: track.is_locked(),
@@ -1118,8 +1139,11 @@ impl Editor {
                                             .child(
                                                 canvas(
                                                     move |bounds, _window, cx| {
-                                                        let _ = weak.update(cx, |this, _| {
-                                                            this.timeline_bounds = bounds;
+                                                        let _ = weak.update(cx, |this, cx| {
+                                                            if this.timeline_bounds != bounds {
+                                                                this.timeline_bounds = bounds;
+                                                                cx.notify();
+                                                            }
                                                         });
                                                     },
                                                     {
