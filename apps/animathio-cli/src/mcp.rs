@@ -317,7 +317,8 @@ pub(crate) struct Batch {
     /// Examples: `{"RemoveClip":{"id":3}}`, `{"MoveClip":{"id":3,"track":1,"start":0}}`,
     /// `{"SplitAt":{"times":[705600000]}}`,
     /// `{"RemoveRange":{"range":{"start":0,"end":352800000},"ripple":true}}`,
-    /// `{"RippleDelete":{"clip":4}}`, `{"SetTrackGain":{"id":1,"gain":0.5}}`.
+    /// `{"RippleDelete":{"clip":4}}`, `{"SetTrackGain":{"id":1,"gain":0.5}}`,
+    /// `{"RenameTrack":{"id":1,"name":"Titles"}}`, `{"MoveTrack":{"id":1,"index":0}}`.
     pub(crate) ops: Vec<serde_json::Value>,
 }
 
@@ -712,7 +713,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Import an image, video, or audio file by absolute path and add a clip for it."
+        description = "Import an image, video, or audio file by absolute path. Video with audio gets linked video and audio clips; the complete import is one undo step."
     )]
     async fn add_media(
         &self,
@@ -734,31 +735,59 @@ impl McpServer {
         let base = next_id(&state.project);
         let track_id = TrackId(base);
         let clip_id = ClipId(base + 1);
-        backend
-            .command_apply(Command::AddAsset {
+        let mut clip = Clip::new(
+            clip_id,
+            kind,
+            TimeRange::new(Time(0), project_duration(&state)).map_err(|e| mcp_error(e.into()))?,
+        );
+        if matches!(clip.kind, ClipKind::Audio(_)) {
+            clip.params.insert("gain".into(), 1.0.into());
+            clip.params.insert("muted".into(), 0.0.into());
+        }
+        let mut commands = vec![
+            Command::AddAsset {
                 id: info.id.clone(),
                 asset: Asset {
                     name: info.name.clone(),
                     media_type: info.media_type.clone(),
                 },
-            })
-            .map_err(mcp_error)?;
-        let clip = Clip::new(
-            clip_id,
-            kind,
-            TimeRange::new(Time(0), project_duration(&state)).map_err(|e| mcp_error(e.into()))?,
-        );
-        backend
-            .command_apply(Command::AddTrack {
+            },
+            Command::AddTrack {
                 track: Track::new(track_id, info.name),
                 index: state.project.tracks().len(),
-            })
-            .map_err(mcp_error)?;
-        backend
-            .command_apply(Command::AddClip {
+            },
+            Command::AddClip {
                 track: track_id,
-                clip,
-            })
+                clip: clip.clone(),
+            },
+        ];
+        if matches!(clip.kind, ClipKind::Video(_)) {
+            use animathio_media::MediaBackend;
+            let info_media = animathio_media::FilmCraftBackend::new()
+                .probe(std::path::Path::new(&p.path))
+                .map_err(|e| invalid(&e.to_string()))?;
+            if !info_media.audio.is_empty() {
+                let audio_track = TrackId(base + 2);
+                let mut audio = Clip::new(ClipId(base + 3), ClipKind::Audio(info.id), clip.range);
+                audio.link_group = Some(clip_id);
+                audio.params.insert("gain".into(), 1.0.into());
+                audio.params.insert("muted".into(), 0.0.into());
+                commands.push(Command::SetClipLink {
+                    id: clip_id,
+                    group: Some(clip_id),
+                });
+                commands.push(Command::AddTrack {
+                    track: Track::new(audio_track, "Audio"),
+                    index: state.project.tracks().len() + 1,
+                });
+                commands.push(Command::AddClip {
+                    track: audio_track,
+                    clip: audio,
+                });
+            }
+        }
+        backend
+            .command_apply(Command::Batch { commands })
             .map_err(mcp_error)?;
         tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))
     }

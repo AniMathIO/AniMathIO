@@ -291,8 +291,7 @@ fn find_scene_class<'t>(
         }
         let name = child
             .child_by_field_name("name")
-            .map(|n| eval::text_of(&n, source))
-            .unwrap_or_default();
+            .map_or_default(|n| eval::text_of(&n, source));
         if let Some(requested) = requested {
             if name == requested {
                 return Ok((child, name));
@@ -319,8 +318,7 @@ fn is_scene_class(class: &Node<'_>, source: &str) -> bool {
             "identifier" => eval::text_of(&base, source),
             "attribute" => base
                 .child_by_field_name("attribute")
-                .map(|a| eval::text_of(&a, source))
-                .unwrap_or_default(),
+                .map_or_default(|a| eval::text_of(&a, source)),
             _ => continue,
         };
         if name == "Scene" || name.ends_with("Scene") {
@@ -337,8 +335,7 @@ fn find_construct<'t>(class: &Node<'t>, source: &str) -> Option<Node<'t>> {
         if stmt.kind() == "function_definition" {
             let name = stmt
                 .child_by_field_name("name")
-                .map(|n| eval::text_of(&n, source))
-                .unwrap_or_default();
+                .map_or_default(|n| eval::text_of(&n, source));
             if name == "construct" {
                 return Some(stmt);
             }
@@ -590,8 +587,7 @@ fn parse_call_statement(call: &Node<'_>, source: &str) -> Option<StmtKind> {
         let object = function.child_by_field_name("object")?;
         let attribute = function
             .child_by_field_name("attribute")
-            .map(|a| eval::text_of(&a, source))
-            .unwrap_or_default();
+            .map_or_default(|a| eval::text_of(&a, source));
         if object.kind() == "identifier" && eval::text_of(&object, source) == "self" {
             return match attribute.as_str() {
                 "play" => parse_play(call, source).map(|(animations, run_time, rate_func)| {
@@ -642,8 +638,7 @@ fn parse_play(call: &Node<'_>, source: &str) -> Option<(Vec<Anim>, Option<f64>, 
             "keyword_argument" => {
                 let name = arg
                     .child_by_field_name("name")
-                    .map(|n| eval::text_of(&n, source))
-                    .unwrap_or_default();
+                    .map_or_default(|n| eval::text_of(&n, source));
                 let value = arg
                     .child_by_field_name("value")
                     .map(|v| eval::eval(&v, source));
@@ -734,15 +729,13 @@ fn parse_method_chain(call: &Node<'_>, source: &str) -> Option<(String, Method, 
     }
     let method_name = function
         .child_by_field_name("attribute")
-        .map(|a| eval::text_of(&a, source))
-        .unwrap_or_default();
+        .map_or_default(|a| eval::text_of(&a, source));
     let mut animated = false;
     let mut object = function.child_by_field_name("object")?;
     while object.kind() == "attribute" {
         let object_attr = object
             .child_by_field_name("attribute")
-            .map(|a| eval::text_of(&a, source))
-            .unwrap_or_default();
+            .map_or_default(|a| eval::text_of(&a, source));
         if object_attr == "animate" {
             animated = true;
             object = object.child_by_field_name("object")?;
@@ -822,8 +815,7 @@ fn parse_mobject_expr(node: &Node<'_>, source: &str) -> Option<MobjectExpr> {
             } else if function.kind() == "attribute" {
                 let method_name = function
                     .child_by_field_name("attribute")
-                    .map(|a| eval::text_of(&a, source))
-                    .unwrap_or_default();
+                    .map_or_default(|a| eval::text_of(&a, source));
                 let object = function.child_by_field_name("object")?;
                 let base = parse_mobject_expr(&object, source)?;
                 let (positional, _kwargs) = call_arguments(node, source);
@@ -875,15 +867,13 @@ fn parse_chain_expr(call: &Node<'_>, source: &str) -> Option<(MobjectExpr, bool)
     }
     let method_name = function
         .child_by_field_name("attribute")
-        .map(|a| eval::text_of(&a, source))
-        .unwrap_or_default();
+        .map_or_default(|a| eval::text_of(&a, source));
     let mut object = function.child_by_field_name("object")?;
     let mut animated = false;
     while object.kind() == "attribute" {
         let object_attr = object
             .child_by_field_name("attribute")
-            .map(|a| eval::text_of(&a, source))
-            .unwrap_or_default();
+            .map_or_default(|a| eval::text_of(&a, source));
         if object_attr == "animate" {
             animated = true;
             object = object.child_by_field_name("object")?;
@@ -944,8 +934,7 @@ fn call_arguments(call: &Node<'_>, source: &str) -> (Vec<Value>, Vec<(String, Va
             "keyword_argument" => {
                 let name = arg
                     .child_by_field_name("name")
-                    .map(|n| eval::text_of(&n, source))
-                    .unwrap_or_default();
+                    .map_or_default(|n| eval::text_of(&n, source));
                 let value = arg
                     .child_by_field_name("value")
                     .map_or(Value::Unknown, |v| eval::eval(&v, source));
@@ -966,8 +955,7 @@ fn position(node: &Node<'_>, source: &str) -> (usize, usize, String) {
     let snippet = source
         .lines()
         .nth(pos.row)
-        .map(str::trim)
-        .unwrap_or_default();
+        .map_or_default(str::trim);
     (pos.row + 1, pos.column + 1, truncate(snippet, 80))
 }
 
@@ -976,8 +964,7 @@ fn snippet_at(node: &Node<'_>, source: &str) -> String {
     let snippet = source
         .lines()
         .nth(pos.row)
-        .map(str::trim)
-        .unwrap_or_default();
+        .map_or_default(str::trim);
     truncate(snippet, 80)
 }
 

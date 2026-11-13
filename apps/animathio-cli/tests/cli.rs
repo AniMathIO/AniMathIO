@@ -252,6 +252,26 @@ fn import_v1_writes_a_valid_archive() {
     .unwrap();
     ok(&["import-v1", path(&input), "-o", path(&output)]);
     ok(&["validate", path(&output)]);
+    ok(&[
+        "render",
+        path(&output),
+        "--frame",
+        "1",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&dir.path().join("import.png")),
+    ]);
+    ok(&[
+        "export",
+        path(&output),
+        "--to",
+        "0.1",
+        "-o",
+        path(&dir.path().join("import.mp4")),
+    ]);
     let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
     assert_eq!(bundle.project.tracks().len(), 1);
     assert_eq!(bundle.project.width(), 800);
@@ -291,6 +311,26 @@ class Second(Scene):
         path(&output),
     ]);
     ok(&["validate", path(&output)]);
+    ok(&[
+        "render",
+        path(&output),
+        "--frame",
+        "1",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&dir.path().join("import.png")),
+    ]);
+    ok(&[
+        "export",
+        path(&output),
+        "--to",
+        "0.1",
+        "-o",
+        path(&dir.path().join("import.mp4")),
+    ]);
     let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
     assert_eq!(bundle.project.tracks().len(), 1);
     assert_eq!(bundle.project.width(), 1920);
@@ -363,4 +403,54 @@ fn export_creates_missing_parents_and_never_overwrites_silently() {
     args.extend(["-o", path(&output), "--overwrite"]);
     ok(&args);
     assert!(output.is_file());
+}
+
+#[test]
+fn import_media_preserves_companion_audio_and_video_only_sources() {
+    use animathio_core::{ClipKind, FrameRate};
+    use animathio_media::{EncoderConfig, Mp4Encoder, VideoConfig};
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.mp4");
+    let output = dir.path().join("import.amio");
+    fs::write(
+        &source,
+        include_bytes!("../../../crates/media/tests/fixtures/sample.mp4"),
+    )
+    .unwrap();
+    ok(&[
+        "import-media",
+        source.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+    ]);
+    let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+    let clips: Vec<_> = bundle
+        .project
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips().values())
+        .collect();
+    assert_eq!(clips.len(), 2);
+    assert!(matches!(clips[0].kind, ClipKind::Video(_)));
+    assert!(matches!(clips[1].kind, ClipKind::Audio(_)));
+    assert_eq!(clips[0].range, clips[1].range);
+    assert_eq!(clips[0].link_group, clips[1].link_group);
+    assert!(clips[0].link_group.is_some());
+    let mut encoder = Mp4Encoder::new(EncoderConfig::video_only(VideoConfig::new(
+        16,
+        16,
+        FrameRate::new(30, 1).unwrap(),
+    )))
+    .unwrap();
+    encoder.encode_video_frame(&[255; 16 * 16 * 4]).unwrap();
+    fs::write(&source, encoder.finish().unwrap()).unwrap();
+    ok(&[
+        "import-media",
+        source.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+    ]);
+    let bundle = read_amio(File::open(output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 1);
+    assert_eq!(bundle.project.tracks()[0].clips().len(), 1);
 }

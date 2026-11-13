@@ -1344,6 +1344,7 @@ fn build_project(
         }
         .apply(&mut project)?;
         let clip = Clip {
+            link_group: None,
             id: clip_id,
             kind,
             range: TimeRange::new(start_ticks, end_ticks)?,

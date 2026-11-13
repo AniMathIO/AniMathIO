@@ -45,17 +45,29 @@ impl Editor {
     }
 
     pub(super) fn execute(&mut self, command: &Command, cx: &mut Context<Self>) {
+        self.try_execute(command, cx);
+    }
+
+    /// [`Editor::execute`], reporting whether the command was applied.
+    pub(super) fn try_execute(&mut self, command: &Command, cx: &mut Context<Self>) -> bool {
         self.finish_color_edit(cx);
         match self.history.execute(&mut self.project, command) {
-            Ok(()) => self.after_edit(cx),
-            Err(error) => self.error = Some(error.0),
+            Ok(()) => {
+                self.after_edit(cx);
+                true
+            }
+            Err(error) => {
+                self.error = Some(error.0);
+                cx.notify();
+                false
+            }
         }
     }
 
     pub(super) fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.dirty = true;
         self.next_id = self.next_id.max(next_id(&self.project));
-        self.selected = self.selected.filter(|id| self.find_clip(*id).is_some());
+        self.prune_selection();
         self.sync_audio(cx);
         let time = self.current_render_time();
         self.request_render(time);
@@ -138,6 +150,10 @@ impl Editor {
             }
             InputTarget::Field { id, field } => match buffer.trim().parse::<f64>() {
                 Ok(value) => self.commit_field(id, &field, value, cx),
+                Err(_) => self.error = Some("invalid number".into()),
+            },
+            InputTarget::SelectionField { field } => match buffer.trim().parse::<f64>() {
+                Ok(value) => self.commit_selection_field(&field, value, cx),
                 Err(_) => self.error = Some("invalid number".into()),
             },
             InputTarget::PluginNumber { id, name } => {
@@ -301,6 +317,31 @@ impl Editor {
         self.execute(&command, cx);
     }
 
+    /// Apply one numeric field to every selected clip as a single undo step.
+    pub(super) fn commit_selection_field(
+        &mut self,
+        field: &Field,
+        value: f64,
+        cx: &mut Context<Self>,
+    ) {
+        if !value.is_finite() {
+            self.error = Some("non-finite value".into());
+            return;
+        }
+        let value = match field {
+            Field::Transform(TransformProperty::Opacity) => value.clamp(0.0, 1.0),
+            _ => value,
+        };
+        let commands: Vec<Command> = self
+            .selected_ids()
+            .into_iter()
+            .filter_map(|id| self.field_command(id, field, value))
+            .collect();
+        if let Some(command) = selection::batch(commands) {
+            self.execute(&command, cx);
+        }
+    }
+
     pub(super) fn field_command(&self, id: ClipId, field: &Field, value: f64) -> Option<Command> {
         match field {
             Field::Transform(property) => {
@@ -368,42 +409,6 @@ impl Editor {
         self.set_fade(id, FadeEdge::Out, 0, cx);
     }
 
-    /// Delete a specific clip.
-    pub(super) fn delete_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
-        self.execute(&Command::RemoveClip { id }, cx);
-        if self.selected == Some(id) {
-            self.selected = None;
-            self.selected_field = None;
-        }
-    }
-
-    /// Duplicate a clip immediately after itself on the same track.
-    pub(super) fn duplicate_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
-        let Some(clip) = self.find_clip(id).cloned() else {
-            return;
-        };
-        let Some(track) = self
-            .project
-            .tracks()
-            .iter()
-            .find(|t| t.clips().contains_key(&id))
-            .map(Track::id)
-        else {
-            return;
-        };
-        let duration = clip.range.end.0 - clip.range.start.0;
-        let Some(end) = clip.range.end.0.checked_add(duration) else {
-            return;
-        };
-        let Ok(range) = TimeRange::new(clip.range.end, Time(end)) else {
-            return;
-        };
-        let mut copy = clip;
-        copy.id = self.next_clip_id();
-        copy.range = range;
-        self.execute(&Command::AddClip { track, clip: copy }, cx);
-    }
-
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
         self.finish_color_edit(cx);
         match self.history.undo(&mut self.project) {
@@ -422,40 +427,63 @@ impl Editor {
         }
     }
 
-    pub(super) fn delete_selected(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.selected else {
-            return;
-        };
-        self.execute(&Command::RemoveClip { id }, cx);
-        self.selected = None;
-        self.selected_field = None;
-    }
-
+    /// Split every selected clip under the playhead (or, with no selection, the
+    /// first clip under it) as one undo step.
     pub(super) fn split_at_playhead(&mut self, cx: &mut Context<Self>) {
         let position = self.position;
-        let selected = self.selected.filter(|id| {
-            self.find_clip(*id)
-                .is_some_and(|c| c.range.start < position && position < c.range.end)
-        });
-        let target = selected.or_else(|| {
-            self.project
+        let straddles = |clip: &Clip| clip.range.start < position && position < clip.range.end;
+        let selected = self.selected_ids();
+        let mut targets: Vec<ClipId> = selected
+            .iter()
+            .copied()
+            .filter(|id| self.find_clip(*id).is_some_and(straddles))
+            .collect();
+        if targets.is_empty() {
+            targets.extend(
+                self.project
+                    .tracks()
+                    .iter()
+                    .flat_map(|t| t.clips().values())
+                    .find(|c| straddles(c))
+                    .map(|c| c.id),
+            );
+        }
+        let commands: Vec<Command> = targets
+            .into_iter()
+            .map(|id| Command::SplitClip {
+                id,
+                right_id: self.next_clip_id(),
+                at: position,
+            })
+            .collect();
+        if let Some(command) = selection::batch(commands) {
+            self.execute(&command, cx);
+        }
+    }
+}
+
+impl Editor {
+    pub(super) fn unlink_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        let group = self
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .find(|c| c.id == id)
+            .and_then(|c| c.link_group);
+        if let Some(group) = group {
+            let commands = self
+                .project
                 .tracks()
                 .iter()
                 .flat_map(|t| t.clips().values())
-                .find(|c| c.range.start < position && position < c.range.end)
-                .map(|c| c.id)
-        });
-        let Some(id) = target else {
-            return;
-        };
-        let right_id = self.next_clip_id();
-        self.execute(
-            &Command::SplitClip {
-                id,
-                right_id,
-                at: position,
-            },
-            cx,
-        );
+                .filter(|c| c.link_group == Some(group))
+                .map(|c| Command::SetClipLink {
+                    id: c.id,
+                    group: None,
+                })
+                .collect();
+            self.execute(&Command::Batch { commands }, cx);
+        }
     }
 }

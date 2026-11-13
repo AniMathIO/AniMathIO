@@ -9,11 +9,11 @@ impl Editor {
                 self.error = Some(error);
             }
             self.playing = false;
-            self.shuttle.0 = 0;
+            self.shuttle = Shuttle::default();
             self.position = self.clock.now();
         } else {
-            self.shuttle.0 = 1;
-            let _ = self.clock.set_rate(1);
+            self.shuttle = Shuttle(1, false);
+            let _ = self.clock.set_rate(Speed::NORMAL);
             if let Err(error) = self.clock.seek(self.position) {
                 self.error = Some(error);
             }
@@ -30,8 +30,17 @@ impl Editor {
             self.seek_to(self.clock.now(), cx);
             return;
         }
-        let rate = self.shuttle.press(direction);
-        if let Err(error) = self.clock.set_rate(rate).and_then(|()| self.clock.play()) {
+        // J/L while K is held is a half-speed jog; otherwise repeat-doubling shuttle.
+        if self.k_held {
+            self.shuttle.jog(direction);
+        } else {
+            self.shuttle.press(direction);
+        }
+        if let Err(error) = self
+            .clock
+            .set_rate(self.shuttle.speed())
+            .and_then(|()| self.clock.play())
+        {
             self.error = Some(error);
             return;
         }
@@ -58,7 +67,7 @@ impl Editor {
 
     pub(super) fn seek_to(&mut self, time: Time, cx: &mut Context<Self>) {
         self.playing = false;
-        self.shuttle.0 = 0;
+        self.shuttle = Shuttle::default();
         if let Err(error) = self.clock.pause() {
             self.error = Some(error);
         }
@@ -280,8 +289,8 @@ impl Editor {
                     .justify_end()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(cx.theme().muted_foreground)
-                    .child(if self.playing && self.shuttle.0 != 1 {
-                        format!("{}x (silent)", self.shuttle.0)
+                    .child(if self.playing && self.shuttle != Shuttle(1, false) {
+                        self.shuttle.label()
                     } else {
                         timecode::format_timecode(
                             Time(timeline::project_duration(&self.project)),

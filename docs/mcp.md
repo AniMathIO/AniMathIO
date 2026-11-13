@@ -99,7 +99,7 @@ clears its undo history.
 | `add_text` | Add a plain-text clip | font size in pixels; ms times |
 | `add_math` | Add an `org.animathio.latex` plugin clip | `latex`; optional `mode` (`latex`/`typst`), `size` (default 48 px), `color`, `x`/`y`, `start_ms`, `duration_ms`, `reveal_duration_ms` |
 | `add_graph` | Add an `org.animathio.graph` plugin clip | bounds, newline-separated `items`, `show_grid`/`show_axes`/`show_labels`, `color`, `x`/`y`, `start_ms`, `duration_ms`, `draw_duration_ms` |
-| `add_media` | Import image/video/audio by absolute path, add a clip | |
+| `add_media` | Import image/video/audio by absolute path, add a clip (one undo step); audio starts with animatable gain/mute defaults | |
 | `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction` |
 | `update_element` | Update a clip's placement and/or visible time frame | |
 | `remove_element` | Remove a clip by id | |
@@ -145,7 +145,10 @@ when it references relative assets. Source size is limited by the importer.
 `cut_at`, `remove_range`, `trim_silence` and `batch` are built on the core commands
 `SplitAt`, `RemoveRange`, `RippleDelete` and `Batch`; `Batch` applies its commands in
 order, validates the project once at the end, and returns a `Batch` of the inverses as
-the single undo step. The same commands work over `command.apply`. Edits that would
+the single undo step. The same commands work over `command.apply`. Track layout edits
+use the same path: `{"RenameTrack":{"id":1,"name":"Titles"}}` and
+`{"MoveTrack":{"id":1,"index":0}}` (`index` is the layer's position after the move) are
+valid `batch` ops and `command.apply` commands; `{"SetTrackLocked":...}` locks a track. Edits that would
 leave a transition without both adjacent clips (for example removing the whole
 outgoing clip) are rejected as a whole and the project is unchanged; remove the
 transition first.
@@ -256,3 +259,5 @@ The local server accepts up to eight simultaneous connections. Idle clients do n
 block other clients, and disconnect errors are logged without stopping the listener.
 The editor drains calls on a timer even while its window is occluded. Frame renders,
 asset reads and saves run on workers against project snapshots.
+
+`add_media` probes video files and creates aligned video and companion audio clips when the source has audio. Asset, tracks and clips are one undoable batch. Video without an audio stream stays video-only. Companion audio starts with gain 1 and muted 0.

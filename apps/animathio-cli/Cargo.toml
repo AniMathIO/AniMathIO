@@ -10,6 +10,8 @@ publish.workspace = true
 animathio-plugin-host = { path = "../../crates/plugin-host" }
 directories = "6"
 animathio-plugin-api = { path = "../../crates/plugin-api" }
+
+animathio-media = { path = "../../crates/media" }
 animathio-export = { path = "../../crates/export" }
 animathio-control = { path = "../../crates/control" }
 animathio-core.workspace = true

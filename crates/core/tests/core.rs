@@ -1052,3 +1052,77 @@ fn merge_undo_restores_independent_clip_data() {
     redo.apply(&mut project).unwrap();
     assert_eq!(project, merged);
 }
+
+#[test]
+fn track_rename_and_move_are_reversible_and_validate_their_targets() {
+    let mut project = base();
+    Command::AddTrack {
+        track: Track::new(TrackId(2), "top"),
+        index: 2,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let original = project.clone();
+    let order = |project: &Project| project.tracks().iter().map(Track::id).collect::<Vec<_>>();
+
+    let rename = Command::RenameTrack {
+        id: TrackId(1),
+        name: "Titles".into(),
+    };
+    let inverse = rename.apply(&mut project).unwrap();
+    assert_eq!(project.tracks()[1].name(), "Titles");
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+
+    let to_front = Command::MoveTrack {
+        id: TrackId(2),
+        index: 0,
+    };
+    let inverse = to_front.apply(&mut project).unwrap();
+    assert_eq!(order(&project), [TrackId(2), TrackId(0), TrackId(1)]);
+    // Clips travel with their layer.
+    assert_eq!(project.tracks()[1].clips().len(), 1);
+    let json = serde_json::to_string(&to_front).unwrap();
+    assert_eq!(serde_json::from_str::<Command>(&json).unwrap(), to_front);
+    inverse.apply(&mut project).unwrap();
+    assert_eq!(project, original);
+
+    for bad in [
+        Command::MoveTrack {
+            id: TrackId(0),
+            index: 3,
+        },
+        Command::MoveTrack {
+            id: TrackId(9),
+            index: 0,
+        },
+        Command::RenameTrack {
+            id: TrackId(9),
+            name: "x".into(),
+        },
+    ] {
+        assert!(bad.apply(&mut project).is_err(), "{bad:?}");
+        assert_eq!(project, original, "failed commands leave no trace");
+    }
+
+    // Layer-level edits stay possible on a locked layer.
+    Command::SetTrackLocked {
+        id: TrackId(0),
+        locked: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::RenameTrack {
+        id: TrackId(0),
+        name: "Locked".into(),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::MoveTrack {
+        id: TrackId(0),
+        index: 2,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert_eq!(project.tracks()[2].name(), "Locked");
+}

@@ -86,7 +86,23 @@ under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 shuttle, in/out, blade and ripple command planning. In/out points and tool mode stay
 in view state. Ripple trim uses one `Command::Batch` on the source track;
 Shift+Delete uses `RippleDelete`. The ruler and export range share half-open bounds.
-The rate clock uses audio at 1x and a silent signed monotonic clock for shuttle.
+The audio device clock stays master at every shuttle speed; with no output device a signed
+monotonic clock stands in.
+
+Audible shuttle lives in `crates/audio` (`Speed`, `BlockGenerator`, `varispeed`).
+`Player::set_speed` restarts the session at the latency-corrected position like a seek.
+The mixer worker (never the device callback) renders blocks: it mixes the timeline span a
+block covers and resamples it by the signed rate with linear interpolation, carrying the
+fractional position so blocks join seamlessly. Negative speeds read backwards, so the block
+is the reversed PCM. Forward up to 8x and reverse up to 4x are audible (pitch follows
+speed); faster rates push silence. The callback's clock is `origin + frames * speed`
+computed with a rational speed (reverse counts down), so video stays exact at each rate.
+Half-speed K+J/K+L jog uses `Speed::HALF`.
+
+Exports run through `export_queue`: each job owns a project snapshot, jobs run sequentially
+on the export worker (`crates/export` honours the cancel flag through its progress
+callback and leaves no partial file), and the editor polls the queue to drive the Export
+queue popover and toasts. Control-protocol exports appear in the same queue.
 
 `start_screen` provides project presets, recents and importer entry points. Workflow
 dialogs use gpui-component forms; export works on an immutable snapshot, so selecting
@@ -164,7 +180,7 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 
 `core::Command` is an exhaustive enum of serializable, invertible edits:
 `AddTrack`, `RemoveTrack`, `SetTrackGain`, `SetTrackMuted`, `SetTrackSolo`,
-`SetTrackLocked`, `AddAsset`, `RemoveAsset`,
+`SetTrackLocked`, `RenameTrack`, `MoveTrack`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
 `SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
@@ -179,6 +195,11 @@ keyframe commands) in `Command::apply` itself, so the editor, the control
 protocol and MCP all see the same `track N is locked` error; layer-level
 commands (gain, mute, solo, lock) always work so a track can be unlocked.
 `SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks.
+`RenameTrack` and `MoveTrack { id, index }` (the track's position after the move) are
+layer-level, so they work on locked tracks too. The editor's multi-clip edits (grouped
+move, nudge, delete, paste, duplicate, linked ripple) are plain `Batch`es planned by the
+window-free `selection`, `clipboard` and `ripple` modules of the app crate, so each is one
+undo step and is replayable over the control protocol.
 `Batch { commands }` applies its members atomically as one undo step
 (at most 1024 members); fades are a `Batch` of `AddKeyframe`s on a
 clip's `gain` (audio) or opacity (everything else).
@@ -344,3 +365,5 @@ Integration tests use `plugin-host`'s `test-support` feature to build text and s
 for `wasm32-wasip2` with a shared target directory and resource limits. Subprocess
 CLI tests receive an explicit bundle directory. CI builds bundles on both Linux
 and Windows; the WASI target must be installed for local tests too.
+
+Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.

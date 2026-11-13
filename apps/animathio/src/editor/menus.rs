@@ -7,15 +7,20 @@ use gpui_component::{
     status_bar::StatusBar,
 };
 
+/// A track context-menu entry's handler.
+type TrackMenuAction = Box<dyn Fn(&mut Editor, &mut Window, &mut Context<Editor>)>;
+
 impl Editor {
     pub(super) fn refresh_menus(&mut self, cx: &mut Context<Self>) {
         let signature = format!(
-            "{:?}/{:?}/{:?}/{:?}/{}",
+            "{:?}/{:?}/{:?}/{:?}/{:?}/{:?}/{}",
             self.recent.paths,
-            self.selected,
+            self.selected_ids(),
+            self.ripple_scope,
+            self.clipboard.is_some(),
             self.dock,
             self.preview.gpu,
-            self.export_task.is_some()
+            self.export_queue_open
         );
         if self.menu_signature == signature {
             return;
@@ -29,6 +34,7 @@ impl Editor {
                 )
             }))
             .disabled(self.recent.paths.is_empty());
+        let none_selected = self.selected.is_none();
         let menus = vec![
             Menu::new("File").items([
                 MenuItem::action("New project", NewProject),
@@ -48,14 +54,21 @@ impl Editor {
                 MenuItem::action("Undo", Undo),
                 MenuItem::action("Redo", Redo),
                 MenuItem::separator(),
-                MenuItem::action("Delete selection", DeleteSelection)
-                    .disabled(self.selected.is_none()),
+                MenuItem::action("Cut", CutClips).disabled(none_selected),
+                MenuItem::action("Copy", CopyClips).disabled(none_selected),
+                MenuItem::action("Paste at playhead", PasteClips),
+                MenuItem::action("Duplicate", DuplicateClips).disabled(none_selected),
+                MenuItem::separator(),
+                MenuItem::action("Select all clips", SelectAllClips),
+                MenuItem::action("Deselect", ClearSelection).disabled(none_selected),
+                MenuItem::action("Delete selection", DeleteSelection).disabled(none_selected),
             ]),
             Menu::new("View").items([
                 MenuItem::action("Media pool", ToggleMediaPool).checked(self.dock.left_open),
                 MenuItem::action("Inspector", ToggleInspector).checked(self.dock.right_open),
                 MenuItem::action("Timeline", ToggleTimeline).checked(self.dock.bottom_open),
                 MenuItem::separator(),
+                MenuItem::action("Export queue", ToggleExportQueue).checked(self.export_queue_open),
                 MenuItem::action("GPU preview", ToggleGpuPreview).checked(self.preview.gpu),
                 MenuItem::action("Zoom to fit", ZoomToFit),
             ]),
@@ -81,9 +94,12 @@ impl Editor {
                 MenuItem::action("Blade", BladeTool),
                 MenuItem::action("Ripple", RippleTool),
                 MenuItem::action("Hand", HandTool),
+                MenuItem::separator(),
+                MenuItem::action("Ripple all tracks", ToggleRippleScope)
+                    .checked(self.ripple_scope == RippleScope::AllTracks),
             ]),
             Menu::new("Clip").items([
-                MenuItem::action("Split at playhead", SplitClip).disabled(self.selected.is_none()),
+                MenuItem::action("Split at playhead", SplitClip).disabled(none_selected),
                 MenuItem::action("Add effect", ShowEffects),
                 MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),
@@ -194,8 +210,16 @@ impl Editor {
             ContextMenu::Clip { id } => {
                 let actions: Vec<(IconName, &str, ClipAction)> = vec![
                     (IconName::Scissors, "Split at playhead", Self::split_clip),
-                    (IconName::Copy, "Duplicate", Self::duplicate_clip),
+                    (IconName::CopyPlus, "Duplicate", Self::duplicate_clip),
+                    (IconName::Copy, "Copy", Self::copy_clip),
+                    (IconName::Scissors, "Cut", Self::cut_clip),
                     (IconName::Trash, "Delete", Self::delete_clip),
+                    (IconName::Scissors, "Unlink", Self::unlink_clip),
+                    (
+                        IconName::FoldHorizontal,
+                        "Ripple delete",
+                        Self::ripple_delete_clip,
+                    ),
                     (
                         IconName::TrendingUp,
                         "Fade in 1 s",
@@ -234,6 +258,49 @@ impl Editor {
                         cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
                             this.add_effect_to_clip(id, kind, cx);
                             this.context_menu = None;
+                            cx.notify();
+                        }),
+                        cx,
+                    ));
+                }
+            }
+            ContextMenu::Track { id } => {
+                let count = self.project.tracks().len();
+                let position = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .position(|track| track.id() == id);
+                let actions: Vec<(IconName, &str, bool, TrackMenuAction)> = vec![
+                    (
+                        IconName::Pencil,
+                        "Rename",
+                        true,
+                        Box::new(move |this, window, cx| this.start_track_rename(id, window, cx)),
+                    ),
+                    (
+                        IconName::ArrowUp,
+                        "Move up",
+                        position.is_some_and(|index| index > 0),
+                        Box::new(move |this, _, cx| this.move_track_by(id, -1, cx)),
+                    ),
+                    (
+                        IconName::ArrowDown,
+                        "Move down",
+                        position.is_some_and(|index| index + 1 < count),
+                        Box::new(move |this, _, cx| this.move_track_by(id, 1, cx)),
+                    ),
+                ];
+                for (icon, label, enabled, action) in actions {
+                    if !enabled {
+                        continue;
+                    }
+                    menu = menu.child(context_item(
+                        icon,
+                        label,
+                        cx.listener(move |this: &mut Self, _: &ClickEvent, window, cx| {
+                            this.context_menu = None;
+                            action(this, window, cx);
                             cx.notify();
                         }),
                         cx,
@@ -279,7 +346,7 @@ impl Editor {
     }
 
     /// Persistent project summary; transient results are notifications.
-    pub(super) fn status_line(&self, cx: &App) -> StatusBar {
+    pub(super) fn status_line(&self, cx: &mut Context<Self>) -> StatusBar {
         let (width, height) = project_size(&self.project);
         let duration = timecode::format_timecode(
             Time(timeline::project_duration(&self.project)),
@@ -295,6 +362,7 @@ impl Editor {
                     .font_family(cx.theme().mono_font_family.clone())
                     .child(duration),
             )
+            .right(self.export_queue_button(cx))
             .right(
                 div()
                     .text_color(cx.theme().muted_foreground)

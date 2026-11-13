@@ -15,9 +15,11 @@
     clippy::too_many_arguments
 )]
 
+mod clipboard;
 mod control;
 mod editing;
 mod editor;
+mod export_queue;
 mod export_worker;
 mod fades;
 mod glyph_guard;
@@ -28,6 +30,8 @@ mod playback;
 mod preferences;
 mod preview_settings;
 mod render_worker;
+mod ripple;
+mod selection;
 mod timecode;
 mod timeline;
 

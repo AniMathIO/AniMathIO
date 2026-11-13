@@ -3,11 +3,13 @@
 mod mixer;
 mod player;
 mod source;
+mod speed;
 mod waveform;
 
 pub use mixer::*;
 pub use player::*;
 pub use source::*;
+pub use speed::*;
 pub use waveform::*;
 
 /// Audio decoding, configuration or playback failure.
