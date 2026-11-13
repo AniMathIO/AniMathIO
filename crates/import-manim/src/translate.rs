@@ -8,12 +8,12 @@ use crate::ast::{
     StmtKind,
 };
 use crate::{Asset, ImportError, ManimOptions, Report, Rgba};
-use animathio_core::builtin::{Builtin, PathElement, Shape, Stroke};
 use animathio_core::{
     Asset as CoreAsset, AssetId, Clip, ClipId, ClipKind, Command, FrameRate, Interpolation,
     Keyframe, Project, TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform,
     TransformProperty,
 };
+use animathio_plugin_api::sources::{PathElement, Shape, Stroke};
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
@@ -1392,11 +1392,11 @@ fn build_clip_kind(
             font_size_px,
             color,
         } => (
-            ClipKind::Builtin(Builtin::Text {
-                text: text.clone(),
-                font_size: (*font_size_px / f64::from(CANVAS_HEIGHT)).clamp(f64::EPSILON, 16.0),
-                color: *color,
-            }),
+            animathio_plugin_api::sources::text(
+                text.clone(),
+                (*font_size_px / f64::from(CANVAS_HEIGHT)).clamp(f64::EPSILON, 16.0),
+                *color,
+            ),
             BTreeMap::new(),
         ),
         Kind::Tex {
@@ -1421,7 +1421,7 @@ fn build_clip_kind(
             )
         }
         Kind::Shape { geom, stroke, fill } => {
-            let shape = builtin_shape(geom);
+            let shape = plugin_shape(geom);
             let stroke_width = {
                 let scale_x = mob.normalized_scale.0 * mob.scale;
                 if scale_x > 0.0 {
@@ -1431,14 +1431,14 @@ fn build_clip_kind(
                 }
             };
             (
-                ClipKind::Builtin(Builtin::Shape {
+                animathio_plugin_api::sources::shape(
                     shape,
-                    fill: *fill,
-                    stroke: stroke.map(|color| Stroke {
+                    *fill,
+                    stroke.map(|color| Stroke {
                         color,
                         width: stroke_width,
                     }),
-                }),
+                ),
                 BTreeMap::new(),
             )
         }
@@ -1472,15 +1472,15 @@ fn build_clip_kind(
     }
 }
 
-fn builtin_shape(geom: &ShapeGeom) -> Shape {
+fn plugin_shape(geom: &ShapeGeom) -> Shape {
     match geom {
         ShapeGeom::Rect => Shape::Rect,
         ShapeGeom::Ellipse => Shape::Ellipse,
-        ShapeGeom::Path { verbs } => Shape::Path(builtin_path(verbs)),
+        ShapeGeom::Path { verbs } => Shape::Path(plugin_path(verbs)),
     }
 }
 
-fn builtin_path(verbs: &[LocalVerb]) -> Vec<PathElement> {
+fn plugin_path(verbs: &[LocalVerb]) -> Vec<PathElement> {
     let points: Vec<(f64, f64)> = verbs
         .iter()
         .filter_map(|v| match v {

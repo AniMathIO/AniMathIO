@@ -4,6 +4,7 @@ pub mod guest;
 pub mod manifest;
 pub mod package;
 pub mod schema;
+pub mod sources;
 
 pub use manifest::{ManifestError, PluginKind, PluginManifestToml};
 pub use package::{

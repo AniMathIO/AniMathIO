@@ -33,3 +33,10 @@ animathio-render = { path = "../render" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = { workspace = true }
 wat = "1"
+
+[features]
+test-support = []
+
+[[test]]
+name = "first_party"
+required-features = ["test-support"]

@@ -1,9 +1,9 @@
 //! Cache lifetime, random access and compositing contracts beyond pixel goldens.
-use animathio_core::{
-    builtin::{Builtin, Shape},
-    *,
-};
-use animathio_render::{Frame, FrameSource, RenderCtx, ResourcePool, render, sample};
+mod common;
+use animathio_core::*;
+use animathio_plugin_api::sources::Shape;
+use animathio_render::{Frame, FrameSource, RenderCtx, ResourcePool, sample};
+use common::render;
 use proptest::prelude::*;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
@@ -22,11 +22,7 @@ fn layer(id: u64, kind: ClipKind, transform: Transform) -> SceneClip {
 fn rect(color: [u8; 4], transform: Transform) -> SceneClip {
     layer(
         0,
-        ClipKind::Builtin(Builtin::Shape {
-            shape: Shape::Rect,
-            fill: Some(color),
-            stroke: None,
-        }),
+        animathio_plugin_api::sources::shape(Shape::Rect, Some(color), None),
         transform,
     )
 }
@@ -249,6 +245,7 @@ fn vector_scenes_render_pixel_space_paths() {
         clips: vec![layer(
             0,
             ClipKind::Vector(VectorScene {
+                coordinate_space: animathio_core::CoordinateSpace::Canvas,
                 elements: vec![VectorElement::FillPath {
                     path: vec![
                         PathVerb::MoveTo(Point::new(10.0, 10.0)),

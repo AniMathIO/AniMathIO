@@ -7,9 +7,6 @@ wit_bindgen::generate!({
 
 use animathio::plugin::types::*;
 
-/// AniMathIO ticks per second (flicks).
-const TICKS_PER_SECOND: f64 = 705_600_000.0;
-
 struct ShapesPlugin;
 
 fn get_number(params: &[ParamEntry], id: &str, default: f64) -> f64 {
@@ -197,6 +194,21 @@ impl Guest for ShapesPlugin {
             kinds: vec![PluginKind::ClipSource],
             params: vec![
                 ParamSpec {
+                    id: "units".into(),
+                    label: "Units".into(),
+                    kind: ParamKind::EnumChoice(EnumParam {
+                        options: vec!["pixels".into(), "normalized".into()],
+                        default: "pixels".into(),
+                    }),
+                },
+                ParamSpec {
+                    id: "path".into(),
+                    label: "Path (JSON verbs)".into(),
+                    kind: ParamKind::String(StringParam {
+                        default: "[]".into(),
+                    }),
+                },
+                ParamSpec {
                     id: "shape".to_string(),
                     label: "Shape".to_string(),
                     kind: ParamKind::EnumChoice(EnumParam {
@@ -207,6 +219,7 @@ impl Guest for ShapesPlugin {
                             "star".to_string(),
                             "arrow".to_string(),
                             "line".to_string(),
+                            "path".to_string(),
                         ],
                         default: "rect".to_string(),
                     }),
@@ -218,7 +231,7 @@ impl Guest for ShapesPlugin {
                         min: 0.0,
                         max: 4096.0,
                         default: 640.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
@@ -228,37 +241,37 @@ impl Guest for ShapesPlugin {
                         min: 0.0,
                         max: 4096.0,
                         default: 360.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
                     id: "width".to_string(),
                     label: "Width".to_string(),
                     kind: ParamKind::Number(NumberRange {
-                        min: 1.0,
+                        min: 0.0001,
                         max: 4096.0,
                         default: 200.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
                     id: "height".to_string(),
                     label: "Height".to_string(),
                     kind: ParamKind::Number(NumberRange {
-                        min: 1.0,
+                        min: 0.0001,
                         max: 4096.0,
                         default: 120.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
                     id: "radius".to_string(),
                     label: "Radius".to_string(),
                     kind: ParamKind::Number(NumberRange {
-                        min: 1.0,
+                        min: 0.0001,
                         max: 4096.0,
                         default: 100.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
@@ -268,7 +281,7 @@ impl Guest for ShapesPlugin {
                         min: 3.0,
                         max: 64.0,
                         default: 5.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
@@ -278,7 +291,7 @@ impl Guest for ShapesPlugin {
                         min: -360.0,
                         max: 360.0,
                         default: 0.0,
-                        step: 1.0,
+                        step: 0.001,
                     }),
                 },
                 ParamSpec {
@@ -312,25 +325,30 @@ impl Guest for ShapesPlugin {
                         min: 0.0,
                         max: 64.0,
                         default: 2.0,
-                        step: 0.5,
+                        step: 0.001,
                     }),
                 },
             ],
         }
     }
 
-    fn render_clip(params: Vec<ParamEntry>, time_ticks: i64, size: Size) -> Scene {
+    fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
         let _ = size;
-        let t = time_ticks as f64 / TICKS_PER_SECOND;
+        let normalized = get_string(&params, "units", "pixels") == "normalized";
 
         let shape = get_string(&params, "shape", "rect");
-        let x = get_number(&params, "x", 640.0) as f32;
-        let y = get_number(&params, "y", 360.0) as f32;
-        let width = get_number(&params, "width", 200.0) as f32;
-        let height = get_number(&params, "height", 120.0) as f32;
+        let x = get_number(&params, "x", if normalized { 0.5 } else { 640.0 }) as f32;
+        let y = get_number(&params, "y", if normalized { 0.5 } else { 360.0 }) as f32;
+        let width = get_number(&params, "width", if normalized { 1.0 } else { 200.0 }) as f32;
+        let height = get_number(&params, "height", if normalized { 1.0 } else { 120.0 }) as f32;
         let radius = get_number(&params, "radius", 100.0) as f32;
-        let points = get_number(&params, "points", 5.0).max(3.0) as usize;
-        let rotation = get_number(&params, "rotation", 0.0) as f32 + t as f32 * 0.5;
+        let points = get_number(&params, "points", 5.0).clamp(3.0, 64.0) as usize;
+        let rotation = get_number(&params, "rotation", 0.0) as f32
+            + if normalized {
+                0.0
+            } else {
+                (_time_ticks as f64 / 705_600_000.0) as f32 * 0.5
+            };
         let fill = get_color(
             &params,
             "fill",
@@ -354,6 +372,8 @@ impl Guest for ShapesPlugin {
         let stroke_width = get_number(&params, "stroke_width", 2.0) as f32;
 
         let path = match shape.as_str() {
+            "path" => parse_path(&get_string(&params, "path", "[]")),
+            "ellipse" if normalized => normalized_ellipse(x, y, width, height),
             "ellipse" => ellipse(x, y, width / 2.0, height / 2.0),
             "polygon" => polygon(x, y, radius, points, rotation),
             "star" => star(x, y, radius, radius * 0.45, points, rotation),
@@ -365,15 +385,25 @@ impl Guest for ShapesPlugin {
         let style = StrokeStyle {
             width: stroke_width,
             color: stroke,
+            // Match the former renderer's kurbo::Stroke::new defaults.
             cap: StrokeCap::Round,
             join: StrokeJoin::Round,
         };
 
+        let mut elements = Vec::new();
+        if fill.a != 0 {
+            elements.push(DrawCommand::FillPath((path.clone(), fill)));
+        }
+        if stroke.a != 0 && stroke_width > 0.0 {
+            elements.push(DrawCommand::StrokePath((path, style)));
+        }
         Scene {
-            elements: vec![
-                DrawCommand::FillPath((path.clone(), fill)),
-                DrawCommand::StrokePath((path, style)),
-            ],
+            coordinate_space: if normalized {
+                CoordinateSpace::Normalized
+            } else {
+                CoordinateSpace::Canvas
+            },
+            elements,
         }
     }
 
@@ -387,3 +417,58 @@ impl Guest for ShapesPlugin {
 }
 
 export!(ShapesPlugin);
+
+fn normalized_ellipse(x: f32, y: f32, width: f32, height: f32) -> Vec<PathVerb> {
+    use kurbo::Shape;
+    kurbo::Ellipse::new(
+        (x as f64, y as f64),
+        (width as f64 / 2.0, height as f64 / 2.0),
+        0.0,
+    )
+    .to_path(0.001)
+    .elements()
+    .iter()
+    .map(|e| {
+        let p = |v: kurbo::Point| Point {
+            x: v.x as f32,
+            y: v.y as f32,
+        };
+        match *e {
+            kurbo::PathEl::MoveTo(a) => PathVerb::MoveTo(p(a)),
+            kurbo::PathEl::LineTo(a) => PathVerb::LineTo(p(a)),
+            kurbo::PathEl::QuadTo(a, b) => PathVerb::QuadTo((p(a), p(b))),
+            kurbo::PathEl::CurveTo(a, b, c) => PathVerb::CubicTo((p(a), p(b), p(c))),
+            kurbo::PathEl::ClosePath => PathVerb::Close,
+        }
+    })
+    .collect()
+}
+
+#[derive(serde::Deserialize)]
+enum PathElement {
+    MoveTo([f32; 2]),
+    LineTo([f32; 2]),
+    QuadTo([f32; 2], [f32; 2]),
+    CurveTo([f32; 2], [f32; 2], [f32; 2]),
+    Close,
+}
+
+fn parse_path(json: &str) -> Vec<PathVerb> {
+    let Ok(elements) = serde_json::from_str::<Vec<PathElement>>(json) else {
+        return Vec::new();
+    };
+    if elements.len() > 100_000 {
+        return Vec::new();
+    }
+    let p = |v: [f32; 2]| Point { x: v[0], y: v[1] };
+    elements
+        .into_iter()
+        .map(|e| match e {
+            PathElement::MoveTo(a) => PathVerb::MoveTo(p(a)),
+            PathElement::LineTo(a) => PathVerb::LineTo(p(a)),
+            PathElement::QuadTo(a, b) => PathVerb::QuadTo((p(a), p(b))),
+            PathElement::CurveTo(a, b, c) => PathVerb::CubicTo((p(a), p(b), p(c))),
+            PathElement::Close => PathVerb::Close,
+        })
+        .collect()
+}

@@ -1051,6 +1051,13 @@ fn wit_scene_to_core(scene: wit_types::Scene) -> VectorScene {
             wit_types::DrawCommand::TextRun(text_elem) => {
                 elements.push(animathio_core::VectorElement::TextRun(
                     animathio_core::TextElement {
+                        align: match text_elem.align {
+                            wit_types::TextAlignment::Left => animathio_core::TextAlignment::Left,
+                            wit_types::TextAlignment::Center => {
+                                animathio_core::TextAlignment::Center
+                            }
+                            wit_types::TextAlignment::Right => animathio_core::TextAlignment::Right,
+                        },
                         text: text_elem.text,
                         font_size: text_elem.font_size as f64,
                         x: text_elem.x as f64,
@@ -1067,7 +1074,13 @@ fn wit_scene_to_core(scene: wit_types::Scene) -> VectorScene {
         }
     }
 
-    VectorScene { elements }
+    VectorScene {
+        coordinate_space: match scene.coordinate_space {
+            wit_types::CoordinateSpace::Canvas => animathio_core::CoordinateSpace::Canvas,
+            wit_types::CoordinateSpace::Normalized => animathio_core::CoordinateSpace::Normalized,
+        },
+        elements,
+    }
 }
 
 fn wit_verb_to_core(v: wit_types::PathVerb) -> animathio_core::PathVerb {
@@ -1616,6 +1629,7 @@ mod tests {
     #[test]
     fn nan_vector_scene_fails_validation() {
         let wit_scene = wit_types::Scene {
+            coordinate_space: wit_types::CoordinateSpace::Canvas,
             elements: vec![wit_types::DrawCommand::FillPath((
                 vec![wit_types::PathVerb::MoveTo(wit_types::Point {
                     x: f32::NAN,
@@ -1767,3 +1781,6 @@ mod tests {
         assert!(!real.join("key").exists());
     }
 }
+
+#[cfg(feature = "test-support")]
+pub mod test_support;

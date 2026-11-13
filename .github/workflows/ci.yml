@@ -48,7 +48,7 @@ jobs:
         with:
           workspaces: .
       - name: Build plugins
-        if: runner.os == 'Linux'
+        shell: bash
         run: ./scripts/build-plugins.sh
       - name: Build plugin authoring example
         run: cargo build --manifest-path plugins/examples/hello/Cargo.toml --target wasm32-wasip2 --release --locked

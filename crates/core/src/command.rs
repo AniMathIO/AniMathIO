@@ -1,4 +1,3 @@
-use crate::builtin::Color;
 use crate::{
     Animation, Asset, AssetId, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error, FrameRate,
     Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform, Transition,
@@ -102,7 +101,7 @@ pub enum Command {
         /// Output frame rate.
         frame_rate: FrameRate,
         /// Straight-alpha sRGB canvas background.
-        background: Color,
+        background: [u8; 4],
         /// Explicit project duration in ticks; `0` means derive from clips.
         duration: Time,
     },

@@ -175,7 +175,7 @@ impl Guest for LatexPlugin {
         };
         let result = host::typeset_math(&source, math_mode, font_size);
         if result.paths.is_empty() {
-            return Scene { elements: Vec::new() };
+            return Scene { coordinate_space: CoordinateSpace::Canvas, elements: Vec::new() };
         }
 
         let content_width = result.bbox.max_x - result.bbox.min_x;
@@ -215,7 +215,7 @@ impl Guest for LatexPlugin {
             }
         }
 
-        Scene { elements }
+        Scene { coordinate_space: CoordinateSpace::Canvas, elements }
     }
 
     fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {

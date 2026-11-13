@@ -70,8 +70,8 @@ real desktop.** Run every GUI run, bench (`--bench-viewport`) and screenshot thr
 `WAYLAND_DISPLAY`, then tears everything down afterwards:
 
 ```bash
-scripts/virtual-display.sh ./target/release/animathio --bench-viewport
-scripts/virtual-display.sh --screenshot docs/screenshots/editor-main.png 8 ./target/release/animathio
+ANIMATHIO_PLUGIN_DIR=target/plugins scripts/virtual-display.sh ./target/release/animathio --bench-viewport
+ANIMATHIO_PLUGIN_DIR=target/plugins scripts/virtual-display.sh --screenshot docs/screenshots/editor-main.png 8 ./target/release/animathio
 ```
 
 Don't use `spectacle`, `grim` or anything else that captures the user's session.
@@ -99,7 +99,9 @@ and engine resource pool; its optional `gpu` feature adds the Vello/wgpu
 `GpuBackend` used only for editor preview (CPU stays the reference for tests and
 export; `tests/gpu.rs` compares the two and skips without an adapter).
 `animathio-cli` provides headless PNG rendering.
-Text/shapes under `core::builtin` are temporary plugin stand-ins. Video uses a
+Text and shapes are first-party WASM plugins (`org.animathio.text` /
+`org.animathio.shapes`); build them with `scripts/build-plugins.sh` before rendering.
+Schema-1 builtin clips migrate in `format` to plugin clips on load. Video uses a
 labelled checkerboard until a media decoder is integrated. Do not add runtime
 resources to `Project` or store evaluated animation state in the renderer.
 
