@@ -199,10 +199,10 @@ jobs:
             ls "$bundle/Contents/Resources/plugins"/*.amplugin
           }
 
-          # `-acceptlicense` because the bundled license becomes a dmg EULA.
+          # stdin is closed so an unexpected license prompt fails instead of hanging.
           mountroot="$(mktemp -d)"
           hdiutil imageinfo "$dmg" | sed -n 1,20p || true
-          hdiutil attach "$dmg" -nobrowse -readonly -noverify -acceptlicense -mountroot "$mountroot" || { echo "hdiutil attach failed with $?" >&2; exit 1; }
+          hdiutil attach "$dmg" -nobrowse -readonly -noverify -mountroot "$mountroot" < /dev/null || { echo "hdiutil attach failed with $?" >&2; exit 1; }
           find "$mountroot" -maxdepth 2 -print
           trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
           mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
