@@ -1,4 +1,4 @@
-use crate::{Error, Mixer};
+use crate::{BlockGenerator, Error, Mixer, Speed};
 use animathio_core::{Project, TICKS_PER_SECOND, Time, TimeRange};
 use arc_swap::ArcSwap;
 use cpal::{
@@ -29,6 +29,7 @@ pub struct Player {
     mixer: Arc<ArcSwap<Mixer>>,
     project: Arc<ArcSwap<Project>>,
     position: Time,
+    speed: Speed,
     session: Option<Session>,
 }
 impl Player {
@@ -53,6 +54,7 @@ impl Player {
             mixer: Arc::new(ArcSwap::from(mixer)),
             project: Arc::new(ArcSwap::from(project)),
             position: Time(0),
+            speed: Speed::NORMAL,
             session: None,
         })
     }
@@ -114,6 +116,28 @@ impl Player {
         }
         Ok(())
     }
+    /// Change the playback speed. While playing, the session is flushed and
+    /// restarted at the current latency-corrected position, exactly like a seek,
+    /// so the master clock keeps describing what is audible. Forward up to 8x and
+    /// reverse up to 4x are audible (varispeed, pitch follows speed); faster is
+    /// muted but the clock still runs at that speed.
+    pub fn set_speed(&mut self, speed: Speed) -> Result<(), Error> {
+        if speed == self.speed {
+            return Ok(());
+        }
+        let playing = self.session.is_some();
+        self.pause()?;
+        self.speed = speed;
+        if playing {
+            self.play()?;
+        }
+        Ok(())
+    }
+    /// The current playback speed.
+    #[must_use]
+    pub fn speed(&self) -> Speed {
+        self.speed
+    }
     /// Last device-consumed media time minus reported output latency. Monotonic
     /// between explicit seeks; no elapsed wall time is added or extrapolated.
     #[must_use]
@@ -136,21 +160,25 @@ impl Player {
         let rate = mixer.rate();
         let (mut producer, consumer) = RingBuffer::new(BUFFER_FRAMES * channels);
         // Prefill on the control thread so the first callback already has data.
-        let mut cursor = crate::source::sample_bounds(
+        let speed = self.speed;
+        #[allow(clippy::cast_precision_loss)] // Frame positions stay far below 2^53.
+        let start = crate::source::sample_bounds(
             TimeRange {
                 start: self.position,
                 end: self.position,
             },
             rate,
         )?
-        .0;
-        let prefill = mix_block(&mixer, &project, cursor, BUFFER_FRAMES)?;
+        .0 as f64;
+        let mut generator = BlockGenerator::new(speed, channels, start);
+        let prefill = generator.next_block(BUFFER_FRAMES, |first, count| {
+            mix_span(&mixer, &project, first, count)
+        })?;
         for sample in prefill {
             producer
                 .push(sample)
                 .map_err(|e| Error::Playback(e.to_string()))?;
         }
-        cursor += BUFFER_FRAMES;
         let clock = Arc::new(AtomicI64::new(self.position.0));
         let failed = Arc::new(AtomicBool::new(false));
         let stopped = Arc::new(AtomicBool::new(false));
@@ -161,6 +189,7 @@ impl Player {
             submitted: 0,
             rate,
             channels,
+            speed,
         };
         let callback_error = Arc::clone(&failed);
         let stream = self
@@ -198,12 +227,14 @@ impl Player {
                         // at the next boundary without ever tearing a chunk in two.
                         let mixer = mixer.load_full();
                         let project = project.load_full();
-                        for sample in mix_block(&mixer, &project, cursor, BLOCK)? {
+                        let block = generator.next_block(BLOCK, |first, count| {
+                            mix_span(&mixer, &project, first, count)
+                        })?;
+                        for sample in block {
                             producer
                                 .push(sample)
                                 .map_err(|e| Error::Playback(e.to_string()))?;
                         }
-                        cursor += BLOCK;
                     }
                     Ok(())
                 })();
@@ -258,6 +289,21 @@ impl Drop for Session {
 fn playback_error(error: impl std::fmt::Display) -> Error {
     Error::Playback(error.to_string())
 }
+/// Mix `count` timeline frames starting at a possibly negative `first` frame;
+/// frames before the timeline start are silence (reverse shuttle runs into them).
+fn mix_span(mixer: &Mixer, project: &Project, first: i64, count: usize) -> Result<Vec<f32>, Error> {
+    let channels = usize::from(mixer.channels());
+    let skip = usize::try_from(-first.min(0))
+        .map_err(|e| Error::Invalid(e.to_string()))?
+        .min(count);
+    let mut output = vec![0.0_f32; count * channels];
+    if skip < count {
+        let start = usize::try_from(first.max(0)).map_err(|e| Error::Invalid(e.to_string()))?;
+        let block = mix_block(mixer, project, start, count - skip)?;
+        output[skip * channels..].copy_from_slice(&block);
+    }
+    Ok(output)
+}
 fn mix_block(
     mixer: &Mixer,
     project: &Project,
@@ -287,6 +333,7 @@ struct Callback {
     submitted: u64,
     rate: u32,
     channels: usize,
+    speed: Speed,
 }
 impl Callback {
     fn fill<T: SizedSample + FromSample<f32>>(&mut self, output: &mut [T], latency: Duration) {
@@ -294,10 +341,16 @@ impl Callback {
             u64::try_from(latency.as_nanos() * u128::from(self.rate) / 1_000_000_000)
                 .unwrap_or(u64::MAX);
         let audible = self.submitted.saturating_sub(latency_frames);
+        // Signed rational speed keeps the clock exact; reverse counts downwards.
         let ticks = i128::from(self.origin.0)
-            + i128::from(audible) * i128::from(TICKS_PER_SECOND) / i128::from(self.rate);
-        self.clock
-            .fetch_max(i64::try_from(ticks).unwrap_or(i64::MAX), Ordering::Release);
+            + i128::from(audible) * i128::from(TICKS_PER_SECOND) * i128::from(self.speed.num())
+                / (i128::from(self.rate) * i128::from(self.speed.den()));
+        let ticks = i64::try_from(ticks).unwrap_or(if ticks < 0 { i64::MIN } else { i64::MAX });
+        if self.speed.is_reverse() {
+            self.clock.fetch_min(ticks, Ordering::Release);
+        } else {
+            self.clock.fetch_max(ticks, Ordering::Release);
+        }
         for frame in output.chunks_mut(self.channels) {
             if frame.len() == self.channels && self.consumer.slots() >= self.channels {
                 for sample in frame {
@@ -388,6 +441,7 @@ mod tests {
             submitted: 0,
             rate: 48_000,
             channels: 2,
+            speed: Speed::NORMAL,
         };
         let mut data = [0.0_f32; 960];
         let mut previous = 123;
@@ -419,8 +473,65 @@ mod tests {
             submitted: 0,
             rate: 48_000,
             channels: 2,
+            speed: Speed::NORMAL,
         };
         sought.fill(&mut data, Duration::ZERO);
         assert_eq!(clock.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn fake_device_clock_follows_speed_forward_slow_and_reverse() {
+        let run = |speed: Speed, origin: i64| {
+            let (mut producer, consumer) = RingBuffer::new(9600);
+            for _ in 0..9600 {
+                producer.push(0.25).unwrap();
+            }
+            let clock = Arc::new(AtomicI64::new(origin));
+            let mut callback = Callback {
+                consumer,
+                clock: Arc::clone(&clock),
+                origin: Time(origin),
+                submitted: 0,
+                rate: 48_000,
+                channels: 2,
+                speed,
+            };
+            let mut data = [0.0_f32; 960];
+            let mut seen = vec![origin];
+            for _ in 0..5 {
+                callback.fill(&mut data, Duration::ZERO);
+                seen.push(clock.load(Ordering::Acquire));
+            }
+            seen
+        };
+        let second = TICKS_PER_SECOND;
+        // The clock is published at the start of each callback, so the fifth fill
+        // reports four callbacks of 480 device frames: 40 ms of device time.
+        let device = second / 25;
+        let normal = run(Speed::NORMAL, 0);
+        assert_eq!(normal[5], device);
+        let double = run(Speed::whole(2).unwrap(), 0);
+        assert_eq!(double[5], 2 * device);
+        let half = run(Speed::HALF, 0);
+        assert_eq!(half[5], device / 2);
+        let reverse = run(Speed::whole(-4).unwrap(), second);
+        assert_eq!(reverse[5], second - 4 * device);
+        assert!(reverse.windows(2).all(|w| w[1] <= w[0]), "monotonic down");
+        let muted = run(Speed::whole(16).unwrap(), 0);
+        assert_eq!(muted[5], 16 * device);
+    }
+
+    #[test]
+    fn mix_span_pads_frames_before_the_timeline_with_silence() {
+        use crate::{AudioPool, Pcm};
+        let rate = 48_000;
+        let pool = AudioPool::default();
+        let mixer = pool.prepare(rate, 2).unwrap();
+        let _ = Pcm::new(rate, 2, vec![]).unwrap();
+        let project = Project::default();
+        let block = mix_span(&mixer, &project, -3, 5).unwrap();
+        assert_eq!(block.len(), 10);
+        assert!(block.iter().all(|s| *s == 0.0));
+        assert_eq!(mix_span(&mixer, &project, -10, 4).unwrap().len(), 8);
     }
 }

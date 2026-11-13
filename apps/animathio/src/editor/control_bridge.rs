@@ -117,18 +117,27 @@ impl Editor {
                 continue;
             }
             if let Call::Export { params } = call {
-                if self.export_task.is_some() {
+                if self.export_queue.is_busy() {
                     let _ = reply.send(Err(ControlError::Other(
                         "an export is already running".into(),
                     )));
                 } else {
+                    // Control exports show up in the queue like any other job.
+                    let spec = crate::export_queue::JobSpec {
+                        project: self.project.clone(),
+                        assets: self.assets.clone(),
+                        summary: "control request".into(),
+                        params: params.clone(),
+                    };
                     match crate::export_worker::ExportTask::spawn(
-                        self.project.clone(),
-                        self.assets.clone(),
+                        spec.project.clone(),
+                        spec.assets.clone(),
                         params,
                         Some(reply.clone()),
                     ) {
-                        Ok(task) => self.export_task = Some(task),
+                        Ok(task) => {
+                            self.export_queue.adopt_running(&spec, task);
+                        }
                         Err(error) => {
                             let _ = reply.send(Err(ControlError::Other(error)));
                         }
@@ -217,8 +226,8 @@ impl Editor {
                 serde_json::to_value(())?
             }
             Call::PlaybackPlay => {
-                let _ = self.clock.set_rate(1);
-                self.shuttle.0 = 1;
+                let _ = self.clock.set_rate(Speed::NORMAL);
+                self.shuttle = Shuttle(1, false);
                 self.playing = true;
                 if let Err(error) = self.clock.play() {
                     self.error = Some(error);
@@ -227,7 +236,7 @@ impl Editor {
                 serde_json::to_value(())?
             }
             Call::PlaybackPause => {
-                self.shuttle.0 = 0;
+                self.shuttle = Shuttle::default();
                 self.playing = false;
                 if let Err(error) = self.clock.pause() {
                     self.error = Some(error);
@@ -264,7 +273,6 @@ impl Editor {
                 if replace {
                     self.marks = InOut::default();
                     self.shuttle = Shuttle::default();
-                    self.export_options = None;
                     self.path = None;
                     self.selected = None;
                     self.selected_field = None;
@@ -337,7 +345,6 @@ impl Editor {
         let _ = self.clock.pause();
         self.marks = InOut::default();
         self.shuttle = Shuttle::default();
-        self.export_options = None;
         self.project = project;
         self.history = History::default();
         self.assets = Arc::new(assets.into_iter().map(|a| (a.id, a.bytes)).collect());

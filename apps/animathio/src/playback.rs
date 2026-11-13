@@ -1,14 +1,15 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use animathio_audio::{AudioPool, Mixer, Player};
+use animathio_audio::{AudioPool, Mixer, Player, Speed};
 use animathio_core::{Project, Rounding, TICKS_PER_SECOND, Time};
 
 /// The single A/V master clock. The UI thread owns it and asks "which video frame
 /// is due now" once per UI frame; video is never drift-corrected on its own.
 pub(crate) trait Clock {
     fn now(&self) -> Time;
-    fn set_rate(&mut self, _rate: i32) -> Result<(), String> {
+    /// Change the signed playback speed; takes effect immediately, also while playing.
+    fn set_rate(&mut self, _speed: Speed) -> Result<(), String> {
         Ok(())
     }
     fn has_error(&self) -> bool {
@@ -73,6 +74,10 @@ impl Clock for AudioClock {
         self.player.seek(time).map_err(|e| e.to_string())
     }
 
+    fn set_rate(&mut self, speed: Speed) -> Result<(), String> {
+        self.player.set_speed(speed).map_err(|e| e.to_string())
+    }
+
     fn set_project(&mut self, project: Arc<Project>) {
         self.player.set_project(project);
     }
@@ -89,7 +94,7 @@ impl Clock for AudioClock {
 /// Wall-clock fallback used when no audio device is available. It implements the
 /// same trait so the rest of the editor is indifferent to which clock is driving.
 pub(crate) struct MonotonicClock {
-    rate: i32,
+    speed: Speed,
     base: Time,
     playing: bool,
     started: Instant,
@@ -98,7 +103,7 @@ pub(crate) struct MonotonicClock {
 impl MonotonicClock {
     pub(crate) fn new() -> Self {
         Self {
-            rate: 1,
+            speed: Speed::NORMAL,
             base: Time(0),
             playing: false,
             started: Instant::now(),
@@ -107,19 +112,23 @@ impl MonotonicClock {
 }
 
 impl Clock for MonotonicClock {
-    fn set_rate(&mut self, rate: i32) -> Result<(), String> {
+    fn set_rate(&mut self, speed: Speed) -> Result<(), String> {
         self.base = self.now();
         self.started = Instant::now();
-        self.rate = rate;
+        self.speed = speed;
         Ok(())
     }
 
     fn now(&self) -> Time {
         if self.playing {
+            let scaled = i128::from(ticks(self.started.elapsed())) * i128::from(self.speed.num())
+                / i128::from(self.speed.den());
             Time(
-                self.base.0.saturating_add(
-                    ticks(self.started.elapsed()).saturating_mul(i64::from(self.rate)),
-                ),
+                i64::try_from(i128::from(self.base.0) + scaled).unwrap_or(if scaled < 0 {
+                    i64::MIN
+                } else {
+                    i64::MAX
+                }),
             )
         } else {
             self.base
@@ -149,76 +158,12 @@ impl Clock for MonotonicClock {
     }
 }
 
-/// Choose the audio clock, falling back to a monotonic clock with no device.
+/// Choose the audio clock, falling back to a monotonic clock with no device. The
+/// audio clock stays master at every shuttle speed; muted speeds still count.
 pub(crate) fn make_clock(project: &Project, pool: &AudioPool) -> Box<dyn Clock> {
-    let normal: Box<dyn Clock> = match AudioClock::open(project, pool) {
+    match AudioClock::open(project, pool) {
         Ok(clock) => Box::new(clock),
         Err(_) => Box::new(MonotonicClock::new()),
-    };
-    Box::new(RateClock {
-        normal,
-        shuttle: MonotonicClock::new(),
-        rate: 1,
-        playing: false,
-    })
-}
-
-/// Audio remains the master at 1x. Reverse and accelerated shuttle use a silent
-/// signed monotonic clock; switching back seeks audio to the same timeline tick.
-struct RateClock {
-    normal: Box<dyn Clock>,
-    shuttle: MonotonicClock,
-    rate: i32,
-    playing: bool,
-}
-impl Clock for RateClock {
-    fn now(&self) -> Time {
-        if self.rate == 1 {
-            self.normal.now()
-        } else {
-            self.shuttle.now()
-        }
-    }
-    fn set_rate(&mut self, rate: i32) -> Result<(), String> {
-        let time = self.now();
-        self.normal.pause()?;
-        self.shuttle.pause()?;
-        self.rate = rate;
-        self.shuttle.set_rate(rate)?;
-        self.seek(time)?;
-        if self.playing {
-            self.play()?;
-        }
-        Ok(())
-    }
-    fn play(&mut self) -> Result<(), String> {
-        self.playing = true;
-        if self.rate == 1 {
-            self.normal.play()
-        } else {
-            self.shuttle.play()
-        }
-    }
-    fn pause(&mut self) -> Result<(), String> {
-        self.playing = false;
-        self.normal.pause()?;
-        self.shuttle.pause()
-    }
-    fn seek(&mut self, time: Time) -> Result<(), String> {
-        self.normal.seek(time)?;
-        self.shuttle.seek(time)
-    }
-    fn has_error(&self) -> bool {
-        self.rate == 1 && self.normal.has_error()
-    }
-    fn set_project(&mut self, project: Arc<Project>) {
-        self.normal.set_project(project);
-    }
-    fn set_mixer(&mut self, mixer: Arc<Mixer>) {
-        self.normal.set_mixer(mixer);
-    }
-    fn mixer_format(&self) -> Option<(u32, u16)> {
-        self.normal.mixer_format()
     }
 }
 
@@ -267,6 +212,24 @@ mod tests {
         assert_eq!(due_frame(&project, Time(0)), Some(Time(0)));
         assert_eq!(due_frame(&project, first), Some(first));
         assert_eq!(due_frame(&project, Time(first.0 - 1)), Some(Time(0)));
+    }
+
+    #[test]
+    fn monotonic_clock_runs_backwards_and_at_fractional_speed() {
+        let mut clock = MonotonicClock::new();
+        clock.seek(Time(TICKS_PER_SECOND * 10)).unwrap();
+        clock.set_rate(Speed::whole(-2).unwrap()).unwrap();
+        clock.play().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let back = clock.now();
+        assert!(back.0 < TICKS_PER_SECOND * 10, "{back:?}");
+        clock.pause().unwrap();
+        clock.set_rate(Speed::HALF).unwrap();
+        clock.seek(Time(0)).unwrap();
+        clock.play().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let forward = clock.now().0;
+        assert!(forward > 0 && forward < TICKS_PER_SECOND / 20, "{forward}");
     }
 
     #[test]

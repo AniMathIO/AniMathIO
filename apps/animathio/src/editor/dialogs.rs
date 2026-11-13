@@ -40,18 +40,15 @@ fn footer(
         )
 }
 
-#[derive(Clone)]
-pub(super) struct ExportOptions {
-    preset: Option<ExportPreset>,
-    range: TimeRange,
+/// Outcome of submitting the Export dialog.
+enum Submitted {
+    Invalid,
+    Queued,
+    ConfirmOverwrite,
 }
 
 impl Editor {
     pub(super) fn open_export_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.export_task.is_some() {
-            self.open_export_status(window, cx);
-            return;
-        }
         let duration = animathio_export::duration(&self.project).0;
         if duration <= 0 {
             self.error = Some("Add content before exporting".into());
@@ -83,23 +80,45 @@ impl Editor {
             cx,
         );
         let output = input(
-            self.preferences
-                .export_folder
-                .join("video.mp4")
-                .to_string_lossy()
-                .into_owned(),
+            self.next_export_path().to_string_lossy().into_owned(),
             window,
             cx,
         );
         let editor = cx.entity();
         window.open_dialog(cx, move |dialog, _, _| {
             let path_input = output.clone();
-            let editor = editor.clone();
-            let preset_submit = preset.clone();
-            let range_submit = range.clone();
-            let from_submit = from.clone();
-            let to_submit = to.clone();
-            let output_submit = output.clone();
+            let submit = {
+                let (editor, preset, range, from, to, output) = (
+                    editor.clone(),
+                    preset.clone(),
+                    range.clone(),
+                    from.clone(),
+                    to.clone(),
+                    output.clone(),
+                );
+                std::rc::Rc::new(move |front: bool, window: &mut Window, cx: &mut App| {
+                    let preset_name = selected(&preset, cx);
+                    let preset = ExportPreset::ALL
+                        .into_iter()
+                        .find(|p| p.name() == preset_name);
+                    let choice = selected(&range, cx);
+                    let from = timecode::parse_timecode(&from.read(cx).value(), rate);
+                    let to = timecode::parse_timecode(&to.read(cx).value(), rate);
+                    let output = PathBuf::from(output.read(cx).value().trim());
+                    let outcome = editor.update(cx, |this, cx| {
+                        this.submit_export(preset, &choice, from, to, output, front, cx)
+                    });
+                    match outcome {
+                        Submitted::Invalid => {}
+                        Submitted::Queued => window.close_dialog(cx),
+                        Submitted::ConfirmOverwrite => {
+                            window.close_dialog(cx);
+                            editor.update(cx, |this, cx| this.open_overwrite_dialog(window, cx));
+                        }
+                    }
+                })
+            };
+            let (queue_submit, now_submit) = (submit.clone(), submit);
             dialog
                 .title("Export video")
                 .width(px(520.))
@@ -138,121 +157,241 @@ impl Editor {
                         .child(field("Custom start (HH:MM:SS:FF)", Input::new(&from)))
                         .child(field("Custom end, exclusive", Input::new(&to))),
                 )
-                .footer(footer("Export", move |_, window, cx| {
-                    let preset_name = selected(&preset_submit, cx);
-                    let preset = ExportPreset::ALL
-                        .into_iter()
-                        .find(|p| p.name() == preset_name);
-                    let choice = selected(&range_submit, cx);
-                    let from = timecode::parse_timecode(&from_submit.read(cx).value(), rate);
-                    let to = timecode::parse_timecode(&to_submit.read(cx).value(), rate);
-                    let output = PathBuf::from(output_submit.read(cx).value().trim());
-                    let valid = editor.update(cx, |this, cx| {
-                        let duration = animathio_export::duration(&this.project).0;
-                        let range = match choice.as_str() {
-                            "In/out" => this.marks.range(duration),
-                            "Custom" => from
-                                .zip(to)
-                                .and_then(|(from, to)| TimeRange::new(from, to).ok())
-                                .filter(|r| {
-                                    r.start < r.end && r.start.0 >= 0 && r.end.0 <= duration
-                                }),
-                            _ => TimeRange::new(Time(0), Time(duration)).ok(),
-                        };
-                        let Some(range) = range else {
-                            this.error = Some("Choose a nonempty range within the project".into());
-                            cx.notify();
-                            return false;
-                        };
-                        if output.as_os_str().is_empty() || output.file_name().is_none() {
-                            this.error = Some("Choose an output file".into());
-                            cx.notify();
-                            return false;
-                        }
-                        this.export_options = Some(ExportOptions { preset, range });
-                        if output.exists() {
-                            this.confirm_overwrite = Some(output);
-                        } else {
-                            this.start_export(output, false, cx);
-                        }
-                        cx.notify();
-                        true
-                    });
-                    if valid {
-                        window.close_dialog(cx);
-                        editor.update(cx, |this, cx| this.open_export_status(window, cx));
-                    }
-                }))
+                .footer(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .justify_end()
+                        .child(
+                            Button::new("dialog-cancel")
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("export-add-to-queue")
+                                .icon(icons::icon(IconName::ListVideo))
+                                .label("Add to queue")
+                                .on_click(move |_, window, cx| queue_submit(false, window, cx)),
+                        )
+                        .child(
+                            Button::new("export-now")
+                                .primary()
+                                .icon(icons::icon(IconName::Upload))
+                                .label("Export now")
+                                .on_click(move |_, window, cx| now_submit(true, window, cx)),
+                        ),
+                )
         });
     }
 
-    fn open_export_status(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let title = if self.export_task.is_some() {
-            "Exporting video"
-        } else {
-            "Export video"
+    /// A free `video.mp4`, `video-2.mp4`, ... in the default export folder, so
+    /// repeated queueing does not collide with earlier jobs or files.
+    fn next_export_path(&self) -> PathBuf {
+        let folder = &self.preferences.export_folder;
+        let candidate = |n: u32| {
+            if n == 1 {
+                folder.join("video.mp4")
+            } else {
+                folder.join(format!("video-{n}.mp4"))
+            }
         };
+        (1..=9999)
+            .map(candidate)
+            .find(|path| !path.exists() && !self.export_queue.targets(path))
+            .unwrap_or_else(|| candidate(1))
+    }
+
+    #[allow(clippy::too_many_arguments)] // Dialog fields, passed straight through.
+    fn submit_export(
+        &mut self,
+        preset: Option<ExportPreset>,
+        choice: &str,
+        from: Option<Time>,
+        to: Option<Time>,
+        output: PathBuf,
+        front: bool,
+        cx: &mut Context<Self>,
+    ) -> Submitted {
+        let duration = animathio_export::duration(&self.project).0;
+        let range = match choice {
+            "In/out" => self.marks.range(duration),
+            "Custom" => from
+                .zip(to)
+                .and_then(|(from, to)| TimeRange::new(from, to).ok())
+                .filter(|r| r.start < r.end && r.start.0 >= 0 && r.end.0 <= duration),
+            _ => TimeRange::new(Time(0), Time(duration)).ok(),
+        };
+        let Some(range) = range else {
+            self.error = Some("Choose a nonempty range within the project".into());
+            cx.notify();
+            return Submitted::Invalid;
+        };
+        if output.as_os_str().is_empty() || output.file_name().is_none() {
+            self.error = Some("Choose an output file".into());
+            cx.notify();
+            return Submitted::Invalid;
+        }
+        if self.export_queue.targets(&output) {
+            self.error = Some("That file is already in the export queue".into());
+            cx.notify();
+            return Submitted::Invalid;
+        }
+        let spec = match self.export_spec(output.clone(), preset, range) {
+            Ok(spec) => spec,
+            Err(error) => {
+                self.error = Some(error);
+                cx.notify();
+                return Submitted::Invalid;
+            }
+        };
+        if output.exists() {
+            self.pending_export = Some((spec, front));
+            cx.notify();
+            return Submitted::ConfirmOverwrite;
+        }
+        self.enqueue_export(spec, front, cx);
+        Submitted::Queued
+    }
+
+    /// Snapshot the project (with the preset applied) into a queueable job.
+    /// Later edits and delivery presets never touch the open project.
+    fn export_spec(
+        &self,
+        output: PathBuf,
+        preset: Option<ExportPreset>,
+        range: TimeRange,
+    ) -> Result<crate::export_queue::JobSpec, String> {
+        let mut project = self.project.clone();
+        let mut settings = animathio_export::Settings::default();
+        if let Some(preset) = preset {
+            preset
+                .command(&project)
+                .and_then(|command| command.apply(&mut project).map_err(ControlError::from))
+                .map_err(|error| error.to_string())?;
+            settings = preset.export_settings();
+        }
+        let rate = self.project.frame_rate();
+        let summary = format!(
+            "{}, {} to {}",
+            preset.map_or("Project settings", ExportPreset::name),
+            timecode::format_timecode(range.start, rate),
+            timecode::format_timecode(range.end, rate),
+        );
+        Ok(crate::export_queue::JobSpec {
+            project,
+            assets: self.assets.clone(),
+            params: animathio_control::ExportParams {
+                output,
+                from: range.start,
+                to: Some(range.end),
+                settings,
+                overwrite: false,
+            },
+            summary,
+        })
+    }
+
+    pub(super) fn enqueue_export(
+        &mut self,
+        spec: crate::export_queue::JobSpec,
+        front: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let name = spec
+            .params
+            .output
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        self.export_queue.enqueue(spec, front);
+        self.export_queue_open = true;
+        self.pump_export_queue();
+        if !front {
+            self.notices
+                .push(gpui_component::notification::Notification::info(format!(
+                    "Added {name} to the export queue"
+                )));
+        }
+        cx.notify();
+    }
+
+    /// Poll the queue: collect a finished job, start the next, and turn results
+    /// into toasts. Returns whether anything changed.
+    pub(super) fn pump_export_queue(&mut self) -> bool {
+        use crate::export_queue::Event;
+        let assets_and_spawn = |spec: crate::export_queue::JobSpec| {
+            crate::export_worker::ExportTask::spawn(spec.project, spec.assets, spec.params, None)
+        };
+        let events = self.export_queue.pump(assets_and_spawn);
+        let changed = !events.is_empty();
+        for event in events {
+            let notice = match event {
+                Event::Finished { name, .. } => {
+                    gpui_component::notification::Notification::success(format!("Exported {name}"))
+                }
+                Event::Failed { name, error, .. } => {
+                    gpui_component::notification::Notification::error(format!(
+                        "Export of {name} failed: {error}"
+                    ))
+                }
+                Event::Cancelled { name, .. } => gpui_component::notification::Notification::info(
+                    format!("Export of {name} cancelled"),
+                ),
+            };
+            self.notices.push(notice);
+        }
+        changed
+    }
+
+    /// The "Replace existing file?" step for a job that targets an existing file.
+    fn open_overwrite_dialog(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((spec, _)) = &self.pending_export else {
+            return;
+        };
+        let path = spec.params.output.display().to_string();
         let editor = cx.entity();
         window.open_dialog(cx, move |dialog, _, cx| {
-            let content = editor.update(cx, |this, cx| this.export_dialog(cx));
-            let editor = editor.clone();
+            let (replace, cancel) = (editor.clone(), editor.clone());
             dialog
-                .title(title)
-                .child(content)
+                .title("Replace existing file?")
+                .width(px(480.))
+                .child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(path.clone()),
+                )
                 .on_close(move |_, _, cx| {
-                    editor.update(cx, |this, cx| {
-                        this.confirm_overwrite = None;
+                    cancel.update(cx, |this, cx| {
+                        this.pending_export = None;
                         cx.notify();
                     });
                 })
+                .footer(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .justify_end()
+                        .child(
+                            Button::new("overwrite-cancel")
+                                .label("Cancel")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("overwrite-replace")
+                                .primary()
+                                .label("Replace")
+                                .on_click(move |_, window, cx| {
+                                    replace.update(cx, |this, cx| {
+                                        if let Some((mut spec, front)) = this.pending_export.take()
+                                        {
+                                            spec.params.overwrite = true;
+                                            this.enqueue_export(spec, front, cx);
+                                        }
+                                    });
+                                    window.close_dialog(cx);
+                                }),
+                        ),
+                )
         });
-    }
-
-    pub(super) fn start_export(
-        &mut self,
-        output: PathBuf,
-        overwrite: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self.export_task.is_some() {
-            return;
-        }
-        let mut project = self.project.clone();
-        let mut settings = animathio_export::Settings::default();
-        let range = self
-            .export_options
-            .as_ref()
-            .map(|options| options.range)
-            .or_else(|| self.marks.range(timeline::project_duration(&project)))
-            .unwrap();
-        if let Some(preset) = self
-            .export_options
-            .as_ref()
-            .and_then(|options| options.preset)
-        {
-            match preset
-                .command(&project)
-                .and_then(|command| command.apply(&mut project).map_err(ControlError::from))
-            {
-                Ok(_) => settings = preset.export_settings(),
-                Err(error) => {
-                    self.error = Some(error.to_string());
-                    return;
-                }
-            }
-        }
-        let params = animathio_control::ExportParams {
-            output,
-            from: range.start,
-            to: Some(range.end),
-            settings,
-            overwrite,
-        };
-        match crate::export_worker::ExportTask::spawn(project, self.assets.clone(), params, None) {
-            Ok(task) => self.export_task = Some(task),
-            Err(error) => self.error = Some(error),
-        }
-        cx.notify();
     }
 
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -528,84 +667,5 @@ impl Editor {
                     }
                 }))
         });
-    }
-
-    pub(super) fn export_dialog(&self, cx: &mut Context<Self>) -> Div {
-        use std::sync::atomic::Ordering;
-        let Some(task) = &self.export_task else {
-            let Some(path) = &self.confirm_overwrite else {
-                return div().child("Export finished. See the notification for the result.");
-            };
-            return div()
-                .w_full()
-                .p_3()
-                .bg(cx.theme().popover)
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child("Replace existing file?")
-                .child(
-                    div()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(path.display().to_string()),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .gap_2()
-                        .child(button(
-                            "confirm-overwrite",
-                            "Replace",
-                            cx.listener(|this, _: &ClickEvent, _, cx| {
-                                if let Some(path) = this.confirm_overwrite.take() {
-                                    this.start_export(path, true, cx);
-                                }
-                                cx.notify();
-                            }),
-                        ))
-                        .child(button(
-                            "cancel-overwrite",
-                            "Cancel",
-                            cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.confirm_overwrite = None;
-                                cx.notify();
-                            }),
-                        )),
-                );
-        };
-        let completed = task.completed.load(Ordering::Relaxed);
-        let total = task.total.load(Ordering::Relaxed);
-        let percent = if total == 0 {
-            0.0
-        } else {
-            100.0 * completed as f32 / total as f32
-        };
-        div()
-            .w_full()
-            .p_3()
-            .bg(cx.theme().popover)
-            .border_1()
-            .border_color(cx.theme().border)
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child("Exporting MP4")
-            .child(format!("{completed} / {total} frames"))
-            .child(
-                gpui_component::progress::Progress::new("export-progress")
-                    .value(percent)
-                    .loading(total == 0),
-            )
-            .child(button(
-                "cancel-export",
-                "Cancel",
-                cx.listener(|this, _: &ClickEvent, _, cx| {
-                    if let Some(task) = &this.export_task {
-                        task.cancel.store(true, Ordering::Relaxed);
-                    }
-                    cx.notify();
-                }),
-            ))
     }
 }

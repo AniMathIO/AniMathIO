@@ -11,11 +11,7 @@ impl Editor {
     pub(super) fn refresh_menus(&mut self, cx: &mut Context<Self>) {
         let signature = format!(
             "{:?}/{:?}/{:?}/{:?}/{}",
-            self.recent.paths,
-            self.selected,
-            self.dock,
-            self.preview.gpu,
-            self.export_task.is_some()
+            self.recent.paths, self.selected, self.dock, self.preview.gpu, self.export_queue_open
         );
         if self.menu_signature == signature {
             return;
@@ -56,6 +52,7 @@ impl Editor {
                 MenuItem::action("Inspector", ToggleInspector).checked(self.dock.right_open),
                 MenuItem::action("Timeline", ToggleTimeline).checked(self.dock.bottom_open),
                 MenuItem::separator(),
+                MenuItem::action("Export queue", ToggleExportQueue).checked(self.export_queue_open),
                 MenuItem::action("GPU preview", ToggleGpuPreview).checked(self.preview.gpu),
                 MenuItem::action("Zoom to fit", ZoomToFit),
             ]),
@@ -279,7 +276,7 @@ impl Editor {
     }
 
     /// Persistent project summary; transient results are notifications.
-    pub(super) fn status_line(&self, cx: &App) -> StatusBar {
+    pub(super) fn status_line(&self, cx: &mut Context<Self>) -> StatusBar {
         let (width, height) = project_size(&self.project);
         let duration = timecode::format_timecode(
             Time(timeline::project_duration(&self.project)),
@@ -295,6 +292,7 @@ impl Editor {
                     .font_family(cx.theme().mono_font_family.clone())
                     .child(duration),
             )
+            .right(self.export_queue_button(cx))
             .right(
                 div()
                     .text_color(cx.theme().muted_foreground)

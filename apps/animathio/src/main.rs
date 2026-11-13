@@ -18,6 +18,7 @@
 mod control;
 mod editing;
 mod editor;
+mod export_queue;
 mod export_worker;
 mod fades;
 mod glyph_guard;

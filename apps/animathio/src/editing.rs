@@ -11,16 +11,48 @@ pub(crate) enum Tool {
     Hand,
 }
 
+/// J/K/L shuttle state: the whole-number rate (negative is reverse) plus a flag
+/// for the half-speed K+J/K+L slow jog. J/L doubles up to 16x; audio follows up to
+/// 8x forward and 4x reverse (see `animathio_audio::Speed::is_audible`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Shuttle(pub(crate) i32);
+pub(crate) struct Shuttle(pub(crate) i32, pub(crate) bool);
 impl Shuttle {
     pub(crate) fn press(&mut self, direction: i32) -> i32 {
-        self.0 = if self.0.signum() == direction {
+        self.0 = if self.0.signum() == direction && !self.1 {
             (self.0 * 2).clamp(-16, 16)
         } else {
             direction
         };
+        self.1 = false;
         self.0
+    }
+    /// K+J / K+L: half-speed jog in `direction`.
+    pub(crate) fn jog(&mut self, direction: i32) {
+        self.0 = direction;
+        self.1 = true;
+    }
+    /// The playback speed this state asks the clock for.
+    pub(crate) fn speed(self) -> animathio_audio::Speed {
+        if self.1 {
+            animathio_audio::Speed::new(self.0.signum(), 2)
+        } else {
+            animathio_audio::Speed::whole(if self.0 == 0 { 1 } else { self.0 })
+        }
+        .unwrap_or_default()
+    }
+    /// Short transport label such as `2x`, `-4x (muted)` or `0.5x`.
+    pub(crate) fn label(self) -> String {
+        let speed = self.speed();
+        let value = if self.1 {
+            format!("{}0.5x", if self.0 < 0 { "-" } else { "" })
+        } else {
+            format!("{}x", self.0)
+        };
+        if speed.is_audible() {
+            value
+        } else {
+            format!("{value} (muted)")
+        }
     }
 }
 
@@ -295,6 +327,31 @@ mod tests {
         assert_eq!(shuttle.press(-1), -2);
         shuttle.0 = 0;
         assert_eq!(shuttle.press(-1), -1);
+    }
+    #[test]
+    fn shuttle_jog_is_half_speed_and_labels_muted_rates() {
+        let mut shuttle = Shuttle::default();
+        shuttle.jog(-1);
+        assert_eq!(shuttle.speed(), animathio_audio::Speed::HALF_REVERSE);
+        assert_eq!(shuttle.label(), "-0.5x");
+        // The next plain press leaves jog mode instead of doubling.
+        assert_eq!(shuttle.press(-1), -1);
+        assert_eq!(shuttle.speed().as_f64(), -1.0);
+        let mut shuttle = Shuttle::default();
+        let labels: Vec<_> = (0..5)
+            .map(|_| {
+                shuttle.press(1);
+                shuttle.label()
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            ["1x", "2x", "4x", "8x", "16x (muted)"].map(String::from)
+        );
+        shuttle.0 = -4;
+        assert_eq!(shuttle.label(), "-4x");
+        shuttle.0 = -8;
+        assert_eq!(shuttle.label(), "-8x (muted)");
     }
     #[test]
     fn marks_partial_reversed_and_out_of_bounds() {

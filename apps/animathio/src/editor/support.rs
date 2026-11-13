@@ -2,18 +2,6 @@
 
 use super::*;
 
-pub(super) fn button(
-    id: &'static str,
-    label: impl Into<SharedString>,
-    listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Button {
-    Button::new(id)
-        .secondary()
-        .compact()
-        .label(label)
-        .on_click(listener)
-}
-
 /// An icon-only button with a tooltip, using a Lucide (or bundled) SVG.
 pub(super) fn icon_button(
     id: &'static str,

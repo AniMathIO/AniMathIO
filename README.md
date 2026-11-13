@@ -92,8 +92,10 @@ Shift+Z for Undo/Redo. In the timeline, Ctrl/Cmd+B splits at the playhead and De
 removes the selection; Shift+Delete ripple-deletes it (or the in/out range across
 all tracks when no clip is selected). Space, Left/Right, Up/Down
 and Home/End control playback, frame stepping, edit-point stepping and project bounds.
-J/K/L shuttle backward/stop/forward; repeated J/L doubles the speed up to 16x.
-Reverse and accelerated shuttle are silent; normal 1x playback uses the audio clock.
+J/K/L shuttle backward/stop/forward; repeated J/L doubles the speed up to 16x. Holding K
+while pressing J or L jogs at half speed. Audio follows the shuttle and stays the master
+clock: forward 1x/2x/4x/8x and reverse 1x/2x/4x are audible (varispeed, so pitch follows
+speed); faster rates are muted while video keeps pace.
 
 I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Alt+X clears them. The ruler highlights
 the range; looping uses it and export defaults to it. Select (A), Blade (B), Ripple
@@ -105,7 +107,10 @@ yellow line. Ctrl/Cmd+plus/minus zooms and Shift+Z fits the timeline.
 Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
 `youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square` presets (30 fps, CRF 18).
 Presets apply to an export snapshot, keeping project settings unchanged. Existing
-files require confirmation; running exports show progress and can be cancelled.
+files require confirmation. Exports never block the editor: "Add to queue" or "Export now"
+snapshots the project into a job, and the Export queue popover (status bar, View menu) runs
+jobs one at a time with progress, ETA, cancel, show-in-folder/open and error text; toasts
+announce completion or failure.
 File → Project settings edits resolution, rational fps and background. Preferences
 (Ctrl/Cmd+,) saves the preview renderer, autosave interval (0 disables), default export
 folder and density in the application config directory, separately from projects.
