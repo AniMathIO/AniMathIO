@@ -321,7 +321,11 @@ enum ContextMenu {
 enum PoolDrag {
     Asset(AssetId),
     Plugin(String),
-    Effect(animathio_core::EffectKind),
+    /// A plugin effect, by plugin id and effect id.
+    Effect {
+        plugin: String,
+        effect: String,
+    },
 }
 
 struct KeyframePaint {

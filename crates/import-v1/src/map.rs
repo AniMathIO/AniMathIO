@@ -9,8 +9,8 @@ use crate::model::{V1Animation, V1Effect, V1Element, V1Placement, V1Project};
 use crate::{Asset, ImportError, ImportLimits, Report};
 use animathio_core::{
     Asset as CoreAsset, AssetId, Clip, ClipId, ClipKind, Command, EffectId, EffectInstance,
-    EffectKind, FrameRate, Interpolation, Keyframe, Project, TICKS_PER_SECOND, Target, Time,
-    TimeRange, Track, TrackId, Transform, TransformProperty,
+    FrameRate, Interpolation, Keyframe, Project, TICKS_PER_SECOND, Target, Time, TimeRange, Track,
+    TrackId, Transform, TransformProperty,
 };
 use animathio_plugin_api::sources::Color;
 use base64::Engine;
@@ -541,11 +541,11 @@ fn element_effects(
     };
     let name = effect.kind.as_str();
     let kind = match name {
-        "blackAndWhite" => EffectKind::Grayscale,
-        "sepia" => EffectKind::Sepia,
-        "invert" => EffectKind::Invert,
+        "blackAndWhite" => "grayscale",
+        "sepia" => "sepia",
+        "invert" => "invert",
         // v1's preset is `saturate(200%)`, so the multiplier is 2, not 1.
-        "saturate" => EffectKind::Saturate,
+        "saturate" => "saturate",
         "none" => return Vec::new(),
         other => {
             report.warn(format!(
@@ -554,8 +554,8 @@ fn element_effects(
             return Vec::new();
         }
     };
-    let mut instance = EffectInstance::new(EffectId(1), kind);
-    if kind == EffectKind::Saturate {
+    let mut instance = EffectInstance::basic(EffectId(1), kind);
+    if kind == "saturate" {
         instance.params.insert("amount".to_owned(), 2.0);
     }
     vec![instance]

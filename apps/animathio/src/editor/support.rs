@@ -971,20 +971,6 @@ pub(super) fn asset_kind_label(media_type: &str) -> &'static str {
     }
 }
 
-/// Every built-in effect, in a stable order for menus and tabs.
-pub(super) fn effect_kinds() -> [animathio_core::EffectKind; 8] {
-    [
-        animathio_core::EffectKind::Grayscale,
-        animathio_core::EffectKind::Sepia,
-        animathio_core::EffectKind::Invert,
-        animathio_core::EffectKind::Saturate,
-        animathio_core::EffectKind::Brightness,
-        animathio_core::EffectKind::Contrast,
-        animathio_core::EffectKind::Blur,
-        animathio_core::EffectKind::Opacity,
-    ]
-}
-
 /// A themed context-menu item.
 pub(super) fn context_item(
     icon: IconName,
@@ -1005,20 +991,6 @@ pub(super) fn context_item(
         .child(label.to_owned())
         .id(SharedString::from(format!("context-item-{label}")))
         .on_click(listener)
-}
-
-/// Human-readable effect name for the effects tab and inspector.
-pub(super) fn effect_label(kind: animathio_core::EffectKind) -> &'static str {
-    match kind {
-        animathio_core::EffectKind::Grayscale => "Grayscale",
-        animathio_core::EffectKind::Sepia => "Sepia",
-        animathio_core::EffectKind::Invert => "Invert",
-        animathio_core::EffectKind::Saturate => "Saturate",
-        animathio_core::EffectKind::Brightness => "Brightness",
-        animathio_core::EffectKind::Contrast => "Contrast",
-        animathio_core::EffectKind::Blur => "Blur",
-        animathio_core::EffectKind::Opacity => "Opacity",
-    }
 }
 
 /// Dim placeholder text used for empty panels and unloaded viewports.

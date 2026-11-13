@@ -102,6 +102,19 @@ pub trait ControlHandler {
         Ok(())
     }
 
+    /// List the filters provided by loaded effect plugins.
+    fn effects_list(&mut self) -> Result<Vec<crate::EffectInfo>, ControlError> {
+        from_value(self.handle(Call::EffectsList)?)
+    }
+
+    /// Add a plugin effect to a clip.
+    fn effects_add(
+        &mut self,
+        params: crate::EffectAddParams,
+    ) -> Result<crate::EffectAdded, ControlError> {
+        from_value(self.handle(Call::EffectsAdd { params })?)
+    }
+
     /// Add a LaTeX plugin clip.
     fn math_add(&mut self, params: MathAddParams) -> Result<ClipAdded, ControlError> {
         from_value(self.handle(Call::MathAdd { params })?)

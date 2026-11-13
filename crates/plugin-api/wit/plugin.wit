@@ -1,4 +1,4 @@
-package animathio:plugin@0.2.0;
+package animathio:plugin@0.2.1;
 
 /// Shared data types for vector graphics, parameter schemas and plugin manifests.
 interface types {
@@ -218,6 +218,51 @@ interface host {
     log: func(message: string);
 }
 
+/// Pixel-filter effects, added in API 0.2.1.
+///
+/// A frame effect receives one straight-alpha sRGB RGBA8 frame and returns a
+/// frame of the same size. The host enforces size, fuel, wall-clock and memory
+/// limits on every call; see `SandboxLimits` in `plugin-host`.
+interface frame-effects {
+    use types.{size, param-map, param-spec};
+
+    /// One filter offered by an effect plugin.
+    record effect-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`), stored in projects.
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Numeric parameters with range, default and step. Only `number` kinds are
+        /// supported; effect parameters are keyframeable numbers.
+        params: list<param-spec>,
+    }
+
+    /// List the filters this plugin provides.
+    list-effects: func() -> list<effect-descriptor>;
+
+    /// Apply filter `effect` to `pixels`: `size.width * size.height * 4` bytes of
+    /// row-major straight-alpha sRGB RGBA8. Must return exactly the same number
+    /// of bytes. `time-ticks` is the clip-local source time. The call is a pure
+    /// function of its arguments. Returns a diagnostic string on invalid input.
+    apply-frame: func(effect: string, pixels: list<u8>, size: size, params: param-map, time-ticks: s64) -> result<list<u8>, string>;
+}
+
+/// World for effect plugins (`kinds = ["effect"]`): describe plus pixel filters.
+/// Components for this world need no clip-source or animation exports.
+world effect-plugin {
+    import host;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The pixel filters themselves.
+    export frame-effects;
+}
+
 /// WebAssembly Component interface exported by AniMathIO plugins.
 world plugin {
     import host;
@@ -230,7 +275,8 @@ world plugin {
     /// Render a vector scene for a clip-source plugin at a given time and canvas size.
     export render-clip: func(params: param-map, time-ticks: s64, size: size) -> scene;
 
-    /// Apply a visual effect to an input scene.
+    /// Reserved vector-scene effect hook (unused by the host; pixel effects use
+    /// the `effect-plugin` world). Kept so 0.2.0 components stay valid.
     export apply-effect: func(input: scene, params: param-map, time-ticks: s64, size: size) -> scene;
 
     /// Evaluate an animation value curve at a given time.

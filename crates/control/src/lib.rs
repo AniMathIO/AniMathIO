@@ -13,6 +13,7 @@
 mod authoring;
 mod client;
 mod edit;
+mod effects;
 mod error;
 mod export_presets;
 mod handler;
@@ -27,6 +28,9 @@ pub use client::ControlClient;
 pub use edit::{
     TitleStyle, TrimSilenceParams, TrimSilenceResult, content_end, describe_timeline,
     detect_silence, timecode, title_command, trim_silence,
+};
+pub use effects::{
+    EffectAddParams, EffectAdded, EffectInfo, EffectParamInfo, add_effect_command, effect_infos,
 };
 pub use error::ControlError;
 pub use export_presets::ExportPreset;

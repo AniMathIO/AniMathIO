@@ -127,3 +127,56 @@ pub(super) fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value,
     value["schemaVersion"] = serde_json::json!(2);
     Ok(value)
 }
+
+/// Schema 2 stored effects as `{"id", "kind": "Grayscale", "params"}` with a closed enum of
+/// builtin filters. Schema 3 names a plugin and a filter id instead; the former builtins now
+/// live in `org.animathio.effects-basic` under lower-case ids, with identical parameter names.
+pub(super) fn migrate_effects(mut value: serde_json::Value) -> Result<serde_json::Value, Error> {
+    if let Some(tracks) = value
+        .get_mut("tracks")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for track in tracks {
+            let Some(clips) = track
+                .get_mut("clips")
+                .and_then(serde_json::Value::as_object_mut)
+            else {
+                continue;
+            };
+            for clip in clips.values_mut() {
+                let Some(effects) = clip
+                    .get_mut("effects")
+                    .and_then(serde_json::Value::as_array_mut)
+                else {
+                    continue;
+                };
+                for effect in effects {
+                    let object = effect
+                        .as_object_mut()
+                        .ok_or_else(|| invalid("effect must be an object"))?;
+                    let kind = object
+                        .remove("kind")
+                        .ok_or_else(|| invalid("schema-2 effect has no kind"))?;
+                    let id = match kind.as_str() {
+                        Some("Grayscale") => "grayscale",
+                        Some("Sepia") => "sepia",
+                        Some("Invert") => "invert",
+                        Some("Saturate") => "saturate",
+                        Some("Brightness") => "brightness",
+                        Some("Contrast") => "contrast",
+                        Some("Blur") => "blur",
+                        Some("Opacity") => "opacity",
+                        _ => return Err(invalid("unknown builtin effect kind")),
+                    };
+                    object.insert(
+                        "plugin".to_owned(),
+                        serde_json::json!(animathio_core::BASIC_EFFECTS_PLUGIN),
+                    );
+                    object.insert("effect".to_owned(), serde_json::json!(id));
+                }
+            }
+        }
+    }
+    value["schemaVersion"] = serde_json::json!(3);
+    Ok(value)
+}

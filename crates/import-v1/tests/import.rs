@@ -9,8 +9,7 @@
 )]
 
 use animathio_core::{
-    AssetId, ClipKind, EffectId, EffectInstance, EffectKind, FrameRate, Project, TICKS_PER_SECOND,
-    Time,
+    AssetId, ClipKind, EffectId, EffectInstance, FrameRate, Project, TICKS_PER_SECOND, Time,
 };
 use animathio_import_v1::{
     ImportError, ImportLimits, import_v1, import_v1_with_limits, import_v1_with_report,
@@ -229,7 +228,7 @@ fn imports_every_element_type_and_maps_values() {
     );
     assert_eq!(
         video_clip.effects,
-        vec![EffectInstance::new(EffectId(1), EffectKind::Sepia)]
+        vec![EffectInstance::basic(EffectId(1), "sepia")]
     );
     assert_eq!(video_clip.transform.x, 0.125);
     assert_eq!(video_clip.transform.y, 100.0 / 600.0 / 2.0);
@@ -270,7 +269,7 @@ fn imports_every_element_type_and_maps_values() {
     assert_eq!(image_clip.kind, ClipKind::Image(png_asset.clone()));
     assert_eq!(
         image_clip.effects,
-        vec![EffectInstance::new(EffectId(1), EffectKind::Grayscale)]
+        vec![EffectInstance::basic(EffectId(1), "grayscale")]
     );
     assert!(image_clip.animations.iter().any(|a| matches!(
         a.target,
@@ -292,7 +291,7 @@ fn imports_every_element_type_and_maps_values() {
     );
     assert_eq!(
         mafs_clip.effects,
-        vec![EffectInstance::new(EffectId(1), EffectKind::Invert)]
+        vec![EffectInstance::basic(EffectId(1), "invert")]
     );
 
     // Media types come from the data URLs.

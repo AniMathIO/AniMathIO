@@ -284,7 +284,7 @@ fn schema_one_builtins_migrate_through_json_and_amio() {
     let mut current = Vec::new();
     write_json(&mut current, &project).unwrap();
     let current: serde_json::Value = serde_json::from_slice(&current).unwrap();
-    assert_eq!(current["schemaVersion"], 2);
+    assert_eq!(current["schemaVersion"], SCHEMA_VERSION);
     for (old, new) in original["tracks"]
         .as_array()
         .unwrap()
@@ -342,4 +342,64 @@ fn schema_one_migration_rejects_invalid_legacy_sources() {
         clip["kind"] = json!({"Builtin": source});
         assert!(read_json(serde_json::to_vec(&bad).unwrap().as_slice()).is_err());
     }
+}
+
+#[test]
+fn schema_two_builtin_effects_migrate_to_the_effects_plugin() {
+    let fixture = include_bytes!("fixtures/v2-effects.json");
+    let project = read_json(fixture.as_slice()).unwrap();
+    let archived = read_amio(archive(&[("project.json", fixture)]), Limits::default()).unwrap();
+    assert_eq!(archived.project, project);
+
+    let clip = &project.tracks()[0].clips()[&ClipId(1)];
+    let migrated: Vec<_> = clip
+        .effects
+        .iter()
+        .map(|effect| (effect.plugin.as_str(), effect.effect.as_str()))
+        .collect();
+    assert_eq!(
+        migrated,
+        [
+            "grayscale",
+            "sepia",
+            "invert",
+            "saturate",
+            "brightness",
+            "contrast",
+            "blur",
+            "opacity"
+        ]
+        .map(|id| ("org.animathio.effects-basic", id))
+    );
+    // Parameters and ids carry over unchanged, including the keyframed target.
+    assert_eq!(clip.effects[3].params["amount"], 2.0);
+    assert_eq!(clip.effects[6].params["radius"], 0.02);
+    assert_eq!(clip.animations.len(), 1);
+    assert_eq!(
+        clip.animations[0].target,
+        Target::Effect {
+            effect: EffectId(1),
+            param: "amount".into()
+        }
+    );
+
+    // Rewriting produces the current schema, which reads back identically.
+    let mut current = Vec::new();
+    write_json(&mut current, &project).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&current).unwrap();
+    assert_eq!(value["schemaVersion"], SCHEMA_VERSION);
+    assert!(
+        !String::from_utf8(current.clone())
+            .unwrap()
+            .contains("\"kind\": \"Grayscale\"")
+    );
+    assert_eq!(read_json(current.as_slice()).unwrap(), project);
+}
+
+#[test]
+fn schema_two_migration_rejects_unknown_builtin_effects() {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(include_bytes!("fixtures/v2-effects.json")).unwrap();
+    value["tracks"][0]["clips"]["1"]["effects"][0]["kind"] = json!("Vignette");
+    assert!(read_json(serde_json::to_vec(&value).unwrap().as_slice()).is_err());
 }

@@ -30,7 +30,7 @@ embedded asset, ≤ 10,000 media entries.
 | `slideIn` / `slideOut` | X/Y keyframes (directions `left`/`right`/`top`/`bottom`) |
 | `breathe` | ScaleX/ScaleY keyframes (bounded by slide-in/out window) |
 | `mafsReveal` | Opacity keyframes as a fallback |
-| Effects (`blackAndWhite`, `sepia`, `invert`, `saturate`) | One `EffectInstance` per clip (`Grayscale`/`Sepia`/`Invert`, and `Saturate` with `amount = 2`), rendered by the builtin CPU effect chain |
+| Effects (`blackAndWhite`, `sepia`, `invert`, `saturate`) | One `EffectInstance` per clip (`grayscale`/`sepia`/`invert`, and `saturate` with `amount = 2`) from the `org.animathio.effects-basic` plugin, run in the plugin sandbox |
 
 v1 stores milliseconds and pixels as `f64`; v2 stores integer ticks and normalized
 canvas fractions. The conversion is exact-but-lossy by design, with bounds checked
@@ -42,8 +42,8 @@ where they matter.
   stored the graph definition, so only a marker (`v1.mafs`) survives for a future
   graph plugin. A warning is emitted.
 - **Unknown effects are ignored** with a warning. The four v1 presets become
-  real, renderable builtin effects (`Grayscale`/`Sepia`/`Invert`, `Saturate` with
-  `amount = 2`).
+  real, renderable plugin effects (`grayscale`/`sepia`/`invert`, `saturate` with
+  `amount = 2`; the plugin must be installed to render them).
 - **Rotation is approximated as center-based.** v1 rotated around the Konva
   top-left corner; the importer warns and uses the element center.
 - **`fontWeight` is dropped** — the v2 text component has no weight

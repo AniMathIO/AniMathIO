@@ -159,10 +159,10 @@ impl Editor {
         match drag {
             PoolDrag::Asset(asset_id) => self.drop_asset(asset_id, track, time, cx),
             PoolDrag::Plugin(plugin_id) => self.drop_plugin(plugin_id, track, time, cx),
-            PoolDrag::Effect(kind) => {
+            PoolDrag::Effect { plugin, effect } => {
                 let hit = timeline::hit_test(&layout, &self.project, x, y);
                 if let Some(clip) = hit.map(|hit| hit.clip).or(self.selected) {
-                    self.add_effect_to_clip(clip, kind, cx);
+                    self.add_effect_to_clip(clip, &plugin, &effect, cx);
                 } else {
                     self.error = Some("drop an effect on a clip".into());
                     cx.notify();
@@ -279,10 +279,27 @@ impl Editor {
         self.execute(&Command::AddClip { track, clip }, cx);
     }
 
-    /// Add a built-in effect to the selected clip's chain.
+    /// Effects offered by the loaded effect plugins, in plugin then listing order.
+    pub(super) fn available_effects(&self) -> Vec<animathio_plugin_host::EffectDescriptor> {
+        self.plugin_host
+            .as_ref()
+            .map(PluginHost::effects)
+            .unwrap_or_default()
+    }
+
+    /// Display name for an effect, falling back to its id when the plugin is not loaded.
+    pub(super) fn effect_label(&self, plugin: &str, effect: &str) -> String {
+        self.available_effects()
+            .into_iter()
+            .find(|e| e.plugin_id == plugin && e.effect_id == effect)
+            .map_or_else(|| effect.to_owned(), |e| e.name)
+    }
+
+    /// Add a plugin effect to the selected clip's chain.
     pub(super) fn add_effect_to_selected(
         &mut self,
-        kind: animathio_core::EffectKind,
+        plugin: &str,
+        effect: &str,
         cx: &mut Context<Self>,
     ) {
         let Some(id) = self.selected else {
@@ -290,19 +307,28 @@ impl Editor {
             cx.notify();
             return;
         };
-        self.add_effect_to_clip(id, kind, cx);
+        self.add_effect_to_clip(id, plugin, effect, cx);
     }
 
-    /// Add a built-in effect to a specific clip's chain.
+    /// Add a plugin effect, with the plugin's default parameters, to a clip's chain.
     pub(super) fn add_effect_to_clip(
         &mut self,
         id: ClipId,
-        kind: animathio_core::EffectKind,
+        plugin: &str,
+        effect: &str,
         cx: &mut Context<Self>,
     ) {
+        let Some(descriptor) = self
+            .available_effects()
+            .into_iter()
+            .find(|e| e.plugin_id == plugin && e.effect_id == effect)
+        else {
+            self.error = Some(format!("effect {plugin}/{effect} is not available"));
+            cx.notify();
+            return;
+        };
         let index = self.find_clip(id).map_or(0, |clip| clip.effects.len());
-        let effect =
-            animathio_core::EffectInstance::new(animathio_core::EffectId(self.next_id), kind);
+        let effect = descriptor.instance(animathio_core::EffectId(self.next_id));
         self.next_id = self.next_id.saturating_add(1);
         self.execute(&Command::AddEffect { id, index, effect }, cx);
     }
@@ -729,17 +755,13 @@ impl Editor {
                 body = body.child(cards);
             }
             LeftTab::Effects => {
-                let kinds = [
-                    animathio_core::EffectKind::Grayscale,
-                    animathio_core::EffectKind::Sepia,
-                    animathio_core::EffectKind::Invert,
-                    animathio_core::EffectKind::Saturate,
-                    animathio_core::EffectKind::Brightness,
-                    animathio_core::EffectKind::Contrast,
-                    animathio_core::EffectKind::Blur,
-                    animathio_core::EffectKind::Opacity,
-                ];
-                for kind in kinds {
+                let effects = self.available_effects();
+                if effects.is_empty() {
+                    body = body.child(empty_state("No effect plugins loaded", cx));
+                }
+                for descriptor in effects {
+                    let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
+                    let (click_plugin, click_effect) = (plugin.clone(), effect.clone());
                     body = body.child(
                         div()
                             .px_2()
@@ -751,15 +773,21 @@ impl Editor {
                             .items_center()
                             .gap_2()
                             .child(icons::icon(IconName::Sparkles).small())
-                            .child(effect_label(kind))
-                            .id("effect-item")
+                            .child(descriptor.name)
+                            .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.add_effect_to_selected(kind, cx);
+                                this.add_effect_to_selected(&click_plugin, &click_effect, cx);
                             }))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                                    this.arm_pool_drag(PoolDrag::Effect(kind), cx);
+                                    this.arm_pool_drag(
+                                        PoolDrag::Effect {
+                                            plugin: plugin.clone(),
+                                            effect: effect.clone(),
+                                        },
+                                        cx,
+                                    );
                                 }),
                             ),
                     );
@@ -860,7 +888,9 @@ impl Editor {
                     .find(|plugin| &plugin.id == id)
                     .map_or_else(|| id.clone(), |plugin| plugin.name.clone()),
             ),
-            PoolDrag::Effect(kind) => (IconName::Sparkles, effect_label(*kind).to_owned()),
+            PoolDrag::Effect { plugin, effect } => {
+                (IconName::Sparkles, self.effect_label(plugin, effect))
+            }
         };
         let over_timeline = self.timeline_bounds.contains(&self.pool_drag_pos);
         Some(

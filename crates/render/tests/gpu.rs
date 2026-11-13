@@ -3,8 +3,8 @@
 #![cfg(feature = "gpu")]
 mod common;
 use animathio_core::{
-    AssetId, ClipId, ClipKind, EffectId, EffectInstance, EffectKind, Rounding, Scene, SceneClip,
-    Time, TrackId, Transform, evaluate,
+    AssetId, ClipId, ClipKind, EffectId, EffectInstance, Rounding, Scene, SceneClip, Time, TrackId,
+    Transform, evaluate,
 };
 use animathio_format::{Bundle, Limits, read_amio, read_json};
 use animathio_render::{CpuBackend, Frame, GpuBackend, PlaceholderFrameSource, RenderCtx};
@@ -54,6 +54,7 @@ fn ctx(assets: &BTreeMap<AssetId, Vec<u8>>, gpu: Option<GpuBackend>) -> RenderCt
     for (id, bytes) in assets {
         ctx.resources.insert(id.clone(), bytes.clone()).unwrap();
     }
+    ctx.set_effect_processor(animathio_plugin_host::test_support::effect_processor());
     ctx
 }
 
@@ -124,7 +125,7 @@ fn gpu_composites_cpu_effect_layers() {
         std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/effects.png"))
             .unwrap();
     let id = AssetId::of(&bytes);
-    let mut effect = EffectInstance::new(EffectId(1), EffectKind::Blur);
+    let mut effect = EffectInstance::basic(EffectId(1), "blur");
     effect.params.insert("radius".to_owned(), 3.0);
     let scene = Scene {
         clips: vec![SceneClip {

@@ -24,7 +24,7 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 2) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 3) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding, mixing, playback (cpal) | ✅ `audio` (prototype limits) |
@@ -35,9 +35,10 @@ Editor and headless engine prototype. What works today:
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
 | Media decoding / video export | ✅ native decoding and offline H.264/AAC MP4 export |
 
-Text and shapes use the bundled WASM components end to end, including CLI renders
-and exports. Build them with `scripts/build-plugins.sh`; schema-1 projects migrate
-automatically to plugin clips when loaded. Effects remain in the renderer.
+Text, shapes and the eight clip effects (grayscale, sepia, invert, saturate, brightness,
+contrast, blur, opacity) use the bundled WASM components end to end, including CLI renders
+and exports. Build them with `scripts/build-plugins.sh`; schema-1 and schema-2 projects
+migrate automatically to plugin clips and plugin effects when loaded.
 
 ## Screenshot
 

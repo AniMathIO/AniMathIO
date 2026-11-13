@@ -36,7 +36,8 @@ build_plugin() {
 import sys, zipfile
 
 name = sys.argv[1]
-wasm = f"target/wasm32-wasip2/release/{name}.wasm"
+# Cargo names the artifact after the library, which swaps hyphens for underscores.
+wasm = f"target/wasm32-wasip2/release/{name.replace('-', '_')}.wasm"
 out = f"target/plugins/{name}.amplugin"
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     z.write(f"plugins/{name}/plugin.toml", "plugin.toml")
@@ -49,3 +50,4 @@ build_plugin shapes
 build_plugin text
 build_plugin latex
 build_plugin graph
+build_plugin effects-basic
