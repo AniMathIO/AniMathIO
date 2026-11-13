@@ -84,7 +84,7 @@ chip, and the drop zone is dashed and lights up while files are dragged over it.
 - **Effect warnings:** a clip whose effect plugin is not loaded, or whose last preview
   frame failed inside an effect, gets an amber warning badge next to its kind icon in
   the timeline, a warning row (icon plus reason) in the inspector Effects section and a
-  toast when the preview first fails.
+  toast when the preview first fails ([screenshot](screenshots/editor-effect-warning.png)).
 - **Filmstrip:** one thumbnail per visible tile, requested per source time, decoded on
   a worker and kept in a 256-tile least-recently-used cache; the worker also keeps
   LRU caches of open decoders and stills and one shared copy of each encoded video. Fades are drawn by
