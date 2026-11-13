@@ -24,7 +24,7 @@ impl Editor {
         self.clock = make_clock(&self.project, &self.pool);
         self.path = None;
         self.dirty = false;
-        self.selected = None;
+        self.clear_selection();
         self.selected_field = None;
         self.selected_keyframe = None;
         self.position = Time(0);
@@ -129,7 +129,7 @@ impl Editor {
                 }
                 self.audio_ids = audio_asset_ids(&self.project);
                 self.clock = make_clock(&self.project, &self.pool);
-                self.selected = None;
+                self.clear_selection();
                 self.selected_field = None;
                 self.position = Time(0);
                 self.playing = false;

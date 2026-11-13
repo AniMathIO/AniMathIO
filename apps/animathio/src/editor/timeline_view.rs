@@ -54,7 +54,7 @@ impl Editor {
             return;
         }
         if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
-            self.selected = Some(clip_id);
+            self.select_only(clip_id);
             self.selected_field = None;
             self.selected_keyframe = None;
             let current = self
@@ -70,7 +70,7 @@ impl Editor {
         }
         if let Some(selection) = self.hit_keyframe(&layout, x, y) {
             let clip = self.find_clip(selection.clip_id).cloned();
-            self.selected = Some(selection.clip_id);
+            self.select_only(selection.clip_id);
             self.selected_field = None;
             self.selected_keyframe = Some(selection.clone());
             if let Some(clip) = clip {
@@ -86,10 +86,13 @@ impl Editor {
             return;
         }
         self.selected_keyframe = None;
-        if let Some((hit, edge)) = timeline::hit_trim_edge(&layout, &self.project, x, y)
+        let secondary = event.modifiers.secondary(cx);
+        let extend = secondary || event.modifiers.shift;
+        if !extend
+            && let Some((hit, edge)) = timeline::hit_trim_edge(&layout, &self.project, x, y)
             && let Some(clip) = self.find_clip(hit.clip).cloned()
         {
-            self.selected = Some(hit.clip);
+            self.select_only(hit.clip);
             self.selected_field = None;
             self.gesture = Some(TimelineGesture::Trim(TrimDrag {
                 clip_id: hit.clip,
@@ -106,28 +109,69 @@ impl Editor {
             cx.notify();
             return;
         }
+        let current = self.selected_ids();
         if let Some(hit) = timeline::hit_test(&layout, &self.project, x, y) {
-            self.selected = Some(hit.clip);
             self.selected_field = None;
-            if let Some(clip) = self.find_clip(hit.clip).cloned() {
-                let grab_offset = timeline::x_to_time(&layout, x).0 - clip.range.start.0;
-                self.gesture = Some(TimelineGesture::Drag(ClipDrag {
-                    clip_id: clip.id,
-                    origin_track: hit.track,
-                    target_track: hit.track,
-                    origin_start: clip.range.start,
-                    duration: clip.range.end.0 - clip.range.start.0,
-                    grab_offset,
-                    current_start: clip.range.start,
-                }));
+            if secondary {
+                let toggled = selection::toggle(&current, hit.clip);
+                let primary = toggled.contains(&hit.clip).then_some(hit.clip);
+                self.set_selection(toggled, primary.or(self.selected));
+            } else if event.modifiers.shift {
+                let anchor = self.selected.unwrap_or(hit.clip);
+                let range = selection::range_select(&self.project, anchor, hit.clip, &current);
+                self.set_selection(range, Some(anchor));
+            } else {
+                // Pressing on a member keeps the group so it can be dragged; a
+                // click that does not move collapses to the clicked clip.
+                let collapse_to =
+                    (current.contains(&hit.clip) && current.len() > 1).then_some(hit.clip);
+                if collapse_to.is_some() {
+                    self.set_selection(current, Some(hit.clip));
+                } else {
+                    self.select_only(hit.clip);
+                }
+                self.begin_clip_drag(&layout, hit, x, collapse_to);
             }
         } else {
-            self.selected = None;
-            self.selected_field = None;
-            self.gesture = Some(TimelineGesture::Scrub);
-            self.scrub_to(x, cx);
+            // Empty track space starts a rubber band. Without a modifier a plain
+            // click (no drag) deselects and moves the playhead, as before.
+            self.gesture = Some(TimelineGesture::Marquee(MarqueeDrag {
+                origin: (x + layout.scroll_x as f32, y),
+                current: (x, y),
+                base: if extend { current } else { BTreeSet::new() },
+                moved: false,
+            }));
         }
         cx.notify();
+    }
+
+    /// Start dragging the (already updated) selection from the clip under the
+    /// pointer.
+    fn begin_clip_drag(
+        &mut self,
+        layout: &TimelineLayout,
+        hit: timeline::ClipHit,
+        x: f32,
+        collapse_to: Option<ClipId>,
+    ) {
+        let Some(clip) = self.find_clip(hit.clip).cloned() else {
+            return;
+        };
+        let members = self.selected_ids();
+        let group_start = selection::earliest_start(&self.project, &members).map_or(0, |t| t.0);
+        let rows = selection::row_span(&self.project, &members).unwrap_or((0, 0));
+        self.gesture = Some(TimelineGesture::Drag(ClipDrag {
+            members,
+            origin_track: hit.track,
+            target_track: hit.track,
+            origin_start: clip.range.start,
+            group_start,
+            rows,
+            row_delta: 0,
+            grab_offset: timeline::x_to_time(layout, x).0 - clip.range.start.0,
+            current_start: clip.range.start,
+            collapse_to,
+        }));
     }
 
     /// The fade handle under a canvas-relative point, for the selected or hovered
@@ -175,7 +219,7 @@ impl Editor {
         y: f32,
     ) -> Option<KeyframeSelection> {
         let selected = self.selected?;
-        if y < layout.ruler_height {
+        if y < layout.ruler_height || self.selected_ids().len() > 1 {
             return None;
         }
         let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
@@ -263,28 +307,59 @@ impl Editor {
                 cx.notify();
             }
             Some(TimelineGesture::Drag(drag)) => {
+                let members: Vec<ClipId> = drag.members.iter().copied().collect();
                 let raw = timeline::drag_start(&layout, drag.grab_offset, x);
-                drag.current_start = if self.snapping {
-                    timeline::snap_start(&layout, &self.project, drag.clip_id, self.position, raw)
+                let snapped = if self.snapping {
+                    timeline::snap_start_among(&layout, &self.project, &members, self.position, raw)
                 } else {
                     raw
                 };
+                // The group stops together at time zero.
+                let floor = drag.origin_start.0 - drag.group_start;
+                drag.current_start = Time(snapped.0.max(floor));
                 self.snap_line = if self.snapping {
-                    timeline::snap_target(
+                    timeline::snap_target_among(
                         &layout,
                         &self.project,
-                        Some(drag.clip_id),
+                        &members,
                         self.position,
                         raw,
                     )
                 } else {
                     None
                 };
-                let max_row = self.project.tracks().len().saturating_sub(1) as f32;
+                let rows = self.project.tracks().len();
+                let origin_row = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .position(|track| track.id() == drag.origin_track)
+                    .unwrap_or(0);
+                let max_row = rows.saturating_sub(1) as f32;
                 let row = ((y - layout.ruler_height) / layout.row_height.max(1.0))
                     .clamp(0.0, max_row) as usize;
-                if let Some(track) = self.project.tracks().get(row) {
-                    drag.target_track = track.id();
+                drag.row_delta = selection::row_delta(origin_row, row, rows, drag.rows);
+                if let Some(track) = selection::track_at(
+                    &self.project,
+                    selection::shifted_row(origin_row, drag.row_delta, rows),
+                ) {
+                    drag.target_track = track;
+                }
+                cx.notify();
+            }
+            Some(TimelineGesture::Marquee(band)) => {
+                band.current = (x, y);
+                let dx = band.current.0 + layout.scroll_x as f32 - band.origin.0;
+                let dy = band.current.1 - band.origin.1;
+                if !band.moved && dx.hypot(dy) > 3.0 {
+                    band.moved = true;
+                }
+                if band.moved {
+                    let origin = (band.origin.0 - layout.scroll_x as f32, band.origin.1);
+                    let mut ids = selection::marquee(&layout, &self.project, origin, (x, y));
+                    ids.extend(band.base.iter().copied());
+                    let primary = self.selected;
+                    self.set_selection(ids, primary);
                 }
                 cx.notify();
             }
@@ -347,7 +422,7 @@ impl Editor {
 
     pub(super) fn on_timeline_mouse_up(
         &mut self,
-        _event: &MouseUpEvent,
+        event: &MouseUpEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -375,27 +450,46 @@ impl Editor {
         }
         match self.gesture.take() {
             Some(TimelineGesture::Drag(drag)) => {
-                if drag.target_track == drag.origin_track && drag.current_start == drag.origin_start
-                {
+                let delta = drag.current_start.0 - drag.origin_start.0;
+                if delta == 0 && drag.row_delta == 0 {
+                    if let Some(id) = drag.collapse_to {
+                        self.select_only(id);
+                    }
                     return;
                 }
-                self.execute(
-                    &Command::MoveClip {
-                        id: drag.clip_id,
-                        track: drag.target_track,
-                        start: drag.current_start,
-                    },
-                    cx,
-                );
+                if let Some(command) =
+                    selection::move_command(&self.project, &drag.members, delta, drag.row_delta)
+                {
+                    self.execute(&command, cx);
+                }
+            }
+            Some(TimelineGesture::Marquee(band)) => {
+                if !band.moved && band.base.is_empty() {
+                    // A plain click on empty space: deselect and park the playhead.
+                    self.clear_selection();
+                    let (x, _) = self.timeline_relative(event.position);
+                    self.scrub_to(x, cx);
+                }
             }
             Some(TimelineGesture::Trim(trim)) => {
-                if let Some(command) = editing::trim_command(
-                    &self.project,
-                    trim.clip_id,
-                    trim.edge,
-                    trim.current,
-                    trim.ripple,
-                ) {
+                let command = if trim.ripple {
+                    ripple::trim_command(
+                        &self.project,
+                        trim.clip_id,
+                        trim.edge,
+                        trim.current,
+                        self.ripple_scope,
+                    )
+                } else {
+                    editing::trim_command(
+                        &self.project,
+                        trim.clip_id,
+                        trim.edge,
+                        trim.current,
+                        false,
+                    )
+                };
+                if let Some(command) = command {
                     self.execute(&command, cx);
                 }
             }
@@ -422,11 +516,17 @@ impl Editor {
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
         if let Some(selection) = self.hit_keyframe(&layout, x, y) {
-            self.selected = Some(selection.clip_id);
+            self.select_only(selection.clip_id);
             self.selected_keyframe = Some(selection.clone());
             self.context_menu = Some(ContextMenu::Keyframe(selection));
         } else if let Some(hit) = timeline::hit_test(&layout, &self.project, x, y) {
-            self.selected = Some(hit.clip);
+            // Right-clicking a member keeps the whole selection for the menu.
+            let current = self.selected_ids();
+            if current.contains(&hit.clip) {
+                self.set_selection(current, Some(hit.clip));
+            } else {
+                self.select_only(hit.clip);
+            }
             self.selected_keyframe = None;
             self.context_menu = Some(ContextMenu::Clip { id: hit.clip });
         } else {
@@ -481,19 +581,43 @@ impl Editor {
         Some(wave)
     }
 
+    /// The rubber band as a canvas-relative `(left, top, right, bottom)` rectangle.
+    fn marquee_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        let Some(TimelineGesture::Marquee(band)) = &self.gesture else {
+            return None;
+        };
+        if !band.moved {
+            return None;
+        }
+        let scroll = self.timeline_scroll;
+        let origin = (band.origin.0 - scroll, band.origin.1);
+        Some((
+            origin.0.min(band.current.0),
+            origin.1.min(band.current.1),
+            origin.0.max(band.current.0),
+            origin.1.max(band.current.1),
+        ))
+    }
+
     pub(super) fn build_timeline_snapshot(&self, cx: &App) -> TimelineSnapshot {
         let duration = timeline::project_duration(&self.project);
         let mut clips = Vec::new();
+        let selected = self.selected_ids();
+        let single = selected.len() <= 1;
+        let rows = self.project.tracks().len();
         let any_solo = self.project.tracks().iter().any(Track::is_solo);
         for (row, track) in self.project.tracks().iter().enumerate() {
             let silenced = track.is_muted() || (any_solo && !track.is_solo());
             for clip in track.clips().values() {
+                let mut paint_row = row;
                 let (start, end) = if let Some(TimelineGesture::Drag(drag)) = &self.gesture
-                    && drag.clip_id == clip.id
+                    && drag.members.contains(&clip.id)
                 {
+                    let delta = drag.current_start.0 - drag.origin_start.0;
+                    paint_row = selection::shifted_row(row, drag.row_delta, rows);
                     (
-                        drag.current_start,
-                        Time(drag.current_start.0 + drag.duration),
+                        Time(clip.range.start.0 + delta),
+                        Time(clip.range.end.0 + delta),
                     )
                 } else if let Some(TimelineGesture::Trim(trim)) = &self.gesture
                     && trim.clip_id == clip.id
@@ -506,7 +630,7 @@ impl Editor {
                     (clip.range.start, clip.range.end)
                 };
                 let mut keyframes = Vec::new();
-                if self.selected == Some(clip.id) {
+                if single && self.selected == Some(clip.id) {
                     for animation in &clip.animations {
                         for local in animation.keys.keys().keys() {
                             let time = if let Some(drag) = &self.keyframe_drag
@@ -548,10 +672,10 @@ impl Editor {
                     _ => None,
                 };
                 clips.push(ClipPaint {
-                    row,
+                    row: paint_row,
                     start,
                     end,
-                    selected: self.selected == Some(clip.id),
+                    selected: selected.contains(&clip.id),
                     hovered: self.hovered_clip == Some(clip.id),
                     label: clip_label(&self.project, clip).into(),
                     kind: clip.kind.clone(),
@@ -575,6 +699,7 @@ impl Editor {
             row_height: self.dock.track_height.pixels(),
             marks: self.marks,
             snap_line: self.snap_line,
+            marquee: self.marquee_rect(),
             theme: cx.theme().clone(),
         }
     }
@@ -586,6 +711,7 @@ impl Editor {
         let weak = cx.entity().downgrade();
         let weak_paint = weak.clone();
         let snapping = self.snapping;
+        let ripple_all = self.ripple_scope == RippleScope::AllTracks;
         let content_height =
             RULER_H + self.project.tracks().len() as f32 * self.dock.track_height.pixels();
         let pool_dragging = self.pool_drag.is_some();
@@ -686,6 +812,22 @@ impl Editor {
                         )
                         .selected(snapping)
                         .toggled(snapping),
+                    )
+                    .child(
+                        icon_button(
+                            "ripple-scope",
+                            icons::icon(if ripple_all {
+                                IconName::Link
+                            } else {
+                                IconName::Unlink
+                            }),
+                            self.ripple_scope.label(),
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.toggle_ripple_scope(cx);
+                            }),
+                        )
+                        .selected(ripple_all)
+                        .toggled(ripple_all),
                     )
                     .children(
                         [
@@ -943,10 +1085,72 @@ impl Editor {
                     .selected(locked)
                     .toggled(locked),
                 );
+            let renaming = self
+                .track_rename
+                .as_ref()
+                .filter(|rename| rename.id == id)
+                .map(|rename| rename.input.clone());
+            let drag = TrackDrag {
+                id,
+                name: name.clone().into(),
+            };
+            let row_index = self
+                .project
+                .tracks()
+                .iter()
+                .position(|track| track.id() == id)
+                .unwrap_or(0);
+            let name_label = if let Some(input) = renaming {
+                div()
+                    .id(("track-rename", id.0))
+                    .w_full()
+                    .h(px(22.))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if event.keystroke.key == "escape" {
+                            this.finish_track_rename(false, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .child(
+                        gpui_component::input::Input::new(&input)
+                            .xsmall()
+                            .appearance(true),
+                    )
+            } else {
+                div()
+                    .id(("track-name", id.0))
+                    .w_full()
+                    .h(px(14.))
+                    .truncate()
+                    .text_xs()
+                    .text_color(cx.theme().foreground)
+                    .child(name.clone())
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        if event.click_count() == 2 {
+                            this.start_track_rename(id, window, cx);
+                        }
+                    }))
+            };
             header = header.child(
                 div()
                     // A per-track id scopes the buttons' hover/tooltip state.
                     .id(("track-header", id.0))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.context_menu = Some(ContextMenu::Track { id });
+                            this.context_menu_pos = Some(event.position);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
+                    .on_drag(drag, |drag, _offset, _window, cx| cx.new(|_| drag.clone()))
+                    .drag_over::<TrackDrag>(|style, _, _, cx| {
+                        style.border_t_2().border_color(cx.theme().ring)
+                    })
+                    .on_drop(cx.listener(move |this, drag: &TrackDrag, _, cx| {
+                        this.move_track_to(drag.id, row_index, cx);
+                    }))
                     .h(px(self.dock.track_height.pixels()))
                     .flex_shrink_0()
                     .w_full()
@@ -960,15 +1164,7 @@ impl Editor {
                     .px_2()
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(14.))
-                            .truncate()
-                            .text_xs()
-                            .text_color(cx.theme().foreground)
-                            .child(name),
-                    )
+                    .child(name_label)
                     .child(controls),
             );
         }

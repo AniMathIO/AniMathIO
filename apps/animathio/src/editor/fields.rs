@@ -760,6 +760,139 @@ impl Editor {
         Self::param_row(Some(diamond), model.label(), control, cx)
     }
 
+    /// Inspector for several selected clips: a read-only summary plus the
+    /// transform (and, for all-audio selections, gain) fields every clip shares.
+    /// A shared field shows the primary clip's value and applies an edit to every
+    /// selected clip as one undo step.
+    fn multi_inspector(
+        &mut self,
+        ids: &BTreeSet<ClipId>,
+        pane: Div,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let clips: Vec<Clip> = ids
+            .iter()
+            .filter_map(|id| self.find_clip(*id).cloned())
+            .collect();
+        let Some(summary) = selection::summarize(&self.project, ids) else {
+            return pane.child("No clip selected");
+        };
+        let rate = self.project.frame_rate();
+        let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
+        for clip in &clips {
+            *kinds.entry(kind_label(&clip.kind)).or_default() += 1;
+        }
+        let kinds = kinds
+            .into_iter()
+            .map(|(kind, count)| format!("{count} {kind}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let muted = cx.theme().muted_foreground;
+        let info = |label: &str, value: String| {
+            div()
+                .h(px(24.))
+                .px_2()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(div().w(px(70.)).text_color(muted).child(label.to_owned()))
+                .child(div().flex_1().min_w_0().truncate().child(value))
+        };
+        let header = div()
+            .px_2()
+            .py_2()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .border_b_1()
+            .border_color(cx.theme().sidebar_border)
+            .child(icons::icon(IconName::Layers).small())
+            .child(
+                div()
+                    .flex_1()
+                    .child(format!("{} clips selected", summary.count)),
+            );
+        let details = div()
+            .flex()
+            .flex_col()
+            .child(info("Kinds", kinds))
+            .child(info(
+                "Tracks",
+                format!("{} of {}", summary.tracks, self.project.tracks().len()),
+            ))
+            .child(info(
+                "Start",
+                timecode::format_timecode(summary.start, rate),
+            ))
+            .child(info("End", timecode::format_timecode(summary.end, rate)))
+            .child(info(
+                "Duration",
+                timecode::format_timecode(Time(summary.end.0 - summary.start.0), rate),
+            ));
+        let mut shared = vec![
+            (Field::Transform(TransformProperty::X), "Position X"),
+            (Field::Transform(TransformProperty::Y), "Position Y"),
+            (Field::Transform(TransformProperty::ScaleX), "Scale X"),
+            (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
+            (Field::Transform(TransformProperty::Rotation), "Rotation"),
+            (Field::Transform(TransformProperty::Opacity), "Opacity"),
+        ];
+        let all_audio = clips
+            .iter()
+            .all(|clip| matches!(clip.kind, ClipKind::Audio(_)));
+        if all_audio {
+            shared.push((Field::Param("gain".to_owned()), "Gain"));
+        }
+        let primary = self.selected.and_then(|id| self.find_clip(id).cloned());
+        let rows: Vec<Div> = shared
+            .into_iter()
+            .map(|(field, label)| {
+                let values: Vec<f64> = clips.iter().map(|c| field_value(c, &field)).collect();
+                let value = primary
+                    .as_ref()
+                    .map_or(values[0], |clip| field_value(clip, &field));
+                let mixed = values.iter().any(|v| (v - value).abs() > f64::EPSILON);
+                let key = match &field {
+                    Field::Transform(property) => format!("multi:f:{property:?}"),
+                    Field::Param(name) => format!("multi:p:{name}"),
+                };
+                let control = self.number_control(
+                    &key,
+                    InputTarget::SelectionField {
+                        field: field.clone(),
+                    },
+                    value,
+                    field_step(&field),
+                    window,
+                    cx,
+                );
+                let label = if mixed {
+                    format!("{label} (mixed)")
+                } else {
+                    label.to_owned()
+                };
+                Self::param_row(None, &label, control, cx)
+            })
+            .collect();
+        let body = div()
+            .id("inspector-scroll")
+            .flex_1()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .child(self.section("selection", "Selection", details, cx))
+            .child(self.section(
+                "shared",
+                "Shared properties",
+                div().flex().flex_col().children(rows),
+                cx,
+            ));
+        pane.child(header).child(body)
+    }
+
     /// Inspector panel: header, collapsible sections and widgets for the
     /// selected clip.
     pub(super) fn inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -784,6 +917,10 @@ impl Editor {
             );
         };
         self.fields.retain_clip(id);
+        let ids = self.selected_ids();
+        if ids.len() > 1 {
+            return self.multi_inspector(&ids, pane, window, cx);
+        }
         let Some(clip) = self.find_clip(id).cloned() else {
             return pane.child("No clip selected");
         };

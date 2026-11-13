@@ -49,6 +49,21 @@ pub enum Command {
         /// New lock state.
         locked: bool,
     },
+    /// Rename a layer.
+    RenameTrack {
+        /// Layer identity.
+        id: TrackId,
+        /// New display name.
+        name: String,
+    },
+    /// Move a layer to `index` in the stack: the layer's position after the move,
+    /// so it must be smaller than the layer count.
+    MoveTrack {
+        /// Layer identity.
+        id: TrackId,
+        /// Destination position in the layer stack.
+        index: usize,
+    },
     /// Remove a layer with all its clips.
     RemoveTrack {
         /// Layer identity.
@@ -385,6 +400,25 @@ impl Command {
                 };
                 project.tracks[index].locked = *locked;
                 inverse
+            }
+            Self::RenameTrack { id, name } => {
+                let index = track_index(project, *id)?;
+                Self::RenameTrack {
+                    id: *id,
+                    name: std::mem::replace(&mut project.tracks[index].name, name.clone()),
+                }
+            }
+            Self::MoveTrack { id, index } => {
+                let from = track_index(project, *id)?;
+                if *index >= project.tracks.len() {
+                    return Err(invalid("track index out of bounds"));
+                }
+                let track = project.tracks.remove(from);
+                project.tracks.insert(*index, track);
+                Self::MoveTrack {
+                    id: *id,
+                    index: from,
+                }
             }
             Self::RemoveTrack { id } => {
                 let index = track_index(project, *id)?;
