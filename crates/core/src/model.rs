@@ -593,13 +593,12 @@ fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
         if animation.keys.0.is_empty() {
             return Err(invalid("empty animation"));
         }
-        let effect_kind = match &animation.target {
+        match &animation.target {
             Target::Param(name) => {
                 if !clip.params.contains_key(name) && !matches!(&clip.kind, ClipKind::Plugin { .. })
                 {
                     return Err(invalid("animation parameter missing"));
                 }
-                None
             }
             Target::Effect { effect, param } => {
                 let instance = clip
@@ -607,13 +606,12 @@ fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
                     .iter()
                     .find(|instance| instance.id == *effect)
                     .ok_or_else(|| invalid("animation effect missing"))?;
-                if !instance.kind.param_names().contains(&param.as_str()) {
+                if !instance.params.contains_key(param) {
                     return Err(invalid("animation effect parameter missing"));
                 }
-                Some(instance.kind)
             }
-            Target::Transform(_) => None,
-        };
+            Target::Transform(_) => {}
+        }
         let first = &animation
             .keys
             .0
@@ -635,11 +633,7 @@ fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
                     .is_some_and(|v| (0.0..=1.0).contains(&v)),
                 Target::Transform(_) => key.value.as_number().is_some(),
                 Target::Param(_) => true,
-                Target::Effect { param, .. } => effect_kind.is_some_and(|kind| {
-                    key.value
-                        .as_number()
-                        .is_some_and(|v| kind.validate_param(param, v).is_ok())
-                }),
+                Target::Effect { .. } => key.value.as_number().is_some_and(f64::is_finite),
             };
             if time.0 < 0 || !key.value.valid() || !key.value.same_type(first) || !valid_value {
                 return Err(invalid("invalid or mixed-type keyframe"));

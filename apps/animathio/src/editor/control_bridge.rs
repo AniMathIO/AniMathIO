@@ -198,6 +198,21 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(())?
             }
+            Call::EffectsList => {
+                serde_json::to_value(animathio_control::effect_infos(self.available_effects()))?
+            }
+            Call::EffectsAdd { params } => {
+                let (command, added) = animathio_control::add_effect_command(
+                    &self.project,
+                    &self.available_effects(),
+                    &params,
+                )?;
+                self.history
+                    .execute(&mut self.project, &command)
+                    .map_err(|error| ControlError::Other(error.0))?;
+                self.after_edit(cx);
+                serde_json::to_value(added)?
+            }
             Call::HistoryUndo => {
                 let undone = self
                     .history
@@ -295,6 +310,9 @@ impl Editor {
         let mut ctx = animathio_render::RenderCtx::from_assets((*self.assets).clone())?;
         let scene = animathio_core::evaluate(&self.project, params.time);
         let scene = self.resolve_scene(scene, (params.width, params.height));
+        if let Some(host) = &self.plugin_host {
+            ctx.set_effect_processor(host.effect_processor());
+        }
         let frame = animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;

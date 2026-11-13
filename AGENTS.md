@@ -99,9 +99,13 @@ and engine resource pool; its optional `gpu` feature adds the Vello/wgpu
 `GpuBackend` used only for editor preview (CPU stays the reference for tests and
 export; `tests/gpu.rs` compares the two and skips without an adapter).
 `animathio-cli` provides headless PNG rendering.
-Text and shapes are first-party WASM plugins (`org.animathio.text` /
-`org.animathio.shapes`); build them with `scripts/build-plugins.sh` before rendering.
-Schema-1 builtin clips migrate in `format` to plugin clips on load. Video uses a
+Text, shapes and the clip effects are first-party WASM plugins (`org.animathio.text` /
+`org.animathio.shapes` / `org.animathio.effects-basic`); build them with
+`scripts/build-plugins.sh` before rendering. `render::effects` only runs the effect chain:
+each `EffectInstance` (plugin id + effect id) goes to the `RenderCtx`'s `EffectProcessor`
+(`ctx.set_effect_processor(host.effect_processor())`), so every `RenderCtx` or `Exporter`
+that renders clips with effects needs one. Schema-1 builtin clips and schema-2 builtin
+effects migrate in `format` to plugin clips/effects on load. Video uses a
 labelled checkerboard until a media decoder is integrated. Do not add runtime
 resources to `Project` or store evaluated animation state in the renderer.
 

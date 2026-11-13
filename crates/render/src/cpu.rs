@@ -111,7 +111,7 @@ impl Backend for CpuBackend {
                 // Rasterize the clip into its own layer, apply the effect chain
                 // there, then composite. Effects must not see other clips.
                 let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;
-                crate::effects::apply_chain(&mut layer, &clip.effects)?;
+                crate::effects::apply_chain(&mut layer, clip, pool)?;
                 ctx.set_transform(Affine::IDENTITY);
                 #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
                 ctx.push_opacity_layer(clip.transform.opacity as f32);
@@ -346,7 +346,7 @@ impl CpuBackend {
             _ => unit_transform(clip.transform, size)?,
         };
         let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;
-        crate::effects::apply_chain(&mut layer, &clip.effects)?;
+        crate::effects::apply_chain(&mut layer, clip, pool)?;
         crate::transition::fade(&mut layer, clip.transform.opacity);
         Ok(layer)
     }

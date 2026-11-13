@@ -12,7 +12,7 @@ use std::{
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 /// Current project schema. Future migrations advance one version at a time.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Persistence errors, including malformed or unsupported project data.
 #[derive(Debug, thiserror::Error)]
@@ -81,7 +81,8 @@ pub fn write_json(writer: impl Write, project: &Project) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read current or schema-1 projects, migrating legacy clip sources automatically.
+/// Read current, schema-2 or schema-1 projects, migrating builtin clip sources and builtin
+/// effects to their plugin equivalents automatically.
 pub fn read_json(reader: impl Read) -> Result<Project, Error> {
     read_json_with_migration(reader, |_, _| {
         Err(invalid("no migration registered for this schema"))
@@ -118,6 +119,8 @@ fn decode_json(
         }
         value = if version == 1 {
             legacy::migrate(value)?
+        } else if version == 2 {
+            legacy::migrate_effects(value)?
         } else {
             step(version, value)?
         };

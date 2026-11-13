@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use animathio_core::{ClipKind, Scene as CoreScene, VectorScene};
-use animathio_plugin_api::{InspectorSchema, PluginManifestToml, PluginPackage};
+use animathio_plugin_api::{InspectorSchema, PluginKind, PluginManifestToml, PluginPackage};
 use animathio_typeset::{MathMode, TypesetEngine, TypesetResult, TypesetVerb};
 use lru::LruCache;
 use thiserror::Error;
@@ -23,8 +23,23 @@ wasmtime::component::bindgen!({
     world: "plugin",
 });
 
+/// Bindings for the pixel-effect world (`effect-plugin`). Shared interfaces reuse the
+/// `plugin` world's generated types and host imports, so one linker serves both worlds.
+mod effect_world {
+    wasmtime::component::bindgen!({
+        path: "../plugin-api/wit",
+        world: "effect-plugin",
+        with: {
+            "animathio:plugin/types": crate::animathio::plugin::types,
+            "animathio:plugin/host": crate::animathio::plugin::host,
+        },
+    });
+}
+
 mod discovery;
+mod effects;
 pub use discovery::{PluginDirectory, plugin_search_dirs};
+pub use effects::{EffectDescriptor, EffectHandle, EffectParam};
 
 use animathio::plugin::host::Host;
 use animathio::plugin::types as wit_types;
@@ -92,6 +107,18 @@ pub struct SandboxLimits {
     /// A low deadline races the epoch ticker and can spuriously trap fast
     /// calls such as `describe` during plugin loading.
     pub epoch_deadline_ticks: u64,
+    /// Largest frame, in pixels, a pixel effect may process (default: 16 Mpx, above
+    /// 4K UHD). Larger frames are rejected before any plugin code runs.
+    pub max_effect_pixels: usize,
+    /// Ceiling on the memory of one pixel-effect call (default: 1 GiB). The limit
+    /// actually applied is 64 MiB plus 48 bytes per frame pixel, capped here, so small
+    /// frames get a small sandbox.
+    pub effect_memory_bytes: usize,
+    /// Extra fuel per frame pixel for pixel effects, added to `fuel_per_call`
+    /// (default: 4,096 — roughly 10x the cost of the heaviest first-party filter).
+    pub effect_fuel_per_pixel: u64,
+    /// Epoch deadline ticks for pixel effects (default: 1,000, a ~10 s backstop).
+    pub effect_epoch_deadline_ticks: u64,
 }
 
 impl Default for SandboxLimits {
@@ -101,6 +128,10 @@ impl Default for SandboxLimits {
             max_table_elements: 50_000,
             fuel_per_call: 50_000_000,
             epoch_deadline_ticks: 100,
+            max_effect_pixels: 16 * 1024 * 1024,
+            effect_memory_bytes: 1024 * 1024 * 1024,
+            effect_fuel_per_pixel: 4096,
+            effect_epoch_deadline_ticks: 1000,
         }
     }
 }
@@ -525,10 +556,36 @@ fn write_verified_entry(
     Ok(())
 }
 
+/// Assemble a sandboxed store: WASI with no ambient authority plus fuel, epoch and
+/// memory limits.
+fn build_store(
+    engine: &Engine,
+    wasi: WasiCtx,
+    font_data: Vec<u8>,
+    typeset: Arc<TypesetEngine>,
+    limiter: StoreLimits,
+    fuel: u64,
+    epoch_deadline_ticks: u64,
+) -> Store<HostState> {
+    let state = HostState {
+        table: ResourceTable::new(),
+        wasi,
+        font_data,
+        typeset,
+        limiter,
+        logs: Vec::new(),
+    };
+    let mut store = Store::new(engine, state);
+    let _ = store.set_fuel(fuel);
+    store.set_epoch_deadline(epoch_deadline_ticks);
+    store.limiter(|s| &mut s.limiter);
+    store
+}
+
 /// Central registry managing plugin loading, sandboxing, output caching and scene resolution.
 pub struct PluginHost {
     engine: Engine,
-    linker: Linker<HostState>,
+    linker: Arc<Linker<HostState>>,
     disk_cache: ComponentDiskCache,
     plugins: BTreeMap<String, LoadedPlugin>,
     limits: SandboxLimits,
@@ -537,8 +594,11 @@ pub struct PluginHost {
     output_cache: LruCache<[u8; 32], VectorScene>,
     cache_hits: AtomicUsize,
     cache_misses: AtomicUsize,
+    /// Registry and sandboxed runner for pixel-effect plugins, shared with every
+    /// [`EffectHandle`] handed to a renderer.
+    effects: Arc<effects::EffectRuntime>,
     /// Held only so its `Drop` stops and joins the epoch ticker thread.
-    _epoch_ticker: EpochTicker,
+    _epoch_ticker: Arc<EpochTicker>,
 }
 
 impl PluginHost {
@@ -569,11 +629,20 @@ impl PluginHost {
         );
         let disk_cache = ComponentDiskCache::new(cache_dir);
         let output_cache = LruCache::new(NonZeroUsize::new(512).unwrap());
-        let epoch_ticker = EpochTicker::start(engine.clone(), EPOCH_TICK_INTERVAL);
+        let epoch_ticker = Arc::new(EpochTicker::start(engine.clone(), EPOCH_TICK_INTERVAL));
+        let linker = Arc::new(linker);
+        let effects = Arc::new(effects::EffectRuntime::new(
+            engine.clone(),
+            Arc::clone(&linker),
+            limits,
+            Arc::clone(&typeset),
+            Arc::clone(&epoch_ticker),
+        ));
 
         Ok(Self {
             engine,
             linker,
+            effects,
             disk_cache,
             plugins: BTreeMap::new(),
             limits,
@@ -677,8 +746,14 @@ impl PluginHost {
 
         // Describe plugin to extract WIT manifest and parameter schema
         let mut store = self.create_store(CapabilityGrants::default())?;
-        let instance = Plugin::instantiate(&mut store, &component, &self.linker)?;
-        let wit_manifest = instance.call_describe(&mut store)?;
+        let wit_manifest = if package.manifest.kinds.contains(&PluginKind::Effect) {
+            self.effects
+                .register(&id, &component, &mut store)
+                .map_err(|e| HostError::CompilationFailed(format!("effect plugin {id}: {e}")))?
+        } else {
+            let instance = Plugin::instantiate(&mut store, &component, &self.linker)?;
+            instance.call_describe(&mut store)?
+        };
 
         let inspector_schema = wit_manifest_to_inspector(&wit_manifest);
 
@@ -717,22 +792,28 @@ impl PluginHost {
             wasi_builder.env(k, v);
         }
         let wasi = wasi_builder.build();
-
-        let state = HostState {
-            table: ResourceTable::new(),
+        Ok(build_store(
+            &self.engine,
             wasi,
-            font_data: self.font_data.clone(),
-            typeset: Arc::clone(&self.typeset),
-            limiter: sandbox_store_limits(&self.limits),
-            logs: Vec::new(),
-        };
+            self.font_data.clone(),
+            Arc::clone(&self.typeset),
+            sandbox_store_limits(&self.limits),
+            self.limits.fuel_per_call,
+            self.limits.epoch_deadline_ticks,
+        ))
+    }
 
-        let mut store = Store::new(&self.engine, state);
-        let _ = store.set_fuel(self.limits.fuel_per_call);
-        store.set_epoch_deadline(self.limits.epoch_deadline_ticks);
-        store.limiter(|s| &mut s.limiter);
+    /// Pixel effects offered by every loaded effect plugin, in plugin-id then listing order.
+    #[must_use]
+    pub fn effects(&self) -> Vec<EffectDescriptor> {
+        self.effects.descriptors()
+    }
 
-        Ok(store)
+    /// A cheap handle that runs effect plugins for a renderer. It shares this host's
+    /// plugin registry, so plugins loaded later become available to existing handles.
+    #[must_use]
+    pub fn effect_processor(&self) -> EffectHandle {
+        EffectHandle::new(Arc::clone(&self.effects))
     }
 
     /// Execute a clip-source plugin under sandbox protection and return a VectorScene.

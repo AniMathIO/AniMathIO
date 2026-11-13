@@ -3,13 +3,13 @@
 //! backend for interactive preview.
 //! Media bytes and decoded images live in `RenderCtx`, never in the project.
 mod cpu;
-pub mod effects;
+mod effects;
 #[cfg(feature = "gpu")]
 mod gpu;
 pub mod sample;
 mod transition;
 
-use animathio_core::{AssetId, ClipKind, Project, Scene, Time};
+use animathio_core::{AssetId, ClipKind, EffectProcessor, Project, Scene, Time};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{Cursor, Write},
@@ -109,6 +109,8 @@ pub(crate) fn check_size(size: Size) -> Result<(u16, u16), Error> {
 pub struct ResourcePool {
     encoded: BTreeMap<AssetId, Arc<[u8]>>,
     images: BTreeMap<AssetId, Arc<Frame>>,
+    /// Runs clip effects; set with [`RenderCtx::set_effect_processor`].
+    pub(crate) effects: Option<Box<dyn EffectProcessor>>,
 }
 impl ResourcePool {
     /// Register verified bytes; re-registering identical content preserves its cache.
@@ -276,6 +278,13 @@ impl RenderCtx {
         let mut ctx = Self::new(CpuBackend::default(), video);
         ctx.resources = resources;
         Ok(ctx)
+    }
+
+    /// Install the plugin runner for clip effects, replacing any previous one.
+    /// Without a processor, rendering a clip that has effects fails with
+    /// [`Error::Effect`]; clips without effects never need one.
+    pub fn set_effect_processor(&mut self, processor: impl EffectProcessor + 'static) {
+        self.resources.effects = Some(Box::new(processor));
     }
 
     /// Swap the rendering backend, keeping resources and video decoders.

@@ -1,0 +1,7 @@
+api_version = "0.2.1"
+id = "org.animathio.effects-basic"
+name = "Basic Effects"
+version = "0.1.0"
+description = "Color and blur filters: grayscale, sepia, invert, saturate, brightness, contrast, blur and opacity"
+kinds = ["effect"]
+capabilities = []

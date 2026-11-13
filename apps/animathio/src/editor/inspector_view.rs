@@ -143,10 +143,11 @@ impl Editor {
                     .iter()
                     .map(|(name, value)| format!("{name} {value:.3}"))
                     .collect();
+                let label = self.effect_label(&instance.plugin, &instance.effect);
                 let summary = if params.is_empty() {
-                    effect_label(instance.kind).to_owned()
+                    label
                 } else {
-                    format!("{} ({})", effect_label(instance.kind), params.join(", "))
+                    format!("{label} ({})", params.join(", "))
                 };
                 div()
                     .px_2()

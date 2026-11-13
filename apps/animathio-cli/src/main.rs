@@ -221,6 +221,7 @@ fn run(cli: Cli) -> Result<()> {
             };
             let mut ctx = context(bundle.assets)?;
             let mut plugins = plugin_host()?;
+            ctx.set_effect_processor(plugins.effect_processor());
             render(
                 &plugins.resolve(
                     &evaluate(&bundle.project, time),
@@ -257,7 +258,9 @@ fn run(cli: Cli) -> Result<()> {
                 overwrite,
             };
             let mut plugins = plugin_host()?;
-            animathio_export::Exporter::new(&bundle.project, &bundle.assets)?.export_to_file(
+            let mut exporter = animathio_export::Exporter::new(&bundle.project, &bundle.assets)?;
+            exporter.set_effect_processor(plugins.effect_processor());
+            exporter.export_to_file(
                 &bundle.project,
                 range,
                 animathio_export::Settings {
@@ -291,6 +294,7 @@ fn run(cli: Cli) -> Result<()> {
             rate.frame_to_time(to - 1, Rounding::Nearest)?;
             let mut ctx = context(bundle.assets)?;
             let mut plugins = plugin_host()?;
+            ctx.set_effect_processor(plugins.effect_processor());
             let first = render(
                 &plugins.resolve(
                     &evaluate(

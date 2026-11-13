@@ -52,6 +52,9 @@ impl ExportTask {
                     let mut exporter =
                         Exporter::new(&project, &assets).map_err(|e| e.to_string())?;
                     let (mut host, _, _) = crate::editor::load_plugins();
+                    if let Some(host) = &host {
+                        exporter.set_effect_processor(host.effect_processor());
+                    }
                     let destination = animathio_export::Destination {
                         path: output,
                         overwrite: params.overwrite,
