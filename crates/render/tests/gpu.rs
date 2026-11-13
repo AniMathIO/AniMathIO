@@ -1,12 +1,14 @@
 //! GPU preview backend vs the CPU reference on the golden fixtures.
 //! Skipped (with a message) when no GPU adapter is available, as on CI.
 #![cfg(feature = "gpu")]
+mod common;
 use animathio_core::{
     AssetId, ClipId, ClipKind, EffectId, EffectInstance, EffectKind, Rounding, Scene, SceneClip,
     Time, TrackId, Transform, evaluate,
 };
 use animathio_format::{Bundle, Limits, read_amio, read_json};
-use animathio_render::{CpuBackend, Frame, GpuBackend, PlaceholderFrameSource, RenderCtx, render};
+use animathio_render::{CpuBackend, Frame, GpuBackend, PlaceholderFrameSource, RenderCtx};
+use common::render;
 use std::{collections::BTreeMap, fs::File, path::Path};
 
 /// Antialiasing differs slightly between the CPU and GPU rasterizers, so compare with

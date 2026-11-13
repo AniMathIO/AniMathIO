@@ -1,5 +1,10 @@
 # `animathio-cli` reference
 
+Text and shape renders require the bundled WASM components. Run
+`scripts/build-plugins.sh` first; for unpackaged release binaries set
+`ANIMATHIO_PLUGIN_DIR=target/plugins`. PNG renders, sequences and MP4 exports all
+resolve clips through the plugin host.
+
 Headless project validation, PNG rendering, importers and the MCP sidecar.
 Generated from the built binary's `--help` output.
 

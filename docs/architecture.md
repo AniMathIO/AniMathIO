@@ -9,13 +9,13 @@ the render/audio/export data flow. The authority for these rules is
 | Crate | Owns |
 | --- | --- |
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. **No IO, GPU, decoder or UI dependencies.** |
-| `format` | Versioned `project.json` (schema version 1) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
+| `format` | Versioned `project.json` (schema version 2) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
 | `audio` | Engine-owned decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb device playback. No audio resources live in `Project`. |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
 | `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
-| `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema and the guest SDK. |
+| `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema, guest SDK and first-party clip authoring helpers (`sources`). |
 | `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, log) and plugin scene resolution. |
 | `typeset` | Host-side math typesetting: Typst as a library plus MiTeX for LaTeX→Typst conversion, turned into vector path outlines plus a tight bbox. |
 | `import-v1` | One-way importer for v1 `.animathio` projects (deflated JSON + base64 media). |
@@ -350,5 +350,32 @@ including their variants.
 Every plugin inspector control has a keyframe diamond. Editing an animated
 parameter updates the key at the playhead or inserts one there, preserving an
 existing key's outgoing interpolation. Unanimated edits update base parameters.
+
+## Text and shape sources
+
+Text and shapes are `ClipKind::Plugin` sources with IDs `org.animathio.text` and
+`org.animathio.shapes`. Their parameters and geometry belong to the components;
+`core` has no builtin source variants or source-specific validation. The optional
+Rust constructors in `plugin-api::sources` create ordinary plugin payloads.
+The editor inspector reads their declared schemas and applies typed parameters
+through commands. CLI PNG renders, sequences, MP4 exports and headless control
+resolve evaluated scenes through the same plugin host as preview.
+
+The generic vector interchange supports `Canvas` pixel coordinates and `Normalized`
+unit-square coordinates. Normalized paths, strokes and text scale with the clip;
+normalized text font size is relative to canvas height and is laid out with the
+embedded font, wrapping and alignment shared by CPU and GPU. A renderer sees only
+resolved vector drawing instructions, never text/shapes plugin IDs.
+
+Schema 2 writes plugin clips. `format` migrates schema-1 builtin text, rectangles,
+ellipses and arbitrary quadratic/cubic paths, preserving local stroke widths,
+fill/outline transparency, transforms, source offsets, keyframes and effects.
+Legacy domain types and their validation exist only in the format reader. Existing
+plugin payloads remain opaque and untouched. Effects continue in `render::effects`.
+
+Integration tests use `plugin-host`'s `test-support` feature to build text and shapes
+for `wasm32-wasip2` with a shared target directory and resource limits. Subprocess
+CLI tests receive an explicit bundle directory. CI builds bundles on both Linux
+and Windows; the WASI target must be installed for local tests too.
 
 Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.

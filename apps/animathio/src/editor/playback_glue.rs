@@ -24,7 +24,7 @@ impl Editor {
     }
 
     /// Run plugin clips through the plugin host so the render worker only ever
-    /// sees media, builtin, vector and error clips.
+    /// sees media, vector and error clips.
     pub(super) fn resolve_scene(&mut self, scene: Scene, size: (u32, u32)) -> Scene {
         match &mut self.plugin_host {
             Some(host) => host.resolve(&scene, size),

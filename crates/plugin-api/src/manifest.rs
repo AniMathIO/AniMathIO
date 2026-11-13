@@ -36,7 +36,7 @@ pub enum PluginKind {
 /// Plugin manifest stored as `plugin.toml` inside `.amplugin` packages.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifestToml {
-    /// Plugin API version contract, e.g. "0.1.0".
+    /// Plugin API version contract, e.g. "0.2.0".
     pub api_version: String,
     /// Reverse-domain plugin identifier, e.g. "org.animathio.shapes".
     pub id: String,
@@ -74,7 +74,7 @@ impl PluginManifestToml {
         if self.api_version.is_empty() {
             return Err(ManifestError::MissingField("api_version"));
         }
-        if !self.api_version.starts_with("0.1") {
+        if !self.api_version.starts_with("0.2") {
             return Err(ManifestError::UnsupportedApiVersion(
                 self.api_version.clone(),
             ));

@@ -413,26 +413,32 @@ pub(super) fn paint_clip(
 /// Content labels are kept here so plugin migration touches one small match.
 pub(super) fn timeline_content_preview(clip: &Clip) -> String {
     match &clip.kind {
-        ClipKind::Builtin(animathio_core::builtin::Builtin::Text { text, .. }) => text
-            .lines()
-            .next()
-            .unwrap_or("")
-            .chars()
-            .take(100)
-            .collect(),
-        ClipKind::Builtin(_) | ClipKind::Vector(_) => "Vector shape".into(),
-        ClipKind::Plugin { .. } => ["text", "source", "latex", "expression"]
+        ClipKind::Vector(_) => "Vector shape".into(),
+        ClipKind::Plugin { plugin_id, .. } => ["text", "source", "latex", "expression"]
             .iter()
             .find_map(|key| {
                 clip.params.get(*key).and_then(|value| {
                     if let animathio_core::ParamValue::String(text) = value {
-                        Some(text.chars().take(100).collect())
+                        Some(
+                            text.lines()
+                                .next()
+                                .unwrap_or("")
+                                .chars()
+                                .take(100)
+                                .collect(),
+                        )
                     } else {
                         None
                     }
                 })
             })
-            .unwrap_or_default(),
+            .unwrap_or_else(|| {
+                if plugin_id.ends_with("shapes") {
+                    "Vector shape".into()
+                } else {
+                    String::new()
+                }
+            }),
         _ => String::new(),
     }
 }
@@ -824,27 +830,26 @@ pub(super) fn ruler_step(duration: i64, pixels_per_tick: f64, rate: FrameRate) -
     (step as i64).clamp(1, duration.max(1))
 }
 
-/// A source-kind colour from the theme's semantic palette.
+/// A source-kind colour from the design tokens.
 pub(super) fn clip_color(kind: &animathio_core::ClipKind, _theme: &gpui_component::Theme) -> Hsla {
     style::hex(match kind {
         ClipKind::Video(_) => colors::CLIP_VIDEO,
         ClipKind::Image(_) => colors::CLIP_IMAGE,
         ClipKind::Audio(_) => colors::CLIP_AUDIO,
-        ClipKind::Builtin(animathio_core::builtin::Builtin::Text { .. }) => colors::CLIP_TEXT,
         ClipKind::Plugin { plugin_id, .. } => {
-            if plugin_id.contains("latex") || plugin_id.contains("math") {
+            if plugin_id == "org.animathio.text" || plugin_id == "text" {
+                colors::CLIP_TEXT
+            } else if plugin_id == "org.animathio.shapes" || plugin_id == "shapes" {
+                colors::CLIP_SHAPE
+            } else if plugin_id.contains("latex") || plugin_id.contains("math") {
                 colors::CLIP_LATEX
             } else if plugin_id.contains("graph") {
                 colors::CLIP_GRAPH
-            } else if plugin_id == "text" {
-                colors::CLIP_TEXT
-            } else if plugin_id == "shapes" {
-                colors::CLIP_SHAPE
             } else {
                 colors::CLIP_PLUGIN
             }
         }
-        ClipKind::Builtin(_) | ClipKind::Vector(_) => colors::CLIP_SHAPE,
+        ClipKind::Vector(_) => colors::CLIP_SHAPE,
         ClipKind::Error(_) => colors::CLIP_ERROR,
     })
 }
@@ -943,11 +948,11 @@ pub(super) fn kind_label(kind: &ClipKind) -> String {
         ClipKind::Video(_) => "video".into(),
         ClipKind::Image(_) => "image".into(),
         ClipKind::Audio(_) => "audio".into(),
-        ClipKind::Builtin(builtin) => match builtin {
-            animathio_core::builtin::Builtin::Text { .. } => "text".into(),
-            animathio_core::builtin::Builtin::Shape { .. } => "shape".into(),
+        ClipKind::Plugin { plugin_id, .. } => match plugin_id.as_str() {
+            "org.animathio.text" => "text".into(),
+            "org.animathio.shapes" => "shape".into(),
+            _ => format!("plugin {plugin_id}"),
         },
-        ClipKind::Plugin { plugin_id, .. } => format!("plugin {plugin_id}"),
         ClipKind::Vector(_) => "vector".into(),
         ClipKind::Error(_) => "error".into(),
     }

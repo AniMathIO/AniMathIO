@@ -440,7 +440,12 @@ fn export_video_creates_parents_and_requires_overwrite() {
         "export_video",
         json!({"path": path, "overwrite": true}),
     );
-    assert_eq!(exported["path"], path);
+    // Compare canonical paths: Windows may report `\\?\` or 8.3 short forms.
+    let returned = std::path::PathBuf::from(exported["path"].as_str().unwrap());
+    assert_eq!(
+        returned.canonicalize().unwrap(),
+        output.canonicalize().unwrap()
+    );
     assert!(output.is_file());
 
     drop(stdin);

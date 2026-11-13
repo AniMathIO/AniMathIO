@@ -7,18 +7,17 @@
 //! image; WGSL effect ports are a follow-up.
 
 use crate::cpu::{
-    ShapedRun, check_vector_font_size, path, pixel_transform, text_pixel_size, unit_transform,
+    ShapedRun, check_vector_font_size, pixel_transform, relative_text_pixel_size, unit_transform,
     vector_path, vector_stroke,
 };
 use crate::{Backend, CpuBackend, Error, Frame, FrameSource, ResourcePool, Size, check_size};
 use animathio_core::{
     AssetId, ClipKind, Color as CoreColor, Scene, SceneClip, VectorElement, VectorScene,
-    builtin::{Builtin, Color},
 };
 use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc, time::Duration};
 use vello::{
     AaConfig, AaSupport, Glyph, RenderParams, Renderer, RendererOptions, Scene as VelloScene,
-    kurbo::{Affine, Rect, Stroke},
+    kurbo::{Affine, Rect},
     peniko::{
         Blob, Color as VelloColor, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix,
     },
@@ -150,7 +149,11 @@ impl GpuBackend {
                 continue;
             }
             let transform = match &clip.kind {
-                ClipKind::Vector(_) => pixel_transform(clip.transform, size)?,
+                ClipKind::Vector(scene)
+                    if scene.coordinate_space == animathio_core::CoordinateSpace::Canvas =>
+                {
+                    pixel_transform(clip.transform, size)?
+                }
                 _ => unit_transform(clip.transform, size)?,
             };
             #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
@@ -211,30 +214,6 @@ impl GpuBackend {
                     self.placeholder(t, size, &label)?;
                 }
             }
-            ClipKind::Builtin(Builtin::Text {
-                text,
-                font_size,
-                color: fill,
-            }) => self.text(t, size, text, *font_size, *fill)?,
-            ClipKind::Builtin(Builtin::Shape {
-                shape,
-                fill,
-                stroke,
-            }) => {
-                let path = path(shape);
-                if let Some(fill) = fill {
-                    self.scene.fill(Fill::NonZero, t, color(*fill), None, &path);
-                }
-                if let Some(stroke) = stroke {
-                    self.scene.stroke(
-                        &Stroke::new(stroke.width),
-                        t,
-                        color(stroke.color),
-                        None,
-                        &path,
-                    );
-                }
-            }
             ClipKind::Plugin { plugin_id, .. } => {
                 self.placeholder(t, size, &format!("PLUGIN\n{plugin_id}"))?;
             }
@@ -275,9 +254,9 @@ impl GpuBackend {
         size: Size,
         text: &str,
         font_size: f64,
-        fill: Color,
+        fill: [u8; 4],
     ) -> Result<(), Error> {
-        let font_size = text_pixel_size(font_size, size)?;
+        let font_size = relative_text_pixel_size(font_size, size)?;
         let runs = self.cpu.shape(text, font_size as f32, size)?;
         let t = t * Affine::scale_non_uniform(1.0 / f64::from(size.0), 1.0 / f64::from(size.1));
         self.glyphs(t, &runs, color(fill));
@@ -307,8 +286,32 @@ impl GpuBackend {
                     );
                 }
                 VectorElement::TextRun(text) => {
+                    if scene.coordinate_space == animathio_core::CoordinateSpace::Normalized {
+                        let font_size = relative_text_pixel_size(text.font_size, size)?;
+                        let runs = self.cpu.shape_aligned(
+                            &text.text,
+                            font_size as f32,
+                            size,
+                            text.align,
+                        )?;
+                        self.glyphs(
+                            t * Affine::translate((text.x, text.y))
+                                * Affine::scale_non_uniform(
+                                    1.0 / f64::from(size.0),
+                                    1.0 / f64::from(size.1),
+                                ),
+                            &runs,
+                            color_core(text.color),
+                        );
+                        continue;
+                    }
                     check_vector_font_size(text.font_size)?;
-                    let runs = self.cpu.shape(&text.text, text.font_size as f32, size)?;
+                    let runs = self.cpu.shape_aligned(
+                        &text.text,
+                        text.font_size as f32,
+                        size,
+                        text.align,
+                    )?;
                     self.glyphs(
                         t * Affine::translate((text.x, text.y)),
                         &runs,
@@ -459,7 +462,7 @@ fn image_data(frame: Arc<Frame>) -> Result<ImageData, Error> {
     })
 }
 
-fn color(value: Color) -> VelloColor {
+fn color(value: [u8; 4]) -> VelloColor {
     VelloColor::from_rgba8(value[0], value[1], value[2], value[3])
 }
 

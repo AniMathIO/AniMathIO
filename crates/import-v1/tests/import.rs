@@ -10,7 +10,7 @@
 
 use animathio_core::{
     AssetId, ClipKind, EffectId, EffectInstance, EffectKind, FrameRate, Project, TICKS_PER_SECOND,
-    Time, builtin::Builtin,
+    Time,
 };
 use animathio_import_v1::{
     ImportError, ImportLimits, import_v1, import_v1_with_limits, import_v1_with_report,
@@ -277,19 +277,11 @@ fn imports_every_element_type_and_maps_values() {
         animathio_core::Target::Transform(animathio_core::TransformProperty::X)
     )));
 
-    // Text: builtin text with normalized font size and explicit color.
-    let text_clip = &clips[3].1;
-    let ClipKind::Builtin(Builtin::Text {
-        text,
-        font_size,
-        color,
-    }) = &text_clip.kind
-    else {
-        panic!("expected builtin text clip");
-    };
-    assert_eq!(text, "hello");
-    assert_eq!(*font_size, 24.0 / 600.0);
-    assert_eq!(*color, [255, 0, 0, 255]);
+    // Text is a first-party component with normalized font size.
+    assert_eq!(
+        clips[3].1.kind,
+        animathio_plugin_api::sources::text("hello".into(), 24.0 / 600.0, [255, 0, 0, 255])
+    );
 
     // Mafs: static PNG image with the mafs marker and effect.
     let mafs_clip = &clips[4].1;

@@ -8,6 +8,7 @@ pub(crate) struct Preferences {
     pub(crate) autosave_seconds: u64,
     pub(crate) export_folder: PathBuf,
     pub(crate) compact: bool,
+    pub(crate) reduce_motion: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -15,6 +16,7 @@ impl Default for Preferences {
             autosave_seconds: 60,
             export_folder: PathBuf::new(),
             compact: true,
+            reduce_motion: false,
         }
     }
 }
@@ -48,6 +50,7 @@ mod tests {
     fn preferences_round_trip_and_default_missing_fields() {
         let prefs: Preferences = serde_json::from_str("{}").unwrap();
         assert_eq!(prefs.autosave_seconds, 60);
+        assert!(!prefs.reduce_motion);
         let text = serde_json::to_string(&prefs).unwrap();
         assert_eq!(
             serde_json::from_str::<Preferences>(&text).unwrap().compact,
