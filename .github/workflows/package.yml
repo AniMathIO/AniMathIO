@@ -186,16 +186,22 @@ jobs:
           # hands it to create-dmg, so both the bundle and the image are there.
           app='target/packages/AniMathIO.app'
           dmg="$(find target/packages -maxdepth 1 -name '*.dmg' -print -quit)"
+          echo "app=$app dmg=$dmg"
+          find target/packages -maxdepth 1 -print
           test -d "$app"
           test -n "$dmg"
+          find "$app" -not -path '*/plugins/*' -print
+          plutil -p "$app/Contents/Info.plist"
 
           check_bundle() {
             local bundle="$1"
+            echo "== checking $bundle"
+            ls -la "$bundle/Contents/MacOS"
             for exe in animathio animathio-cli; do
-              test -x "$bundle/Contents/MacOS/$exe"
+              test -x "$bundle/Contents/MacOS/$exe" || { echo "missing $exe" >&2; return 1; }
               "$bundle/Contents/MacOS/$exe" --version
             done
-            ls "$bundle/Contents/Resources/plugins"/*.amplugin >/dev/null
+            ls "$bundle/Contents/Resources/plugins"/*.amplugin
           }
 
           check_bundle "$app"
