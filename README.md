@@ -63,6 +63,10 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Titles](docs/screenshots/editor-titles.png) | ![Export queue](docs/screenshots/editor-export-queue.png) |
 
+| Missing effect plugin warning (badge, inspector row, toast) |
+| --- |
+| ![Effect warning](docs/screenshots/editor-effect-warning.png) |
+
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — crate map, time model, engine rules and data flow
