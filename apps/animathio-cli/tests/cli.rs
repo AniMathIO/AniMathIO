@@ -245,6 +245,26 @@ fn import_v1_writes_a_valid_archive() {
     .unwrap();
     ok(&["import-v1", path(&input), "-o", path(&output)]);
     ok(&["validate", path(&output)]);
+    ok(&[
+        "render",
+        path(&output),
+        "--frame",
+        "1",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&dir.path().join("import.png")),
+    ]);
+    ok(&[
+        "export",
+        path(&output),
+        "--to",
+        "0.1",
+        "-o",
+        path(&dir.path().join("import.mp4")),
+    ]);
     let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
     assert_eq!(bundle.project.tracks().len(), 1);
     assert_eq!(bundle.project.width(), 800);
@@ -284,6 +304,26 @@ class Second(Scene):
         path(&output),
     ]);
     ok(&["validate", path(&output)]);
+    ok(&[
+        "render",
+        path(&output),
+        "--frame",
+        "1",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&dir.path().join("import.png")),
+    ]);
+    ok(&[
+        "export",
+        path(&output),
+        "--to",
+        "0.1",
+        "-o",
+        path(&dir.path().join("import.mp4")),
+    ]);
     let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
     assert_eq!(bundle.project.tracks().len(), 1);
     assert_eq!(bundle.project.width(), 1920);

@@ -738,30 +738,34 @@ impl McpServer {
         let base = next_id(&state.project);
         let track_id = TrackId(base);
         let clip_id = ClipId(base + 1);
-        backend
-            .command_apply(Command::AddAsset {
-                id: info.id.clone(),
-                asset: Asset {
-                    name: info.name.clone(),
-                    media_type: info.media_type.clone(),
-                },
-            })
-            .map_err(mcp_error)?;
-        let clip = Clip::new(
+        let mut clip = Clip::new(
             clip_id,
             kind,
             TimeRange::new(Time(0), project_duration(&state)).map_err(|e| mcp_error(e.into()))?,
         );
+        if matches!(clip.kind, ClipKind::Audio(_)) {
+            clip.params.insert("gain".into(), 1.0.into());
+            clip.params.insert("muted".into(), 0.0.into());
+        }
         backend
-            .command_apply(Command::AddTrack {
-                track: Track::new(track_id, info.name),
-                index: state.project.tracks().len(),
-            })
-            .map_err(mcp_error)?;
-        backend
-            .command_apply(Command::AddClip {
-                track: track_id,
-                clip,
+            .command_apply(Command::Batch {
+                commands: vec![
+                    Command::AddAsset {
+                        id: info.id.clone(),
+                        asset: Asset {
+                            name: info.name.clone(),
+                            media_type: info.media_type.clone(),
+                        },
+                    },
+                    Command::AddTrack {
+                        track: Track::new(track_id, info.name),
+                        index: state.project.tracks().len(),
+                    },
+                    Command::AddClip {
+                        track: track_id,
+                        clip,
+                    },
+                ],
             })
             .map_err(mcp_error)?;
         tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))

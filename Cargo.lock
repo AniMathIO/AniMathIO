@@ -256,6 +256,7 @@ dependencies = [
  "animathio-format",
  "animathio-import-manim",
  "animathio-import-v1",
+ "animathio-media",
  "animathio-render",
  "base64 0.22.1",
  "clap",
