@@ -51,8 +51,7 @@ fn animation(project: &Project, name: &str, target: &Target) -> Option<animathio
             .tracks()
             .iter()
             .find(|t| t.id() == *track)
-            .map(|t| t.name().to_owned())
-            .unwrap_or_default();
+            .map_or_default(|t| t.name().to_owned());
         if track_name != name {
             continue;
         }

@@ -13,10 +13,11 @@ Commands:
   render-seq    Render [from, to) frame indices to `frame_000000.png`, etc
   export        Export an offline H.264 + AAC MP4
   validate      Check model invariants and all asset content hashes
+  import-media  Import media into a new project, including linked companion audio
   import-v1     Convert a v1 `.animathio` project to a `.amio` archive
   import-manim  Convert a Manim Community scene script to a `.amio` archive
   new-sample    Write a three-second animated image/text/shape demo archive
-  mcp           Run an MCP stdio server
+  mcp           Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
   help          Print this message or the help of the given subcommand(s)
 
 Options:
@@ -216,3 +217,20 @@ Options:
 animathio-cli mcp                    # attach to a running editor
 animathio-cli mcp --project sample.amio
 ```
+
+## `import-media`
+
+```text
+Import media into a new project, including linked companion audio
+
+Usage: animathio-cli import-media --output <OUTPUT> <INPUT>
+
+Arguments:
+  <INPUT>
+
+Options:
+  -o, --output <OUTPUT>
+  -h, --help             Print help
+```
+
+Creates a new `.amio` project from video or audio. Video with audio creates linked clips on separate tracks.

@@ -21,6 +21,7 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Selectable, Sizable};
 use serde_json::{Value, json};
 
+use crate::clipboard::Clipboard;
 use crate::control::{ControlMsg, ControlRuntime};
 use crate::editing::{self, InOut, Shuttle, Tool};
 use crate::fades::{self, FadeEdge};
@@ -29,10 +30,13 @@ use crate::inspector::{self, ParamModel, PluginDescriptor};
 use crate::layout::DockLayout;
 use crate::playback::{Clock, due_frame, make_clock};
 use crate::render_worker::{RenderRequest, RenderWorker};
+use crate::ripple::{self, RippleScope};
+use crate::selection;
 use crate::timecode;
 use crate::timeline::{self, TimelineLayout, TrimEdge};
 
 pub(crate) mod actions;
+mod clip_ops;
 mod color_edit;
 mod commands;
 mod control_bridge;
@@ -184,25 +188,81 @@ enum InputTarget {
         axis: usize,
     },
     Timecode,
+    /// A transform/parameter field applied to every selected clip.
+    SelectionField {
+        field: Field,
+    },
 }
 
 impl InputTarget {
     fn is_numeric(&self) -> bool {
         matches!(
             self,
-            Self::Field { .. } | Self::PluginNumber { .. } | Self::PluginPoint { .. }
+            Self::Field { .. }
+                | Self::SelectionField { .. }
+                | Self::PluginNumber { .. }
+                | Self::PluginPoint { .. }
         )
     }
 }
 
 struct ClipDrag {
-    clip_id: ClipId,
+    /// Every dragged clip (the whole selection, or just `clip_id`).
+    members: BTreeSet<ClipId>,
     origin_track: TrackId,
     target_track: TrackId,
     origin_start: Time,
-    duration: i64,
+    /// Start of the earliest member, so the group stops at time zero together.
+    group_start: i64,
+    /// First and last track row occupied by members.
+    rows: (usize, usize),
+    /// Track rows the group has moved, already clamped to the stack.
+    row_delta: isize,
     grab_offset: i64,
     current_start: Time,
+    /// A plain click on a member of a multi-selection keeps the selection for the
+    /// drag; releasing without moving collapses it onto this clip.
+    collapse_to: Option<ClipId>,
+}
+
+/// Rubber-band selection on empty track space.
+struct MarqueeDrag {
+    /// Press point: x in content pixels (scroll-independent), y canvas-relative.
+    origin: (f32, f32),
+    /// Pointer, canvas-relative.
+    current: (f32, f32),
+    /// Selection the band extends (empty unless Shift/Ctrl was held).
+    base: BTreeSet<ClipId>,
+    /// The pointer left the click tolerance, so this is a band, not a click.
+    moved: bool,
+}
+
+/// An inline track-name edit in the header.
+struct TrackRename {
+    id: TrackId,
+    input: Entity<gpui_component::input::InputState>,
+    _subscription: Subscription,
+}
+
+/// A track header being dragged to reorder tracks.
+#[derive(Clone)]
+struct TrackDrag {
+    id: TrackId,
+    name: SharedString,
+}
+
+impl Render for TrackDrag {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_1()
+            .rounded_sm()
+            .bg(cx.theme().popover)
+            .border_1()
+            .border_color(cx.theme().ring)
+            .text_color(cx.theme().foreground)
+            .child(self.name.clone())
+    }
 }
 
 struct KeyframeDrag {
@@ -243,12 +303,14 @@ enum TimelineGesture {
     Drag(ClipDrag),
     Trim(TrimDrag),
     Fade(FadeDrag),
+    Marquee(MarqueeDrag),
 }
 
 /// A right-click context menu target on the timeline.
 #[derive(Clone, PartialEq)]
 enum ContextMenu {
     Clip { id: ClipId },
+    Track { id: TrackId },
     Keyframe(KeyframeSelection),
 }
 
@@ -295,6 +357,8 @@ struct TimelineSnapshot {
     row_height: f32,
     marks: InOut,
     snap_line: Option<Time>,
+    /// Rubber band in canvas coordinates: `(left, top, right, bottom)`.
+    marquee: Option<(f32, f32, f32, f32)>,
     theme: gpui_component::Theme,
 }
 
@@ -346,7 +410,14 @@ pub(crate) struct Editor {
     clock: Box<dyn Clock>,
     playing: bool,
     position: Time,
+    /// The primary selected clip: what the inspector, keyframes and fades act on.
+    /// Always a member of [`Editor::selected_ids`] when set.
     selected: Option<ClipId>,
+    /// Every selected clip; see [`Editor::selected_ids`] for the reconciled view.
+    selection: BTreeSet<ClipId>,
+    clipboard: Option<Clipboard>,
+    ripple_scope: RippleScope,
+    track_rename: Option<TrackRename>,
     selected_field: Option<Field>,
     worker: RenderWorker,
     image: Option<Arc<RenderImage>>,
@@ -446,6 +517,10 @@ impl Editor {
             playing: false,
             position: Time(0),
             selected: None,
+            selection: BTreeSet::new(),
+            clipboard: None,
+            ripple_scope: RippleScope::default(),
+            track_rename: None,
             selected_field: None,
             worker,
             image: None,

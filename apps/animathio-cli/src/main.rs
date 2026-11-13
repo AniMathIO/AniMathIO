@@ -78,6 +78,12 @@ enum Action {
     },
     /// Check model invariants and all asset content hashes.
     Validate { project: PathBuf },
+    /// Import media into a new project, including linked companion audio.
+    ImportMedia {
+        input: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
     /// Convert a v1 `.animathio` project to a `.amio` archive.
     ImportV1 {
         /// v1 `.animathio` project file (deflated JSON).
@@ -173,6 +179,7 @@ fn run(cli: Cli) -> Result<()> {
                 bundle.assets.len()
             );
         }
+        Action::ImportMedia { input, output } => import_media(&input, &output)?,
         Action::ImportV1 { input, output } => {
             let bytes = read_import_input(&input)?;
             let (project, assets, report) = animathio_import_v1::import_v1_with_report(&bytes)?;
@@ -236,9 +243,7 @@ fn run(cli: Cli) -> Result<()> {
                     .command(&bundle.project)?
                     .apply(&mut bundle.project)?;
             }
-            let defaults = preset
-                .map(animathio_control::ExportPreset::export_settings)
-                .unwrap_or_default();
+            let defaults = preset.map_or_default(animathio_control::ExportPreset::export_settings);
             let range = animathio_core::TimeRange::new(
                 from,
                 to.unwrap_or_else(|| animathio_export::duration(&bundle.project)),
@@ -445,6 +450,78 @@ fn parse_time(value: &str) -> std::result::Result<Time, String> {
         .and_then(|t| i64::try_from(t).ok())
         .ok_or_else(invalid)?;
     Ok(Time(ticks))
+}
+
+fn import_media(input: &Path, output: &Path) -> Result<()> {
+    use animathio_core::{Asset, Clip, ClipId, ClipKind, Command, TimeRange, Track, TrackId};
+    use animathio_media::MediaBackend;
+    let mut bytes = Vec::new();
+    File::open(input)?
+        .take(Limits::default().asset_bytes + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > Limits::default().asset_bytes {
+        return Err("media too large".into());
+    }
+    let name = input
+        .file_name()
+        .ok_or("missing filename")?
+        .to_string_lossy()
+        .into_owned();
+    let info = animathio_media::FilmCraftBackend::new().probe_bytes(&name, bytes.clone().into())?;
+    let id = AssetId::of(&bytes);
+    let mut project = Project::default();
+    let range = TimeRange::new(Time(0), info.duration)?;
+    let has_video = info.video.is_some();
+    let mut clip = Clip::new(
+        ClipId(1),
+        if has_video {
+            ClipKind::Video(id.clone())
+        } else {
+            ClipKind::Audio(id.clone())
+        },
+        range,
+    );
+    if has_video && !info.audio.is_empty() {
+        clip.link_group = Some(ClipId(1));
+    }
+    if !has_video {
+        clip.params.insert("gain".into(), 1.0.into());
+        clip.params.insert("muted".into(), 0.0.into());
+    }
+    let mut commands = vec![
+        Command::AddAsset {
+            id: id.clone(),
+            asset: Asset {
+                name,
+                media_type: animathio_control::media_type_of(&input.to_string_lossy()).into(),
+            },
+        },
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Media"),
+            index: 0,
+        },
+        Command::AddClip {
+            track: TrackId(1),
+            clip,
+        },
+    ];
+    if has_video && !info.audio.is_empty() {
+        let mut audio = Clip::new(ClipId(2), ClipKind::Audio(id.clone()), range);
+        audio.link_group = Some(ClipId(1));
+        audio.params.insert("gain".into(), 1.0.into());
+        audio.params.insert("muted".into(), 0.0.into());
+        commands.push(Command::AddTrack {
+            track: Track::new(TrackId(2), "Audio"),
+            index: 1,
+        });
+        commands.push(Command::AddClip {
+            track: TrackId(2),
+            clip: audio,
+        });
+    }
+    Command::Batch { commands }.apply(&mut project)?;
+    save_amio(output, &project, &BTreeMap::from([(id, bytes)]))?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -98,6 +98,14 @@ pub(super) fn paint_timeline(
     for clip in &snapshot.clips {
         paint_clip(bounds, &layout, clip, window, cx);
     }
+    if let Some((left, top, right, bottom)) = snapshot.marquee {
+        let band = Bounds::from_corners(
+            point(bounds.origin.x + px(left), bounds.origin.y + px(top)),
+            point(bounds.origin.x + px(right), bounds.origin.y + px(bottom)),
+        );
+        window.paint_quad(fill(band, cx.theme().ring.opacity(0.18)));
+        window.paint_quad(outline(band, cx.theme().ring, BorderStyle::Solid));
+    }
     if snapshot.marks.marked()
         && let Some(range) = snapshot.marks.range(snapshot.duration)
     {

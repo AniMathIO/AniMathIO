@@ -149,8 +149,7 @@ pub(crate) fn parse_hex_color(value: &str) -> Option<Rgba> {
 /// Source text of a node.
 pub(crate) fn text_of(node: &Node<'_>, source: &str) -> String {
     node.utf8_text(source.as_bytes())
-        .map(str::to_owned)
-        .unwrap_or_default()
+        .map_or_default(str::to_owned)
 }
 
 /// Strip a Python string literal's quotes and (raw/unicode/bytes) prefix.
@@ -328,12 +327,10 @@ fn eval_call(node: &Node<'_>, source: &str, depth: usize) -> Value {
     if function.kind() == "attribute" {
         let object = function
             .child_by_field_name("object")
-            .map(|o| text_of(&o, source))
-            .unwrap_or_default();
+            .map_or_default(|o| text_of(&o, source));
         let attribute = function
             .child_by_field_name("attribute")
-            .map(|a| text_of(&a, source))
-            .unwrap_or_default();
+            .map_or_default(|a| text_of(&a, source));
         if (object == "np" || object == "numpy")
             && attribute == "array"
             && let Some(arguments) = node.child_by_field_name("arguments")
@@ -348,12 +345,10 @@ fn eval_call(node: &Node<'_>, source: &str, depth: usize) -> Value {
 fn eval_attribute(node: &Node<'_>, source: &str) -> Value {
     let object = node
         .child_by_field_name("object")
-        .map(|o| text_of(&o, source))
-        .unwrap_or_default();
+        .map_or_default(|o| text_of(&o, source));
     let attribute = node
         .child_by_field_name("attribute")
-        .map(|a| text_of(&a, source))
-        .unwrap_or_default();
+        .map_or_default(|a| text_of(&a, source));
     match (object.as_str(), attribute.as_str()) {
         ("np" | "numpy", "pi") => Value::Num(std::f64::consts::PI),
         _ => Value::Unknown,

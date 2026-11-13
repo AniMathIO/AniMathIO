@@ -115,7 +115,18 @@ pub(crate) fn snap_start(
     playhead: Time,
     candidate: Time,
 ) -> Time {
-    snap_target(layout, project, Some(exclude), playhead, candidate).unwrap_or(candidate)
+    snap_start_among(layout, project, &[exclude], playhead, candidate)
+}
+
+/// [`snap_start`] for a dragged group: none of the group's own edges attract.
+pub(crate) fn snap_start_among(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: &[ClipId],
+    playhead: Time,
+    candidate: Time,
+) -> Time {
+    snap_target_among(layout, project, exclude, playhead, candidate).unwrap_or(candidate)
 }
 
 /// The engaged snap target, including an exact hit on an edge.
@@ -123,6 +134,17 @@ pub(crate) fn snap_target(
     layout: &TimelineLayout,
     project: &Project,
     exclude: Option<ClipId>,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
+    snap_target_among(layout, project, exclude.as_slice(), playhead, candidate)
+}
+
+/// [`snap_target`] ignoring every clip in `exclude`.
+pub(crate) fn snap_target_among(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: &[ClipId],
     playhead: Time,
     candidate: Time,
 ) -> Option<Time> {
@@ -139,7 +161,7 @@ pub(crate) fn snap_target(
     consider(playhead);
     for track in project.tracks() {
         for clip in track.clips().values() {
-            if Some(clip.id) != exclude {
+            if !exclude.contains(&clip.id) {
                 consider(clip.range.start);
                 consider(clip.range.end);
             }

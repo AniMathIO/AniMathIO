@@ -274,7 +274,7 @@ impl Editor {
                     self.marks = InOut::default();
                     self.shuttle = Shuttle::default();
                     self.path = None;
-                    self.selected = None;
+                    self.clear_selection();
                     self.selected_field = None;
                     self.seek_to(Time(0), cx);
                 }
@@ -351,7 +351,7 @@ impl Editor {
         self.path = None;
         self.position = Time(0);
         self.playing = false;
-        self.selected = None;
+        self.clear_selection();
         self.selected_field = None;
         self.pool = AudioPool::default();
         if let Err(error) = load_audio(&mut self.pool, &self.project, &self.assets) {
