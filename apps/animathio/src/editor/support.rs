@@ -1114,16 +1114,15 @@ pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Opti
             );
         }
     };
-    let mut error = None;
-    for dir in animathio_plugin_host::plugin_search_dirs() {
-        match host.load_plugin_directory(&dir) {
-            Ok(_) => {}
-            Err(message) => {
-                eprintln!("plugin load failed from {}: {message}", dir.path.display());
-                error.get_or_insert_with(|| format!("plugin load failed: {message}"));
-            }
-        }
+    let problems = host.load_discovered_plugins();
+    for problem in &problems {
+        eprintln!("plugin load problem: {problem}");
     }
+    // Preview keeps placeholder boxes for unresolved plugins; say why. Export fails
+    // for such clips instead of writing the placeholders.
+    let error = problems
+        .first()
+        .map(|first| format!("plugin load failed: {first} (text and shapes may not render)"));
     let mut descriptors = Vec::new();
     for id in host.loaded_plugin_ids() {
         let Some(plugin) = host.get_plugin(&id) else {
@@ -1326,4 +1325,59 @@ pub(super) fn write_project(
         .collect();
     animathio_format::save_amio(path, project, &referenced).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_id;
+    use animathio_core::{
+        Clip, ClipId, ClipKind, Command, FrameRate, Project, Time, TimeRange, TrackId,
+    };
+
+    /// The allocation `add_media_file` performs for a video with audio: the clip id and
+    /// its companion both come from the counter, which is refreshed from the project
+    /// after the batch is applied. A second import in the same drop must not collide.
+    #[test]
+    fn two_video_imports_with_companion_audio_get_distinct_ids() {
+        let mut project = Project::new(FrameRate::new(30, 1).unwrap());
+        let mut counter = next_id(&project);
+        let range = TimeRange::new(Time(0), Time(100)).unwrap();
+        for import in 0..3u64 {
+            let video = ClipId(counter);
+            counter += 1;
+            let audio = ClipId(counter);
+            counter += 1;
+            let video_track = TrackId(100 + import * 2);
+            let audio_track = TrackId(101 + import * 2);
+            let mut audio_clip = Clip::new(audio, ClipKind::Error("a".into()), range);
+            audio_clip.link_group = Some(video);
+            let mut video_clip = Clip::new(video, ClipKind::Error("v".into()), range);
+            video_clip.link_group = Some(video);
+            Command::Batch {
+                commands: vec![
+                    Command::AddTrack {
+                        track: animathio_core::Track::new(video_track, "V"),
+                        index: 0,
+                    },
+                    Command::AddTrack {
+                        track: animathio_core::Track::new(audio_track, "A"),
+                        index: 1,
+                    },
+                    Command::AddClip {
+                        track: video_track,
+                        clip: video_clip,
+                    },
+                    Command::AddClip {
+                        track: audio_track,
+                        clip: audio_clip,
+                    },
+                ],
+            }
+            .apply(&mut project)
+            .unwrap_or_else(|e| panic!("import {import}: {e}"));
+            counter = counter.max(next_id(&project));
+        }
+        let clips: usize = project.tracks().iter().map(|t| t.clips().len()).sum();
+        assert_eq!(clips, 6);
+    }
 }

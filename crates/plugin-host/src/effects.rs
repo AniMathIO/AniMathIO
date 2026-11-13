@@ -222,8 +222,24 @@ impl EffectRuntime {
                 effect.plugin, effect.effect
             ));
         }
-        let params: Vec<_> = effect
-            .params
+        // A stored value outside the declared range (hand-edited or old project) is
+        // clamped instead of failing every frame of the clip.
+        let descriptor = entry
+            .effects
+            .iter()
+            .find(|e| e.effect_id == effect.effect)
+            .expect("effect presence checked above");
+        let clamped = descriptor.clamped_params(&effect.params);
+        if clamped != effect.params {
+            log::warn!(
+                "effect {}/{} has out-of-range parameters {:?}; clamped to {:?}",
+                effect.plugin,
+                effect.effect,
+                effect.params,
+                clamped
+            );
+        }
+        let params: Vec<_> = clamped
             .iter()
             .map(|(id, value)| wit_types::ParamEntry {
                 id: id.clone(),

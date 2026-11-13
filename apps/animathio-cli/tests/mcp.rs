@@ -18,6 +18,12 @@ fn spawn_mcp(project: &Path) -> (Child, BufReader<ChildStdout>, ChildStdin) {
     let mut child = Command::new(bin())
         .args(["mcp", "--project"])
         .arg(project)
+        // Export fails for plugin clips without their plugins, so give every spawned
+        // server the built first-party bundles.
+        .env(
+            "ANIMATHIO_PLUGIN_DIR",
+            animathio_plugin_host::test_support::plugin_dir(),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

@@ -25,6 +25,13 @@ pub fn plugin_search_dirs() -> Vec<PluginDirectory> {
     )
 }
 
+/// The `ANIMATHIO_PLUGIN_DIR` override when it is set but is not a directory.
+pub(crate) fn invalid_override_dir() -> Option<PathBuf> {
+    std::env::var_os("ANIMATHIO_PLUGIN_DIR")
+        .map(PathBuf::from)
+        .filter(|path| !path.is_dir())
+}
+
 fn search_dirs(
     override_dir: Option<PathBuf>,
     exe: Option<&Path>,

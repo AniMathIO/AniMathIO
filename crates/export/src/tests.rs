@@ -399,3 +399,79 @@ fn export_file_with_plugins(
         |scene| animathio_plugin_host::test_support::resolve(&scene, resolution(project)),
     )
 }
+
+#[test]
+fn export_fails_instead_of_baking_placeholders_for_unresolved_plugins() {
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 10)).unwrap();
+    // No resolver at all: the text clip stays a plugin clip.
+    let error = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            range,
+            Settings::default(),
+            |_| true,
+            |scene| scene,
+        )
+        .unwrap_err();
+    let message = error.to_string();
+    assert!(matches!(error, Error::Plugin { clip: 1, .. }), "{message}");
+    assert!(message.contains("clip 1"), "{message}");
+    assert!(message.contains("org.animathio.text"), "{message}");
+
+    // A resolver whose plugin trapped turns the clip into an error clip.
+    let error = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            range,
+            Settings::default(),
+            |_| true,
+            |mut scene| {
+                for clip in &mut scene.clips {
+                    if matches!(clip.kind, ClipKind::Plugin { .. }) {
+                        clip.kind = ClipKind::Error("Plugin trapped: out of fuel".into());
+                    }
+                }
+                scene
+            },
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("out of fuel"), "{error}");
+    assert!(error.to_string().contains("org.animathio.text"), "{error}");
+}
+
+#[test]
+fn project_error_clips_still_export() {
+    // An error clip authored in the project (not produced by a failed plugin) is
+    // content, not a plugin failure.
+    let (mut project, assets) = project();
+    Command::AddTrack {
+        track: Track::new(TrackId(9), "Err"),
+        index: 3,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(9),
+        clip: Clip::new(
+            ClipId(9),
+            ClipKind::Error("authored".into()),
+            TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+        ),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 10)).unwrap();
+    Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            range,
+            Settings::default(),
+            |_| true,
+            |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
+        )
+        .unwrap();
+}

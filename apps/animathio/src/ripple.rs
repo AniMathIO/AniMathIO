@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use animathio_core::{Clip, ClipId, Command, Project, Time, TimeRange, Track};
 
 use crate::editing;
-use crate::selection::{batch, existing};
+use crate::selection::{batch, existing, with_companions};
 use crate::timeline::TrimEdge;
 
 /// Which tracks a ripple edit slides.
@@ -99,7 +99,8 @@ pub(crate) fn delete_command(
     ids: &BTreeSet<ClipId>,
     scope: RippleScope,
 ) -> Option<Command> {
-    let removed = existing(project, ids);
+    // Removing a linked clip removes its companions, so their tracks must ripple too.
+    let removed = with_companions(project, &existing(project, ids));
     if removed.is_empty() {
         return None;
     }
@@ -387,5 +388,19 @@ mod tests {
         .unwrap();
         let after = run(&mut project, &command);
         assert_eq!(starts(&after), [(1, 0, 5), (2, 10, 20)]);
+    }
+
+    #[test]
+    fn all_tracks_delete_of_a_linked_clip_ripples_the_companions_track() {
+        // Clip 1 (track 1) is linked to clip 2 (track 2); clip 4 follows on track 2 with
+        // an unlinked clip 3 on track 1. Deleting only clip 1 must close both gaps.
+        let mut project = project_with(&[
+            (1, &[(1, 10, 20), (3, 20, 30)][..]),
+            (2, &[(2, 10, 20), (4, 20, 30)][..]),
+        ]);
+        crate::selection::tests::link(&mut project, &[1, 2]);
+        let command = delete_command(&project, &set(&[1]), RippleScope::AllTracks).unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(starts(&after), [(3, 10, 20), (4, 10, 20)]);
     }
 }

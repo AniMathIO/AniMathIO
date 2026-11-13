@@ -121,12 +121,16 @@ pub fn add_effect_command(
         }
         instance_params.insert(name.clone(), *value);
     }
+    descriptor
+        .validate_params(&instance_params)
+        .map_err(ControlError::InvalidParams)?;
     let id = EffectId(
         clip.effects
             .iter()
             .map(|e| e.id.0)
             .max()
-            .map_or(0, |max| max + 1),
+            .map_or(Some(0), |max| max.checked_add(1))
+            .ok_or_else(|| ControlError::InvalidParams("effect id overflow".into()))?,
     );
     let index = params.index.unwrap_or(clip.effects.len());
     let instance = animathio_core::EffectInstance::new(

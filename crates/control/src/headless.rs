@@ -179,6 +179,24 @@ impl HeadlessHandler {
         Ok(added)
     }
 
+    /// Reject commands that would store effect parameters outside the plugin's
+    /// declared ranges (core only validates names and finiteness).
+    fn check_effect_params(
+        &mut self,
+        command: &animathio_core::Command,
+    ) -> Result<(), ControlError> {
+        if !animathio_plugin_host::mentions_effect_params(command) {
+            return Ok(());
+        }
+        self.ensure_effect_plugins();
+        match &self.plugins {
+            Some(host) => host
+                .validate_effect_command(&self.project, command)
+                .map_err(ControlError::InvalidParams),
+            None => Ok(()),
+        }
+    }
+
     /// Load the plugin host even when the project has no plugin clips or effects yet, so
     /// effect listing and adding work on an empty project.
     fn ensure_effect_plugins(&mut self) {
@@ -307,6 +325,7 @@ impl ControlHandler for HeadlessHandler {
             }
             Call::ProjectSave { path } => serde_json::to_value(self.save(path)?)?,
             Call::CommandApply { command } => {
+                self.check_effect_params(&command)?;
                 self.history.execute(&mut self.project, &command)?;
                 serde_json::to_value(())?
             }
@@ -420,6 +439,10 @@ fn load_plugins() -> Option<PluginHost> {
         })
     });
     if !has_plugins {
+        eprintln!(
+            "no plugin bundles found; plugin clips render as placeholders and fail to export \
+             (run scripts/build-plugins.sh or set ANIMATHIO_PLUGIN_DIR)"
+        );
         return None;
     }
     let mut host = match PluginHost::new(plugin_cache_dir()) {
@@ -429,13 +452,8 @@ fn load_plugins() -> Option<PluginHost> {
             return None;
         }
     };
-    for dir in dirs {
-        if let Err(error) = host.load_plugin_directory(&dir) {
-            eprintln!(
-                "failed to load plugins from {}: {error}",
-                dir.path.display()
-            );
-        }
+    for problem in host.load_discovered_plugins() {
+        eprintln!("plugin load problem: {problem}");
     }
     Some(host)
 }
@@ -583,6 +601,81 @@ mod tests {
             handler.handle(Call::CommandApply { command }).unwrap();
         }
         handler
+    }
+
+    #[test]
+    fn export_fails_when_a_plugin_clip_cannot_be_resolved() {
+        let mut handler = text_project();
+        // A host that loaded no plugins, as when the bundles were not built.
+        let cache = tempfile::tempdir().unwrap();
+        handler.plugins = Some(PluginHost::new(cache.path()).unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("clip.mp4");
+        let error = handler
+            .handle(Call::Export {
+                params: export_params(output.clone(), false),
+            })
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("clip 1"), "{error}");
+        assert!(error.contains("org.animathio.text"), "{error}");
+        assert!(!output.exists(), "a failed export leaves no file behind");
+    }
+
+    #[test]
+    fn effect_parameters_are_range_checked_on_apply() {
+        let mut handler = text_project();
+        let add = |handler: &mut HeadlessHandler, amount: f64| {
+            handler.handle(Call::EffectsAdd {
+                params: crate::EffectAddParams {
+                    clip: ClipId(1),
+                    plugin: "org.animathio.effects-basic".into(),
+                    effect: "grayscale".into(),
+                    params: BTreeMap::from([("amount".to_owned(), amount)]),
+                    index: None,
+                },
+            })
+        };
+        assert!(add(&mut handler, 5.0).is_err(), "override above max");
+        assert!(add(&mut handler, 0.5).is_ok());
+        let set = |handler: &mut HeadlessHandler, value: f64| {
+            handler.handle(Call::CommandApply {
+                command: Command::SetEffectParam {
+                    id: ClipId(1),
+                    effect: animathio_core::EffectId(0),
+                    name: "amount".into(),
+                    value: Some(value),
+                },
+            })
+        };
+        assert!(set(&mut handler, 5.0).is_err());
+        assert!(set(&mut handler, 1.0).is_ok());
+        let keyframe = |value: f64| Command::AddKeyframe {
+            id: ClipId(1),
+            target: animathio_core::Target::Effect {
+                effect: animathio_core::EffectId(0),
+                param: "amount".into(),
+            },
+            time: Time(0),
+            keyframe: animathio_core::Keyframe {
+                value: value.into(),
+                interpolation: animathio_core::Interpolation::default(),
+            },
+        };
+        assert!(
+            handler
+                .handle(Call::CommandApply {
+                    command: keyframe(5.0)
+                })
+                .is_err()
+        );
+        assert!(
+            handler
+                .handle(Call::CommandApply {
+                    command: keyframe(0.25)
+                })
+                .is_ok()
+        );
     }
 
     fn export_params(output: PathBuf, overwrite: bool) -> crate::method::ExportParams {

@@ -474,8 +474,10 @@ fn plugin_host() -> Result<animathio_plugin_host::PluginHost> {
         |base| base.cache_dir().join("animathio/plugins"),
     );
     let mut host = animathio_plugin_host::PluginHost::new(cache)?;
-    for dir in animathio_plugin_host::plugin_search_dirs() {
-        host.load_plugin_directory(&dir)?;
+    // Rendering keeps placeholder boxes for unresolved plugins, so say why; export
+    // fails outright for such clips (see `animathio_export::Error::Plugin`).
+    for problem in host.load_discovered_plugins() {
+        eprintln!("warning: {problem}");
     }
     Ok(host)
 }

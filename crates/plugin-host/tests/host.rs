@@ -376,3 +376,16 @@ fn evaluated_colour_keyframes_reach_plugin_output_and_cache() {
     };
     assert!(vector.elements.iter().any(|element| matches!(element, animathio_core::VectorElement::FillPath { color, .. } if *color == animathio_core::Color::rgba(255,0,0,255))));
 }
+
+#[test]
+fn failed_packages_are_reported_not_silently_skipped() {
+    let plugins = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    std::fs::write(plugins.path().join("broken.amplugin"), b"not a package").unwrap();
+    let mut host = PluginHost::new(cache.path()).unwrap();
+    assert!(host.load_failures().is_empty());
+    let ids = host.load_plugins_dir(plugins.path()).unwrap();
+    assert!(ids.is_empty());
+    assert_eq!(host.load_failures().len(), 1);
+    assert!(host.load_failures()[0].contains("broken.amplugin"));
+}

@@ -59,7 +59,7 @@ gets a JSON-RPC error instead of a result.
 | `math.add` | `{ params: { latex, mode?, size?, color?, x?, y?, start?, duration?, reveal_duration? } }` | `{ track_id, clip_id }` |
 | `graph.add` | `{ params: { x_min?, x_max?, y_min?, y_max?, items?, show_grid?, show_axes?, show_labels?, color?, x?, y?, start?, duration?, draw_duration? } }` | `{ track_id, clip_id }` |
 | `effects.list` | — | `[EffectInfo]` (plugin, effect, name, description, params with id/label/min/max/default) from loaded effect plugins |
-| `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults |
+| `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults; unknown or out-of-range params are rejected |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
 
 `command` is a serialized `animathio_core::Command` — the same enum undo/redo,
@@ -196,7 +196,11 @@ Debug builds also look for `plugins` next to the executable's parent directory
 current working directory. Only executable-relative directories and the explicit
 environment override can supply reserved `org.animathio.*` ids. Packages claiming
 those ids in the user directory are skipped before compilation/instantiation.
-Missing plugins remain preserved in the project and render as placeholders.
+Missing plugins remain preserved in the project. Preview and PNG renders draw them as
+`PLUGIN`/`ERROR` placeholders (the editor and CLI print why the plugins did not load), but
+**export never writes placeholders**: it fails with `clip N (plugin 'id') cannot be
+exported: ...` when any plugin clip in the exported range is unresolved or errors, so
+check the host log or run `scripts/build-plugins.sh` first.
 For an in-tree release build, set `ANIMATHIO_PLUGIN_DIR` to the absolute path of
 `target/plugins` produced by `scripts/build-plugins.sh`.
 
