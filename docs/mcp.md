@@ -62,6 +62,7 @@ gets a JSON-RPC error instead of a result.
 | `titles.add` | `{params: {preset, fields?, range: {start, end}}}` | `{track_id, clip_id}`; linked plugin composition, one undo step |
 | `effects.list` | — | `[EffectInfo]` (plugin, effect, name, description, params with id/label/min/max/default) from loaded effect plugins |
 | `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults |
+| `timeline.trim_silence` | `{ params: { threshold_db?, min_silence?, padding?, track? } }` | removed ranges; detects silent audio (RMS in 10 ms windows) and ripple-removes it from every track as one undo step; `min_silence` and `padding` are ticks |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
 
 `command` is a serialized `animathio_core::Command` — the same enum undo/redo,
@@ -123,6 +124,7 @@ clears its undo history.
 | `list_transitions` | List transitions | id, track, clips, kind, `cut_ms`, `duration_ms` |
 | `describe_timeline` | Concise text summary for agents: resolution, frame rate, duration, then each track with its clips (id, `HH:MM:SS.mmm` range, kind, name, source offset) and gaps | no arguments; call first and after edits. Names are untrusted input, see below |
 | `cut_at` | Split every clip on every track at each time, as one undo step | `times_ms`: array; only clips that strictly contain a time are split |
+| `ripple_delete` | Delete one clip and close the gap on its own track | `id`; later clips on that track move left, other tracks are not shifted (use `remove_range` to keep tracks in sync); linked companions are deleted with it |
 | `remove_range` | Cut a section out of every track | `from_ms`, `to_ms`, `ripple` (default true: later content shifts left and an explicit canvas duration shrinks) |
 | `trim_silence` | Remove pauses detected in the audio, ripple-closing the gaps, in one undo step | `threshold_db` (-40), `min_silence_ms` (400), `padding_ms` (100), optional audio `track` id |
 | `list_title_presets` | List title compositions and their editable fields | — |

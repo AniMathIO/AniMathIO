@@ -1,13 +1,16 @@
 # `animathio-cli` reference
 
-Text and shape renders require the bundled WASM components. Run
+Text, shape and effect renders require the bundled WASM components. Run
 `scripts/build-plugins.sh` first; for unpackaged release binaries set
 `ANIMATHIO_PLUGIN_DIR=target/plugins`. PNG renders, sequences and MP4 exports all
 resolve clips through the plugin host.
 
-Headless project validation, PNG rendering, importers and the MCP sidecar.
-Generated from the built binary's `--help` output.
+Headless project validation, PNG rendering, MP4 export, importers and the MCP sidecar.
+The `text` blocks below are the binary's own `--help` output: `scripts/check-docs.sh`
+fails when they drift, and `scripts/check-docs.sh --fix-cli` regenerates them from a
+built `animathio-cli`.
 
+<!-- help:cli -->
 ```text
 AniMathIO headless CPU renderer
 
@@ -29,6 +32,7 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 ```
+<!-- /help:cli -->
 
 Build it once (on shared Linux machines keep the resource limits):
 
@@ -42,13 +46,16 @@ adjacent `assets/<blake3>` directory. `--frame`, `--from` and `--to` are zero-ba
 project frame indices at the project's rational frame rate; the sequence end is
 exclusive. `--time` accepts exact decimal seconds (`1.25`) or integer ticks with a
 `ticks` suffix (`705600000ticks`); 705,600,000 ticks = 1 second. Output size
-defaults to 640×360 (or the project's canvas when set) unless overridden.
+defaults to the project's canvas (640×360 when it is unset) unless overridden.
 
 ## `render`
 
-Render one frame to PNG.
+Render one frame to PNG. Exactly one of `--frame` or `--time` is required.
 
+<!-- help:render -->
 ```text
+Render one frame to PNG
+
 Usage: animathio-cli render [OPTIONS] --output <OUTPUT> <PROJECT>
 
 Arguments:
@@ -57,13 +64,12 @@ Arguments:
 Options:
       --frame <FRAME>    Zero-based frame index at the project's rational frame rate
       --time <TIME>      Exact nonnegative decimal seconds (e.g. 1.25), or integer ticks (123ticks)
-  -o, --output <OUTPUT>
+  -o, --output <OUTPUT>  
       --width <WIDTH>    Overrides the project's output width
       --height <HEIGHT>  Overrides the project's output height
   -h, --help             Print help
 ```
-
-Exactly one of `--frame` or `--time` is required.
+<!-- /help:render -->
 
 ```bash
 animathio-cli render sample.amio --frame 30 -o frame.png
@@ -76,17 +82,24 @@ animathio-cli render sample.amio --frame 0 --width 1280 --height 720 -o wide.png
 
 Render the half-open frame range `[from, to)` to `frame_000000.png`, etc.
 
+<!-- help:render-seq -->
 ```text
+Render [from, to) frame indices to `frame_000000.png`, etc
+
 Usage: animathio-cli render-seq [OPTIONS] --to <TO> --output <OUTPUT> <PROJECT>
+
+Arguments:
+  <PROJECT>  
 
 Options:
       --from <FROM>      [default: 0]
       --to <TO>          Exclusive final frame index
-  -o, --output <OUTPUT>
+  -o, --output <OUTPUT>  
       --width <WIDTH>    Overrides the project's output width
       --height <HEIGHT>  Overrides the project's output height
   -h, --help             Print help
 ```
+<!-- /help:render-seq -->
 
 ```bash
 animathio-cli render-seq sample.amio --from 0 --to 90 -o frames/
@@ -112,16 +125,17 @@ replaced silently: without `--overwrite` the command fails with an
 temporary file in the destination directory and renamed into place only after a
 successful export, so a failed or interrupted run leaves no partial output.
 
+<!-- help:export -->
 ```text
 Export an offline H.264 + AAC MP4
 
 Usage: animathio-cli export [OPTIONS] --output <OUTPUT> <PROJECT>
 
 Arguments:
-  <PROJECT>
+  <PROJECT>  
 
 Options:
-  -o, --output <OUTPUT>
+  -o, --output <OUTPUT>  
       --from <FROM>      Inclusive start in decimal seconds or Nticks [default: 0]
       --to <TO>          Exclusive end in decimal seconds or Nticks; defaults to project duration
       --fps <FPS>        Output rate, e.g. 30 or 30000/1001
@@ -130,6 +144,7 @@ Options:
       --overwrite        Replace an existing output file instead of failing
   -h, --help             Print help
 ```
+<!-- /help:export -->
 
 ```bash
 animathio-cli export sample.amio -o out.mp4
@@ -143,20 +158,61 @@ animathio-cli export sample.amio -o renders/out.mp4 --overwrite
 Check model invariants and all asset content hashes. It does not attempt video
 decoding.
 
+<!-- help:validate -->
 ```text
+Check model invariants and all asset content hashes
+
 Usage: animathio-cli validate <PROJECT>
+
+Arguments:
+  <PROJECT>  
+
+Options:
+  -h, --help  Print help
 ```
+<!-- /help:validate -->
 
 ```bash
 animathio-cli validate sample.amio
 ```
 
+## `import-media`
+
+Create a new `.amio` project from one video or audio file (the file is embedded as a
+content-addressed asset and must be at most 1 GiB). A video with an audio stream
+becomes linked video and audio clips on separate tracks (they move, trim, split and
+delete together); a video without audio stays video-only. Use MCP `add_media` to add
+media, including images, to an existing project.
+
+<!-- help:import-media -->
+```text
+Import media into a new project, including linked companion audio
+
+Usage: animathio-cli import-media --output <OUTPUT> <INPUT>
+
+Arguments:
+  <INPUT>  
+
+Options:
+  -o, --output <OUTPUT>  
+  -h, --help             Print help
+```
+<!-- /help:import-media -->
+
+```bash
+animathio-cli import-media interview.mp4 -o interview.amio
+```
+
 ## `import-v1`
 
 Convert a v1 (Electron/TypeScript) `.animathio` project to a 2.0 `.amio` archive.
-Non-fatal warnings are printed to stderr.
+Non-fatal warnings are printed to stderr. See
+[`docs/migrating-from-v1.md`](migrating-from-v1.md) for what maps.
 
+<!-- help:import-v1 -->
 ```text
+Convert a v1 `.animathio` project to a `.amio` archive
+
 Usage: animathio-cli import-v1 --output <OUTPUT> <INPUT>
 
 Arguments:
@@ -166,6 +222,7 @@ Options:
   -o, --output <OUTPUT>  Output `.amio` archive
   -h, --help             Print help
 ```
+<!-- /help:import-v1 -->
 
 ```bash
 animathio-cli import-v1 project.animathio -o imported.amio
@@ -175,7 +232,10 @@ animathio-cli import-v1 project.animathio -o imported.amio
 
 Convert a Manim Community scene script (`.py`) to a 2.0 `.amio` archive.
 
+<!-- help:import-manim -->
 ```text
+Convert a Manim Community scene script to a `.amio` archive
+
 Usage: animathio-cli import-manim [OPTIONS] --output <OUTPUT> <INPUT>
 
 Arguments:
@@ -186,6 +246,7 @@ Options:
   -o, --output <OUTPUT>  Output `.amio` archive
   -h, --help             Print help
 ```
+<!-- /help:import-manim -->
 
 ```bash
 animathio-cli import-manim scene.py -o imported.amio
@@ -195,11 +256,19 @@ animathio-cli import-manim scene.py --scene MyScene -o imported.amio
 ## `new-sample`
 
 Write a three-second animated image/text/shape demo archive (the same sample the
-editor opens by default).
+editor opens with `--sample`).
 
+<!-- help:new-sample -->
 ```text
+Write a three-second animated image/text/shape demo archive
+
 Usage: animathio-cli new-sample --output <OUTPUT>
+
+Options:
+  -o, --output <OUTPUT>  
+  -h, --help             Print help
 ```
+<!-- /help:new-sample -->
 
 ```bash
 animathio-cli new-sample -o sample.amio
@@ -210,32 +279,19 @@ animathio-cli new-sample -o sample.amio
 Run an MCP stdio server: connects to a running editor's control socket, or drives a
 project file headlessly when `--project` is given. See [`docs/mcp.md`](mcp.md).
 
+<!-- help:mcp -->
 ```text
+Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
+
 Usage: animathio-cli mcp [OPTIONS]
 
 Options:
-      --project <PROJECT>  Project file to operate on headlessly
+      --project <PROJECT>  Project file to operate on headlessly (a `.amio` archive or `project.json`)
   -h, --help               Print help
 ```
+<!-- /help:mcp -->
 
 ```bash
 animathio-cli mcp                    # attach to a running editor
 animathio-cli mcp --project sample.amio
 ```
-
-## `import-media`
-
-```text
-Import media into a new project, including linked companion audio
-
-Usage: animathio-cli import-media --output <OUTPUT> <INPUT>
-
-Arguments:
-  <INPUT>
-
-Options:
-  -o, --output <OUTPUT>
-  -h, --help             Print help
-```
-
-Creates a new `.amio` project from video or audio. Video with audio creates linked clips on separate tracks.
