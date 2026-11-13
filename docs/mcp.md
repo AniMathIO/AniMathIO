@@ -256,3 +256,5 @@ The local server accepts up to eight simultaneous connections. Idle clients do n
 block other clients, and disconnect errors are logged without stopping the listener.
 The editor drains calls on a timer even while its window is occluded. Frame renders,
 asset reads and saves run on workers against project snapshots.
+
+`add_media` probes video files and creates aligned video and companion audio clips when the source has audio. Asset, tracks and clips are one undoable batch. Video without an audio stream stays video-only. Companion audio starts with gain 1 and muted 0.

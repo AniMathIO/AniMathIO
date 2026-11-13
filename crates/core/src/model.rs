@@ -201,6 +201,9 @@ pub struct Animation {
 pub struct Clip {
     /// Stable identity, unique across the project.
     pub id: ClipId,
+    /// Clips with the same group move and edit together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_group: Option<ClipId>,
     /// Source data.
     pub kind: ClipKind,
     /// Timeline placement.
@@ -223,6 +226,7 @@ impl Clip {
     pub fn new(id: ClipId, kind: ClipKind, range: TimeRange) -> Self {
         Self {
             id,
+            link_group: None,
             kind,
             range,
             source_offset: Time(0),

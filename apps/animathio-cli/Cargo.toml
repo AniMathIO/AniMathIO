@@ -7,6 +7,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+animathio-media = { path = "../../crates/media" }
 animathio-export = { path = "../../crates/export" }
 animathio-control = { path = "../../crates/control" }
 animathio-core.workspace = true
@@ -22,7 +23,6 @@ serde_json.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util"] }
 
 [dev-dependencies]
-animathio-media = { path = "../../crates/media" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 tempfile = "3"

@@ -317,3 +317,5 @@ including their variants.
 Every plugin inspector control has a keyframe diamond. Editing an animated
 parameter updates the key at the playhead or inserts one there, preserving an
 existing key's outgoing interpolation. Unanimated edits update base parameters.
+
+Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.

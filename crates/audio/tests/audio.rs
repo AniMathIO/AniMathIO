@@ -506,3 +506,12 @@ fn unsupported_surround_rebuild_keeps_previous_mixer_usable() {
     let range = TimeRange::new(Time(0), Time(100)).unwrap();
     assert!(good.mix(&Project::default(), range).is_ok());
 }
+
+#[test]
+fn mp4_companion_decodes_audio_instead_of_default_video_track() {
+    let source = SymphoniaSource::from_bytes(
+        include_bytes!("../../media/tests/fixtures/sample.mp4").to_vec(),
+    )
+    .unwrap();
+    assert!(source.pcm().frames() > 0);
+}

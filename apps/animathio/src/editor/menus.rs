@@ -196,6 +196,7 @@ impl Editor {
                     (IconName::Scissors, "Split at playhead", Self::split_clip),
                     (IconName::Copy, "Duplicate", Self::duplicate_clip),
                     (IconName::Trash, "Delete", Self::delete_clip),
+                    (IconName::Scissors, "Unlink", Self::unlink_clip),
                     (
                         IconName::TrendingUp,
                         "Fade in 1 s",

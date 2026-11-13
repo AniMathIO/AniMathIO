@@ -13,6 +13,18 @@ const MAX_BATCH: usize = 1024;
 /// A failed edit leaves the project unchanged. IDs are supplied by callers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
+    /// Set or clear a clip's companion group (unlink each member in a batch).
+    SetClipLink {
+        /// Clip to link or unlink.
+        id: ClipId,
+        /// Companion group, or none to unlink.
+        group: Option<ClipId>,
+    },
+    /// Apply an exact edit without companion propagation (used by undo).
+    Exact {
+        /// Exact command to apply.
+        command: Box<Command>,
+    },
     /// Insert a layer at a back-to-front compositing index.
     AddTrack {
         /// Layer data (also restores removed clips).
@@ -300,7 +312,9 @@ impl Command {
                 .iter()
                 .find(|t| t.id == *track && t.locked)
                 .map(|t| t.id),
-            Self::RemoveClip { id }
+            Self::Exact { command } => command.locked_track(project),
+            Self::SetClipLink { id, .. }
+            | Self::RemoveClip { id }
             | Self::MoveClip { id, .. }
             | Self::TrimClip { id, .. }
             | Self::SplitClip { id, .. }
@@ -321,10 +335,109 @@ impl Command {
         }
     }
 
+    fn apply_inner(&self, project: &mut Project) -> Result<Self, Error> {
+        if let Self::Exact { command } = self {
+            return command.apply_raw(project).map(|inverse| Self::Exact {
+                command: Box::new(inverse),
+            });
+        }
+        let id = match self {
+            Self::MoveClip { id, .. }
+            | Self::TrimClip { id, .. }
+            | Self::RemoveClip { id }
+            | Self::SplitClip { id, .. } => Some(*id),
+            _ => None,
+        };
+        if let Some(id) = id {
+            let original = project.tracks[clip_track_index(project, id)?].clips[&id].clone();
+            if let Some(group) = original.link_group {
+                let members: Vec<_> = project
+                    .tracks
+                    .iter()
+                    .flat_map(|t| t.clips.values().map(move |c| (t.id, c.clone())))
+                    .filter(|(_, c)| c.id != id && c.link_group == Some(group))
+                    .collect();
+                let mut commands = vec![self.clone()];
+                let mut next = next_clip_id(project)?;
+                if let Self::SplitClip { right_id, .. } = self {
+                    next = next.max(
+                        right_id
+                            .0
+                            .checked_add(1)
+                            .ok_or_else(|| invalid("clip id overflow"))?,
+                    );
+                }
+                for (track, clip) in members {
+                    commands.push(match self {
+                        Self::RemoveClip { .. } => Self::RemoveClip { id: clip.id },
+                        Self::MoveClip { start, .. } => Self::MoveClip {
+                            id: clip.id,
+                            track,
+                            start: Time(
+                                clip.range
+                                    .start
+                                    .0
+                                    .checked_add(start.0 - original.range.start.0)
+                                    .ok_or_else(|| invalid("move overflow"))?,
+                            ),
+                        },
+                        Self::TrimClip {
+                            range,
+                            source_offset,
+                            ..
+                        } => Self::TrimClip {
+                            id: clip.id,
+                            range: *range,
+                            source_offset: Time(
+                                clip.source_offset
+                                    .0
+                                    .checked_add(source_offset.0)
+                                    .and_then(|v| v.checked_sub(original.source_offset.0))
+                                    .ok_or_else(|| invalid("trim overflow"))?,
+                            ),
+                        },
+                        Self::SplitClip { at, .. } => {
+                            let right_id = ClipId(next);
+                            next = next
+                                .checked_add(1)
+                                .ok_or_else(|| invalid("clip id overflow"))?;
+                            Self::SplitClip {
+                                id: clip.id,
+                                right_id,
+                                at: *at,
+                            }
+                        }
+                        _ => unreachable!(),
+                    });
+                }
+                return apply_generated(project, &commands);
+            }
+        }
+        self.apply_raw(project).map(|inverse| {
+            if matches!(self, Self::AddClip { clip, .. } if clip.link_group.is_some()) {
+                Self::Exact {
+                    command: Box::new(inverse),
+                }
+            } else {
+                inverse
+            }
+        })
+    }
+
     // Keep the exhaustive command/inverse pairs together for review.
     #[allow(clippy::too_many_lines)]
-    fn apply_inner(&self, project: &mut Project) -> Result<Self, Error> {
+    fn apply_raw(&self, project: &mut Project) -> Result<Self, Error> {
         Ok(match self {
+            Self::Exact { command } => command.apply_raw(project)?,
+            Self::SetClipLink { id, group } => {
+                let clip = clip_mut(project, *id)?;
+                let old = clip.link_group;
+                clip.link_group = *group;
+                Self::SetClipLink {
+                    id: *id,
+                    group: old,
+                }
+            }
             Self::Batch { commands } => {
                 if commands.len() > MAX_BATCH {
                     return Err(invalid("batch too large"));
@@ -340,7 +453,61 @@ impl Command {
                 apply_generated(project, &commands)?
             }
             Self::RippleDelete { clip } => {
-                let commands = ripple_delete_commands(project, *clip)?;
+                let original = &project.tracks[clip_track_index(project, *clip)?].clips[clip];
+                let mut ids = vec![*clip];
+                if let Some(group) = original.link_group {
+                    ids.extend(
+                        project
+                            .tracks
+                            .iter()
+                            .flat_map(|t| t.clips.values())
+                            .filter(|c| c.id != *clip && c.link_group == Some(group))
+                            .map(|c| c.id),
+                    );
+                }
+                let mut commands = Vec::new();
+                for id in ids {
+                    commands.extend(ripple_delete_commands(project, id)?);
+                }
+                let mut moved: std::collections::BTreeSet<_> = commands
+                    .iter()
+                    .filter_map(|c| {
+                        if let Self::MoveClip { id, .. } = c {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                for command in commands.clone() {
+                    if let Self::MoveClip { id, start, .. } = command {
+                        let original = &project.tracks[clip_track_index(project, id)?].clips[&id];
+                        if let Some(group) = original.link_group {
+                            for track in &project.tracks {
+                                for companion in
+                                    track.clips.values().filter(|c| c.link_group == Some(group))
+                                {
+                                    if moved.insert(companion.id) {
+                                        commands.push(Self::MoveClip {
+                                            id: companion.id,
+                                            track: track.id,
+                                            start: Time(
+                                                companion
+                                                    .range
+                                                    .start
+                                                    .0
+                                                    .checked_add(start.0 - original.range.start.0)
+                                                    .ok_or_else(|| {
+                                                        invalid("ripple move overflow")
+                                                    })?,
+                                            ),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 apply_generated(project, &commands)?
             }
             Self::AddTrack { track, index } => {
@@ -849,7 +1016,24 @@ impl Command {
 /// inverse. On failure the caller's candidate project is discarded by `Command::apply`.
 fn apply_all(project: &mut Project, commands: &[Command]) -> Result<Command, Error> {
     let mut inverses = Vec::with_capacity(commands.len());
+    let mut removed_companions = std::collections::BTreeSet::new();
     for command in commands {
+        if let Command::RemoveClip { id } = command {
+            if removed_companions.contains(id) && clip_track_index(project, *id).is_err() {
+                continue;
+            }
+            let clip = &project.tracks[clip_track_index(project, *id)?].clips[id];
+            if let Some(group) = clip.link_group {
+                removed_companions.extend(
+                    project
+                        .tracks
+                        .iter()
+                        .flat_map(|t| t.clips.values())
+                        .filter(|c| c.link_group == Some(group))
+                        .map(|c| c.id),
+                );
+            }
+        }
         inverses.push(command.apply_inner(project)?);
     }
     inverses.reverse();
@@ -861,7 +1045,34 @@ fn apply_generated(project: &mut Project, commands: &[Command]) -> Result<Comman
     if let Some(track) = commands.iter().find_map(|c| c.locked_track(project)) {
         return Err(Error(format!("track {} is locked", track.0)));
     }
-    apply_all(project, commands)
+    let mut inverses = Vec::new();
+    let mut split_groups = std::collections::BTreeMap::new();
+    for command in commands {
+        if let Command::SplitClip { id, right_id, at } = command {
+            let clip = &project.tracks[clip_track_index(project, *id)?].clips[id];
+            if let Some(group) = clip.link_group {
+                let new_group = *split_groups.entry((group, *at)).or_insert(*right_id);
+                inverses.push(Command::Exact {
+                    command: Box::new(command.apply_raw(project)?),
+                });
+                inverses.push(Command::Exact {
+                    command: Box::new(
+                        Command::SetClipLink {
+                            id: *right_id,
+                            group: Some(new_group),
+                        }
+                        .apply_raw(project)?,
+                    ),
+                });
+                continue;
+            }
+        }
+        inverses.push(Command::Exact {
+            command: Box::new(command.apply_raw(project)?),
+        });
+    }
+    inverses.reverse();
+    Ok(Command::Batch { commands: inverses })
 }
 
 /// First clip id strictly greater than every existing clip id.
