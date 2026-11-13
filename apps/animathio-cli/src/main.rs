@@ -75,6 +75,9 @@ enum Action {
         /// Replace an existing output file instead of failing.
         #[arg(long)]
         overwrite: bool,
+        /// Report wall time, fps and opt-in stage timings.
+        #[arg(long)]
+        bench: bool,
     },
     /// Check model invariants and all asset content hashes.
     Validate { project: PathBuf },
@@ -241,6 +244,7 @@ fn run(cli: Cli) -> Result<()> {
             preset,
             crf,
             overwrite,
+            bench,
         } => {
             let mut bundle = load(&project)?;
             if let Some(preset) = preset {
@@ -258,6 +262,8 @@ fn run(cli: Cli) -> Result<()> {
                 overwrite,
             };
             let mut plugins = plugin_host()?;
+            let started = std::time::Instant::now();
+            let mut frames = 0;
             let mut exporter = animathio_export::Exporter::new(&bundle.project, &bundle.assets)?;
             exporter.set_effect_processor(plugins.effect_processor());
             exporter.export_to_file(
@@ -269,6 +275,7 @@ fn run(cli: Cli) -> Result<()> {
                 },
                 &destination,
                 |progress| {
+                    frames = progress.completed;
                     if progress.completed == progress.total {
                         eprintln!("exported {} frames", progress.total);
                     }
@@ -276,6 +283,16 @@ fn run(cli: Cli) -> Result<()> {
                 },
                 |scene| plugins.resolve(&scene, animathio_export::resolution(&bundle.project)),
             )?;
+            if bench {
+                let elapsed = started.elapsed().as_secs_f64();
+                #[allow(clippy::cast_precision_loss)]
+                let fps = frames as f64 / elapsed;
+                eprintln!(
+                    "export bench: {frames} frames in {elapsed:.3}s ({:.2} fps)",
+                    fps
+                );
+                animathio_core::timing::report();
+            }
         }
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

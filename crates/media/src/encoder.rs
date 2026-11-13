@@ -246,6 +246,8 @@ impl Mp4Encoder {
 
     /// Encode one RGBA8 frame in presentation order.
     pub fn encode_video_frame(&mut self, rgba: &[u8]) -> Result<()> {
+        let _timer = animathio_core::timing::Timer::new("encode-video");
+
         let expected = crate::limits::frame_bytes(self.width, self.height)?;
         if self.frame_index >= crate::limits::MAX_FRAMES {
             return Err(crate::limits::invalid());
@@ -282,6 +284,8 @@ impl Mp4Encoder {
 
     /// Feed interleaved f32 PCM samples (a whole number of frames).
     pub fn encode_audio(&mut self, interleaved: &[f32]) -> Result<()> {
+        let _timer = animathio_core::timing::Timer::new("encode-audio");
+
         if self.audio_track.is_none() {
             return Err(MediaError::NoStream("audio"));
         }
@@ -317,6 +321,7 @@ impl Mp4Encoder {
 
     /// Flush encoders and finish the MP4, returning the file bytes.
     pub fn finish(mut self) -> Result<Vec<u8>> {
+        let _timer = animathio_core::timing::Timer::new("encode-flush-mux");
         if self.audio_track.is_some() {
             let channels = self.audio_channels;
             let frame_len = channels * filmcraft_aac::FRAME_LEN;

@@ -307,6 +307,7 @@ impl RenderCtx {
 /// Rasterize a scene onto a transparent canvas. Evaluation is shared with preview/export.
 /// Rendering is fallible so missing assets and invalid dimensions become diagnostics.
 pub fn render(scene: &Scene, ctx: &mut RenderCtx, size: Size) -> Result<Frame, Error> {
+    let _timer = animathio_core::timing::Timer::new("render-inclusive");
     check_size(size)?;
     ctx.backend
         .render(scene, &mut ctx.resources, ctx.video.as_mut(), size)

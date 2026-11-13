@@ -412,3 +412,9 @@ CLI tests receive an explicit bundle directory. CI builds bundles on both Linux
 and Windows; the WASI target must be installed for local tests too.
 
 Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.
+
+Offline export renders and mixes on its caller while an encoder worker consumes
+owned RGBA/PCM buffers through a channel with capacity one. Frame and audio order
+are unchanged; progress reports only encoded frames. The worker is joined on
+success, failure and cancellation. Output remains atomic, and a serial/pipelined
+MP4 comparison test protects byte determinism.

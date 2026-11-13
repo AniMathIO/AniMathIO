@@ -239,3 +239,14 @@ Options:
 ```
 
 Creates a new `.amio` project from video or audio. Video with audio creates linked clips on separate tracks.
+
+Export profiling: `export PROJECT -o OUTPUT --bench` reports total wall time and
+frames per second (including media preparation, excluding plugin discovery).
+Set `ANIMATHIO_EXPORT_TIMING=1` for process-wide decode, render, effects, encoding
+and audio mixing timers. Render includes decode waits and effects; worker decode
+timers can overlap, so these numbers must not be added together.
+
+For the reproducible 10-second 1080p30 MP4/audio, text title, one-second dissolve
+and grayscale effect workload, build the release CLI and first-party plugins,
+then run `python3 scripts/bench-export.py [OUTPUT_DIRECTORY]` (requires ffmpeg).
+The script retains the source, project and exported MP4 for inspection.

@@ -231,6 +231,7 @@ impl EffectRuntime {
             })
             .collect();
 
+        let _timer = animathio_core::timing::Timer::new("effects");
         let mut store = self.store(count);
         let instance = entry
             .pre

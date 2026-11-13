@@ -178,6 +178,7 @@ impl VideoDecoder for FilmCraftVideoDecoder {
     }
 
     fn frame_at(&self, media_time: Time) -> Result<Arc<Frame>> {
+        let _timer = animathio_core::timing::Timer::new("decode");
         if media_time.0 < 0 {
             return Err(crate::limits::invalid());
         }
