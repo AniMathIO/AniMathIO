@@ -306,7 +306,6 @@ impl Editor {
         }
         self.snap_line = None;
         match &mut self.gesture {
-            Some(TimelineGesture::Overview) => {}
             Some(TimelineGesture::Pan { x: origin, scroll }) => {
                 self.timeline_scroll =
                     (*scroll + *origin - x).clamp(0.0, timeline::max_scroll(&layout));
@@ -422,7 +421,7 @@ impl Editor {
                 cx.notify();
             }
             Some(TimelineGesture::Scrub) => self.scrub_to(x, cx),
-            None => {}
+            Some(TimelineGesture::Overview) | None => {}
         }
     }
 
@@ -577,7 +576,7 @@ impl Editor {
         cx.notify();
     }
 
-    /// Cached downsampled peaks for a decoded audio asset.
+    /// Animate zoom and scroll toward `zoom`, keeping the time under `anchor_x` fixed.
     pub(super) fn animate_timeline_zoom(
         &mut self,
         zoom: f32,
@@ -632,6 +631,7 @@ impl Editor {
         }
     }
 
+    /// Cached downsampled peaks for a decoded audio asset.
     pub(super) fn waveform_for(&self, id: &AssetId) -> Option<Arc<Waveform>> {
         if let Some(wave) = self.waveforms.borrow().get(id) {
             return Some(wave.clone());
@@ -779,7 +779,7 @@ impl Editor {
                     hovered: self.hovered_clip == Some(clip.id),
                     label: format!(
                         "{}   {}",
-                        clip_label(&self.project, clip),
+                        clip_title(&self.project, clip, layout.row_height),
                         timecode::format_timecode(Time(end.0 - start.0), self.project.frame_rate())
                     )
                     .into(),
@@ -1273,6 +1273,18 @@ impl Editor {
                                         )
                                         .corner_radii(px(2.)),
                                     );
+                                    // Unity-gain tick at the midpoint of the 0-2x range.
+                                    window.paint_quad(fill(
+                                        Bounds::new(
+                                            point(
+                                                f32::midpoint(f32::from(left), f32::from(right))
+                                                    .into(),
+                                                y - px(3.5),
+                                            ),
+                                            size(px(1.), px(7.)),
+                                        ),
+                                        crate::style::hex(crate::style::color::TEXT_MUTED),
+                                    ));
                                     let x = left + (right - left) * (gain as f32 / 2.0);
                                     window.paint_quad(
                                         fill(
@@ -1300,71 +1312,50 @@ impl Editor {
                         ),
                 )
                 .child(div().flex_1())
-                .child(
-                    header_button(
-                        "track-mute",
-                        icons::icon(if muted {
-                            IconName::VolumeX
-                        } else {
-                            IconName::Volume2
-                        }),
-                        if muted { "Unmute track" } else { "Mute track" },
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
-                        }),
-                    )
-                    .selected(muted)
-                    .text_color(crate::style::hex(if muted {
-                        crate::style::color::WARNING
+                .child(header_pill(
+                    ("track-mute", id.0),
+                    if muted {
+                        IconName::VolumeX
                     } else {
-                        crate::style::color::TEXT_MUTED
-                    }))
-                    .toggled(muted),
-                )
-                .child(
-                    header_button(
-                        "track-solo",
-                        icons::icon(IconName::Headphones),
-                        if solo { "Unsolo track" } else { "Solo track" },
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
-                        }),
-                    )
-                    .selected(solo)
-                    .text_color(crate::style::hex(if solo {
-                        crate::style::color::SUCCESS
+                        IconName::Volume2
+                    },
+                    if muted { "Unmute track" } else { "Mute track" },
+                    muted,
+                    crate::style::color::WARNING,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
+                    }),
+                ))
+                .child(header_pill(
+                    ("track-solo", id.0),
+                    IconName::Headphones,
+                    if solo { "Unsolo track" } else { "Solo track" },
+                    solo,
+                    crate::style::color::SUCCESS,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
+                    }),
+                ))
+                .child(header_pill(
+                    ("track-lock", id.0),
+                    if locked {
+                        IconName::Lock
                     } else {
-                        crate::style::color::TEXT_MUTED
-                    }))
-                    .toggled(solo),
-                )
-                .child(
-                    header_button(
-                        "track-lock",
-                        icons::icon(if locked {
-                            IconName::Lock
-                        } else {
-                            IconName::LockOpen
-                        }),
-                        if locked { "Unlock track" } else { "Lock track" },
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.execute(
-                                &Command::SetTrackLocked {
-                                    id,
-                                    locked: !locked,
-                                },
-                                cx,
-                            );
-                        }),
-                    )
-                    .selected(locked)
-                    .text_color(crate::style::hex(if locked {
-                        crate::style::color::ACCENT
-                    } else {
-                        crate::style::color::TEXT_MUTED
-                    }))
-                    .toggled(locked),
-                );
+                        IconName::LockOpen
+                    },
+                    if locked { "Unlock track" } else { "Lock track" },
+                    locked,
+                    crate::style::color::ACCENT,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.execute(
+                            &Command::SetTrackLocked {
+                                id,
+                                locked: !locked,
+                            },
+                            cx,
+                        );
+                    }),
+                ));
             let renaming = self
                 .track_rename
                 .as_ref()
@@ -1406,6 +1397,7 @@ impl Editor {
                     .text_color(cx.theme().foreground)
                     .flex()
                     .flex_row()
+                    .items_center()
                     .gap_1()
                     .child(
                         icons::icon(kind.map_or(IconName::Layers, icons::kind_icon))

@@ -608,7 +608,7 @@ impl Editor {
             pool_drag_pos: Point::default(),
             fields: fields::FieldPool::default(),
             waveforms: std::cell::RefCell::default(),
-            waveform_paths: Default::default(),
+            waveform_paths: std::rc::Rc::default(),
         };
         if recovered {
             this.notices

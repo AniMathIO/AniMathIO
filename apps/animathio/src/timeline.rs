@@ -374,8 +374,8 @@ mod tests {
                     ClipId(index + 10),
                     ClipKind::Error("synthetic".into()),
                     TimeRange::new(
-                        Time(index as i64 * TICKS_PER_SECOND),
-                        Time((index + 1) as i64 * TICKS_PER_SECOND),
+                        Time(i64::try_from(index).unwrap() * TICKS_PER_SECOND),
+                        Time(i64::try_from(index + 1).unwrap() * TICKS_PER_SECOND),
                     )
                     .unwrap(),
                 ),

@@ -130,6 +130,8 @@ fn decode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `gpui::test` is glob-imported through `super::*`; keep the std attribute.
+    use core::prelude::v1::test;
 
     #[test]
     fn image_tiles_repeat_and_video_samples_decode_on_worker() {

@@ -132,7 +132,7 @@ on the same track as one undo step. N toggles snapping and an engaged snap draws
 accent line. Ctrl/Cmd+plus/minus zooms and Shift+Z fits the timeline.
 Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
 tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
-waveforms, content snippets, fade curves and hatched transition windows. Select a
+waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
 clip to show its keyframe diamonds. Track headers have mute/solo/lock buttons and
 a horizontal gain slider (drag to adjust, double-click to reset to unity); a drag
 is one undo step. Use large tracks for the most detailed clip previews.
