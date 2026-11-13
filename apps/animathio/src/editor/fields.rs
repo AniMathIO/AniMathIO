@@ -9,7 +9,6 @@
 //! `clip id + parameter`. A control is created the first time it is rendered and
 //! re-synchronised from the project on every frame it is not being edited.
 
-use gpui_component::{IndexPath, Disableable};
 use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{
     Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction,
@@ -17,6 +16,7 @@ use gpui_component::input::{
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::switch::Switch;
+use gpui_component::{Disableable, IndexPath};
 
 use super::*;
 use crate::style::{color, hex};
@@ -163,6 +163,10 @@ impl Editor {
                 move |this, _state, event: &InputEvent, _window, cx| {
                     if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                         this.commit_input(&commit_key, cx);
+                        if commit_key == "timecode" {
+                            this.viewer_state.timecode_editing = false;
+                            cx.notify();
+                        }
                     }
                 },
             ));
@@ -682,6 +686,7 @@ impl Editor {
 
     /// Keyframe diamond for one animatable property: filled when a keyframe sits
     /// at the playhead.
+    #[allow(clippy::if_not_else)]
     fn row_diamond(&self, id: ClipId, target: &Target, cx: &mut Context<Self>) -> Div {
         let active = self
             .find_clip(id)
@@ -723,7 +728,7 @@ impl Editor {
                             "Add keyframe at playhead"
                         })
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_keyframe(id, target.clone(), cx)
+                            this.toggle_keyframe(id, target.clone(), cx);
                         })),
                 );
             } else {
@@ -754,13 +759,62 @@ impl Editor {
         _cx: &mut Context<Self>,
     ) -> Div {
         div()
-            .min_h(px(36.))
+            .min_h(px(32.))
             .flex()
             .flex_row()
             .items_center()
             .gap_1()
             .px_2()
             .child(div().w(px(46.)).flex_shrink_0().children(diamond))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_size(px(11.))
+                    .text_color(hex(color::TEXT_SECONDARY))
+                    .child(label),
+            )
+            .child(control)
+    }
+
+    /// A row label that scrubs its number when dragged horizontally.
+    fn scrub_label(
+        key: &str,
+        text: String,
+        target: InputTarget,
+        value: f64,
+        step: f64,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        div()
+            .id(SharedString::from(format!("label-{key}")))
+            .cursor_ew_resize()
+            .child(text)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.pointer_down = true;
+                    this.fields.scrub = Some(NumberScrub {
+                        target: target.clone(),
+                        origin: f32::from(event.position.x),
+                        value,
+                        step,
+                    });
+                    cx.stop_propagation();
+                }),
+            )
+    }
+
+    /// A `label ........ control` row without the keyframe column.
+    fn param_row_flush(label: impl IntoElement, control: impl IntoElement) -> Div {
+        div()
+            .min_h(px(32.))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .px_2()
             .child(
                 div()
                     .flex_1()
@@ -803,28 +857,17 @@ impl Editor {
             cx,
         );
         let diamond = self.row_diamond(id, &target, cx);
-        let scrub_target = InputTarget::Field {
-            id,
-            field: field.clone(),
-        };
-        let step = field_step(&field);
-        let label = div()
-            .id(SharedString::from(format!("label-{key}")))
-            .cursor_ew_resize()
-            .child(label.to_owned())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.pointer_down = true;
-                    this.fields.scrub = Some(NumberScrub {
-                        target: scrub_target.clone(),
-                        origin: f32::from(event.position.x),
-                        value,
-                        step,
-                    });
-                    cx.stop_propagation();
-                }),
-            );
+        let label = Self::scrub_label(
+            &key,
+            label.to_owned(),
+            InputTarget::Field {
+                id,
+                field: field.clone(),
+            },
+            value,
+            field_step(&field),
+            cx,
+        );
         Self::param_row(Some(diamond), label, control, cx)
     }
 
@@ -947,10 +990,24 @@ impl Editor {
     ) -> Div {
         let name = model.id().to_owned();
         let diamond = self.row_diamond(id, &Target::Param(name.clone()), cx);
+        let mut label = model.label().to_owned().into_any_element();
         let control = match model {
-            ParamModel::Number { step, .. } => {
+            ParamModel::Number { step, min, max, .. } => {
                 let value = self.plugin_number_value(id, &name);
-                self.number_control(
+                let unit = (*min - 0.).abs() < f64::EPSILON && (*max - 1.).abs() < f64::EPSILON;
+                label = Self::scrub_label(
+                    &format!("c{}:pn:{name}", id.0),
+                    model.label().to_owned(),
+                    InputTarget::PluginNumber {
+                        id,
+                        name: name.clone(),
+                    },
+                    value,
+                    *step,
+                    cx,
+                )
+                .into_any_element();
+                let number = self.number_control(
                     &format!("c{}:pn:{name}", id.0),
                     InputTarget::PluginNumber {
                         id,
@@ -960,7 +1017,22 @@ impl Editor {
                     *step,
                     window,
                     cx,
-                )
+                );
+                if unit {
+                    let slider = self.slider_control(
+                        &format!("c{}:ps:{name}", id.0),
+                        Some(InputTarget::PluginNumber {
+                            id,
+                            name: name.clone(),
+                        }),
+                        value,
+                        window,
+                        cx,
+                    );
+                    number.child(slider)
+                } else {
+                    number
+                }
             }
             ParamModel::Color { default, .. } => {
                 let color = self.plugin_color_value(
@@ -1021,7 +1093,7 @@ impl Editor {
                 .w(px(CONTROL_W))
                 .child(self.plugin_asset_control(id, name.clone(), media_type, window, cx)),
         };
-        Self::param_row(Some(diamond), model.label().to_owned(), control, cx)
+        Self::param_row(Some(diamond), label, control, cx)
     }
 
     /// Inspector for several selected clips: a read-only summary plus the
@@ -1138,7 +1210,7 @@ impl Editor {
                 } else {
                     label.to_owned()
                 };
-                Self::param_row(None, label, control, cx)
+                Self::param_row_flush(label, control)
             })
             .collect();
         let body = div()
@@ -1322,7 +1394,7 @@ impl Editor {
             .project
             .tracks()
             .iter()
-            .flat_map(|track| track.transitions())
+            .flat_map(Track::transitions)
             .filter(|t| t.from == id || t.to == id)
             .map(|t| {
                 div()

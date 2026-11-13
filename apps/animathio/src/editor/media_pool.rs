@@ -22,35 +22,6 @@ struct MediaThumbnail {
     peaks: Arc<[f32]>,
 }
 
-struct HoverPreview {
-    image: Arc<RenderImage>,
-    name: String,
-}
-impl Render for HoverPreview {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .p_2()
-            .rounded(px(6.))
-            .bg(hex(color::RAISED))
-            .border_1()
-            .border_color(hex(color::BORDER))
-            .shadow_lg()
-            .child(
-                img(self.image.clone())
-                    .w(px(320.))
-                    .h(px(180.))
-                    .object_fit(ObjectFit::Contain),
-            )
-            .child(
-                div()
-                    .pt_2()
-                    .text_size(px(12.))
-                    .text_color(hex(color::TEXT))
-                    .child(self.name.clone()),
-            )
-    }
-}
-
 fn thumbnail_image(image: image::DynamicImage) -> Arc<RenderImage> {
     let mut image = image.thumbnail(320, 180).to_rgba8();
     for pixel in image.pixels_mut() {
@@ -427,8 +398,8 @@ impl Editor {
                         .await;
                     if this
                         .update(cx, |this, cx| {
-                            if this.media_view.thumbnails.contains_key(&id) {
-                                this.media_view.thumbnails.insert(id, Some(thumbnail));
+                            if let Some(slot) = this.media_view.thumbnails.get_mut(&id) {
+                                *slot = Some(thumbnail);
                                 cx.notify();
                             }
                         })
@@ -531,8 +502,6 @@ impl Editor {
                                 .get(frame_index.min(thumb.frames.len().saturating_sub(1)))
                         })
                         .cloned();
-                    let hover_image = frame.clone();
-                    let hover_name = asset.name.clone();
                     let hover_bounds =
                         std::rc::Rc::new(std::cell::Cell::new(Bounds::<Pixels>::default()));
                     let paint_bounds = hover_bounds.clone();
@@ -629,8 +598,10 @@ impl Editor {
                         .bg(hex(color::RAISED))
                         .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
                         .cursor_pointer()
-                        .when(self.media_view.list, |s| s.w_full())
-                        .when(!self.media_view.list, |s| s.w(relative(0.47)))
+                        .when(self.media_view.list, Styled::w_full)
+                        .when(!self.media_view.list, |s| {
+                            s.flex_1().min_w(px(104.)).max_w(px(176.))
+                        })
                         .child(preview)
                         .child(
                             div()
@@ -669,23 +640,14 @@ impl Editor {
                             }
                         }))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.add_asset_at_playhead(add_id.clone(), cx)
+                            this.add_asset_at_playhead(add_id.clone(), cx);
                         }))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {
-                                this.arm_pool_drag(PoolDrag::Asset(drop_id.clone()), cx)
+                                this.arm_pool_drag(PoolDrag::Asset(drop_id.clone()), cx);
                             }),
                         );
-                    let card = card.when_some(hover_image, |card, image| {
-                        card.tooltip(move |_, cx| {
-                            cx.new(|_| HoverPreview {
-                                image: image.clone(),
-                                name: hover_name.clone(),
-                            })
-                            .into()
-                        })
-                    });
                     cards = cards.child(card);
                 }
                 body = body.child(cards);
@@ -703,6 +665,7 @@ impl Editor {
                 if self.plugins.is_empty() {
                     body = body.child(empty_state("No clip plugins loaded", cx));
                 }
+                let mut cards = div().flex().flex_wrap().gap_2().w_full().pt_1();
                 for descriptor in &self.plugins {
                     let id = descriptor.id.clone();
                     let drop_id = id.clone();
@@ -711,22 +674,47 @@ impl Editor {
                         IconName::Sigma
                     } else if id.contains("graph") {
                         IconName::ChartNoAxesColumn
+                    } else if id.contains("shape") {
+                        IconName::Shapes
+                    } else if id.contains("text") {
+                        IconName::Type
                     } else {
-                        IconName::Sparkles
+                        IconName::Puzzle
                     };
-                    body = body.child(
+                    cards = cards.child(
                         div()
-                            .px_2()
-                            .py_1()
+                            .id(SharedString::from(format!("plugin-{id}")))
+                            .flex_1()
+                            .min_w(px(104.))
+                            .max_w(px(176.))
+                            .rounded(px(6.))
+                            .overflow_hidden()
+                            .border_1()
+                            .border_color(hex(color::BORDER))
+                            .bg(hex(color::RAISED))
                             .cursor_pointer()
-                            .hover(|this| this.bg(cx.theme().muted))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(icons::icon(icon).small())
-                            .child(name)
-                            .id("plugin-item")
+                            .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
+                            .child(
+                                div()
+                                    .h(px(64.))
+                                    .bg(hex(color::BG))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        icons::icon(icon)
+                                            .size(px(26.))
+                                            .text_color(hex(color::CLIP_PLUGIN)),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .p_2()
+                                    .text_size(px(11.))
+                                    .truncate()
+                                    .text_color(hex(color::TEXT))
+                                    .child(name),
+                            )
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.add_plugin_clip_by_id(&id, cx);
                             }))
@@ -738,6 +726,7 @@ impl Editor {
                             ),
                     );
                 }
+                body = body.child(cards);
             }
             LeftTab::Effects => {
                 let kinds = [
@@ -901,14 +890,14 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[core::prelude::v1::test]
     fn media_search_combines_name_and_kind() {
         assert!(media_matches("Lesson.MP4", "video/mp4", "LESS", "video/"));
         assert!(!media_matches("Lesson.MP4", "video/mp4", "less", "audio/"));
         assert!(!media_matches("Lesson.MP4", "video/mp4", "image", ""));
         assert!(media_matches("Score.wav", "audio/wav", "", ""));
     }
-    #[test]
+    #[core::prelude::v1::test]
     fn thumbnails_bound_pixel_storage_and_preserve_aspect() {
         let image = image::DynamicImage::ImageRgba8(image::RgbaImage::new(1920, 1080));
         let thumb = thumbnail_image(image);

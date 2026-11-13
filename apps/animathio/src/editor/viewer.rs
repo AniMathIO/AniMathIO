@@ -8,6 +8,8 @@ pub(super) struct ViewerState {
     pub checker: bool,
     drag: Option<GizmoDrag>,
     pub volume: f64,
+    pub timecode_editing: bool,
+    pub focus_timecode: bool,
 }
 
 impl Default for ViewerState {
@@ -18,6 +20,8 @@ impl Default for ViewerState {
             checker: false,
             drag: None,
             volume: 1.0,
+            timecode_editing: false,
+            focus_timecode: false,
         }
     }
 }
@@ -38,6 +42,7 @@ enum Handle {
 
 /// All geometry uses the same canvas mapping as the renderer: rotation happens
 /// in display pixels, after normalized scale, around the clip centre.
+#[allow(clippy::many_single_char_names)]
 fn local_point(t: Transform, canvas: Bounds<Pixels>, x: f64, y: f64) -> Point<Pixels> {
     let w = f64::from(f32::from(canvas.size.width));
     let h = f64::from(f32::from(canvas.size.height));
@@ -126,6 +131,7 @@ fn snap_axis(value: f64, extent: f64, threshold: f64) -> (f64, Option<f64>) {
     (value, None)
 }
 
+#[allow(clippy::many_single_char_names)]
 fn dragged_transform(
     drag: &GizmoDrag,
     canvas: Bounds<Pixels>,
@@ -162,10 +168,10 @@ fn dragged_transform(
                 t.scale_y = (t.scale_y + local_y / (h * y)).max(0.001);
             }
             if shift {
-                let factor = if x != 0. {
-                    t.scale_x / drag.transform.scale_x.max(0.001)
-                } else {
+                let factor = if x == 0. {
                     t.scale_y / drag.transform.scale_y.max(0.001)
+                } else {
+                    t.scale_x / drag.transform.scale_x.max(0.001)
                 };
                 t.scale_x = drag.transform.scale_x * factor;
                 t.scale_y = drag.transform.scale_y * factor;
@@ -210,18 +216,15 @@ impl Editor {
         let Some(clip) = self.find_clip(drag.id) else {
             return;
         };
-        let commands = [
-            (TransformProperty::X, t.x),
-            (TransformProperty::Y, t.y),
-            (TransformProperty::ScaleX, t.scale_x),
-            (TransformProperty::ScaleY, t.scale_y),
-            (TransformProperty::Rotation, t.rotation),
-        ]
-        .into_iter()
-        .map(|(property, value)| {
-            inspector::numeric_edit_command(clip, Target::Transform(property), value, self.position)
-        })
-        .collect();
+        let values: Vec<(TransformProperty, f64)> = match drag.handle {
+            Handle::Move => vec![(TransformProperty::X, t.x), (TransformProperty::Y, t.y)],
+            Handle::Scale(..) => vec![
+                (TransformProperty::ScaleX, t.scale_x),
+                (TransformProperty::ScaleY, t.scale_y),
+            ],
+            Handle::Rotate => vec![(TransformProperty::Rotation, t.rotation)],
+        };
+        let commands = inspector::transform_edit_commands(clip, &values, self.position);
         self.preview_color(Command::Batch { commands }, cx);
     }
 
@@ -373,9 +376,17 @@ impl Editor {
             .child(
                 div()
                     .flex_1()
-                    .text_size(px(12.))
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_size(px(11.))
                     .text_color(hex(color::TEXT_SECONDARY))
-                    .child("PROGRAM"),
+                    .child(format!(
+                        "{} x {}  {:.0}%",
+                        project_size(&self.project).0,
+                        project_size(&self.project).1,
+                        f64::from(f32::from(self.viewer_state.bounds.size.width))
+                            / f64::from(project_size(&self.project).0.max(1))
+                            * 100.
+                    )),
             )
             .child(
                 Button::new("viewer-fit")
@@ -467,6 +478,7 @@ impl Editor {
         root
     }
 
+    #[allow(clippy::unused_self)]
     pub(super) fn viewer_menu(&self, cx: &mut Context<Self>) -> Div {
         let mut menu = div()
             .absolute()
@@ -565,7 +577,7 @@ fn paint_gizmo(t: Transform, canvas: Bounds<Pixels>, dragging: bool, window: &mu
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[core::prelude::v1::test]
     fn fit_and_rotated_hit_testing_share_canvas_coordinates() {
         let stage = Bounds::new(point(px(20.), px(30.)), size(px(800.), px(600.)));
         let frame = canvas_bounds(stage, (1920, 1080), ViewerFit::Contain);
@@ -586,7 +598,7 @@ mod tests {
         );
         assert_eq!(hit_handle(t, frame, stage.origin), None);
     }
-    #[test]
+    #[core::prelude::v1::test]
     fn move_snaps_edges_and_shift_scale_preserves_aspect() {
         let frame = Bounds::new(Point::default(), size(px(1000.), px(500.)));
         let drag = GizmoDrag {

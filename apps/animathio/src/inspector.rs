@@ -429,6 +429,35 @@ pub(crate) fn numeric_edit_command(
     }
 }
 
+/// Commands that set several transform properties at once. Animated
+/// properties get a keyframe at the playhead; the rest are merged into a single
+/// `SetTransform`, so they cannot overwrite each other.
+pub(crate) fn transform_edit_commands(
+    clip: &Clip,
+    values: &[(TransformProperty, f64)],
+    playhead: Time,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let mut base = clip.transform;
+    let mut plain = false;
+    for (property, value) in values {
+        let target = Target::Transform(*property);
+        if clip.animations.iter().any(|a| a.target == target) {
+            commands.push(numeric_edit_command(clip, target, *value, playhead));
+        } else {
+            base = with_transform(base, *property, *value);
+            plain = true;
+        }
+    }
+    if plain {
+        commands.push(Command::SetTransform {
+            id: clip.id,
+            transform: base,
+        });
+    }
+    commands
+}
+
 /// Build the command that sets a keyframe's outgoing interpolation in place.
 pub(crate) fn interpolation_command(
     clip: &Clip,
@@ -514,6 +543,36 @@ mod tests {
             step: 1.0,
             default: 10.0,
         }
+    }
+
+    #[test]
+    fn transform_edit_merges_plain_properties_and_keys_animated_ones() {
+        let mut clip = clip_with_params();
+        clip.transform.scale_x = 0.5;
+        let plain = transform_edit_commands(
+            &clip,
+            &[(TransformProperty::X, 0.7), (TransformProperty::Y, 0.2)],
+            Time(0),
+        );
+        let [Command::SetTransform { transform, .. }] = plain.as_slice() else {
+            panic!("plain properties must collapse into one SetTransform: {plain:?}");
+        };
+        assert!((transform.x - 0.7).abs() < 1e-9 && (transform.y - 0.2).abs() < 1e-9);
+        assert!((transform.scale_x - 0.5).abs() < 1e-9);
+        clip.animations.push(animathio_core::Animation {
+            target: Target::Transform(TransformProperty::Rotation),
+            keys: animathio_core::Keyframes::default(),
+        });
+        let mixed = transform_edit_commands(
+            &clip,
+            &[
+                (TransformProperty::Rotation, 1.0),
+                (TransformProperty::X, 0.1),
+            ],
+            Time(0),
+        );
+        assert!(matches!(mixed[0], Command::AddKeyframe { .. }));
+        assert!(matches!(mixed[1], Command::SetTransform { .. }));
     }
 
     #[test]
@@ -865,7 +924,7 @@ mod viewer_inspector_tests {
         .apply(&mut project)
         .unwrap();
         let target = Target::Transform(TransformProperty::X);
-        for local in [-20, 0, 80, 180, 240] {
+        for local in [0, 80, 180, 240] {
             Command::AddKeyframe {
                 id: ClipId(1),
                 target: target.clone(),

@@ -134,26 +134,36 @@ impl Editor {
             .child(
                 div()
                     .h(px(34.))
-                    .px_1()
+                    .pl_2()
+                    .pr_1()
                     .flex()
                     .items_center()
                     .gap_1()
                     .child(
-                        icons::icon(icon)
-                            .small()
-                            .text_color(hex(color::TEXT_SECONDARY)),
-                    )
-                    .child(
-                        Button::new(format!("section-{name}"))
-                            .ghost()
-                            .compact()
-                            .icon(chevron)
-                            .label(title)
+                        div()
+                            .id(SharedString::from(format!("section-{name}")))
+                            .flex_1()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .cursor_pointer()
+                            .child(chevron.xsmall().text_color(hex(color::TEXT_MUTED)))
+                            .child(
+                                icons::icon(icon)
+                                    .small()
+                                    .text_color(hex(color::TEXT_SECONDARY)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(title.to_owned()),
+                            )
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.toggle_section(name, cx)),
                             ),
                     )
-                    .child(div().flex_1())
                     .when(resettable, |header| {
                         header.child(
                             Button::new(SharedString::from(format!("reset-{name}")))
@@ -162,7 +172,7 @@ impl Editor {
                                 .icon(icons::icon(IconName::RotateCcw).xsmall())
                                 .tooltip("Reset section (including keyframes)")
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.reset_inspector_section(name, cx)
+                                    this.reset_inspector_section(name, cx);
                                 })),
                         )
                     }),

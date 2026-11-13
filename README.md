@@ -54,9 +54,9 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Viewer and inspector](docs/screenshots/editor-viewer.png) | ![Timeline](docs/screenshots/editor-timeline.png) |
 
-| Multi-selection (rubber band, inspector summary) |
-| --- |
-| ![Multi-selection](docs/screenshots/editor-multiselect.png) |
+| Multi-selection (rubber band, inspector summary) | Media pool (thumbnail grid) |
+| --- | --- |
+| ![Multi-selection](docs/screenshots/editor-multiselect.png) | ![Media pool](docs/screenshots/editor-media.png) |
 
 ## Documentation
 
@@ -126,6 +126,21 @@ on the original tracks (a missing, locked or occupied track gets a new one, so a
 never overwrites), and Ctrl/Cmd+D duplicates the selection right after itself. The clip
 JSON is also written to the system clipboard, so it can be pasted into another project
 window.
+
+**Viewer, inspector and media pool.** The selected visual clip shows an on-canvas
+transform gizmo: drag inside to move (snapping to the canvas centre and edges, with
+accent guide lines), drag a corner or edge handle to scale (Shift keeps the aspect
+ratio), drag the handle above the box to rotate (Shift snaps to 15 degrees). A small
+pill shows the live values. A drag previews without touching the history and lands as
+one undo step on release. The viewer header has the zoom menu, safe-area, rule-of-thirds
+and checkerboard toggles. The transport shows a large timecode (click it to type one),
+prev/next edit, frame step, the circular play button, loop, the shuttle-speed badge,
+the duration and a monitor-only volume (it never changes export). Inspector sections are
+collapsible cards with a reset button each. Drag a field label (Shift = fine, Ctrl =
+coarse) or the grip beside a value to scrub it as one undo step; 0 to 1 parameters also get a slider;
+every animatable property has a keyframe diamond with previous/next-key arrows. The
+media pool offers a grid or list, a search field, kind filter chips, per-card type
+badges, duration and resolution, audio waveforms, and hover-scrubbing of video posters.
 
 **Tracks.** Double-click a track name to rename it inline (Enter commits, Esc cancels).
 Drag a track header onto another to reorder, or use the header's right-click menu

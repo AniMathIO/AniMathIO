@@ -50,10 +50,9 @@ impl Editor {
                                     .on_click(cx.listener(|this, _, _, cx| this.import_media(cx))),
                             ))
                             .child(
-                                div()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .child(self.media_pool(window, cx).bg(style::hex(color::PANEL))),
+                                div().flex_1().min_h_0().child(
+                                    self.media_pool(window, cx).bg(style::hex(color::PANEL)),
+                                ),
                             ),
                     )),
             );
