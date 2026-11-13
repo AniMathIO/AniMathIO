@@ -423,9 +423,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &About, _window, cx| {
         this.notices
-            .push(gpui_component::notification::Notification::info(
-                "AniMathIO 2.0",
-            ));
+            .push(crate::style::Toast::info("AniMathIO 2.0"));
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &ShuttleReverse, window, cx| {

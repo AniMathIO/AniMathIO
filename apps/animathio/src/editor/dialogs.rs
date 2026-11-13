@@ -1,10 +1,22 @@
 //! Modal workflows built from gpui-component dialogs, forms and inputs.
 use super::*;
+use crate::style;
 use animathio_control::ExportPreset;
 use gpui_component::form::{Field as FormField, Form};
 use gpui_component::input::{Input, InputState, NumberInput};
 use gpui_component::select::{Select, SelectState};
 use gpui_component::{IndexPath, WindowExt};
+
+fn heading(icon: IconName, title: &'static str) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_size(px(16.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(icons::icon(icon).text_color(style::hex(style::color::ACCENT)))
+        .child(title)
+}
 
 type Choices = Entity<SelectState<Vec<String>>>;
 fn input(value: impl Into<SharedString>, window: &mut Window, cx: &mut App) -> Entity<InputState> {
@@ -35,6 +47,8 @@ fn footer(
         .child(
             Button::new("dialog-apply")
                 .primary()
+                .bg(style::primary_gradient())
+                .text_color(style::hex(style::color::BG))
                 .label(label)
                 .on_click(callback),
         )
@@ -120,8 +134,15 @@ impl Editor {
             };
             let (queue_submit, now_submit) = (submit.clone(), submit);
             dialog
-                .title("Export video")
-                .width(px(520.))
+                .title(heading(IconName::Clapperboard, "Export video"))
+                .width(px(560.))
+                .child(
+                    div()
+                        .mb_3()
+                        .text_size(px(12.))
+                        .text_color(style::hex(style::color::TEXT_SECONDARY))
+                        .child("The final cut. Render a video or add it to your queue."),
+                )
                 .child(
                     Form::new()
                         .child(field("Preset", Select::new(&preset)))
@@ -176,6 +197,8 @@ impl Editor {
                         .child(
                             Button::new("export-now")
                                 .primary()
+                                .bg(style::primary_gradient())
+                                .text_color(style::hex(style::color::BG))
                                 .icon(icons::icon(IconName::Upload))
                                 .label("Export now")
                                 .on_click(move |_, window, cx| now_submit(true, window, cx)),
@@ -306,10 +329,9 @@ impl Editor {
         self.export_queue_open = true;
         self.pump_export_queue();
         if !front {
-            self.notices
-                .push(gpui_component::notification::Notification::info(format!(
-                    "Added {name} to the export queue"
-                )));
+            self.notices.push(crate::style::Toast::info(format!(
+                "Added {name} to the export queue"
+            )));
         }
         cx.notify();
     }
@@ -326,16 +348,14 @@ impl Editor {
         for event in events {
             let notice = match event {
                 Event::Finished { name, .. } => {
-                    gpui_component::notification::Notification::success(format!("Exported {name}"))
+                    crate::style::Toast::success(format!("Exported {name}"))
                 }
                 Event::Failed { name, error, .. } => {
-                    gpui_component::notification::Notification::error(format!(
-                        "Export of {name} failed: {error}"
-                    ))
+                    crate::style::Toast::error(format!("Export of {name} failed: {error}"))
                 }
-                Event::Cancelled { name, .. } => gpui_component::notification::Notification::info(
-                    format!("Export of {name} cancelled"),
-                ),
+                Event::Cancelled { name, .. } => {
+                    crate::style::Toast::info(format!("Export of {name} cancelled"))
+                }
             };
             self.notices.push(notice);
         }
@@ -352,7 +372,7 @@ impl Editor {
         window.open_dialog(cx, move |dialog, _, cx| {
             let (replace, cancel) = (editor.clone(), editor.clone());
             dialog
-                .title("Replace existing file?")
+                .title(heading(IconName::TriangleAlert, "Replace existing file?"))
                 .width(px(480.))
                 .child(
                     div()
@@ -428,7 +448,7 @@ impl Editor {
             let ph = height.clone();
             let preset = presets.clone();
             dialog
-                .title("Project settings")
+                .title(heading(IconName::Settings2, "Project settings"))
                 .width(px(460.))
                 .child(
                     Form::new()
@@ -535,15 +555,22 @@ impl Editor {
             window,
             cx,
         );
+        let motion = choices(
+            vec!["Full motion".into(), "Reduce motion".into()],
+            usize::from(self.preferences.reduce_motion),
+            window,
+            cx,
+        );
         let editor = cx.entity();
         window.open_dialog(cx, move |dialog, _, _| {
+            let motion_submit = motion.clone();
             let autosave_submit = autosave.clone();
             let folder_submit = folder.clone();
             let gpu_submit = gpu.clone();
             let density_submit = density.clone();
             let editor = editor.clone();
             dialog
-                .title("Preferences")
+                .title(heading(IconName::SlidersHorizontal, "Preferences"))
                 .child(
                     Form::new()
                         .child(field("Preview renderer", Select::new(&gpu)))
@@ -552,7 +579,8 @@ impl Editor {
                             NumberInput::new(&autosave),
                         ))
                         .child(field("Default export folder", Input::new(&folder)))
-                        .child(field("Theme density", Select::new(&density))),
+                        .child(field("Theme density", Select::new(&density)))
+                        .child(field("Motion", Select::new(&motion))),
                 )
                 .footer(footer("Save", move |_, window, cx| {
                     let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
@@ -561,11 +589,13 @@ impl Editor {
                     let folder = PathBuf::from(folder_submit.read(cx).value().to_string());
                     let gpu = selected(&gpu_submit, cx) == "GPU";
                     let compact = selected(&density_submit, cx) == "Compact";
+                    let reduce_motion = selected(&motion_submit, cx) == "Reduce motion";
                     let saved = editor.update(cx, |this, cx| {
                         let preferences = crate::preferences::Preferences {
                             autosave_seconds: seconds,
                             export_folder: folder,
                             compact,
+                            reduce_motion,
                         };
                         if let Err(error) = preferences.save() {
                             this.error = Some(error);
@@ -576,8 +606,22 @@ impl Editor {
                         if gpu != this.preview.gpu {
                             this.toggle_gpu_preview(cx);
                         }
-                        cx.global_mut::<gpui_component::Theme>().font_size =
-                            px(if compact { 12. } else { 14. });
+                        cx.set_reduce_motion(reduce_motion);
+                        gpui_component::Theme::update(cx, |theme| {
+                            theme.font_size = px(if compact { 12. } else { 14. });
+                            theme.motion.duration_fast = Duration::from_millis(if reduce_motion {
+                                0
+                            } else {
+                                style::motion::FAST_MS
+                            });
+                            theme.motion.duration_normal =
+                                Duration::from_millis(if reduce_motion {
+                                    0
+                                } else {
+                                    style::motion::BASE_MS
+                                });
+                            theme.motion.duration_slow = theme.motion.duration_normal;
+                        });
                         cx.notify();
                         true
                     });
@@ -602,7 +646,7 @@ impl Editor {
             let scene_submit = scene.clone();
             let path = path.clone();
             dialog
-                .title("Import Manim scene")
+                .title(heading(IconName::Code, "Import Manim scene"))
                 .child(Form::new().child(field(
                     "Scene class (blank uses first Scene)",
                     Input::new(&scene),
@@ -643,7 +687,7 @@ impl Editor {
             let duration_submit = duration.clone();
             let editor = editor.clone();
             dialog
-                .title("Write on")
+                .title(heading(IconName::WandSparkles, "Write on"))
                 .child(Form::new().child(field(
                     "Reveal duration in seconds",
                     NumberInput::new(&duration),
