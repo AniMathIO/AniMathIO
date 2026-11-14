@@ -42,6 +42,23 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::Mutex;
 
+#[derive(Deserialize, JsonSchema)]
+struct CreateFromTemplate {
+    /// Catalog identity from `list_templates`.
+    template: String,
+    /// New .amio destination; existing files are refused.
+    output: String,
+    /// Placeholder clip id to replacement text.
+    #[serde(default)]
+    text: std::collections::BTreeMap<String, String>,
+    /// Placeholder clip id to media file path.
+    #[serde(default)]
+    media: std::collections::BTreeMap<String, String>,
+    /// Crop to fill the box; false contains the entire source.
+    #[serde(default)]
+    cover: bool,
+}
+
 /// Shared control backend: a connected editor or a headless project.
 pub(crate) type Backend = Box<dyn ControlHandler + Send>;
 
@@ -2050,6 +2067,97 @@ impl McpServer {
             })
             .map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))
+    }
+
+    #[tool(
+        description = "List bundled and user project templates with labelled placeholder clip identities."
+    )]
+    async fn list_templates(&self) -> Result<CallToolResult, McpError> {
+        let catalog = animathio_control::template_catalog().map_err(mcp_error)?;
+        tool_text(json!(
+            catalog
+                .into_iter()
+                .map(|t| {
+                    let placeholders: Vec<_> = t
+                        .manifest
+                        .placeholders
+                        .iter()
+                        .map(|p| {
+                            json!({
+                                "clip": p.clip,
+                                "label": p.label,
+                                "accepts_text": t.accepts_text(p.clip),
+                            })
+                        })
+                        .collect();
+                    let mut manifest = json!(t.manifest);
+                    manifest["placeholders"] = json!(placeholders);
+                    manifest
+                })
+                .collect::<Vec<_>>()
+        ))
+    }
+
+    #[tool(
+        description = "Create a new portable .amio project from a catalog template and text/media placeholder maps. Refuses existing destinations; opens the created project in the current backend."
+    )]
+    async fn create_from_template(
+        &self,
+        Parameters(p): Parameters<CreateFromTemplate>,
+    ) -> Result<CallToolResult, McpError> {
+        let template = animathio_control::template_catalog()
+            .map_err(mcp_error)?
+            .into_iter()
+            .find(|t| t.manifest.id == p.template)
+            .ok_or_else(|| invalid("unknown template"))?;
+        let parse = |id: String| {
+            id.parse::<u64>()
+                .map(ClipId)
+                .map_err(|_| invalid("placeholder id must be an integer"))
+        };
+        let text = p
+            .text
+            .into_iter()
+            .map(|(id, text)| parse(id).map(|id| (id, text)))
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let media = p
+            .media
+            .into_iter()
+            .map(|(id, path)| {
+                parse(id).map(|id| {
+                    (
+                        id,
+                        animathio_control::MediaFill {
+                            path: PathBuf::from(path),
+                            cover: p.cover,
+                        },
+                    )
+                })
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let fill = template.fill(&text, &media).map_err(mcp_error)?;
+        let mut project = template.project.clone();
+        fill.command
+            .apply(&mut project)
+            .map_err(|e| invalid(&e.to_string()))?;
+        let mut assets = template.assets.clone();
+        assets.extend(fill.assets);
+        let path = PathBuf::from(p.output);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| invalid(&e.to_string()))?;
+        if let Err(error) = animathio_format::write_amio(file, &project, &assets) {
+            let _ = std::fs::remove_file(&path);
+            return Err(invalid(&error.to_string()));
+        }
+        self.backend
+            .lock()
+            .await
+            .handle(Call::ProjectOpen { path: path.clone() })
+            .map_err(mcp_error)?;
+        tool_text(json!({"path": path}))
     }
 
     #[tool(

@@ -55,7 +55,8 @@ unsaved dot, MCP listener status and Export. The bottom chips report the canvas,
 frame rate, duration, autosave policy, requested preview renderer and export queue.
 “GPU requested” describes the preview preference: the worker can fall back to CPU.
 
-The launcher offers five canvas preset cards, recent-project cards with
+The launcher offers five canvas preset cards, a Templates section with cached CPU
+thumbnails, aspect labels and user-template deletion, recent-project cards with
 cached modification times, media drops and Open / Import v1 / Import Manim.
 Its quiet gradient glow runs only while the launcher is visible. Card lifts and
 tab changes settle in 180ms. Preferences > Motion > Reduce motion makes the glow

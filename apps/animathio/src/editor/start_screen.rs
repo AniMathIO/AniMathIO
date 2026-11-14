@@ -21,7 +21,7 @@ impl Editor {
         self.path.is_none() && self.project.tracks().is_empty() && self.project.assets().is_empty()
     }
 
-    pub(super) fn start_screen(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn start_screen(&mut self, cx: &mut Context<Self>) -> Div {
         // Static wash plus a slow light sweep. The sweep is skipped entirely
         // under "Reduce motion", leaving only the wash.
         let wash = div().absolute().inset_0().bg(linear_gradient(
@@ -506,6 +506,7 @@ impl Editor {
                                 ),
                         )
                         .child(presets)
+                        .child(self.template_cards(cx))
                         .child(
                             div()
                                 .flex()

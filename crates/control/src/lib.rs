@@ -82,4 +82,7 @@ pub use server::{
 };
 
 mod templates;
-pub use templates::{Placeholder, ProjectTemplate, TemplateManifest, project_templates};
+pub use templates::{
+    MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, delete_user_template,
+    project_templates, save_user_template, template_catalog, template_library_dir,
+};

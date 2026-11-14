@@ -41,6 +41,7 @@ impl Editor {
                 MenuItem::action("Open…", OpenProject),
                 MenuItem::submenu(recent),
                 MenuItem::action("Save", SaveProject),
+                MenuItem::action("Save as template…", SaveTemplate),
                 MenuItem::separator(),
                 MenuItem::action("Import media…", ImportMedia),
                 MenuItem::action("Import v1…", ImportV1),
