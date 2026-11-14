@@ -281,6 +281,27 @@ mod tests {
     }
 
     #[test]
+    fn monotonic_clock_plays_and_resumes_from_the_scrubbed_position() {
+        let six = Time(TICKS_PER_SECOND * 6);
+        let mut clock = MonotonicClock::new();
+        // Scrub to 0:06 while paused, then play: it continues from there, not from zero.
+        clock.seek(six).unwrap();
+        clock.set_rate(Speed::NORMAL).unwrap();
+        clock.play().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(clock.now() >= six, "{:?}", clock.now());
+        clock.pause().unwrap();
+        let paused = clock.now();
+        assert!(paused >= six);
+        // Resuming after a pause keeps going from the paused position.
+        clock.set_rate(Speed::NORMAL).unwrap();
+        clock.seek(paused).unwrap();
+        clock.play().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(clock.now() >= paused);
+    }
+
+    #[test]
     fn monotonic_clock_seek_and_advance() {
         let mut clock = MonotonicClock::new();
         assert_eq!(clock.now(), Time(0));

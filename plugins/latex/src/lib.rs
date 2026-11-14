@@ -85,7 +85,7 @@ impl Guest for LatexPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "latex".to_string(),
-            version: "1.0.0".to_string(),
+            version: "1.1.0".to_string(),
             description: "LaTeX/Typst math typeset by the host into vector outlines".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -94,7 +94,10 @@ impl Guest for LatexPlugin {
                     id: "units".into(),
                     label: "Units".into(),
                     kind: ParamKind::EnumChoice(EnumParam {
-                        options: vec!["pixels".into(), "normalized".into()],
+                        // `percent`: size is a percentage of the shorter canvas edge, so a
+                        // formula looks the same at 16:9 and 9:16. `normalized` is a fraction
+                        // fitted to the title safe area; `pixels` is absolute.
+                        options: vec!["pixels".into(), "percent".into(), "normalized".into()],
                         default: "pixels".into(),
                     }),
                 },
@@ -168,9 +171,14 @@ impl Guest for LatexPlugin {
     ) -> Result<Scene, Diagnostic> {
         let source = get_string(&params, "source", r"\frac{a}{b}");
         let mode = get_string(&params, "mode", "latex");
+        // Clips stored before `units` existed have none and keep absolute pixels.
+        let units = get_string(&params, "units", "pixels");
+        let shorter = size.width.min(size.height) as f32;
         let mut font_size = get_number(&params, "size", 48.0) as f32;
-        if get_string(&params, "units", "pixels") == "normalized" {
-            font_size *= size.width.min(size.height) as f32;
+        match units.as_str() {
+            "normalized" => font_size *= shorter,
+            "percent" => font_size = font_size / 100.0 * shorter,
+            _ => {}
         }
         let color = get_color(
             &params,
@@ -189,7 +197,13 @@ impl Guest for LatexPlugin {
             "typst" => MathMode::Typst,
             _ => MathMode::Latex,
         };
-        let result = host::typeset_math(&source, math_mode, font_size)?;
+        // A formula that does not typeset (mid-edit, unbalanced braces...) draws its message in
+        // place instead of failing the whole frame, so the preview and export stay usable and
+        // the problem is visible right where the formula would be.
+        let result = match host::typeset_math(&source, math_mode, font_size) {
+            Ok(result) => result,
+            Err(diagnostic) => return error_scene(&diagnostic.message, shorter, size),
+        };
         if result.paths.is_empty() {
             return Ok(Scene {
                 coordinate_space: CoordinateSpace::Canvas,
@@ -199,12 +213,15 @@ impl Guest for LatexPlugin {
 
         let raw_width = result.bbox.max_x - result.bbox.min_x;
         let raw_height = result.bbox.max_y - result.bbox.min_y;
-        let scale = if get_string(&params, "units", "pixels") == "normalized" {
-            (size.width as f32 * 0.84 / raw_width.max(1.0))
+        let scale = match units.as_str() {
+            "normalized" => (size.width as f32 * 0.84 / raw_width.max(1.0))
                 .min(size.height as f32 * 0.22 / raw_height.max(1.0))
-                .min(1.0)
-        } else {
-            1.0
+                .min(1.0),
+            // Never let a large formula run off the frame.
+            "percent" => (size.width as f32 * 0.92 / raw_width.max(1.0))
+                .min(size.height as f32 * 0.92 / raw_height.max(1.0))
+                .min(1.0),
+            _ => 1.0,
         };
         let content_width = raw_width * scale;
         let content_height = raw_height * scale;
@@ -248,6 +265,34 @@ impl Guest for LatexPlugin {
             elements,
         })
     }
+}
+
+/// Two lines of red text, left aligned in the middle of the frame: "LaTeX error" and the reason.
+fn error_scene(message: &str, shorter: f32, size: Size) -> Result<Scene, Diagnostic> {
+    let red = Color {
+        r: 255,
+        g: 107,
+        b: 107,
+        a: 255,
+    };
+    let font = (shorter * 0.05).max(12.0);
+    let reason: String = message.chars().take(60).collect();
+    let mut elements = Vec::new();
+    for (line, text) in ["LaTeX error", reason.as_str()].into_iter().enumerate() {
+        let x = size.width as f32 * 0.05;
+        let y = size.height as f32 * 0.5 + font * 1.4 * line as f32;
+        for contour in host::shape_text(text, font).unwrap_or_default() {
+            let shifted: Vec<PathVerb> = contour
+                .iter()
+                .map(|verb| offset_verb(verb, x, y, 1.0))
+                .collect();
+            elements.push(DrawCommand::FillPath((shifted, red)));
+        }
+    }
+    Ok(Scene {
+        coordinate_space: CoordinateSpace::Canvas,
+        elements,
+    })
 }
 
 export!(LatexPlugin);

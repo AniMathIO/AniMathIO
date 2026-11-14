@@ -216,6 +216,18 @@ never overwrites), and Ctrl/Cmd+D duplicates the selection right after itself. T
 JSON is also written to the system clipboard, so it can be pasted into another project
 window.
 
+**Context menus.** Right-clicking a clip, track header or keyframe opens a menu whose items
+show their real keyboard shortcut (the same bindings as the menu bar and Help > Keyboard
+shortcuts), for example Cut, Copy, Duplicate, Split, Delete, Ripple delete and Unlink
+(Ctrl/Cmd+Alt+L).
+
+**Adding elements.** Text, shapes, LaTeX and graphs from the library (click a card, or drag
+it onto the timeline) are overlays: they land on the dropped row or the first free track above
+everything they overlap, and a new track is created when none is free, so you never have to
+move the playhead past existing media. Track and clip are one undo step. MCP `add_math` and
+`add_graph` do the same. A new formula starts at 14 % of the shorter frame edge, centred, so it reads
+the same on 16:9 and 9:16.
+
 **Viewer, inspector and media pool.** The selected visual clip shows an on-canvas
 transform gizmo: drag inside to move (snapping to the canvas centre and edges, with
 accent guide lines), drag a corner or edge handle to scale (Shift keeps the aspect

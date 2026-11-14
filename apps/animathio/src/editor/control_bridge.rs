@@ -403,6 +403,10 @@ impl Editor {
             Call::PlaybackPlay => {
                 let _ = self.clock.set_rate(Speed::NORMAL);
                 self.shuttle = Shuttle(1, false);
+                self.play_limit = editing::play_limit(
+                    self.clock.now(),
+                    animathio_export::duration(&self.project),
+                );
                 self.playing = true;
                 if let Err(error) = self.clock.play() {
                     self.error = Some(error);
@@ -413,6 +417,7 @@ impl Editor {
             Call::PlaybackPause => {
                 self.shuttle = Shuttle::default();
                 self.playing = false;
+                self.play_limit = Time(0);
                 if let Err(error) = self.clock.pause() {
                     self.error = Some(error);
                 }

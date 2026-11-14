@@ -147,6 +147,7 @@ impl AuthoringSession<'_> {
                 params: json!({
                     "source": params.latex,
                     "mode": params.mode,
+                    "units": "pixels",
                     "size": params.size,
                     "color": params.color.unwrap_or([255, 255, 255, 255]),
                 }),
@@ -257,36 +258,32 @@ impl AuthoringSession<'_> {
     ) -> Result<ClipAdded, ControlError> {
         let clip_id = clip.id;
         let index = self.project.tracks().len();
-        self.history.execute(
-            self.project,
-            &Command::AddTrack {
+        // One batch (new layer, clip and animation keyframes) so undo removes it in one step.
+        let mut commands = vec![
+            Command::AddTrack {
                 track: Track::new(track_id, label),
                 index,
             },
-        )?;
-        self.history.execute(
-            self.project,
-            &Command::AddClip {
+            Command::AddClip {
                 track: track_id,
                 clip,
             },
-        )?;
+        ];
         if let Some((param, duration)) = animation {
             for (time, value) in [(Time(0), 0.0), (duration, 1.0)] {
-                self.history.execute(
-                    self.project,
-                    &Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Param(param.to_owned()),
-                        time,
-                        keyframe: Keyframe {
-                            value: ParamValue::Number(value),
-                            interpolation: Interpolation::Linear,
-                        },
+                commands.push(Command::AddKeyframe {
+                    id: clip_id,
+                    target: Target::Param(param.to_owned()),
+                    time,
+                    keyframe: Keyframe {
+                        value: ParamValue::Number(value),
+                        interpolation: Interpolation::Linear,
                     },
-                )?;
+                });
             }
         }
+        self.history
+            .execute(self.project, &Command::Batch { commands })?;
         Ok(ClipAdded { track_id, clip_id })
     }
 

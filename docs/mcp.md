@@ -124,8 +124,8 @@ clears its undo history.
 | --- | --- | --- |
 | `get_project_state` | Canvas, tracks, clips, playhead, active state | |
 | `add_text` | Add a plain-text clip | font size in pixels; ms times |
-| `add_math` | Add an `org.animathio.latex` plugin clip | `latex`; optional `mode` (`latex`/`typst`), `size` (default 48 px), `color`, `x`/`y`, `start_ms`, `duration_ms`, `reveal_duration_ms` |
-| `add_graph` | Add an `org.animathio.graph` plugin clip | bounds, newline-separated `items`, `show_grid`/`show_axes`/`show_labels`, `color`, `x`/`y`, `start_ms`, `duration_ms`, `draw_duration_ms` |
+| `add_math` | Add an `org.animathio.latex` plugin clip | `latex`; optional `mode` (`latex`/`typst`), `size` (default 48 px), `color`, `x`/`y`, `start_ms`, `duration_ms`, `reveal_duration_ms`; the clip, its new track and any reveal keyframes are one undo step |
+| `add_graph` | Add an `org.animathio.graph` plugin clip | bounds (always fully visible; the plane is scaled uniformly so circles stay round on any canvas aspect), newline-separated `items`, `show_grid`/`show_axes`/`show_labels`, `color`, `x`/`y`, `start_ms`, `duration_ms`, `draw_duration_ms` |
 | `add_media` | Import image/video/audio by absolute path, add a clip (one undo step); audio starts with animatable gain/mute defaults | |
 | `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction` |
 | `update_element` | Update a clip's placement and/or visible time frame | |

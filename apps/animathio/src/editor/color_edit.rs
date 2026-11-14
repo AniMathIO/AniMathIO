@@ -68,6 +68,21 @@ impl Editor {
         }
     }
 
+    /// Apply `command` immediately without a history entry (a later `finish_color_edit` makes
+    /// the whole preview one undo step). Used by typing in multi-line text fields.
+    pub(super) fn preview_live(&mut self, command: Command, cx: &mut Context<Self>) {
+        match ColorEdit::preview(&mut self.project, command, &mut self.color_edit) {
+            Ok(()) => {
+                self.request_render(self.current_render_time());
+                cx.notify();
+            }
+            Err(error) => {
+                self.error = Some(error.0);
+                cx.notify();
+            }
+        }
+    }
+
     pub(super) fn finish_color_edit(&mut self, cx: &mut Context<Self>) {
         if let Some(edit) = self.color_edit.take() {
             match edit.commit(&mut self.project, &mut self.history) {

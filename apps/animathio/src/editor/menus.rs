@@ -10,6 +10,72 @@ use gpui_component::{
 /// A track context-menu entry's handler.
 type TrackMenuAction = Box<dyn Fn(&mut Editor, &mut Window, &mut Context<Editor>)>;
 
+/// An entry of the clip context menu: icon, label, the bound shortcut action (if any) and the
+/// handler.
+type ClipMenuEntry = (IconName, &'static str, Option<Box<dyn Action>>, ClipAction);
+
+/// The clip context-menu entries. Every entry that has a keyboard shortcut names its action so
+/// the menu can show the real binding next to the label.
+fn clip_menu_entries() -> Vec<ClipMenuEntry> {
+    vec![
+        (
+            IconName::Scissors,
+            "Split at playhead",
+            Some(Box::new(SplitClip)),
+            Editor::split_clip,
+        ),
+        (
+            IconName::CopyPlus,
+            "Duplicate",
+            Some(Box::new(DuplicateClips)),
+            Editor::duplicate_clip,
+        ),
+        (
+            IconName::Copy,
+            "Copy",
+            Some(Box::new(CopyClips)),
+            Editor::copy_clip,
+        ),
+        (
+            IconName::Scissors,
+            "Cut",
+            Some(Box::new(CutClips)),
+            Editor::cut_clip,
+        ),
+        (
+            IconName::Trash,
+            "Delete",
+            Some(Box::new(DeleteSelection)),
+            Editor::delete_clip,
+        ),
+        (
+            IconName::Scissors,
+            "Unlink",
+            Some(Box::new(UnlinkClips)),
+            Editor::unlink_clip,
+        ),
+        (
+            IconName::FoldHorizontal,
+            "Ripple delete",
+            Some(Box::new(RippleDelete)),
+            Editor::ripple_delete_clip,
+        ),
+        (
+            IconName::TrendingUp,
+            "Fade in 1 s",
+            None,
+            Editor::fade_in_one_second,
+        ),
+        (
+            IconName::TrendingDown,
+            "Fade out 1 s",
+            None,
+            Editor::fade_out_one_second,
+        ),
+        (IconName::Eraser, "Clear fades", None, Editor::clear_fades),
+    ]
+}
+
 impl Editor {
     pub(super) fn refresh_menus(&mut self, cx: &mut Context<Self>) {
         let signature = format!(
@@ -103,6 +169,7 @@ impl Editor {
             ]),
             Menu::new("Clip").items([
                 MenuItem::action("Split at playhead", SplitClip).disabled(none_selected),
+                MenuItem::action("Unlink clips", UnlinkClips).disabled(none_selected),
                 MenuItem::action("Add effect", ShowEffects),
                 MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),
@@ -232,14 +299,34 @@ impl Editor {
         }
     }
 
-    pub(super) fn context_menu_dropdown(&self, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn context_menu_dropdown(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         let target = self.context_menu.clone()?;
         let pos = self.context_menu_pos?;
+        // Keep the menu inside the window: slide it up when it would run off the bottom.
+        let rows = match &target {
+            ContextMenu::Clip { .. } => {
+                clip_menu_entries().len() + self.available_effects().len() + 2
+            }
+            ContextMenu::Track { .. } => 5,
+            ContextMenu::Keyframe(_) => 6,
+        };
+        let viewport = window.viewport_size();
+        let height = rows as f32 * 26.0 + 16.0;
+        let top = f32::from(pos.y)
+            .min(f32::from(viewport.height) - height)
+            .max(8.0);
+        let left = f32::from(pos.x)
+            .min(f32::from(viewport.width) - 248.0)
+            .max(8.0);
         let mut menu = div()
             .absolute()
-            .left(pos.x)
-            .top(pos.y)
-            .w(px(200.))
+            .left(px(left))
+            .top(px(top))
+            .w(px(240.))
             .bg(cx.theme().popover)
             .border_1()
             .border_color(cx.theme().border)
@@ -254,39 +341,18 @@ impl Editor {
         });
         match target {
             ContextMenu::Clip { id } => {
-                let actions: Vec<(IconName, &str, ClipAction)> = vec![
-                    (IconName::Scissors, "Split at playhead", Self::split_clip),
-                    (IconName::CopyPlus, "Duplicate", Self::duplicate_clip),
-                    (IconName::Copy, "Copy", Self::copy_clip),
-                    (IconName::Scissors, "Cut", Self::cut_clip),
-                    (IconName::Trash, "Delete", Self::delete_clip),
-                    (IconName::Scissors, "Unlink", Self::unlink_clip),
-                    (
-                        IconName::FoldHorizontal,
-                        "Ripple delete",
-                        Self::ripple_delete_clip,
-                    ),
-                    (
-                        IconName::TrendingUp,
-                        "Fade in 1 s",
-                        Self::fade_in_one_second,
-                    ),
-                    (
-                        IconName::TrendingDown,
-                        "Fade out 1 s",
-                        Self::fade_out_one_second,
-                    ),
-                    (IconName::Eraser, "Clear fades", Self::clear_fades),
-                ];
-                for (icon, label, action) in actions {
+                let actions = clip_menu_entries();
+                for (icon, label, shortcut, action) in actions {
                     menu = menu.child(context_item(
                         icon,
                         label,
+                        shortcut.as_deref(),
                         cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
                             action(this, id, cx);
                             this.context_menu = None;
                             cx.notify();
                         }),
+                        window,
                         cx,
                     ));
                 }
@@ -302,11 +368,13 @@ impl Editor {
                     menu = menu.child(context_item(
                         IconName::Sparkles,
                         &descriptor.name,
+                        None,
                         cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
                             this.add_effect_to_clip(id, &plugin, &effect, cx);
                             this.context_menu = None;
                             cx.notify();
                         }),
+                        window,
                         cx,
                     ));
                 }
@@ -354,11 +422,13 @@ impl Editor {
                     menu = menu.child(context_item(
                         icon,
                         label,
+                        None,
                         cx.listener(move |this: &mut Self, _: &ClickEvent, window, cx| {
                             this.context_menu = None;
                             action(this, window, cx);
                             cx.notify();
                         }),
+                        window,
                         cx,
                     ));
                 }
@@ -369,6 +439,7 @@ impl Editor {
                     .child(context_item(
                         IconName::DiamondMinus,
                         "Remove keyframe",
+                        None,
                         cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
                             this.execute(
                                 &Command::RemoveKeyframe {
@@ -382,6 +453,7 @@ impl Editor {
                             this.context_menu = None;
                             cx.notify();
                         }),
+                        window,
                         cx,
                     ))
                     .children(self.keyframe_menu(&selection, cx));
@@ -466,5 +538,36 @@ impl Editor {
                 self.subtitle_status_button(cx)
                     .map_or_else(|| div().into_any_element(), IntoElement::into_any_element),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[core::prelude::v1::test]
+    fn clip_menu_shortcuts_are_bound_in_the_keymap() {
+        let bound: Vec<_> = super::super::actions::keymap()
+            .into_iter()
+            .filter(|(_, _, context)| *context == "Timeline")
+            .map(|(_, action, _)| action)
+            .collect();
+        let entries = clip_menu_entries();
+        let shown = entries
+            .iter()
+            .filter(|(_, _, action, _)| action.is_some())
+            .count();
+        assert!(
+            shown >= 6,
+            "Cut, Copy, Duplicate, Delete and friends show keys"
+        );
+        for (_, label, action, _) in &entries {
+            if let Some(action) = action {
+                assert!(
+                    bound.iter().any(|b| b.partial_eq(action.as_ref())),
+                    "{label} names an unbound action"
+                );
+            }
+        }
     }
 }

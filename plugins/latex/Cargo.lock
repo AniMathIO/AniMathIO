@@ -329,7 +329,7 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
 name = "latex"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "wit-bindgen",
 ]

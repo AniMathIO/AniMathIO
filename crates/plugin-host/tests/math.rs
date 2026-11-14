@@ -223,12 +223,14 @@ fn latex_typesets_required_expressions() {
 }
 
 #[test]
-fn invalid_latex_returns_a_diagnostic_without_panicking() {
+fn invalid_latex_draws_its_message_without_failing_the_frame() {
     let tmp = tempfile::tempdir().unwrap();
     let mut host = PluginHost::new(tmp.path()).unwrap();
     let latex = load_plugin(&mut host, "latex");
 
-    let error = host
+    // A formula that does not typeset (mid-edit in the inspector) draws a red message in place
+    // of the formula instead of failing the whole frame.
+    let scene = host
         .render_clip(
             &latex,
             &BTreeMap::new(),
@@ -236,8 +238,8 @@ fn invalid_latex_returns_a_diagnostic_without_panicking() {
             0,
             (640, 360),
         )
-        .unwrap_err();
-    assert!(error.to_string().contains("service-failed"));
+        .unwrap();
+    assert!(!scene.elements.is_empty());
 
     // The host stays usable after the failed typesetting call.
     let ok = host
