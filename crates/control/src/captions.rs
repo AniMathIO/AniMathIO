@@ -424,6 +424,133 @@ pub fn clip_caption_style(clip: &Clip) -> Option<String> {
     )
 }
 
+/// Edit a caption's text and re-sync its word timings as one undoable operation.
+/// Exact unchanged words retain their timings (longest common subsequence); new words
+/// share the available interval between their neighbours, weighted by character count.
+/// Returns `None` for ordinary text clips.
+pub fn caption_text_edit_command(clip: &Clip, text: &str) -> Option<Command> {
+    if !is_caption_text(clip) {
+        return None;
+    }
+    let previous = match clip.params.get("text") {
+        Some(ParamValue::String(s)) => s.clone(),
+        _ => plugin_marker(clip, "text").unwrap_or_default(),
+    };
+    let stored = match clip.params.get("words") {
+        Some(ParamValue::String(s)) => s.clone(),
+        _ => plugin_marker(clip, "words").unwrap_or_default(),
+    };
+    let timings = resync_words(
+        &previous,
+        text,
+        &stored,
+        clip.range.end.0 - clip.range.start.0,
+    );
+    Some(Command::Batch {
+        commands: vec![
+            Command::SetPluginParam {
+                id: clip.id,
+                name: "text".into(),
+                value: Some(ParamValue::String(text.into())),
+            },
+            Command::SetPluginParam {
+                id: clip.id,
+                name: "words".into(),
+                value: Some(ParamValue::String(timings)),
+            },
+        ],
+    })
+}
+
+fn resync_words(old: &str, new: &str, stored: &str, duration: i64) -> String {
+    let old: Vec<_> = old.split_whitespace().collect();
+    let new: Vec<_> = new.split_whitespace().collect();
+    let parsed: Option<Vec<(i64, i64)>> = stored
+        .split_whitespace()
+        .map(|p| {
+            let (a, b) = p.split_once(':')?;
+            Some((a.parse().ok()?, b.parse().ok()?))
+        })
+        .collect();
+    let valid = parsed.as_ref().is_some_and(|v| {
+        v.len() == old.len()
+            && v.iter().all(|&(a, b)| a >= 0 && b >= a)
+            && v.windows(2).all(|w| w[0].1 <= w[1].0)
+    });
+    // Source-relative timings can extend beyond the visible window after a trim.
+    let duration = if valid {
+        parsed
+            .as_ref()
+            .and_then(|v| v.last())
+            .map_or(duration, |v| duration.max(v.1))
+    } else {
+        duration
+    };
+    let mut result = vec![None; new.len()];
+    // Bound quadratic work for arbitrarily large imported text. Such cues are spread
+    // over the clip instead; normal subtitle cues are far below this limit.
+    if valid && old.len().saturating_mul(new.len()) <= 262_144 {
+        let parsed = parsed.as_ref().expect("validated timings");
+        let mut lcs = vec![vec![0usize; new.len() + 1]; old.len() + 1];
+        for i in (0..old.len()).rev() {
+            for j in (0..new.len()).rev() {
+                lcs[i][j] = if old[i] == new[j] {
+                    1 + lcs[i + 1][j + 1]
+                } else {
+                    lcs[i + 1][j].max(lcs[i][j + 1])
+                };
+            }
+        }
+        let (mut i, mut j) = (0, 0);
+        while i < old.len() && j < new.len() {
+            if old[i] == new[j] {
+                result[j] = Some(parsed[i]);
+                i += 1;
+                j += 1;
+            } else if lcs[i + 1][j] >= lcs[i][j + 1] {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+    }
+    let mut start = 0;
+    while start < new.len() {
+        if result[start].is_some() {
+            start += 1;
+            continue;
+        }
+        let end = (start..new.len())
+            .find(|&i| result[i].is_some())
+            .unwrap_or(new.len());
+        let from = if start == 0 {
+            0
+        } else {
+            result[start - 1].expect("filled neighbour").1
+        };
+        let to = if end == new.len() {
+            duration.max(from)
+        } else {
+            result[end].expect("anchor").0.max(from)
+        };
+        let total: usize = new[start..end].iter().map(|w| w.chars().count()).sum();
+        let mut done = 0;
+        for i in start..end {
+            let a = from + ((to - from) as i128 * done as i128 / total as i128) as i64;
+            done += new[i].chars().count();
+            let b = from + ((to - from) as i128 * done as i128 / total as i128) as i64;
+            result[i] = Some((a, b));
+        }
+        start = end;
+    }
+    result
+        .into_iter()
+        .flatten()
+        .map(|(a, b)| format!("{a}:{b}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Caption text clips (and their bar partners) per track, for restyling.
 struct CaptionTrack<'a> {
     track: &'a Track,
@@ -663,4 +790,29 @@ fn bar_clip_commands(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod timing_edit_tests {
+    use super::resync_words;
+
+    #[test]
+    fn deletions_replacements_duplicates_and_empty_text() {
+        assert_eq!(
+            resync_words("a b c", "a c", "0:10 20:30 40:50", 60),
+            "0:10 40:50"
+        );
+        assert_eq!(
+            resync_words("a b c", "a long x c", "0:10 20:30 40:50", 60),
+            "0:10 10:34 34:40 40:50"
+        );
+        assert_eq!(
+            resync_words("a a b", "a b", "0:10 20:30 40:50", 60),
+            "0:10 40:50"
+        );
+        assert_eq!(resync_words("a", "", "0:10", 60), "");
+        assert_eq!(resync_words("a b", "a b", "0:20 30:60", 40), "0:20 30:60");
+        assert_eq!(resync_words("a", "bb c", "broken", 60), "0:40 40:60");
+        assert_eq!(resync_words("a", "a b", "0:60", 60), "0:60 60:60");
+    }
 }

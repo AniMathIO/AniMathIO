@@ -324,3 +324,45 @@ fn restyle_fills_missing_word_timings_and_rejects_empty_projects() {
     assert_eq!(words.split(' ').count(), 3);
     let _ = TrackId(0);
 }
+
+#[test]
+fn text_edits_keep_anchors_spread_insertions_and_undo_together() {
+    let mut project = Project::default();
+    let mut history = History::default();
+    apply_cues(
+        &mut project,
+        &mut history,
+        "en".into(),
+        &cues(),
+        &CaptionStyleParams::named("karaoke"),
+    )
+    .unwrap();
+    let before = project.clone();
+    let clip = text_clips(&project)
+        .into_iter()
+        .find(|c| c.range.start == t(1000))
+        .unwrap();
+    let id = clip.id;
+    let command =
+        animathio_control::caption_text_edit_command(clip, "Hello very brave world").unwrap();
+    history.execute(&mut project, &command).unwrap();
+    let clip = text_clips(&project)
+        .into_iter()
+        .find(|c| c.id == id)
+        .unwrap();
+    assert_eq!(
+        plugin_param(clip, "words"),
+        format!(
+            "0:{} {}:{} {}:{} {}:{}",
+            500 * MS,
+            500 * MS,
+            700 * MS,
+            700 * MS,
+            1200 * MS,
+            1400 * MS,
+            2000 * MS
+        )
+    );
+    history.undo(&mut project).unwrap();
+    assert_eq!(project, before);
+}

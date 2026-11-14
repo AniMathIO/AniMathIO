@@ -48,7 +48,7 @@ pub use title_presets::{
 pub use captions::{
     CaptionPosition, CaptionStyleInfo, CaptionStyleParams, SubtitleStyleParams,
     SubtitleStyleResult, apply_caption_style, caption_style_command, caption_styles,
-    clip_caption_style, parse_caption_color,
+    caption_text_edit_command, clip_caption_style, parse_caption_color,
 };
 pub use subtitles::{
     ProgressFn, SUBTITLE_TRACK, SubtitleCueInfo, SubtitleDraft, SubtitleExportParams,

@@ -795,8 +795,13 @@ ticks, one per whitespace-separated word of `text`, relative to the clip's sourc
 `fit_height` set). The active word is the last one whose start time has passed; the scene is a
 pure function of the clip's source time, so preview and export match. `classic` renders exactly
 like the plain fitted title; when the edited text no longer has as many words as `words`, the
-timings are spread over the stored span. The editor and `subtitles.generate` write these
-parameters; see `docs/mcp.md` for `subtitles.style`.
+timings are spread over the stored span. When caption text is edited in the editor, unchanged
+words retain their timings and inserted words share the gap between their neighbours
+(weighted by character count); text and timings undo together. A full gap leaves inserted
+words with zero duration rather than moving existing anchors. Malformed timing data is
+replaced by timings spread over the clip. The editor and `subtitles.generate` write these
+parameters; see `docs/mcp.md` for `subtitles.style`. The caption picker offers text and
+accent swatches plus free colour pickers in the inspector and Generate subtitles dialog.
 The LaTeX plugin also accepts `units`: `pixels` preserves existing projects;
 `normalized` interprets `size` relative to the shorter render-canvas edge and fits
 formula outlines within 84% width and 22% height.

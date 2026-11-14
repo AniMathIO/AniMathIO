@@ -468,6 +468,75 @@ impl Editor {
         div().w(px(CONTROL_W)).child(Input::new(&state).small())
     }
 
+    pub(super) fn caption_color_control(
+        &mut self,
+        key: String,
+        accent: bool,
+        target: Option<TrackId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let color = if accent {
+            self.caption_look.accent.unwrap_or([255, 214, 10, 255])
+        } else {
+            self.caption_look.color.unwrap_or([255; 4])
+        };
+        if !self.fields.colors.contains_key(&key) {
+            let state = cx.new(|cx| ColorPickerState::new(window, cx));
+            let event_key = key.clone();
+            let subscription = cx.subscribe_in(
+                &state,
+                window,
+                move |this, _, event: &ColorPickerEvent, _, cx| {
+                    let ColorPickerEvent::Change(Some(hsla)) = event else {
+                        return;
+                    };
+                    let rgba = Rgba::from(*hsla);
+                    let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    let next = [
+                        channel(rgba.r),
+                        channel(rgba.g),
+                        channel(rgba.b),
+                        channel(rgba.a),
+                    ];
+                    let Some(field) = this.fields.colors.get_mut(&event_key) else {
+                        return;
+                    };
+                    if field.synced == next {
+                        return;
+                    }
+                    field.synced = next;
+                    this.apply_look_change(
+                        if accent {
+                            caption_styles::LookChange::Accent(next)
+                        } else {
+                            caption_styles::LookChange::Text(next)
+                        },
+                        target,
+                        cx,
+                    );
+                },
+            );
+            state.update(cx, |state, cx| state.set_value(to_hsla(color), window, cx));
+            self.fields.colors.insert(
+                key.clone(),
+                ColorField {
+                    state,
+                    synced: color,
+                    _subscription: subscription,
+                },
+            );
+        }
+        let field = self.fields.colors.get_mut(&key).expect("inserted picker");
+        if field.synced != color {
+            field.synced = color;
+            field
+                .state
+                .update(cx, |state, cx| state.set_value(to_hsla(color), window, cx));
+        }
+        div().child(ColorPicker::new(&field.state))
+    }
+
     fn color_control(
         &mut self,
         id: ClipId,
@@ -1373,7 +1442,7 @@ impl Editor {
         if let Some(rows) = title_fields {
             body = body.child(rows);
         }
-        if let Some(section) = self.caption_style_section(id, cx) {
+        if let Some(section) = self.caption_style_section(id, window, cx) {
             body = body.child(section);
         }
         let opacity = inspector::sampled_numeric(

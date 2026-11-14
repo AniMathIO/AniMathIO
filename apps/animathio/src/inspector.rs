@@ -256,6 +256,12 @@ pub(crate) fn param_edit_command(
     value: ParamValue,
     playhead: Time,
 ) -> Command {
+    if name == "text"
+        && let ParamValue::String(text) = &value
+        && let Some(command) = animathio_control::caption_text_edit_command(clip, text)
+    {
+        return command;
+    }
     let target = Target::Param(name.clone());
     let local = clip_local_time(clip, playhead);
     if clip.animations.iter().any(|a| a.target == target) {
