@@ -542,3 +542,12 @@ logic with explicit track scope and validates companion closure and locks. Rever
 ordered range commands are wrapped in one serializable batch for undo/redo.
 The editor's `autocut` module owns ephemeral review state, cancellable background
 analysis, sliders, per-cut toggles and timeline overlays.
+
+## Auto-reframe
+
+The control layer's `reframe` helper owns deterministic low-resolution saliency,
+scene-change resets, a dead zone and rate-limited follow, path simplification and
+a snapshot-guarded command batch. Existing media decoders sample video in source
+time, including trims. The editor's `reframe` module owns settings and a worker
+with atomic progress/cancel; the CLI and MCP use the same helper. No runtime
+tracking state is stored in the project and the format schema is unchanged.

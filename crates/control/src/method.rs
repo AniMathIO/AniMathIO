@@ -368,6 +368,12 @@ pub enum Call {
         /// Snapshot-bound proposal with per-cut toggles.
         proposal: crate::AutocutProposal,
     },
+    /// Reframe video clips to a subject-following portrait or square canvas.
+    #[serde(rename = "video.reframe")]
+    AutoReframe {
+        /// Offline tracking and aspect options.
+        params: crate::ReframeParams,
+    },
     /// Transcribe audio locally and add the result as caption clips on a new `Subtitles`
     /// track, as one undo step.
     #[serde(rename = "subtitles.generate")]

@@ -1,6 +1,7 @@
 //! Headless project validation and deterministic PNG rendering.
 mod autocut;
 mod mcp;
+mod reframe;
 mod transcribe;
 
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
@@ -131,6 +132,11 @@ enum Action {
     Autocut {
         #[command(flatten)]
         args: autocut::AutocutArgs,
+    },
+    /// Reframe video to portrait or square with offline subject tracking.
+    Reframe {
+        #[command(flatten)]
+        args: reframe::ReframeArgs,
     },
     /// List or download the local Whisper speech models.
     Models {
@@ -349,6 +355,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Action::Transcribe { args } => transcribe::run(&args)?,
         Action::Autocut { args } => autocut::run(args)?,
+        Action::Reframe { args } => reframe::run(args)?,
         Action::Models { args } => transcribe::run_models(&args)?,
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

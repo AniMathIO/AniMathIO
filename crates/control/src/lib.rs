@@ -17,6 +17,8 @@ pub use autocut::{
     autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
     propose_autocuts_cancellable,
 };
+mod reframe;
+pub use reframe::{ReframeDraft, ReframeParams, analyse_reframe, auto_reframe, reframe_command};
 mod client;
 mod edit;
 mod effects;

@@ -367,6 +367,16 @@ pub(crate) struct ApplyAutocuts {
     proposal: serde_json::Value,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct AutoReframe {
+    /// Target aspect: 9:16 (default), 1:1 or 4:5.
+    aspect: Option<String>,
+    /// Tracking smoothness in 0..=1 (default 0.5).
+    smoothness: Option<f64>,
+    /// Video clip ids; omitted or empty selects all video clips.
+    clips: Option<Vec<u64>>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AutoSubtitles {
     /// Whisper model size: "tiny" (78 MB), "base" (148 MB, default) or "small" (488 MB).
@@ -1449,6 +1459,28 @@ impl McpServer {
             .command_apply(Command::RippleDelete { clip })
             .map_err(mcp_error)?;
         tool_text(json!({"deleted": clip.0}))
+    }
+
+    #[tool(
+        description = "Auto reframe video clips to 9:16, 1:1 or 4:5 using deterministic offline motion/contrast tracking. Changes the canvas and replaces selected videos' position/scale animation as one undo step; preserves opacity and effects. Unrotated unlocked videos only. No downloads. Returns the number of clips. Other layers keep their normalized transforms. Can take seconds to minutes."
+    )]
+    async fn auto_reframe(
+        &self,
+        Parameters(p): Parameters<AutoReframe>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::ReframeParams {
+            aspect: p.aspect.unwrap_or_else(|| "9:16".into()),
+            smoothness: p.smoothness.unwrap_or(0.5),
+            clips: p
+                .clips
+                .unwrap_or_default()
+                .into_iter()
+                .map(ClipId)
+                .collect(),
+        };
+        let mut backend = self.backend.lock().await;
+        let count = backend.auto_reframe(params).map_err(mcp_error)?;
+        tool_text(json!({"clips":count}))
     }
 
     #[tool(
