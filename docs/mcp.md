@@ -53,6 +53,7 @@ gets a JSON-RPC error instead of a result.
 | `export` | `{ params: { output, from?, to?, settings?, overwrite? } }` | destination path (after completion) |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
+| `media.add` | `{ path }` | track_id, clip_id; bounded import and placement in one undo step, with a single video probe before retaining bytes |
 | `assets.import` | `{ path }` | `AssetInfo` (id, name, media_type) |
 | `timeline.list` | — | `Timeline` (frame rate, duration, tracks, clips) |
 | `project.import_v1` | `{ path }` | — (replaces the current project) |

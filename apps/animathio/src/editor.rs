@@ -179,7 +179,7 @@ enum InputTarget {
     },
     /// Numeric parameter of one of a clip's audio effects.
     AudioEffectParam {
-        clip: ClipId,
+        chain: AudioChain,
         effect: EffectId,
         name: String,
     },
@@ -474,6 +474,7 @@ pub(crate) struct Editor {
     /// The primary selected clip: what the inspector, keyframes and fades act on.
     /// Always a member of [`Editor::selected_ids`] when set.
     selected: Option<ClipId>,
+    audio_inspector_track: Option<TrackId>,
     /// Every selected clip; see [`Editor::selected_ids`] for the reconciled view.
     selection: BTreeSet<ClipId>,
     clipboard: Option<Clipboard>,
@@ -599,6 +600,7 @@ impl Editor {
             playing: false,
             position: Time(0),
             selected: None,
+            audio_inspector_track: None,
             selection: BTreeSet::new(),
             clipboard: None,
             ripple_scope: RippleScope::default(),
