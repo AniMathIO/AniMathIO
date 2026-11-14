@@ -47,13 +47,17 @@ fn companion_edit_and_undo() {
                 Command::RemoveClip { id: ClipId(2) },
             ],
         },
-        Command::RippleDelete { clip: ClipId(1) },
+        Command::RippleDelete {
+            clip: ClipId(1),
+            markers: animathio_core::MarkerRipple::default(),
+        },
         Command::SplitAt {
             times: vec![Time(50)],
         },
         Command::RemoveRange {
             range: TimeRange::new(Time(30), Time(60)).unwrap(),
             ripple: true,
+            markers: animathio_core::MarkerRipple::default(),
         },
     ] {
         let before = project.clone();

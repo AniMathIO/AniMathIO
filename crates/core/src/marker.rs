@@ -1,6 +1,6 @@
 //! Project-level timeline markers: named, coloured points or ranges on the ruler.
 
-use crate::{Error, Time, invalid};
+use crate::{Command, Error, Project, Time, TimeRange, TrackId, invalid};
 use serde::{Deserialize, Serialize};
 
 /// Stable marker identity, allocated by the command caller.
@@ -140,4 +140,101 @@ impl Marker {
         }
         Ok(())
     }
+}
+
+/// Whether markers follow a ripple edit (`RemoveRange`, `RemoveRangeOnTracks`, `RippleDelete`).
+///
+/// A marker at or after the end of the removed range moves left by the range length; a
+/// marker inside the range collapses onto the cut point (it is kept, never deleted); a range
+/// marker spanning the cut shrinks by the removed length and one whose end falls inside the
+/// range is clipped at the cut. The marker updates are part of the same command, so one undo
+/// restores clips and markers exactly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkerRipple {
+    /// Markers ride along when the ripple leaves no content after the cut on a track it did
+    /// not shift, i.e. when it effectively affects every track (the default).
+    #[default]
+    Auto,
+    /// Always move markers.
+    Ride,
+    /// Never move markers.
+    Stay,
+}
+
+impl MarkerRipple {
+    /// Whether markers should move for a ripple that starts at `from` and slides the tracks in
+    /// `affected` (`None` = every track). `Auto` rides when no track outside `affected` has
+    /// content ending after `from`.
+    #[must_use]
+    pub fn rides(self, project: &Project, from: Time, affected: Option<&[TrackId]>) -> bool {
+        match self {
+            Self::Ride => true,
+            Self::Stay => false,
+            Self::Auto => affected.is_none_or(|ids| {
+                project
+                    .tracks()
+                    .iter()
+                    .filter(|t| !ids.contains(&t.id()))
+                    .all(|t| t.clips().values().all(|c| c.range.end.0 <= from.0))
+            }),
+        }
+    }
+}
+
+/// `UpdateMarker` commands moving every marker through ripple-removed `gaps` (sorted,
+/// non-overlapping). A time `x` maps to `x` minus the part of each gap before it, so times
+/// inside a gap collapse onto its start. Range markers map both ends; one that collapses
+/// becomes a point marker. Empty when no marker changes.
+#[must_use]
+pub fn ripple_marker_commands(project: &Project, gaps: &[TimeRange]) -> Vec<Command> {
+    let map = |x: i64| {
+        x - gaps
+            .iter()
+            .map(|g| (x - g.start.0).clamp(0, g.end.0 - g.start.0))
+            .sum::<i64>()
+    };
+    let mut commands = Vec::new();
+    for marker in project.markers() {
+        let time = map(marker.time.0);
+        let end = map(marker.end().0);
+        let duration = marker
+            .duration
+            .and_then(|_| (end > time).then_some(Time(end - time)));
+        if time != marker.time.0 || duration != marker.duration {
+            commands.push(Command::UpdateMarker {
+                id: marker.id,
+                marker: Marker {
+                    time: Time(time),
+                    duration,
+                    ..marker.clone()
+                },
+            });
+        }
+    }
+    commands
+}
+
+/// `UpdateMarker` commands for a ripple that opened `len` ticks of space at `at`: markers at
+/// or after `at` move later by `len`, and a range marker spanning `at` grows by `len`.
+#[must_use]
+pub fn ripple_marker_insert_commands(project: &Project, at: Time, len: i64) -> Vec<Command> {
+    let map = |x: i64| if x >= at.0 { x.saturating_add(len) } else { x };
+    let mut commands = Vec::new();
+    for marker in project.markers() {
+        let time = map(marker.time.0);
+        let end = map(marker.end().0);
+        let duration = marker.duration.map(|_| Time(end - time));
+        if time != marker.time.0 || duration != marker.duration {
+            commands.push(Command::UpdateMarker {
+                id: marker.id,
+                marker: Marker {
+                    time: Time(time),
+                    duration,
+                    ..marker.clone()
+                },
+            });
+        }
+    }
+    commands
 }
