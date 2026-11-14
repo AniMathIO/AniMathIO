@@ -525,7 +525,7 @@ pub(crate) struct AddMarker {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ExportChapters {
     /// `youtube` (default; `M:SS Title` lines), `vtt` (`WebVTT` chapters) or `ffmetadata`
-    /// (FFmpeg chapter metadata).
+    /// (`FFmpeg` chapter metadata).
     format: Option<String>,
     /// Write the chapters to this file instead of returning the text. A `.vtt`, `.ffmeta` or
     /// `.txt` extension picks the format when `format` is omitted.
@@ -537,7 +537,7 @@ pub(crate) struct ExportChapters {
     /// (default `Intro`; empty disables it).
     intro_title: Option<String>,
     /// Shortest chapter in milliseconds; closer markers are merged (default 10000, the
-    /// YouTube minimum; 0 keeps every marker).
+    /// `YouTube` minimum; 0 keeps every marker).
     min_length_ms: Option<f64>,
 }
 #[derive(Deserialize, JsonSchema)]
@@ -1836,7 +1836,7 @@ impl McpServer {
         backend
             .command_apply(Command::RippleDelete {
                 clip,
-                markers: Default::default(),
+                markers: animathio_core::MarkerRipple::default(),
             })
             .map_err(mcp_error)?;
         tool_text(json!({"deleted": clip.0}))

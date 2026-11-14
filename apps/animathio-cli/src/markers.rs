@@ -50,7 +50,7 @@ enum MarkersAction {
         #[command(flatten)]
         save: SaveArgs,
     },
-    /// Write the markers as chapters: a YouTube description list, WebVTT chapters or FFmpeg
+    /// Write the markers as chapters: a `YouTube` description list, `WebVTT` chapters or `FFmpeg`
     /// chapter metadata. Prints to stdout unless --output is given.
     Chapters {
         /// `youtube` (default), `vtt` or `ffmetadata`; a `.vtt`/`.ffmeta` output extension picks it.
@@ -65,7 +65,7 @@ enum MarkersAction {
         /// Title of the chapter added at 0:00 when the first marker is later (empty disables).
         #[arg(long, default_value = "Intro")]
         intro_title: String,
-        /// Shortest chapter in seconds; closer markers merge (YouTube needs 10; 0 keeps all).
+        /// Shortest chapter in seconds; closer markers merge (`YouTube` needs 10; 0 keeps all).
         #[arg(long, default_value = "10", value_parser = parse_time)]
         min_length: Time,
     },

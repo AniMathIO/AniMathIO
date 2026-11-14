@@ -147,15 +147,16 @@ Arguments:
   <PROJECT>  
 
 Options:
-  -o, --output <OUTPUT>  
-      --from <FROM>      Inclusive start in decimal seconds or Nticks [default: 0]
-      --to <TO>          Exclusive end in decimal seconds or Nticks; defaults to project duration
-      --fps <FPS>        Output rate, e.g. 30 or 30000/1001
-      --preset <PRESET>  Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` or `portrait`
-      --crf <CRF>        Constant quality, 0..=51; lower is better (defaults to preset quality or 23)
-      --overwrite        Replace an existing output file instead of failing
-      --bench            Report wall time, fps and opt-in stage timings
-  -h, --help             Print help
+  -o, --output <OUTPUT>      
+      --from <FROM>          Inclusive start in decimal seconds or Nticks [default: 0]
+      --to <TO>              Exclusive end in decimal seconds or Nticks; defaults to project duration
+      --fps <FPS>            Output rate, e.g. 30 or 30000/1001
+      --preset <PRESET>      Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` or `portrait`
+      --crf <CRF>            Constant quality, 0..=51; lower is better (defaults to preset quality or 23)
+      --overwrite            Replace an existing output file instead of failing
+      --chapters <CHAPTERS>  Also write the project's markers as chapters to this sidecar file (`.txt` `YouTube` list, `.vtt` `WebVTT`, `.ffmeta` `FFmpeg` metadata). The MP4 muxer has no chapter atom, so chapters ship beside the video
+      --bench                Report wall time, fps and opt-in stage timings
+  -h, --help                 Print help
 ```
 <!-- /help:export -->
 
@@ -367,7 +368,7 @@ Markers move with ripple edits and autocut; see
 
 ```bash
 animathio-cli markers song.amio list
-animathio-cli markers song.amio chapters --format vtt -o chapters.vtt
+animathio-cli markers song.amio chapters -o chapters.vtt
 animathio-cli export song.amio -o song.mp4 --chapters song.txt
 ```
 
@@ -378,10 +379,11 @@ List, add or remove timeline markers
 Usage: animathio-cli markers <PROJECT> <COMMAND>
 
 Commands:
-  list    Print every marker as JSON (times are Nticks and decimal seconds)
-  add     Add a marker, saving atomically to the input unless --output is given
-  remove  Remove a marker by id, saving atomically to the input unless --output is given
-  help    Print this message or the help of the given subcommand(s)
+  list      Print every marker as JSON (times are Nticks and decimal seconds)
+  add       Add a marker, saving atomically to the input unless --output is given
+  chapters  Write the markers as chapters: a `YouTube` description list, `WebVTT` chapters or `FFmpeg` chapter metadata. Prints to stdout unless --output is given
+  remove    Remove a marker by id, saving atomically to the input unless --output is given
+  help      Print this message or the help of the given subcommand(s)
 
 Arguments:
   <PROJECT>  Input project archive or project.json

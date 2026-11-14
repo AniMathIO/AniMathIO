@@ -653,8 +653,7 @@ fn splitting_never_leaves_a_clip_reading_past_its_media() {
 #[test]
 fn the_control_handler_rejects_trims_past_the_end_of_the_media() {
     use animathio_control::Call;
-    let (mut project, assets) = session();
-    let _ = &mut project;
+    let (project, assets) = session();
     let mut handler =
         HeadlessHandler::from_bundle(animathio_format::Bundle { project, assets }, None);
     // Clip 1: a 12 s WAV placed at [1 s, 13 s) reading source 0..12 s.
@@ -667,6 +666,8 @@ fn the_control_handler_rejects_trims_past_the_end_of_the_media() {
     };
     let err = handler.handle(trim(15 * SEC, 0)).unwrap_err().to_string();
     assert!(err.contains("source media"), "{err}");
+    // Even a single tick beyond the source end is rejected.
+    assert!(handler.handle(trim(13 * SEC + 1, 0)).is_err());
     // Shifting the source window later would also read past the end.
     assert!(handler.handle(trim(13 * SEC, SEC)).is_err());
     // Shortening, or trimming within the media, is fine.

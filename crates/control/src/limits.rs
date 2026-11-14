@@ -3,11 +3,11 @@
 //! the editor) check edits against probed durations here.
 //!
 //! The rule: an edit must not make a video or audio clip read further into its source than
-//! it did before, past the end of the media (within one frame of slack). Stills, generated
+//! it did before, past the end of the media. Stills, generated
 //! clips (plugins, vectors) and clips whose duration is unknown are unbounded. Shortening
 //! or moving a clip, and splitting, never extend the source range, so they always pass.
 
-use animathio_core::{AssetId, ClipId, ClipKind, Command, Project, Rounding, Time};
+use animathio_core::{AssetId, ClipId, ClipKind, Command, Project, Time};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Probed media durations per asset.
@@ -45,12 +45,12 @@ impl SourceLimits {
                 let (ClipKind::Video(id) | ClipKind::Audio(id)) = &clip.kind else {
                     continue;
                 };
-                if !self.probed.insert(id.clone()) {
-                    continue;
-                }
                 let Some(bytes) = assets.get(id) else {
                     continue;
                 };
+                if !self.probed.insert(id.clone()) {
+                    continue;
+                }
                 if let Ok(info) = animathio_media::FilmCraftBackend::new()
                     .probe_bytes("media", bytes.clone().into())
                 {
@@ -70,11 +70,11 @@ impl SourceLimits {
     }
 
     /// Latest timeline end a clip may have for its current source offset, or `None` when the
-    /// clip is unbounded. Includes one frame of slack so frame-aligned cuts at the media end fit.
+    /// clip is unbounded. Frame-aligned cuts must stay within the media end.
     #[must_use]
-    pub fn max_end(&self, project: &Project, clip: &animathio_core::Clip) -> Option<Time> {
+    pub fn max_end(&self, _project: &Project, clip: &animathio_core::Clip) -> Option<Time> {
         let limit = self.duration_of(&clip.kind)?;
-        let room = limit.0 + slack(project) - clip.source_offset.0;
+        let room = limit.0 - clip.source_offset.0;
         Some(Time(clip.range.start.0.saturating_add(room.max(0))))
     }
 
@@ -114,11 +114,10 @@ impl SourceLimits {
                     continue;
                 };
                 let new_end = source_end(clip);
-                if new_end > *old_end && new_end > limit.0 + slack(project) {
+                if new_end > *old_end && new_end > limit.0 {
                     return Err(format!(
-                        "clip {} would run past the end of its source media ({:.3} s long)",
-                        clip.id.0,
-                        limit.0 as f64 / animathio_core::TICKS_PER_SECOND as f64
+                        "clip {} would run past the end of its source media ({} ticks long)",
+                        clip.id.0, limit.0
                     ));
                 }
             }
@@ -157,14 +156,6 @@ fn source_end(clip: &animathio_core::Clip) -> i64 {
     clip.source_offset
         .0
         .saturating_add(clip.range.end.0 - clip.range.start.0)
-}
-
-/// One frame in ticks.
-fn slack(project: &Project) -> i64 {
-    project
-        .frame_rate()
-        .frame_to_time(1, Rounding::Nearest)
-        .map_or(0, |t| t.0)
 }
 
 fn trimmed_ids(command: &Command, out: &mut Vec<ClipId>) {

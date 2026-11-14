@@ -302,21 +302,28 @@ mod tests {
     fn ripple_delete_uses_clip_or_explicit_range() {
         let range = TimeRange::new(Time(2), Time(4)).unwrap();
         assert_eq!(
-            ripple_delete_command(Some(ClipId(1)), Some(range), Default::default()),
+            ripple_delete_command(
+                Some(ClipId(1)),
+                Some(range),
+                animathio_core::MarkerRipple::default()
+            ),
             Some(Command::RippleDelete {
                 clip: ClipId(1),
-                markers: Default::default()
+                markers: animathio_core::MarkerRipple::default()
             })
         );
         assert_eq!(
-            ripple_delete_command(None, Some(range), Default::default()),
+            ripple_delete_command(None, Some(range), animathio_core::MarkerRipple::default()),
             Some(Command::RemoveRange {
                 range,
                 ripple: true,
-                markers: Default::default(),
+                markers: animathio_core::MarkerRipple::default(),
             })
         );
-        assert_eq!(ripple_delete_command(None, None, Default::default()), None);
+        assert_eq!(
+            ripple_delete_command(None, None, animathio_core::MarkerRipple::default()),
+            None
+        );
     }
     #[test]
     fn write_on_replaces_keys_and_rejects_invalid_durations() {
@@ -512,7 +519,7 @@ mod tests {
                 &mut project,
                 &Command::RippleDelete {
                     clip: ClipId(1),
-                    markers: Default::default(),
+                    markers: animathio_core::MarkerRipple::default(),
                 },
             )
             .unwrap();

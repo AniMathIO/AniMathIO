@@ -94,8 +94,8 @@ enum Action {
         /// Replace an existing output file instead of failing.
         #[arg(long)]
         overwrite: bool,
-        /// Also write the project's markers as chapters to this sidecar file (`.txt` YouTube
-        /// list, `.vtt` WebVTT, `.ffmeta` FFmpeg metadata). The MP4 muxer has no chapter
+        /// Also write the project's markers as chapters to this sidecar file (`.txt` `YouTube`
+        /// list, `.vtt` `WebVTT`, `.ffmeta` `FFmpeg` metadata). The MP4 muxer has no chapter
         /// atom, so chapters ship beside the video.
         #[arg(long)]
         chapters: Option<PathBuf>,

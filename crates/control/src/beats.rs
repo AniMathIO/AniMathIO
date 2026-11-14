@@ -540,7 +540,7 @@ fn snap_cuts(
             }),
         };
         match outcome {
-            Ok(_) => {
+            Ok(()) => {
                 result.shifted.push(CutShift {
                     track,
                     left,
