@@ -30,6 +30,13 @@ for _ in $(seq 50); do [[ -e "/tmp/.X11-unix/X${disp#:}" ]] && break; sleep 0.1;
 export DISPLAY="$disp"
 unset WAYLAND_DISPLAY WAYLAND_SOCKET
 export XDG_SESSION_TYPE=x11
+# Keep agent GUI runs silent: the maintainer's speakers stay theirs. The editor
+# skips the audio device (wall-clock playback) and, as a second guard, any library
+# that still tries the sound server gets a server that doesn't exist.
+export ANIMATHIO_AUDIO=none
+export PIPEWIRE_REMOTE=animathio-silent-no-such-remote
+export PULSE_SERVER=unix:/nonexistent/animathio-silent
+export SDL_AUDIODRIVER=dummy
 
 if [[ -n "$shot" ]]; then
   "$@" &

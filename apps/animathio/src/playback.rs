@@ -187,10 +187,22 @@ impl Clock for MonotonicClock {
 /// Choose the audio clock, falling back to a monotonic clock with no device. The
 /// audio clock stays master at every shuttle speed; muted speeds still count.
 pub(crate) fn make_clock(project: &Project, pool: &AudioPool) -> Box<dyn Clock> {
+    // `ANIMATHIO_AUDIO=none` (set by scripts/virtual-display.sh) keeps automated
+    // runs off the audio device entirely; playback then follows the wall clock.
+    if audio_disabled(std::env::var_os("ANIMATHIO_AUDIO").as_deref()) {
+        return Box::new(MonotonicClock::new());
+    }
     match AudioClock::open(project, pool) {
         Ok(clock) => Box::new(clock),
         Err(_) => Box::new(MonotonicClock::new()),
     }
+}
+
+/// Whether `ANIMATHIO_AUDIO` asks for no audio output (`none`, `off` or `0`).
+fn audio_disabled(value: Option<&std::ffi::OsStr>) -> bool {
+    value
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "none" | "off" | "0"))
 }
 
 /// The video frame index whose half-open display interval contains `now`.
@@ -209,6 +221,16 @@ fn ticks(elapsed: std::time::Duration) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn animathio_audio_none_disables_the_device() {
+        use std::ffi::OsStr;
+        assert!(super::audio_disabled(Some(OsStr::new("none"))));
+        assert!(super::audio_disabled(Some(OsStr::new(" OFF "))));
+        assert!(super::audio_disabled(Some(OsStr::new("0"))));
+        assert!(!super::audio_disabled(Some(OsStr::new("default"))));
+        assert!(!super::audio_disabled(None));
+    }
+
     use super::*;
     use animathio_core::{FrameRate, Project, Rounding, TICKS_PER_SECOND, Time};
 
