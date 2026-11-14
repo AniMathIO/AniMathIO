@@ -1078,6 +1078,12 @@ impl Editor {
         rows
     }
 
+    pub(super) fn set_clip_fit(&mut self, id: ClipId, fit: Fit, cx: &mut Context<Self>) {
+        if self.find_clip(id).is_some_and(|clip| clip.fit != fit) {
+            self.execute(&Command::SetClipFit { id, fit }, cx);
+        }
+    }
+
     /// Fit / Fill / Stretch / 1:1 choice for an image or video clip.
     fn fit_row(id: ClipId, current: Fit, cx: &mut Context<Self>) -> Div {
         let mut buttons = div().flex().flex_row().gap_1();
@@ -1090,9 +1096,7 @@ impl Editor {
                     .tooltip(fit_tooltip(fit))
                     .selected(fit == current)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.find_clip(id).is_some_and(|clip| clip.fit != fit) {
-                            this.execute(&Command::SetClipFit { id, fit }, cx);
-                        }
+                        this.set_clip_fit(id, fit, cx);
                     })),
             );
         }

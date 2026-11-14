@@ -119,7 +119,7 @@ fn m_key_adds_a_marker_through_the_keymap(cx: &mut TestAppContext) {
 fn automatic_cuts_scope_picker_and_apply(cx: &mut TestAppContext) {
     let (project, assets) = voice_and_music();
     let mut ui = Ui::open(cx, project, assets);
-    ui.update(|editor, _, _| editor.select_only(VOICE_CLIP));
+    ui.update(|editor, _, cx| editor.select_only(VOICE_CLIP, cx));
     ui.dispatch(AutomaticCuts);
     ui.settle();
 
@@ -166,7 +166,7 @@ fn automatic_cuts_scope_picker_and_apply(cx: &mut TestAppContext) {
 fn editing_invalidates_an_open_autocut_proposal(cx: &mut TestAppContext) {
     let (project, assets) = voice_and_music();
     let mut ui = Ui::open(cx, project, assets);
-    ui.update(|editor, _, _| editor.select_only(VOICE_CLIP));
+    ui.update(|editor, _, cx| editor.select_only(VOICE_CLIP, cx));
     ui.dispatch(AutomaticCuts);
     ui.settle();
     seek(&mut ui, 500);
@@ -209,7 +209,7 @@ fn caption_restyle_is_one_undo_step(cx: &mut TestAppContext) {
             .expect("subtitle track")
     });
     // Selecting a caption makes the remembered look follow its style.
-    ui.update(|editor, _, _| editor.select_only(before[0].0));
+    ui.update(|editor, _, cx| editor.select_only(before[0].0, cx));
     assert_eq!(ui.read(|e| e.caption_look.style.clone()), original);
 
     let target = caption_styles()
@@ -320,7 +320,7 @@ fn auto_duck_panel_apply_and_undo(cx: &mut TestAppContext) {
     let (project, assets) = voice_and_music();
     let before = project.clone();
     let mut ui = Ui::open(cx, project, assets);
-    ui.update(|e, _, _| e.select_only(VOICE_CLIP));
+    ui.update(|e, _, cx| e.select_only(VOICE_CLIP, cx));
     ui.dispatch(actions::AutoDuck);
     ui.update(|e, _, cx| {
         e.duck_review
@@ -382,7 +382,7 @@ fn animation_preset_apply_and_undo(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, project, assets);
     let id = ui.read(|e| e.project.tracks()[0].clips().values().next().unwrap().id);
     ui.update(|e, _, cx| {
-        e.select_only(id);
+        e.select_only(id, cx);
         e.apply_animation_preset("org.animathio.animations", "fade-in", cx);
     });
     assert_ne!(ui.read(|e| e.project.clone()), before);
@@ -416,4 +416,55 @@ fn templates_launcher_renders_cards(cx: &mut TestAppContext) {
     });
     ui.settle();
     assert!(ui.read(|e| !e.title_library.template_manifests.is_empty()));
+}
+
+#[gpui::test]
+fn media_fit_picker_change_and_undo(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let id = ui.read(|e| {
+        e.project
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .find(|c| {
+                matches!(
+                    c.kind,
+                    animathio_core::ClipKind::Image(_) | animathio_core::ClipKind::Video(_)
+                )
+            })
+            .expect("sample media clip")
+            .id
+    });
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|e, _, cx| {
+        e.select_only(id, cx);
+        e.set_clip_fit(id, animathio_core::Fit::Cover, cx);
+    });
+    assert_eq!(
+        ui.read(|e| e.find_clip(id).unwrap().fit),
+        animathio_core::Fit::Cover
+    );
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn clip_context_menu_renders_with_shortcuts(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, window, cx| {
+        let id = e.project.tracks()[0].clips().values().next().unwrap().id;
+        e.context_menu = Some(super::super::ContextMenu::Clip { id });
+        e.context_menu_pos = Some(gpui::point(gpui::px(100.), gpui::px(100.)));
+        assert!(e.context_menu_dropdown(window, cx).is_some());
+        assert!(
+            gpui_component::kbd::Kbd::binding_for_action(
+                &actions::SplitClip,
+                Some("Timeline"),
+                window
+            )
+            .is_some()
+        );
+    });
 }
