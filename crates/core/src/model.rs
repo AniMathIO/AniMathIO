@@ -306,6 +306,9 @@ pub struct Clip {
     pub range: TimeRange,
     /// Source offset at the clip's start (also used by plugins).
     pub source_offset: Time,
+    /// Exact timeline-to-source playback mapping.
+    #[serde(default)]
+    pub time_map: crate::ClipTimeMap,
     /// Base transform.
     pub transform: Transform,
     /// Placement of an image or video source inside the frame; new clips default to contain.
@@ -340,6 +343,7 @@ impl Clip {
             kind,
             range,
             source_offset: Time(0),
+            time_map: crate::ClipTimeMap::default(),
             transform: Transform::default(),
             fit,
             params: BTreeMap::new(),
@@ -635,6 +639,7 @@ impl Project {
                     return Err(invalid("duplicate or mismatched clip id"));
                 }
                 clip.range.validate()?;
+                clip.time_map.validate(clip.range.end.0 - clip.range.start.0)?;
                 if clip.source_offset.0 < 0
                     || clip
                         .source_offset
@@ -756,7 +761,7 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                 track: track.id,
                 id: clip.id,
                 kind: clip.kind.clone(),
-                source_time: Time((clip.source_offset.0 + local_time.0).max(0)),
+                source_time: Time(clip.source_time(local_time).0.max(0)),
                 transform: clip.transform,
                 fit: clip.fit,
                 params: clip.params.clone(),

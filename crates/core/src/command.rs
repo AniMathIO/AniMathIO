@@ -171,6 +171,30 @@ pub enum Command {
         /// New base transform.
         transform: Transform,
     },
+    /// Retime a clip and linked companions, preserving each source interval. With ripple,
+    /// shift clips starting at/after the original end on unlocked tracks; otherwise
+    /// leave them in place and reject overlaps. Automation remains timeline-local.
+    SetClipSpeed {
+        /// Clip identity.
+        id: ClipId,
+        /// Constant rational speed.
+        speed: crate::ClipSpeed,
+        /// Backwards source playback.
+        reverse: bool,
+        /// Ordered clip-local linear speed keys; empty uses constant speed.
+        ramps: Vec<crate::SpeedPoint>,
+        /// Shift trailing clips across unlocked tracks.
+        ripple: bool,
+    },
+    /// Insert a frame hold and ripple the tail as one undo step (audio holds are silent).
+    InsertFrameHold {
+        /// Clip identity.
+        id: ClipId,
+        /// Timeline playhead inside the clip.
+        at: Time,
+        /// Positive hold length in project frames.
+        frames: u32,
+    },
     /// Set how an image or video source is placed inside the clip's frame.
     SetClipFit {
         /// Clip identity.
@@ -480,6 +504,8 @@ impl Command {
             | Self::SplitClip { id, .. }
             | Self::SetTransform { id, .. }
             | Self::SetClipFit { id, .. }
+            | Self::SetClipSpeed { id, .. }
+            | Self::InsertFrameHold { id, .. }
             | Self::SetParam { id, .. }
             | Self::AddEffect { id, .. }
             | Self::RemoveEffect { id, .. }
@@ -1090,6 +1116,14 @@ impl Command {
                 };
                 clip.transform = *transform;
                 inverse
+            }
+            Self::SetClipSpeed { id, speed, reverse, ramps, ripple } => {
+                let commands = crate::speed::speed_commands(project, *id, *speed, *reverse, ramps, *ripple)?;
+                apply_generated(project, &commands)?
+            }
+            Self::InsertFrameHold { id, at, frames } => {
+                let command = crate::freeze_frame_command(project, *id, *at, *frames)?;
+                command.apply_checked(project)?
             }
             Self::SetClipFit { id, fit } => {
                 let clip = clip_mut(project, *id)?;
@@ -1714,17 +1748,16 @@ fn split_at_commands(project: &Project, times: &[Time]) -> Result<Vec<Command>, 
 /// The part of `clip` from timeline time `at` on, as clip `id`: the source offset
 /// advances and every animation is re-based so the kept part looks exactly as it
 /// did (keys before `at` are dropped, the value at `at` becomes a key at 0).
-fn split_right(clip: &Clip, at: Time, id: ClipId) -> Result<Clip, Error> {
+pub(crate) fn split_right(clip: &Clip, at: Time, id: ClipId) -> Result<Clip, Error> {
     let duration = at.0 - clip.range.start.0;
     let mut right = clip.clone();
     right.id = id;
     right.range = TimeRange::new(at, clip.range.end)?;
-    right.source_offset = Time(
-        clip.source_offset
-            .0
-            .checked_add(duration)
-            .ok_or_else(|| invalid("source offset overflow"))?,
-    );
+    if clip.time_map == crate::ClipTimeMap::default() {
+        right.source_offset = Time(clip.source_offset.0.checked_add(duration).ok_or_else(|| invalid("source offset overflow"))?);
+    } else {
+        right.time_map.phase = Time(clip.time_map.phase.0.checked_add(duration).ok_or_else(|| invalid("curve phase overflow"))?);
+    }
     for animation in &mut right.animations {
         let boundary = animation.keys.sample(Time(duration));
         let interpolation = animation

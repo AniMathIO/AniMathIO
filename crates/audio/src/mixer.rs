@@ -303,6 +303,7 @@ impl Mixer {
         out: &mut [f32],
         out_first: usize,
     ) -> Result<(), Error> {
+        if clip.time_map.hold { return Ok(()); }
         let ClipKind::Audio(id) = &clip.kind else {
             return Ok(());
         };
@@ -364,17 +365,7 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            let ticks = i128::from(TICKS_PER_SECOND);
-            let source_ticks = local + i128::from(clip.source_offset.0) * i128::from(self.rate);
-            if source_ticks < 0 {
-                // Before the source start (a dissolve without a handle): silence.
-                continue;
-            }
-            let source_frame = usize::try_from((source_ticks + ticks - 1) / ticks)
-                .map_err(|e| Error::Invalid(e.to_string()))?;
-            let Some(samples) = cursor.frame(source_frame)? else {
-                continue;
-            };
+            let samples = source_samples(clip, time, local, self.rate, &mut cursor)?;
             for (channel, sample) in samples.iter().enumerate() {
                 out[(frame - out_first) * channels + channel] += (f64::from(*sample) * gain) as f32;
             }
@@ -412,15 +403,7 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            let source_ticks = local + i128::from(clip.source_offset.0) * i128::from(self.rate);
-            if source_ticks < 0 {
-                continue;
-            }
-            let source_frame = usize::try_from((source_ticks + ticks - 1) / ticks)
-                .map_err(|e| Error::Invalid(e.to_string()))?;
-            let Some(samples) = cursor.frame(source_frame)? else {
-                continue;
-            };
+            let samples = source_samples(clip, time, local, self.rate, &mut cursor)?;
             for (channel, sample) in samples.iter().enumerate() {
                 input[(frame - base) * channels + channel] = (f64::from(*sample) * gain) as f32;
             }
@@ -710,4 +693,31 @@ fn param(clip: &Clip, name: &str, time: Time, fallback: f64) -> f64 {
                 .and_then(animathio_core::ParamValue::as_number)
                 .unwrap_or(fallback)
         })
+}
+
+
+// Linear resample-based varispeed. Selection and interpolation positions use integer
+// ticks; only sample amplitude interpolation uses floating point. No device state.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+fn source_samples(clip: &Clip, time: Time, local: i128, rate: u32, cursor: &mut Cursor<'_>) -> Result<Vec<f32>, Error> {
+    if clip.time_map.hold { return Ok(Vec::new()); }
+    let ticks = i128::from(TICKS_PER_SECOND);
+    if clip.time_map == animathio_core::ClipTimeMap::default() {
+        let position = local + i128::from(clip.source_offset.0) * i128::from(rate);
+        if position < 0 { return Ok(Vec::new()); }
+        let frame = usize::try_from((position + ticks - 1) / ticks).map_err(|e| Error::Invalid(e.to_string()))?;
+        return Ok(cursor.frame(frame)?.unwrap_or(&[]).to_vec());
+    }
+    let mut position = i128::from(clip.source_time(time).0) * i128::from(rate);
+    if clip.time_map.reverse { position -= ticks - i128::from(rate); }
+    if position < 0 { return Ok(Vec::new()); }
+    let frame = usize::try_from(position / ticks).map_err(|e| Error::Invalid(e.to_string()))?;
+    let mut samples = cursor.frame(frame)?.unwrap_or(&[]).to_vec();
+    let fraction = (position % ticks) as f64 / TICKS_PER_SECOND as f64;
+    if fraction > 0.0 && let Some(next) = cursor.frame(frame + 1)? {
+        for (sample, next) in samples.iter_mut().zip(next) {
+            *sample = (f64::from(*sample) * (1.0 - fraction) + f64::from(*next) * fraction) as f32;
+        }
+    }
+    Ok(samples)
 }

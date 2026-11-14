@@ -7,6 +7,7 @@ mod marker;
 mod model;
 mod params;
 mod time;
+mod speed;
 mod transition;
 mod vector;
 
@@ -17,6 +18,7 @@ pub use marker::*;
 pub use model::*;
 pub use params::*;
 pub use time::*;
+pub use speed::*;
 pub use transition::*;
 pub use vector::*;
 
