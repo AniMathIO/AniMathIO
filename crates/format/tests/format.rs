@@ -430,11 +430,84 @@ fn schema_four_projects_load_with_no_markers_and_markers_round_trip() {
     .apply(&mut project)
     .unwrap();
     let value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
-    assert_eq!(value["schemaVersion"], 5);
+    assert_eq!(value["schemaVersion"], SCHEMA_VERSION);
     assert_eq!(value["markers"].as_array().unwrap().len(), 2);
     assert_eq!(read_json(json_bytes(&project).as_slice()).unwrap(), project);
     let mut cursor = write_amio(Cursor::new(Vec::new()), &project, &BTreeMap::new()).unwrap();
     cursor.set_position(0);
     let back = read_amio(cursor, Limits::default()).unwrap().project;
     assert_eq!(back.marker(MarkerId(3)), Some(&marker));
+}
+
+#[test]
+fn schema_five_media_clips_keep_stretching_after_the_fit_migration() {
+    let (mut project, assets) = fixture(b"video bytes");
+    // Pre-schema-6 files have no `fit` key; they must keep their stretched look.
+    let mut old: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    old["schemaVersion"] = json!(5);
+    for track in old["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_object_mut().unwrap().values_mut() {
+            clip.as_object_mut().unwrap().remove("fit");
+        }
+    }
+    let loaded = read_json(serde_json::to_vec(&old).unwrap().as_slice()).unwrap();
+    let clip = |p: &Project, id| p.tracks()[0].clips()[&ClipId(id)].clone();
+    assert_eq!(clip(&loaded, 1).fit, Fit::Stretch);
+
+    // New media clips default to contain, which is written out and read back.
+    assert_eq!(clip(&project, 1).fit, Fit::Contain);
+    let value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    assert_eq!(value["schemaVersion"], 6);
+    assert_eq!(value["tracks"][0]["clips"]["1"]["fit"], "contain");
+    // Explicit stretch survives the next schema-6 save/load, whose new default is contain.
+    assert_eq!(value["tracks"][1]["clips"]["2"]["fit"], "stretch");
+    assert_eq!(read_json(json_bytes(&loaded).as_slice()).unwrap(), loaded);
+    Command::SetClipFit {
+        id: ClipId(1),
+        fit: Fit::Cover,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut cursor = write_amio(Cursor::new(Vec::new()), &project, &assets).unwrap();
+    cursor.set_position(0);
+    let back = read_amio(cursor, Limits::default()).unwrap().project;
+    assert_eq!(clip(&back, 1).fit, Fit::Cover);
+    assert_eq!(back, project);
+}
+
+#[test]
+fn fit_accepts_its_aliases() {
+    for (name, fit) in [
+        ("fit", Fit::Contain),
+        ("fill", Fit::Cover),
+        ("none", Fit::Original),
+        ("stretch", Fit::Stretch),
+    ] {
+        assert_eq!(serde_json::from_value::<Fit>(json!(name)).unwrap(), fit);
+        assert_eq!(Fit::parse(name), Some(fit));
+        assert_eq!(Fit::parse(fit.name()), Some(fit));
+    }
+}
+
+#[test]
+fn schema_five_template_fit_is_promoted_without_changing_placement() {
+    for mode in ["contain", "cover"] {
+        let (project, _) = fixture(b"video bytes");
+        let mut value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+        value["schemaVersion"] = json!(5);
+        let clip = &mut value["tracks"][0]["clips"]["1"];
+        clip.as_object_mut().unwrap().remove("fit");
+        clip["params"]["media_fit"] = json!({"String":mode});
+        let loaded = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+        let clip = &loaded.tracks()[0].clips()[&ClipId(1)];
+        assert_eq!(clip.fit, Fit::parse(mode).unwrap());
+        assert!(!clip.params.contains_key("media_fit"));
+        assert_eq!(
+            clip.transform,
+            project.tracks()[0].clips()[&ClipId(1)].transform
+        );
+        let saved = json_bytes(&loaded);
+        assert!(!String::from_utf8_lossy(&saved).contains("media_fit"));
+        assert_eq!(read_json(saved.as_slice()).unwrap(), loaded);
+    }
 }

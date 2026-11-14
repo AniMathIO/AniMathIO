@@ -9,7 +9,7 @@ use animathio_control::{
     media_type_of, read_bounded, timeline_of, validate_existing_file, validate_output_file,
 };
 use animathio_core::{
-    Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, Command, EffectId, FrameRate, History,
+    Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, Command, EffectId, Fit, FrameRate, History,
     Interpolation, MarkerId, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange,
     Track, TrackId, Transform, TransformProperty, evaluate,
 };
@@ -393,7 +393,10 @@ struct ClipPaint {
     keyframes: Vec<KeyframePaint>,
     /// Downsampled peaks for audio clips, once the asset is decoded.
     waveform: Option<Arc<Waveform>>,
-    thumbnails: Vec<Option<Arc<RenderImage>>>,
+    thumbnails: Vec<Option<timeline_thumbnails::Thumbnail>>,
+    fit: Fit,
+    transform: Transform,
+    canvas: (u32, u32),
     preview: SharedString,
     source_offset: i64,
     fade_levels: [Vec<f32>; 2],
@@ -742,6 +745,17 @@ impl Editor {
             this.notices
                 .push(crate::style::Toast::info("Recovered from autosave"));
         }
+        cx.on_focus_out(&this.focus_handle, window, |this, _, _, _| {
+            // Root-hosted dialogs/popovers can sit outside the editor's key path.
+            this.k_held = false;
+        })
+        .detach();
+        cx.observe_window_activation(window, |this, window, _| {
+            if !window.is_window_active() {
+                this.k_held = false;
+            }
+        })
+        .detach();
         this.request_render(Time(0));
         // A window-manager close asks before dropping unsaved work.
         let close_view = cx.entity().downgrade();
@@ -892,7 +906,7 @@ impl Render for Editor {
             .text_size(cx.theme().font_size)
             .font_family(cx.theme().font_family.clone())
             .key_context("Editor")
-            .on_key_up(cx.listener(|this, event: &KeyUpEvent, _, _| {
+            .capture_key_up(cx.listener(|this, event: &KeyUpEvent, _, _| {
                 if event.keystroke.key == "k" {
                     this.k_held = false;
                 }

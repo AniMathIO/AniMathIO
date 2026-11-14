@@ -118,6 +118,7 @@ fn plugin_clip(plugin_id: impl Into<String>, params: serde_json::Value) -> Scene
             params,
         },
         source_time: Time(0),
+        fit: animathio_core::Fit::Stretch,
         transform: animathio_core::Transform::default(),
         params: BTreeMap::new(),
         effects: Vec::new(),
@@ -142,6 +143,7 @@ fn loads_both_plugins_and_resolves_scene() {
     assert!(ids.iter().any(|id| id == "org.animathio.text"));
 
     let scene = CoreScene {
+        canvas: (0, 0),
         clips: vec![
             plugin_clip(
                 "org.animathio.shapes",
@@ -208,6 +210,7 @@ fn trap_fixture_is_contained() {
     assert!(result.is_err(), "trap fixture should fail to render");
 
     let scene = CoreScene {
+        canvas: (0, 0),
         clips: vec![plugin_clip(&trap, json!({}))],
     };
     let resolved = host.resolve(&scene, (640, 360));

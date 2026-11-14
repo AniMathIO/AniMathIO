@@ -520,10 +520,8 @@ fn lists_templates_and_creates_projects_from_them_over_mcp() {
         .find_map(|t| t.clips().get(&animathio_core::ClipId(first)))
         .unwrap();
     assert!(matches!(clip.kind, animathio_core::ClipKind::Image(_)));
-    assert_eq!(
-        clip.params["media_fit"],
-        animathio_core::ParamValue::String("cover".into())
-    );
+    assert_eq!(clip.fit, animathio_core::Fit::Cover);
+    assert!(!clip.params.contains_key("media_fit"));
     assert_eq!(bundle.assets.len(), 1);
 
     // Existing destinations are refused; so are placeholders supplied twice.

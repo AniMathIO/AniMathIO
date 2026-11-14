@@ -189,6 +189,8 @@ pub(crate) struct UpdateElement {
     pub(crate) id: String,
     pub(crate) placement: Option<Placement>,
     pub(crate) time_frame: Option<TimeFrame>,
+    /// Image/video fit: fit/contain, fill/cover, stretch, or none/original (1:1).
+    pub(crate) fit: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1335,7 +1337,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Update a clip's placement (pixels, origin top-left) and/or visible time frame (milliseconds)."
+        description = "Update placement (pixels, origin top-left), time frame (milliseconds), or image/video fit (fit, fill, stretch, none). One undo step."
     )]
     async fn update_element(
         &self,
@@ -1346,6 +1348,12 @@ impl McpServer {
         let clip_id = parse_clip_id(&p.id)?;
         let clip = find_clip(&state.project, clip_id).ok_or_else(|| invalid("clip not found"))?;
         let (width, height) = canvas(&state);
+        let mut commands = Vec::new();
+        if let Some(mode) = p.fit {
+            let fit = animathio_core::Fit::parse(&mode)
+                .ok_or_else(|| invalid("fit must be fit, fill, stretch or none"))?;
+            commands.push(Command::SetClipFit { id: clip_id, fit });
+        }
         if let Some(placement) = p.placement {
             let mut transform = clip.transform;
             if let Some(x) = placement.x {
@@ -1369,12 +1377,10 @@ impl McpServer {
             if let Some(scale_y) = placement.scale_y {
                 transform.scale_y = scale_y;
             }
-            backend
-                .command_apply(Command::SetTransform {
-                    id: clip_id,
-                    transform,
-                })
-                .map_err(mcp_error)?;
+            commands.push(Command::SetTransform {
+                id: clip_id,
+                transform,
+            });
         }
         if let Some(time_frame) = p.time_frame {
             let start = time_frame
@@ -1387,12 +1393,15 @@ impl McpServer {
                 .map(ms_to_ticks)
                 .transpose()?
                 .unwrap_or(clip.range.end);
+            commands.push(Command::TrimClip {
+                id: clip_id,
+                range: TimeRange::new(start, end).map_err(|e| mcp_error(e.into()))?,
+                source_offset: clip.source_offset,
+            });
+        }
+        if !commands.is_empty() {
             backend
-                .command_apply(Command::TrimClip {
-                    id: clip_id,
-                    range: TimeRange::new(start, end).map_err(|e| mcp_error(e.into()))?,
-                    source_offset: clip.source_offset,
-                })
+                .command_apply(Command::Batch { commands })
                 .map_err(mcp_error)?;
         }
         tool_text(json!({"clip_id": clip_id.0}))
@@ -2554,5 +2563,71 @@ mod id_tests {
         assert!(serde_json::from_value::<ElementId>(json!({"id": -1})).is_err());
         let schema = serde_json::to_value(schemars::schema_for!(ElementId)).unwrap();
         assert_eq!(schema["properties"]["id"]["type"], "string");
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+    use animathio_core::{Asset, AssetId, Fit};
+
+    #[tokio::test]
+    async fn fit_placement_and_timing_are_one_atomic_undo_step() {
+        let mut backend = HeadlessHandler::new();
+        let asset = AssetId::of(b"image");
+        backend
+            .command_apply(Command::Batch {
+                commands: vec![
+                    Command::AddAsset {
+                        id: asset.clone(),
+                        asset: Asset {
+                            name: "image.png".into(),
+                            media_type: "image/png".into(),
+                        },
+                    },
+                    Command::AddTrack {
+                        track: Track::new(TrackId(1), "media"),
+                        index: 0,
+                    },
+                    Command::AddClip {
+                        track: TrackId(1),
+                        clip: Clip::new(
+                            ClipId(1),
+                            animathio_core::ClipKind::Image(asset),
+                            TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+                        ),
+                    },
+                ],
+            })
+            .unwrap();
+        let before = backend.project().clone();
+        let server = McpServer::new(Box::new(backend));
+        let args = serde_json::from_value(
+            json!({"id":1,"fit":"fill","placement":{"x":100},"time_frame":{"end":2000}}),
+        )
+        .unwrap();
+        server.update_element(Parameters(args)).await.unwrap();
+        let mut backend = server.backend.lock().await;
+        let after = backend.project_get().unwrap().project;
+        assert_eq!(find_clip(&after, ClipId(1)).unwrap().fit, Fit::Cover);
+        assert_ne!(after, before);
+        assert!(backend.history_undo().unwrap());
+        assert_eq!(backend.project_get().unwrap().project, before);
+        drop(backend);
+        for invalid in [
+            json!({"id":1,"fit":"unknown","placement":{"x":500}}),
+            json!({"id":1,"fit":"fill","placement":{"x":500},"time_frame":{"end":-1}}),
+        ] {
+            assert!(
+                server
+                    .update_element(Parameters(serde_json::from_value(invalid).unwrap()))
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                server.backend.lock().await.project_get().unwrap().project,
+                before
+            );
+        }
     }
 }

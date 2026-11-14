@@ -24,6 +24,7 @@ Commands:
   export        Export an offline H.264 + AAC MP4
   validate      Check model invariants and all asset content hashes
   import-media  Import media into a new project, including linked companion audio
+  media-fit     Set one image/video clip's fit and save an edited project archive
   import-v1     Convert a v1 `.animathio` project to a `.amio` archive
   import-manim  Convert a Manim Community scene script to a `.amio` archive
   animations    List or apply animation presets from the loaded animation-preset plugins
@@ -712,3 +713,32 @@ Options:
 ```
 <!-- /help:duck -->
 
+
+
+## `media-fit`
+
+Set one image/video clip's fit and save an edited archive. New clips default to
+contain; existing files retain their migrated fitting. `none` means 1:1 source
+pixels at project resolution, independent of preview size.
+
+```sh
+animathio-cli media-fit project.amio --clip 3 --mode fill -o filled.amio
+```
+
+<!-- help:media-fit -->
+```text
+Set one image/video clip's fit and save an edited project archive
+
+Usage: animathio-cli media-fit [OPTIONS] --clip <CLIP> --mode <MODE> --output <OUTPUT> <PROJECT>
+
+Arguments:
+  <PROJECT>  
+
+Options:
+      --clip <CLIP>      Clip id from the timeline
+      --mode <MODE>      fit/contain, fill/cover, stretch, or none/original (1:1 project pixels)
+  -o, --output <OUTPUT>  
+      --overwrite        Replace an existing output file
+  -h, --help             Print help
+```
+<!-- /help:media-fit -->

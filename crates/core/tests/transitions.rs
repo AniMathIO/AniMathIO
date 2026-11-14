@@ -253,3 +253,44 @@ fn batch_edit_commands_keep_transitions_valid_and_atomic() {
     undo.apply(&mut project).unwrap();
     assert_eq!(project, before);
 }
+
+#[test]
+fn transitions_are_canonical_after_load_and_undo_redo() {
+    let mut project = project();
+    Command::MoveClip {
+        id: ClipId(3),
+        track: TrackId(0),
+        start: Time(200),
+    }
+    .apply(&mut project)
+    .unwrap();
+    add(&mut project, dissolve(9, 1, 2, 20)).unwrap();
+    add(&mut project, dissolve(1, 2, 3, 20)).unwrap();
+    let expected = project.clone();
+    let mut value = serde_json::to_value(&project).unwrap();
+    value["tracks"][0]["transitions"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    let mut loaded: Project = serde_json::from_value(value).unwrap();
+    assert_eq!(loaded, expected);
+    let mut history = History::default();
+    history
+        .execute(
+            &mut loaded,
+            &Command::RemoveTransition {
+                id: TransitionId(9),
+            },
+        )
+        .unwrap();
+    assert!(history.undo(&mut loaded).unwrap());
+    assert_eq!(loaded, expected);
+    assert!(history.redo(&mut loaded).unwrap());
+    assert!(history.undo(&mut loaded).unwrap());
+    assert_eq!(loaded, expected);
+    let undo = Command::RemoveTrack { id: TrackId(0) }
+        .apply(&mut loaded)
+        .unwrap();
+    undo.apply(&mut loaded).unwrap();
+    assert_eq!(loaded, expected);
+}

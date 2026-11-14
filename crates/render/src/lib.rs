@@ -354,6 +354,7 @@ pub fn render_preview(
     // executed: remaining effect clips are drawn without effects and reported as failed.
     let mut probes_left = MAX_EFFECT_PROBES;
     let alone = |clip: &animathio_core::SceneClip| Scene {
+        canvas: scene.canvas,
         clips: vec![clip.clone()],
     };
     for clip in &mut repaired.clips {

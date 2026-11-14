@@ -372,10 +372,11 @@ impl ProjectTemplate {
             .ok_or_else(|| ControlError::InvalidParams("missing placeholder".into()))?;
         let mut clip = track.clips()[&id].clone();
         clip.kind = kind;
-        clip.params.insert(
-            "media_fit".into(),
-            animathio_core::ParamValue::String(if cover { "cover" } else { "contain" }.into()),
-        );
+        clip.fit = if cover {
+            animathio_core::Fit::Cover
+        } else {
+            animathio_core::Fit::Contain
+        };
         let mut commands = Vec::new();
         if !self.project.assets().contains_key(&asset) {
             commands.push(metadata);

@@ -98,8 +98,12 @@ fn media_replacement_retains_edits_and_undoes_exactly() {
         assert_eq!(after.animations, before.animations);
         assert!(matches!(after.kind, animathio_core::ClipKind::Image(_)));
         assert_eq!(
-            after.params["media_fit"],
-            animathio_core::ParamValue::String(if cover { "cover" } else { "contain" }.into())
+            after.fit,
+            if cover {
+                animathio_core::Fit::Cover
+            } else {
+                animathio_core::Fit::Contain
+            }
         );
         undo.apply(&mut project).unwrap();
         assert_eq!(project, template.project);
@@ -228,7 +232,7 @@ fn fill_rejects_conflicts_audio_unknown_ids_and_missing_files() {
 }
 
 #[test]
-fn media_fit_param_reflects_the_chosen_mode() {
+fn media_fit_reflects_the_chosen_mode() {
     let template = project_templates().unwrap().remove(0);
     let id = template.manifest.placeholders[0].clip;
     let temp = tempfile::tempdir().unwrap();
@@ -242,9 +246,6 @@ fn media_fit_param_reflects_the_chosen_mode() {
             .iter()
             .find_map(|t| t.clips().get(&id))
             .unwrap();
-        assert_eq!(
-            clip.params["media_fit"],
-            animathio_core::ParamValue::String(mode.into())
-        );
+        assert_eq!(clip.fit, animathio_core::Fit::parse(mode).unwrap());
     }
 }

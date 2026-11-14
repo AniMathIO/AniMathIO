@@ -13,6 +13,7 @@ fn layer(id: u64, kind: ClipKind, transform: Transform) -> SceneClip {
         track: TrackId(id),
         kind,
         source_time: Time(0),
+        fit: animathio_core::Fit::Stretch,
         transform,
         params: std::collections::BTreeMap::new(),
         effects: Vec::new(),
@@ -44,6 +45,7 @@ fn normalized_transform_rotation_mirroring_opacity_and_z_order() {
         },
     );
     let scene = Scene {
+        canvas: (0, 0),
         clips: vec![background.clone(), foreground.clone()],
     };
     let frame = render(&scene, &mut RenderCtx::default(), (100, 80)).unwrap();
@@ -52,6 +54,7 @@ fn normalized_transform_rotation_mirroring_opacity_and_z_order() {
     assert!((i32::from(p[0]) - 128).abs() <= 1 && (i32::from(p[2]) - 127).abs() <= 1);
     let reverse = render(
         &Scene {
+            canvas: (0, 0),
             clips: vec![foreground, background],
         },
         &mut RenderCtx::default(),
@@ -70,6 +73,7 @@ fn normalized_transform_rotation_mirroring_opacity_and_z_order() {
     );
     let frame = render(
         &Scene {
+            canvas: (0, 0),
             clips: vec![rotated],
         },
         &mut RenderCtx::default(),
@@ -117,6 +121,7 @@ fn transparent_images_preserve_straight_alpha_and_mirrored_orientation() {
     let mut ctx = RenderCtx::default();
     let id = ctx.resources.add(bytes);
     let scene = Scene {
+        canvas: (0, 0),
         clips: vec![layer(
             0,
             ClipKind::Image(id),
@@ -210,6 +215,7 @@ fn malformed_decoder_frame_is_an_error() {
     }
     let mut ctx = RenderCtx::new(animathio_render::CpuBackend::default(), BadSource);
     let scene = Scene {
+        canvas: (0, 0),
         clips: vec![layer(
             0,
             ClipKind::Video(AssetId::of(b"video")),
@@ -242,6 +248,7 @@ proptest! {
 #[test]
 fn vector_scenes_render_pixel_space_paths() {
     let scene = Scene {
+        canvas: (0, 0),
         clips: vec![layer(
             0,
             ClipKind::Vector(VectorScene {

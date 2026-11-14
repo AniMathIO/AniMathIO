@@ -106,6 +106,21 @@ enum Action {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// Set one image/video clip's fit and save an edited project archive.
+    MediaFit {
+        project: PathBuf,
+        /// Clip id from the timeline.
+        #[arg(long)]
+        clip: u64,
+        /// fit/contain, fill/cover, stretch, or none/original (1:1 project pixels).
+        #[arg(long, value_parser = parse_fit)]
+        mode: animathio_core::Fit,
+        #[arg(short, long)]
+        output: PathBuf,
+        /// Replace an existing output file.
+        #[arg(long)]
+        overwrite: bool,
+    },
     /// Convert a v1 `.animathio` project to a `.amio` archive.
     ImportV1 {
         /// v1 `.animathio` project file (deflated JSON).
@@ -293,6 +308,24 @@ fn run(cli: Cli) -> Result<()> {
             );
         }
         Action::ImportMedia { input, output } => import_media(&input, &output)?,
+        Action::MediaFit {
+            project,
+            clip,
+            mode,
+            output,
+            overwrite,
+        } => {
+            if output.exists() && !overwrite {
+                return Err("output exists; pass --overwrite".into());
+            }
+            let mut bundle = load(&project)?;
+            animathio_core::Command::SetClipFit {
+                id: animathio_core::ClipId(clip),
+                fit: mode,
+            }
+            .apply(&mut bundle.project)?;
+            save_amio(output, &bundle.project, &bundle.assets)?;
+        }
         Action::ImportV1 { input, output } => {
             let bytes = read_import_input(&input)?;
             let (project, assets, report) = animathio_import_v1::import_v1_with_report(&bytes)?;
@@ -760,6 +793,11 @@ fn import_media(input: &Path, output: &Path) -> Result<()> {
     Command::Batch { commands }.apply(&mut project)?;
     save_amio(output, &project, &BTreeMap::from([(id, bytes)]))?;
     Ok(())
+}
+
+fn parse_fit(value: &str) -> std::result::Result<animathio_core::Fit, String> {
+    animathio_core::Fit::parse(value)
+        .ok_or_else(|| "mode must be fit, fill, stretch or none".into())
 }
 
 #[cfg(test)]

@@ -250,6 +250,7 @@ pub(crate) fn import_with_report(
             kind,
             range,
             source_offset: Time(0),
+            fit: animathio_core::Fit::Stretch,
             transform,
             params: params.into_iter().map(|(k, v)| (k, v.into())).collect(),
             effects,

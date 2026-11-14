@@ -28,7 +28,7 @@ impl Editor {
         match title_preset_command(&self.project, &params) {
             Ok((command, added)) => {
                 if self.try_execute(&command, cx) {
-                    self.select_only(added.clip_id);
+                    self.select_only(added.clip_id, cx);
                     cx.notify();
                 }
             }

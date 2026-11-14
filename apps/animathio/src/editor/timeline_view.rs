@@ -72,7 +72,7 @@ impl Editor {
             return;
         }
         if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
-            self.select_only(clip_id);
+            self.select_only(clip_id, cx);
             self.selected_field = None;
             self.selected_keyframe = None;
             let current = self
@@ -88,7 +88,7 @@ impl Editor {
         }
         if let Some(selection) = self.hit_keyframe(&layout, x, y) {
             let clip = self.find_clip(selection.clip_id).cloned();
-            self.select_only(selection.clip_id);
+            self.select_only(selection.clip_id, cx);
             self.selected_field = None;
             self.selected_keyframe = Some(selection.clone());
             if let Some(clip) = clip {
@@ -110,7 +110,7 @@ impl Editor {
             && let Some((hit, edge)) = timeline::hit_trim_edge(&layout, &self.project, x, y)
             && let Some(clip) = self.find_clip(hit.clip).cloned()
         {
-            self.select_only(hit.clip);
+            self.select_only(hit.clip, cx);
             self.selected_field = None;
             self.gesture = Some(TimelineGesture::Trim(TrimDrag {
                 clip_id: hit.clip,
@@ -133,20 +133,20 @@ impl Editor {
             if secondary {
                 let toggled = selection::toggle(&current, hit.clip);
                 let primary = toggled.contains(&hit.clip).then_some(hit.clip);
-                self.set_selection(toggled, primary.or(self.selected));
+                self.set_selection(toggled, primary.or(self.selected), cx);
             } else if event.modifiers.shift {
                 let anchor = self.selected.unwrap_or(hit.clip);
                 let range = selection::range_select(&self.project, anchor, hit.clip, &current);
-                self.set_selection(range, Some(anchor));
+                self.set_selection(range, Some(anchor), cx);
             } else {
                 // Pressing on a member keeps the group so it can be dragged; a
                 // click that does not move collapses to the clicked clip.
                 let collapse_to =
                     (current.contains(&hit.clip) && current.len() > 1).then_some(hit.clip);
                 if collapse_to.is_some() {
-                    self.set_selection(current, Some(hit.clip));
+                    self.set_selection(current, Some(hit.clip), cx);
                 } else {
-                    self.select_only(hit.clip);
+                    self.select_only(hit.clip, cx);
                 }
                 self.begin_clip_drag(&layout, hit, x, collapse_to);
             }
@@ -391,7 +391,7 @@ impl Editor {
                     let mut ids = selection::marquee(&layout, &self.project, origin, (x, y));
                     ids.extend(band.base.iter().copied());
                     let primary = self.selected;
-                    self.set_selection(ids, primary);
+                    self.set_selection(ids, primary, cx);
                 }
                 cx.notify();
             }
@@ -497,7 +497,7 @@ impl Editor {
                 let delta = drag.current_start.0 - drag.origin_start.0;
                 if delta == 0 && drag.row_delta == 0 {
                     if let Some(id) = drag.collapse_to {
-                        self.select_only(id);
+                        self.select_only(id, cx);
                     }
                     return;
                 }
@@ -514,7 +514,7 @@ impl Editor {
                     && self.timeline_bounds.contains(&event.position)
                 {
                     // A plain click on empty space: deselect and park the playhead.
-                    self.clear_selection();
+                    self.clear_selection(cx);
                     let (x, _) = self.timeline_relative(event.position);
                     self.scrub_to(x, cx);
                 }
@@ -586,16 +586,16 @@ impl Editor {
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
         if let Some(selection) = self.hit_keyframe(&layout, x, y) {
-            self.select_only(selection.clip_id);
+            self.select_only(selection.clip_id, cx);
             self.selected_keyframe = Some(selection.clone());
             self.context_menu = Some(ContextMenu::Keyframe(selection));
         } else if let Some(hit) = timeline::hit_test(&layout, &self.project, x, y) {
             // Right-clicking a member keeps the whole selection for the menu.
             let current = self.selected_ids();
             if current.contains(&hit.clip) {
-                self.set_selection(current, Some(hit.clip));
+                self.set_selection(current, Some(hit.clip), cx);
             } else {
-                self.select_only(hit.clip);
+                self.select_only(hit.clip, cx);
             }
             self.selected_keyframe = None;
             self.context_menu = Some(ContextMenu::Clip { id: hit.clip });
@@ -813,7 +813,11 @@ impl Editor {
                     ClipKind::Audio(asset) => self.waveform_for(asset),
                     _ => None,
                 };
-                let tile_width = ((layout.row_height - 29.) * (16. / 9.)).max(32.);
+                let tile_width = filmstrip_tile_width(
+                    layout.row_height - 29.,
+                    project_size(&self.project),
+                    clip.transform,
+                );
                 let clip_x = timeline::time_to_x(&layout, start) + 5.;
                 let thumbnail_first = ((-clip_x / tile_width).floor().max(0.)) as usize;
                 let thumbnails = match &clip.kind {
@@ -849,6 +853,9 @@ impl Editor {
                     _ => Vec::new(),
                 };
                 clips.push(ClipPaint {
+                    fit: clip.fit,
+                    transform: clip.transform,
+                    canvas: project_size(&self.project),
                     thumbnail_first,
                     effect_warning: self.clip_effect_warning(clip, &loaded_effects),
                     row: paint_row,

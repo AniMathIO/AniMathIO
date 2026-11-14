@@ -76,6 +76,7 @@ fn decode_fill_all_aspects_and_exact_single_step_undo_redo() {
         history.execute(&mut project, &command).unwrap();
         assert_eq!((project.width(), project.height()), (width, height));
         let clip = &project.tracks()[0].clips()[&ClipId(2)];
+        assert_eq!(clip.fit, animathio_core::Fit::Stretch);
         assert!(clip.transform.scale_x >= 1. && clip.transform.scale_y >= 1.);
         assert!((clip.transform.opacity - 0.6).abs() < 1e-12);
         // Source is 320x180: a uniform physical scale, with no stretch.

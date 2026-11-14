@@ -9,11 +9,13 @@ use std::collections::BTreeMap;
 
 fn clip(kind: ClipKind) -> Scene {
     Scene {
+        canvas: (0, 0),
         clips: vec![SceneClip {
             id: ClipId(1),
             track: TrackId(1),
             kind,
             source_time: Time(0),
+            fit: animathio_core::Fit::Stretch,
             transform: Transform::default(),
             params: BTreeMap::new(),
             effects: Vec::new(),

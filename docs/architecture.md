@@ -9,7 +9,7 @@ the render/audio/export data flow. The authority for these rules is
 | Crate | Owns |
 | --- | --- |
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
-| `format` | Versioned `project.json` (schema version 5) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
+| `format` | Versioned `project.json` (schema version 6) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
 | `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, and cpal/rtrb device playback. No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
@@ -129,7 +129,7 @@ queue popover and toasts. Control-protocol exports appear in the same queue.
 `start_screen` provides project presets, recents and importer entry points.
 `templates` supplies launcher cards, the placeholder fill dialog and user-library save/delete.
 Template manifests stay outside the project schema; source replacements are ordinary
-undoable command batches. Media fitting uses the `media_fit` clip parameter in both
+undoable command batches. Media fitting uses the typed `Clip::fit` field in both
 rendering backends. Workflow
 dialogs use gpui-component forms; export works on an immutable snapshot, so selecting
 a delivery preset does not change the open project. `control::ExportPreset` is the
@@ -208,7 +208,7 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `AddTrack`, `RemoveTrack`, `SetTrackGain`, `SetTrackMuted`, `SetTrackSolo`,
 `SetTrackLocked`, `RenameTrack`, `MoveTrack`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
-`MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
+`MergeClip`, `SetTransform`, `SetClipFit`, `SetParam`, `AddEffect`, `RemoveEffect`,
 `MoveEffect`, `SetEffectParam`, `SetEffectBypass`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
 `AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `AddMarker`, `RemoveMarker`,
 `MoveMarker`, `UpdateMarker`, `Batch`, `SplitAt`,
@@ -678,3 +678,42 @@ a snapshot-guarded command batch. Existing media decoders sample video in source
 time, including trims. The editor's `reframe` module owns settings and a worker
 with atomic progress/cancel; the CLI and MCP use the same helper. No runtime
 tracking state is stored in the project and the format schema is unchanged.
+
+
+Image and video clips created with `Clip::new` default to `Fit::Contain` (Fit).
+`Fit::Cover` (Fill) crops to the clip frame, `Fit::Stretch` distorts to that frame,
+and `Fit::Original` (1:1) uses source pixels at the project resolution before the
+clip transform. Fitting respects the physical aspect of a transformed placeholder;
+CPU, GPU, picking, gizmos and timeline filmstrips share `Fit::rect` and
+`Fit::visible_rect`. Contain/cover use the physical target aspect, preserving
+aspect even with rounded preview dimensions or output size overrides. The project resolution travels with `Scene::canvas`, so a
+smaller preview keeps the same 1:1 framing as export. The inspector Transform
+section edits fit through `SetClipFit`.
+
+A 16:9 clip in a 9:16 project, rendered in each mode (`media-fit-modes.png`: fit
+letterboxes, fill crops, stretch distorts, none is 1:1) and the inspector Fit control
+with the gizmo following the fitted bounds (`editor-media-fit.png`):
+
+![Fit, Fill, Stretch and 1:1 on a 16:9 clip in a 9:16 project](screenshots/media-fit-modes.png)
+
+![Inspector Fit control and gizmo on a filled clip](screenshots/editor-media-fit.png)
+
+Schema 6 migrates earlier media clips to stretch to preserve their appearance.
+Schema-5 template `media_fit` parameters are promoted to `Clip::fit` and removed;
+contain/cover template placement is unchanged. New files write the selected fit.
+No existing pixel golden needs regeneration for this migration.
+
+External `command.apply` requests reject `Exact` and `RestoreClips`, recursively
+inside batches. Internal template edits and recorded history still use these
+primitives. `MergeClip` requires timeline adjacency, source-time continuity and
+identical kind, transform, fit, parameters and effects. The right automation must
+equal the left automation rebased at the join, as a split would produce; otherwise
+the merge is refused atomically. Undo restores both complete clip snapshots.
+
+Inspector inputs commit to their captured clip ids before selection changes drop
+the field pool. A multi-file media import (including a newly needed track and
+linked audio) is one `Command::Batch`; successfully prepared files share one undo
+step, failed files report an error, and an entirely failed import adds no track.
+K release is captured before focused inputs can consume it; leaving the editor focus
+subtree or deactivating its window clears the held-key state. The MCP status chip distinguishes disabled control from startup failure and shows
+the failure in a tooltip; startup errors are also logged.

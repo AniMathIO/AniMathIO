@@ -1349,6 +1349,7 @@ fn build_project(
             kind,
             range: TimeRange::new(start_ticks, end_ticks)?,
             source_offset: Time(0),
+            fit: animathio_core::Fit::Stretch,
             transform: mob_transform(mob),
             params: params.into_iter().map(|(k, v)| (k, v.into())).collect(),
             effects: Vec::new(),

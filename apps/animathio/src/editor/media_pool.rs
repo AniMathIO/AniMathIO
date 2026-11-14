@@ -330,7 +330,7 @@ impl Editor {
         let (commands, _) =
             animathio_control::place_visual_clip(&self.project, clip, &descriptor.name, track);
         if self.try_execute(&Command::Batch { commands }, cx) {
-            self.select_only(id);
+            self.select_only(id, cx);
             cx.notify();
         }
     }

@@ -26,7 +26,15 @@ impl Editor {
     }
 
     /// Replace the selection. `primary` defaults to the first member.
-    pub(super) fn set_selection(&mut self, ids: BTreeSet<ClipId>, primary: Option<ClipId>) {
+    pub(super) fn set_selection(
+        &mut self,
+        ids: BTreeSet<ClipId>,
+        primary: Option<ClipId>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selection != ids || self.selected != primary {
+            self.commit_pending_inspector_inputs(cx);
+        }
         let ids = selection::existing(&self.project, &ids);
         let primary = primary
             .filter(|id| ids.contains(id))
@@ -40,11 +48,12 @@ impl Editor {
         self.selection = ids;
     }
 
-    pub(super) fn select_only(&mut self, id: ClipId) {
-        self.set_selection(BTreeSet::from([id]), Some(id));
+    pub(super) fn select_only(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_selection(BTreeSet::from([id]), Some(id), cx);
     }
 
-    pub(super) fn clear_selection(&mut self) {
+    pub(super) fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.commit_pending_inspector_inputs(cx);
         self.audio_inspector_track = None;
         self.selected = None;
         self.selection.clear();
@@ -71,7 +80,7 @@ impl Editor {
     pub(super) fn select_all(&mut self, cx: &mut Context<Self>) {
         let ids = selection::all_clips(&self.project);
         let primary = self.selected;
-        self.set_selection(ids, primary);
+        self.set_selection(ids, primary, cx);
         cx.notify();
     }
 
@@ -83,7 +92,7 @@ impl Editor {
         } else if self.gesture.take().is_some() || self.keyframe_drag.take().is_some() {
             self.snap_line = None;
         } else {
-            self.clear_selection();
+            self.clear_selection(cx);
         }
         cx.notify();
     }
@@ -155,7 +164,7 @@ impl Editor {
             return;
         };
         if self.try_execute(&command, cx) {
-            self.set_selection(created, None);
+            self.set_selection(created, None, cx);
             cx.notify();
         }
     }
@@ -169,7 +178,7 @@ impl Editor {
             return;
         };
         if self.try_execute(&command, cx) {
-            self.clear_selection();
+            self.clear_selection(cx);
         }
     }
 
@@ -193,7 +202,7 @@ impl Editor {
         if let Some(command) = command
             && self.try_execute(&command, cx)
         {
-            self.clear_selection();
+            self.clear_selection(cx);
         }
     }
 
@@ -232,30 +241,30 @@ impl Editor {
 
     /// Duplicate one clip, or the whole selection when it is part of one.
     pub(super) fn duplicate_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
-        self.adopt_clip(id);
+        self.adopt_clip(id, cx);
         self.duplicate_selection(cx);
     }
 
     /// Make a context-menu target part of the selection (keeping an existing
     /// multi-selection that already contains it).
-    fn adopt_clip(&mut self, id: ClipId) {
+    fn adopt_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
         if !self.selected_ids().contains(&id) {
-            self.select_only(id);
+            self.select_only(id, cx);
         }
     }
 
     pub(super) fn copy_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
-        self.adopt_clip(id);
+        self.adopt_clip(id, cx);
         self.copy_selection(cx);
     }
 
     pub(super) fn cut_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
-        self.adopt_clip(id);
+        self.adopt_clip(id, cx);
         self.cut_selection(cx);
     }
 
     pub(super) fn ripple_delete_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
-        self.adopt_clip(id);
+        self.adopt_clip(id, cx);
         self.ripple_delete_selection(cx);
     }
 

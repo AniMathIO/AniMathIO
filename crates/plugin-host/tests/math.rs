@@ -158,6 +158,7 @@ fn vector_clip(scene: VectorScene) -> SceneClip {
         id: ClipId(1),
         kind: ClipKind::Vector(scene),
         source_time: Time(0),
+        fit: animathio_core::Fit::Stretch,
         transform: Transform::default(),
         params: BTreeMap::new(),
         effects: Vec::new(),
@@ -171,6 +172,7 @@ fn golden_vector(scene: VectorScene, name: &str) {
         .join("golden");
     std::fs::create_dir_all(&root).unwrap();
     let core_scene = CoreScene {
+        canvas: (0, 0),
         clips: vec![vector_clip(scene)],
     };
     let mut ctx = RenderCtx::default();

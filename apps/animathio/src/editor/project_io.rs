@@ -31,7 +31,11 @@ impl Editor {
         self.end_gizmo();
         self.fields = fields::FieldPool::default();
         self.waveforms.borrow_mut().clear();
-        self.clear_selection();
+        self.audio_inspector_track = None;
+        self.selected = None;
+        self.selection.clear();
+        self.selected_field = None;
+        self.selected_keyframe = None;
     }
 
     pub(super) fn new_project(&mut self, cx: &mut Context<Self>) {
@@ -214,24 +218,12 @@ impl Editor {
         else {
             return;
         };
-        let track = self.ensure_track(cx);
+        let track = self
+            .project
+            .tracks()
+            .first()
+            .map_or(TrackId(self.next_id), Track::id);
         self.import_paths(&paths, Some((track, self.position)), cx);
-    }
-
-    pub(super) fn ensure_track(&mut self, cx: &mut Context<Self>) -> TrackId {
-        if let Some(track) = self.project.tracks().first() {
-            return track.id();
-        }
-        let id = TrackId(self.next_id);
-        self.next_id += 1;
-        self.execute(
-            &Command::AddTrack {
-                track: Track::new(id, "Video 1"),
-                index: 0,
-            },
-            cx,
-        );
-        id
     }
 
     pub(super) fn import_paths(
@@ -240,34 +232,98 @@ impl Editor {
         placement: Option<(TrackId, Time)>,
         cx: &mut Context<Self>,
     ) {
+        self.commit_pending_inspector_inputs(cx);
+        let (command, imported, errors) = Self::prepare_import(
+            &self.project,
+            &mut self.pool,
+            &mut self.next_id,
+            paths,
+            placement,
+        );
+        if let Some(error) = errors.last() {
+            self.error = Some(error.clone());
+        }
+        if !imported.is_empty() {
+            let result = if matches!(&command, Command::Batch { commands } if commands.is_empty()) {
+                Ok(())
+            } else {
+                self.history.execute(&mut self.project, &command)
+            };
+            match result {
+                Ok(()) => {
+                    Arc::make_mut(&mut self.assets).extend(imported);
+                    self.worker.load(self.assets.clone());
+                    self.after_edit(cx);
+                }
+                Err(error) => self.error = Some(error.0),
+            }
+        }
+        cx.notify();
+    }
+
+    /// Plan every successful file against a scratch project, then commit once.
+    #[allow(clippy::type_complexity)]
+    fn prepare_import(
+        project: &Project,
+        pool: &mut AudioPool,
+        next: &mut u64,
+        paths: &[PathBuf],
+        placement: Option<(TrackId, Time)>,
+    ) -> (Command, BTreeMap<AssetId, Vec<u8>>, Vec<String>) {
+        let mut draft = project.clone();
+        let mut commands = Vec::new();
+        let mut imported = BTreeMap::new();
+        let mut errors = Vec::new();
+        if let Some((track, _)) = placement
+            && !draft.tracks().iter().any(|t| t.id() == track)
+        {
+            let command = Command::AddTrack {
+                track: Track::new(track, "Video 1"),
+                index: draft.tracks().len(),
+            };
+            if let Err(error) = command.apply(&mut draft) {
+                return (Command::Batch { commands: vec![] }, imported, vec![error.0]);
+            }
+            *next = (*next).max(track.0.saturating_add(1));
+            commands.push(command);
+        }
         let mut placement = placement;
-        let mut changed = false;
         for path in paths {
-            match self.add_media_file(path, placement) {
-                Ok(end) => {
-                    changed = true;
+            match Self::prepare_media_file(&draft, pool, next, path, placement) {
+                Ok((end, command, id, bytes)) => {
+                    if let Err(error) = command.apply(&mut draft) {
+                        errors.push(error.0);
+                        continue;
+                    }
+                    if !matches!(&command, Command::Batch { commands } if commands.is_empty()) {
+                        commands.push(command);
+                    }
+                    *next = (*next).max(next_id(&draft));
+                    imported.insert(id, bytes);
                     if let Some((track, _)) = placement {
                         placement = Some((track, end));
                     }
                 }
-                Err(error) => self.error = Some(error),
+                Err(error) => errors.push(error),
             }
         }
-        if changed {
-            self.worker.load(self.assets.clone());
-            self.after_edit(cx);
+        if imported.is_empty() {
+            commands.clear();
         }
-        cx.notify();
+        (Command::Batch { commands }, imported, errors)
     }
 
     /// Import an asset, optionally placing a clip, as one undoable transaction. Audio
     /// is decoded up front (unsupported audio falls back to a silent source); the
     /// actual clip length is taken from decoded audio when available.
-    pub(super) fn add_media_file(
-        &mut self,
+    #[allow(clippy::type_complexity)]
+    fn prepare_media_file(
+        project: &Project,
+        pool: &mut AudioPool,
+        next: &mut u64,
         path: &Path,
         placement: Option<(TrackId, Time)>,
-    ) -> Result<Time, String> {
+    ) -> Result<(Time, Command, AssetId, Vec<u8>), String> {
         if media_type_for(path) == "application/octet-stream" {
             return Err(format!("Unsupported media: {}", path.display()));
         }
@@ -279,7 +335,7 @@ impl Editor {
             .file_name()
             .map_or_else(|| "media".into(), |s| s.to_string_lossy().into_owned());
         let mut commands = Vec::new();
-        if !self.project.assets().contains_key(&id) {
+        if !project.assets().contains_key(&id) {
             commands.push(Command::AddAsset {
                 id: id.clone(),
                 asset: Asset {
@@ -295,14 +351,12 @@ impl Editor {
                     source.info().rate,
                 )
                 .max(TICKS_PER_SECOND);
-                self.pool
-                    .insert(id.clone(), &source)
+                pool.insert(id.clone(), &source)
                     .map_err(|e| e.to_string())?;
                 (ClipKind::Audio(id.clone()), duration)
             } else {
                 let silent = Pcm::new(48_000, 1, vec![0.0]).map_err(|e| e.to_string())?;
-                self.pool
-                    .insert(id.clone(), &silent)
+                pool.insert(id.clone(), &silent)
                     .map_err(|e| e.to_string())?;
                 (ClipKind::Audio(id.clone()), DEFAULT_MEDIA_TICKS)
             }
@@ -321,7 +375,11 @@ impl Editor {
         if let Some((track, start)) = placement {
             end = Time(start.0.checked_add(duration).ok_or("clip end overflow")?);
             let mut clip = Clip::new(
-                self.next_clip_id(),
+                {
+                    let id = ClipId(*next);
+                    *next = next.saturating_add(1);
+                    id
+                },
                 kind,
                 TimeRange::new(start, end).map_err(|e| e.0)?,
             );
@@ -337,17 +395,22 @@ impl Editor {
             commands.push(Command::AddClip { track, clip });
             if companion {
                 let audio_track = TrackId(
-                    self.project
+                    project
                         .tracks()
                         .iter()
                         .map(|t| t.id().0)
                         .max()
                         .unwrap_or(0)
-                        + 1,
+                        .checked_add(1)
+                        .ok_or("track id space exhausted")?,
                 );
                 // Reserved from the counter so a later file in the same import cannot
                 // be handed the same id.
-                let audio_id = self.next_clip_id();
+                let audio_id = {
+                    let id = ClipId(*next);
+                    *next = next.saturating_add(1);
+                    id
+                };
                 let mut audio = Clip::new(audio_id, ClipKind::Audio(id.clone()), range);
                 audio.link_group = Some(clip_id);
                 audio.params.insert("gain".into(), 1.0.into());
@@ -358,27 +421,19 @@ impl Editor {
                 });
                 commands.push(Command::AddTrack {
                     track: Track::new(audio_track, "Audio"),
-                    index: self.project.tracks().len(),
+                    index: project.tracks().len(),
                 });
                 commands.push(Command::AddClip {
                     track: audio_track,
                     clip: audio,
                 });
                 if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
-                    self.pool
-                        .insert(id.clone(), &source)
+                    pool.insert(id.clone(), &source)
                         .map_err(|e| e.to_string())?;
                 }
             }
         }
-        if !commands.is_empty() {
-            self.history
-                .execute(&mut self.project, &Command::Batch { commands })
-                .map_err(|e| e.0)?;
-            self.next_id = self.next_id.max(next_id(&self.project));
-        }
-        Arc::make_mut(&mut self.assets).insert(id, bytes);
-        Ok(end)
+        Ok((end, Command::Batch { commands }, id, bytes))
     }
 
     pub(super) fn import_legacy(&mut self, cx: &mut Context<Self>) {
@@ -398,5 +453,65 @@ impl Editor {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+
+    #[test]
+    fn media_import_including_the_first_track_and_linked_audio_is_one_undo_step() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let image = root.join("../../crates/render/tests/fixtures/effects.png");
+        let video = root.join("../../crates/media/tests/fixtures/sample.mp4");
+        let bad = root.join("missing-import-file.png");
+        let original = Project::default();
+        let mut next = 1;
+        let (command, assets, errors) = Editor::prepare_import(
+            &original,
+            &mut AudioPool::default(),
+            &mut next,
+            &[image.clone(), video, image, bad],
+            Some((TrackId(1), Time(0))),
+        );
+        assert_eq!(errors.len(), 1);
+        assert_eq!(assets.len(), 2, "repeated media reuses its asset");
+        let mut project = original.clone();
+        let mut history = History::default();
+        history.execute(&mut project, &command).unwrap();
+        assert_eq!(project.tracks()[0].clips().len(), 3);
+        assert!(
+            project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .any(|c| matches!(c.kind, ClipKind::Audio(_)) && c.link_group.is_some())
+        );
+        let imported = project.clone();
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, original);
+        assert!(!history.undo(&mut project).unwrap());
+        assert!(history.redo(&mut project).unwrap());
+        assert_eq!(project, imported);
+    }
+
+    #[test]
+    fn failed_import_does_not_create_a_track() {
+        let original = Project::default();
+        let mut next = 1;
+        let (command, assets, errors) = Editor::prepare_import(
+            &original,
+            &mut AudioPool::default(),
+            &mut next,
+            &[PathBuf::from("/nonexistent/animathio-missing.png")],
+            Some((TrackId(1), Time(0))),
+        );
+        assert!(assets.is_empty());
+        assert_eq!(errors.len(), 1);
+        let mut project = original.clone();
+        command.apply(&mut project).unwrap();
+        assert_eq!(project, original);
     }
 }

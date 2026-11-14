@@ -1118,6 +1118,7 @@ impl PluginHost {
     /// Trapped or missing plugins are converted to `ClipKind::Error` without crashing the host.
     pub fn resolve(&mut self, scene: &CoreScene, canvas_size: (u32, u32)) -> CoreScene {
         let mut resolved_scene = CoreScene {
+            canvas: scene.canvas,
             clips: Vec::with_capacity(scene.clips.len()),
         };
 

@@ -24,7 +24,7 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 5) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 6) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding (streaming; Opus included), mixing, playback (cpal) | ✅ `audio` |
@@ -126,6 +126,11 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | Missing effect plugin warning (badge, inspector row, toast) |
 | --- |
 | ![Effect warning](docs/screenshots/editor-effect-warning.png) |
+
+| Media fit modes (Fit, Fill, Stretch, 1:1) and the Fit inspector control |
+| --- |
+| ![Media fit modes](docs/screenshots/media-fit-modes.png) |
+| ![Fit control in the inspector](docs/screenshots/editor-media-fit.png) |
 
 ## Documentation
 

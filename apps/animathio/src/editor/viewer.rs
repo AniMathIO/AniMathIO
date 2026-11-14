@@ -4,6 +4,7 @@ use crate::style::{color, hex, hexa};
 
 pub(super) struct ViewerState {
     bounds: Bounds<Pixels>,
+    source_sizes: BTreeMap<AssetId, Option<(u32, u32)>>,
     pub grid: bool,
     pub checker: bool,
     drag: Option<GizmoDrag>,
@@ -16,6 +17,7 @@ impl Default for ViewerState {
     fn default() -> Self {
         Self {
             bounds: Bounds::default(),
+            source_sizes: BTreeMap::new(),
             grid: false,
             checker: false,
             drag: None,
@@ -31,6 +33,8 @@ struct GizmoDrag {
     origin: Point<Pixels>,
     transform: Transform,
     handle: Handle,
+    preserve_aspect: bool,
+    visible_scale: [f64; 2],
     /// Last unwrapped rotation delta of a rotate drag, in radians.
     rotation: std::cell::Cell<f64>,
 }
@@ -105,6 +109,48 @@ fn contains_clip(t: Transform, canvas: Bounds<Pixels>, pointer: Point<Pixels>) -
             <= (t.scale_y * f64::from(f32::from(canvas.size.height)) / 2.).abs()
 }
 
+/// Probe dimensions once per asset; no decoded frames are retained by the gizmo.
+fn media_size(
+    kind: &ClipKind,
+    assets: &BTreeMap<AssetId, Vec<u8>>,
+    cache: &mut BTreeMap<AssetId, Option<(u32, u32)>>,
+) -> Option<(u32, u32)> {
+    let (ClipKind::Image(id) | ClipKind::Video(id)) = kind else {
+        return None;
+    };
+    *cache.entry(id.clone()).or_insert_with(|| {
+        let bytes = assets.get(id)?;
+        if matches!(kind, ClipKind::Image(_)) {
+            image::ImageReader::new(std::io::Cursor::new(bytes))
+                .with_guessed_format()
+                .ok()?
+                .into_dimensions()
+                .ok()
+        } else {
+            use animathio_media::MediaBackend as _;
+            let info = animathio_media::FilmCraftBackend::new()
+                .probe_bytes("gizmo", Arc::from(bytes.as_slice()))
+                .ok()?
+                .video?;
+            Some((info.width, info.height))
+        }
+    })
+}
+
+fn fitted_transform(
+    clip: &animathio_core::SceneClip,
+    canvas: (u32, u32),
+    source: Option<(u32, u32)>,
+) -> Transform {
+    let mut t = clip.transform;
+    if let Some(source) = source {
+        let [_, _, w, h] = clip.fit.visible_rect(source, canvas, t);
+        t.scale_x *= w;
+        t.scale_y *= h;
+    }
+    t
+}
+
 /// Visible clips under `pointer`, topmost first. Media clips hit anywhere inside
 /// their transformed bounds; plugin and vector clips (text, shapes, ...) have a
 /// canvas-sized box but only draw part of it, so `has_ink` decides for those.
@@ -126,8 +172,7 @@ fn clips_under_pointer(
             !matches!(clip.kind, ClipKind::Audio(_))
                 && clip.transform.opacity > 0.
                 && contains_clip(clip.transform, canvas, pointer)
-                && (!matches!(clip.kind, ClipKind::Plugin { .. } | ClipKind::Vector(_))
-                    || has_ink(clip))
+                && has_ink(clip)
         })
         .map(|clip| clip.id)
         .collect()
@@ -156,6 +201,7 @@ fn scene_clip_has_ink(
     single.effects.clear();
     single.transform.opacity = 1.;
     let mut scene = Scene {
+        canvas: project_size,
         clips: vec![single],
     };
     if let Some(host) = host {
@@ -260,8 +306,10 @@ fn dragged_transform(
             t.y += dy / h;
             if snap {
                 let (sin, cos) = t.rotation.sin_cos();
-                let ex = (t.scale_x * cos).abs() + (t.scale_y * h / w * sin).abs();
-                let ey = (t.scale_y * cos).abs() + (t.scale_x * w / h * sin).abs();
+                let sx = t.scale_x * drag.visible_scale[0];
+                let sy = t.scale_y * drag.visible_scale[1];
+                let ex = (sx * cos).abs() + (sy * h / w * sin).abs();
+                let ey = (sy * cos).abs() + (sx * w / h * sin).abs();
                 (t.x, guides[0]) = snap_axis(t.x, ex, 6. / w);
                 (t.y, guides[1]) = snap_axis(t.y, ey, 6. / h);
             }
@@ -277,7 +325,7 @@ fn dragged_transform(
             if y != 0. {
                 t.scale_y = min_magnitude(t.scale_y + local_y / (h * y));
             }
-            if shift {
+            if shift || drag.preserve_aspect {
                 let factor = if x == 0. {
                     t.scale_y / min_magnitude(drag.transform.scale_y)
                 } else {
@@ -305,13 +353,22 @@ fn dragged_transform(
 }
 
 impl Editor {
-    fn selected_visual(&self) -> Option<(ClipId, Transform)> {
+    fn selected_visual(&mut self) -> Option<(ClipId, Transform, Transform)> {
         let id = self.selected?;
-        evaluate(&self.project, self.position)
+        let clip = evaluate(&self.project, self.position)
             .clips
             .into_iter()
-            .find(|c| c.id == id && !matches!(c.kind, ClipKind::Audio(_)))
-            .map(|c| (id, c.transform))
+            .find(|c| c.id == id && !matches!(c.kind, ClipKind::Audio(_)))?;
+        let source = media_size(
+            &clip.kind,
+            &self.assets,
+            &mut self.viewer_state.source_sizes,
+        );
+        Some((
+            id,
+            clip.transform,
+            fitted_transform(&clip, project_size(&self.project), source),
+        ))
     }
 
     pub(super) fn move_gizmo(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -376,19 +433,39 @@ impl Editor {
                         this.position,
                         bounds,
                         event.position,
-                        &mut |clip| scene_clip_has_ink(host, clip, size, bounds, event.position),
+                        &mut |clip| {
+                            if matches!(clip.kind, ClipKind::Image(_) | ClipKind::Video(_)) {
+                                let source = media_size(
+                                    &clip.kind,
+                                    &this.assets,
+                                    &mut this.viewer_state.source_sizes,
+                                );
+                                contains_clip(
+                                    fitted_transform(clip, size, source),
+                                    bounds,
+                                    event.position,
+                                )
+                            } else if matches!(
+                                clip.kind,
+                                ClipKind::Plugin { .. } | ClipKind::Vector(_)
+                            ) {
+                                scene_clip_has_ink(host, clip, size, bounds, event.position)
+                            } else {
+                                true
+                            }
+                        },
                     );
-                    let selected_handle = this
-                        .selected_visual()
-                        .and_then(|(_, t)| hit_handle(t, this.viewer_state.bounds, event.position));
+                    let selected_handle = this.selected_visual().and_then(|(_, _, t)| {
+                        hit_handle(t, this.viewer_state.bounds, event.position)
+                    });
                     if event.modifiers.alt
                         || !matches!(selected_handle, Some(Handle::Scale(..) | Handle::Rotate))
                     {
                         let picked = pick_from_stack(&hits, this.selected, event.modifiers.alt);
-                        this.set_selection(picked.into_iter().collect(), picked);
+                        this.set_selection(picked.into_iter().collect(), picked, cx);
                         cx.notify();
                     }
-                    let Some((id, transform)) = this.selected_visual() else {
+                    let Some((id, transform, fitted)) = this.selected_visual() else {
                         return;
                     };
                     if this.project.tracks().iter().any(|track| {
@@ -397,13 +474,26 @@ impl Editor {
                         return;
                     }
                     if let Some(handle) =
-                        hit_handle(transform, this.viewer_state.bounds, event.position)
+                        hit_handle(fitted, this.viewer_state.bounds, event.position)
                     {
                         this.viewer_state.drag = Some(GizmoDrag {
                             id,
                             origin: event.position,
                             transform,
-                            handle,
+                            handle: match handle {
+                                Handle::Scale(x, y) => Handle::Scale(
+                                    x * fitted.scale_x / transform.scale_x,
+                                    y * fitted.scale_y / transform.scale_y,
+                                ),
+                                other => other,
+                            },
+                            visible_scale: [
+                                fitted.scale_x / transform.scale_x,
+                                fitted.scale_y / transform.scale_y,
+                            ],
+                            preserve_aspect: this
+                                .find_clip(id)
+                                .is_some_and(|clip| clip.fit == Fit::Contain),
                             rotation: std::cell::Cell::new(0.),
                         });
                         this.pointer_down = true;
@@ -485,7 +575,7 @@ impl Editor {
                             },
                         );
                         window.paint_quad(outline(frame, hex(color::BORDER), BorderStyle::Solid));
-                        if let Some((_, t)) = selected {
+                        if let Some((_, _, t)) = selected {
                             paint_gizmo(t, frame, dragging, window);
                         }
                     },
@@ -580,7 +670,7 @@ impl Editor {
             .child(header)
             .child(viewport)
             .child(self.transport_controls(window, cx));
-        if let Some((_, t)) = selected {
+        if let Some((_, _, t)) = selected {
             root = root.child(
                 div()
                     .absolute()
@@ -711,6 +801,37 @@ fn paint_gizmo(t: Transform, canvas: Bounds<Pixels>, dragging: bool, window: &mu
 mod tests {
     use super::*;
     #[core::prelude::v1::test]
+    fn fitted_bounds_drive_gizmos_and_picking_without_hitting_letterbox_bars() {
+        let canvas = Bounds::new(Point::default(), size(px(100.), px(100.)));
+        let mut clip = animathio_core::SceneClip {
+            id: ClipId(1),
+            track: TrackId(1),
+            kind: ClipKind::Image(AssetId::of(b"image")),
+            fit: Fit::Contain,
+            source_time: Time(0),
+            transform: Transform::default(),
+            params: BTreeMap::new(),
+            effects: vec![],
+            transition: None,
+        };
+        let fitted = fitted_transform(&clip, (100, 100), Some((200, 100)));
+        assert!(!contains_clip(fitted, canvas, point(px(50.), px(10.))));
+        assert!(contains_clip(fitted, canvas, point(px(50.), px(50.))));
+        assert_eq!(
+            hit_handle(fitted, canvas, point(px(0.), px(25.))),
+            Some(Handle::Scale(-0.5, -0.5))
+        );
+        clip.fit = Fit::Cover;
+        let fitted = fitted_transform(&clip, (100, 100), Some((200, 100)));
+        assert!(contains_clip(fitted, canvas, point(px(50.), px(10.))));
+        assert_eq!(fitted, Transform::default());
+        clip.fit = Fit::Original;
+        let fitted = fitted_transform(&clip, (100, 100), Some((20, 40)));
+        assert!((fitted.scale_x - 0.2).abs() < 1e-9);
+        assert!((fitted.scale_y - 0.4).abs() < 1e-9);
+    }
+
+    #[core::prelude::v1::test]
     fn pointer_hits_respect_stacking_bounds_audio_and_time() {
         let mut project = Project::default();
         for (track, clip_id, scale, kind) in [
@@ -758,8 +879,8 @@ mod tests {
         let stage = Bounds::new(point(px(0.), px(0.)), size(px(800.), px(450.)));
         let ink = std::cell::Cell::new(true);
         let at = |x: f32, y: f32, time: Time| {
-            clips_under_pointer(&project, time, stage, point(px(x), px(y)), &mut |_| {
-                ink.get()
+            clips_under_pointer(&project, time, stage, point(px(x), px(y)), &mut |clip| {
+                !matches!(clip.kind, ClipKind::Plugin { .. } | ClipKind::Vector(_)) || ink.get()
             })
         };
         // Centre: text on top, then both media clips, upper track first; audio never picks.
@@ -838,6 +959,8 @@ mod tests {
                 ..Transform::default()
             },
             handle: Handle::Scale(0.5, 0.),
+            preserve_aspect: false,
+            visible_scale: [1., 1.],
             rotation: std::cell::Cell::new(0.),
         };
         // The right handle of a mirrored clip sits at -0.2 of the canvas width;
@@ -892,6 +1015,8 @@ mod tests {
                 ..Transform::default()
             },
             handle: Handle::Move,
+            preserve_aspect: false,
+            visible_scale: [1., 1.],
             rotation: std::cell::Cell::new(0.),
         };
         let (t, guides) = dragged_transform(&drag, frame, point(px(99.), px(0.)), false, true);
@@ -899,6 +1024,8 @@ mod tests {
         assert_eq!(guides[0], Some(0.5));
         let drag = GizmoDrag {
             handle: Handle::Scale(0.5, 0.5),
+            preserve_aspect: false,
+            visible_scale: [1., 1.],
             rotation: std::cell::Cell::new(0.),
             ..drag
         };

@@ -210,6 +210,11 @@ impl HeadlessHandler {
     }
 
     fn command_apply(&mut self, command: &animathio_core::Command) -> Result<Value, ControlError> {
+        if command.is_internal() {
+            return Err(ControlError::InvalidParams(
+                "Exact and RestoreClips are internal-only commands".into(),
+            ));
+        }
         self.check_effect_params(command)?;
         self.history.execute(&mut self.project, command)?;
         Ok(serde_json::to_value(())?)
