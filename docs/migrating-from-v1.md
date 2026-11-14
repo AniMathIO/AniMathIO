@@ -79,3 +79,17 @@ animathio-cli render imported.amio --frame 0 -o frame.png
 ```
 
 `validate` checks model invariants and asset hashes; it does not decode video.
+
+## Serializer fixture corpus
+
+The checked-in corpus under `crates/import-v1/tests/fixtures` is produced by
+running v1's own serializer on constructed store state. Public CLI integration
+coverage imports and renders every compressed project at three times, including
+all v1 element, animation and effect types, embedded media, missing media,
+Unicode, non-unit scales, empty and very long projects, and a v1 Manim Text
+translation. Placement reads v1's `scaleX`/`scaleY` names (older snake-case
+inputs remain accepted).
+
+This is not yet the complete M4 corpus: actual DOM-rasterized LaTeX/graph
+captures, historical serializers and user-authored projects remain to be added.
+The fixture README records provenance and regeneration instructions.

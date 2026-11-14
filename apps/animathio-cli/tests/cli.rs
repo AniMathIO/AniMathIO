@@ -514,3 +514,69 @@ fn markers_list_add_remove_and_beats_errors_without_audio() {
     assert!(!beats.status.success());
     assert_eq!(fs::read(&project).unwrap(), before);
 }
+
+#[test]
+fn v1_serializer_corpus_imports_and_renders() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/import-v1/tests/fixtures");
+    let dir = tempdir().unwrap();
+    let mut count = 0;
+    for entry in fs::read_dir(fixtures).unwrap() {
+        let input = entry.unwrap().path();
+        if input.extension().and_then(|s| s.to_str()) != Some("animathio") {
+            continue;
+        }
+        count += 1;
+        let output = dir.path().join(format!("{count}.amio"));
+        ok(&["import-v1", path(&input), "-o", path(&output)]);
+        ok(&["validate", path(&output)]);
+        for frame in [0, 15, 60] {
+            ok(&[
+                "render",
+                path(&output),
+                "--frame",
+                &frame.to_string(),
+                "--width",
+                "160",
+                "--height",
+                "90",
+                "-o",
+                path(&dir.path().join(format!("{count}-{frame}.png"))),
+            ]);
+        }
+        if [
+            "media-effects-animations",
+            "unicode-styles",
+            "manim-translated",
+        ]
+        .iter()
+        .any(|name| input.file_stem().unwrap() == *name)
+        {
+            let golden = input.with_extension("png");
+            let actual = dir.path().join(format!("{count}-15.png"));
+            if std::env::var_os("UPDATE_GOLDEN").is_some() {
+                fs::copy(&actual, &golden).unwrap();
+            }
+            let expected = image::open(&golden).unwrap().into_rgba8();
+            let actual = image::open(actual).unwrap().into_rgba8();
+            assert_eq!(actual.dimensions(), expected.dimensions());
+            assert!(
+                actual
+                    .as_raw()
+                    .iter()
+                    .zip(expected.as_raw())
+                    .all(|(a, b)| a.abs_diff(*b) <= 2),
+                "{}",
+                golden.display()
+            );
+        }
+        if input.file_stem().unwrap() == "media-effects-animations" {
+            let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+            let clip = bundle.project.tracks()[0].clips().values().next().unwrap();
+            assert!((clip.transform.scale_x - 80.0 * 0.75 / 320.0).abs() < f64::EPSILON);
+            assert!((clip.transform.scale_y - 50.0 * 1.25 / 180.0).abs() < f64::EPSILON);
+            assert_eq!(bundle.assets.len(), 3);
+        }
+    }
+    assert_eq!(count, 6);
+}

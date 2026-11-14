@@ -106,9 +106,9 @@ pub(crate) struct V1Placement {
     pub(crate) height: f64,
     #[serde(default)]
     pub(crate) rotation: f64,
-    #[serde(default = "default_one")]
+    #[serde(rename = "scaleX", alias = "scale_x", default = "default_one")]
     pub(crate) scale_x: f64,
-    #[serde(default = "default_one")]
+    #[serde(rename = "scaleY", alias = "scale_y", default = "default_one")]
     pub(crate) scale_y: f64,
 }
 
