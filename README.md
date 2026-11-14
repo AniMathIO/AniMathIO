@@ -290,3 +290,9 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 [CLI reference](docs/cli.md#autocut) and [review rules](docs/mcp.md#automatic-cut-review).
 
 ![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
+
+Project template foundations are available headlessly: `animathio-cli templates list`
+prints five bundled, media-free compositions and their placeholder clip ids;
+`animathio-cli new --template quote -o quote.amio` creates an independent project.
+Templates currently provide animated title/text layouts; the launcher library, media
+replacement, thumbnail cards, user-template menu and MCP integration are pending.

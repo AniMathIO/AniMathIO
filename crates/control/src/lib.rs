@@ -67,3 +67,6 @@ pub use path::{read_bounded, validate_existing_file, validate_output_file};
 pub use server::{
     ControlServer, MAX_REQUEST_BYTES, RunningServer, SocketSpec, default_socket_spec,
 };
+
+mod templates;
+pub use templates::{Placeholder, ProjectTemplate, TemplateManifest, project_templates};
