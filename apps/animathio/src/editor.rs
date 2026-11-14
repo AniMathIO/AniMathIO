@@ -50,6 +50,7 @@ mod export_panel;
 mod fields;
 mod inspector_view;
 mod markers;
+mod math;
 mod media_pool;
 mod menus;
 mod playback_glue;
@@ -152,6 +153,7 @@ type ClipAction = fn(&mut Editor, ClipId, &mut Context<Editor>);
 /// Tabs in the left media-pool panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LeftTab {
+    Math,
     Titles,
     Assets,
     Plugins,
@@ -372,6 +374,7 @@ enum ContextMenu {
 /// An item being dragged from the media pool onto the timeline.
 #[derive(Clone, PartialEq)]
 enum PoolDrag {
+    Math(animathio_control::MathObjectKind),
     Title(String),
     Asset(AssetId),
     Plugin(String),
@@ -613,6 +616,8 @@ pub(crate) struct Editor {
     failed_effect_clips: BTreeSet<ClipId>,
     media_view: media_pool::MediaView,
     title_library: titles::TitleLibrary,
+    math_library: math::MathLibrary,
+    math_inspector: Option<(ClipId, String, Entity<math::MathEditor>)>,
     safe_areas: bool,
     viewer_menu_open: bool,
     closed_sections: BTreeSet<String>,
@@ -751,6 +756,8 @@ impl Editor {
             failed_effect_clips: BTreeSet::new(),
             media_view: media_pool::MediaView::default(),
             title_library: titles::TitleLibrary::default(),
+            math_library: math::MathLibrary::default(),
+            math_inspector: None,
             safe_areas: false,
             viewer_menu_open: false,
             closed_sections: BTreeSet::new(),

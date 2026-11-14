@@ -153,6 +153,10 @@ impl Editor {
             .get(row)
             .map(Track::id)
             .or_else(|| self.project.tracks().first().map(Track::id));
+        if let PoolDrag::Math(kind) = &drag {
+            self.add_math_default(*kind, time, cx);
+            return;
+        }
         if let PoolDrag::Title(preset) = &drag {
             self.add_title_preset(preset, time, cx);
             return;
@@ -169,6 +173,7 @@ impl Editor {
             return;
         };
         match drag {
+            PoolDrag::Math(_) => unreachable!("math is placed above"),
             PoolDrag::Title(_) => unreachable!("titles create their own tracks"),
             PoolDrag::Asset(asset_id) => self.drop_asset(asset_id, track, time, cx),
             PoolDrag::Plugin(_) => unreachable!("plugins are placed above"),
@@ -478,6 +483,9 @@ impl Editor {
             .id("media-body")
             .overflow_y_scroll();
         match self.left_tab {
+            LeftTab::Math => {
+                body = body.child(self.math_cards(cx));
+            }
             LeftTab::Titles => {
                 body = body.child(self.title_cards(cx));
             }
@@ -877,74 +885,80 @@ impl Editor {
             }))
             .bg(hex(color::PANEL))
             .child(tab_row)
-            .when(self.left_tab != LeftTab::Titles, |pane| {
-                pane.child(
-                    div()
-                        .px_2()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .child(
-                            div().flex_1().min_w_0().child(
-                                Input::new(self.media_view.search.as_ref().expect("search state"))
+            .when(
+                !matches!(self.left_tab, LeftTab::Titles | LeftTab::Math),
+                |pane| {
+                    pane.child(
+                        div()
+                            .px_2()
+                            .py_2()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(
+                                        self.media_view.search.as_ref().expect("search state"),
+                                    )
                                     .small(),
+                                ),
+                            )
+                            .child(
+                                icon_button(
+                                    "pool-grid",
+                                    icons::icon(IconName::LayoutGrid),
+                                    "Thumbnail grid",
+                                    cx.listener(|this, _, _, cx| {
+                                        this.media_view.list = false;
+                                        cx.notify();
+                                    }),
+                                )
+                                .selected(!self.media_view.list),
+                            )
+                            .child(
+                                icon_button(
+                                    "pool-list",
+                                    icons::icon(IconName::List),
+                                    "List view",
+                                    cx.listener(|this, _, _, cx| {
+                                        this.media_view.list = true;
+                                        cx.notify();
+                                    }),
+                                )
+                                .selected(self.media_view.list),
                             ),
-                        )
-                        .child(
-                            icon_button(
-                                "pool-grid",
-                                icons::icon(IconName::LayoutGrid),
-                                "Thumbnail grid",
-                                cx.listener(|this, _, _, cx| {
-                                    this.media_view.list = false;
-                                    cx.notify();
-                                }),
-                            )
-                            .selected(!self.media_view.list),
-                        )
-                        .child(
-                            icon_button(
-                                "pool-list",
-                                icons::icon(IconName::List),
-                                "List view",
-                                cx.listener(|this, _, _, cx| {
-                                    this.media_view.list = true;
-                                    cx.notify();
-                                }),
-                            )
-                            .selected(self.media_view.list),
+                    )
+                    .child(
+                        div().px_2().pb_2().flex().gap_1().children(
+                            [
+                                ("", "All"),
+                                ("video/", "Video"),
+                                ("image/", "Images"),
+                                ("audio/", "Audio"),
+                            ]
+                            .into_iter()
+                            .map(|(kind, label)| {
+                                Button::new(SharedString::from(format!("filter-{label}")))
+                                    .ghost()
+                                    .compact()
+                                    .label(label)
+                                    .selected(self.media_view.kind == kind)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.media_view.kind = kind;
+                                        cx.notify();
+                                    }))
+                            }),
                         ),
-                )
-                .child(
-                    div().px_2().pb_2().flex().gap_1().children(
-                        [
-                            ("", "All"),
-                            ("video/", "Video"),
-                            ("image/", "Images"),
-                            ("audio/", "Audio"),
-                        ]
-                        .into_iter()
-                        .map(|(kind, label)| {
-                            Button::new(SharedString::from(format!("filter-{label}")))
-                                .ghost()
-                                .compact()
-                                .label(label)
-                                .selected(self.media_view.kind == kind)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.media_view.kind = kind;
-                                    cx.notify();
-                                }))
-                        }),
-                    ),
-                )
-            })
+                    )
+                },
+            )
             .child(body)
     }
 
     pub(super) fn pool_drag_ghost(&self, cx: &mut Context<Self>) -> Option<Div> {
         let drag = self.pool_drag.as_ref()?;
         let (icon, label) = match drag {
+            PoolDrag::Math(kind) => (IconName::Shapes, kind.label().into()),
             PoolDrag::Title(id) => (IconName::Type, id.clone()),
             PoolDrag::Asset(id) => (
                 IconName::Film,

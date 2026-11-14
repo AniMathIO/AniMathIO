@@ -423,3 +423,11 @@ AniMathIO logo, preserved in `apps/animathio/assets/brand.svg`. UI actions keep
 the violet-to-cyan accent. See [the design guide](docs/design.md).
 
 [Keyboard shortcuts](docs/keyboard-shortcuts.md) — Premiere Pro defaults.
+
+The library's **Math** tab provides preview cards for LaTeX, text, points, lines,
+vectors, polygons, plots, circles, ellipses and Cartesian/polar grids. Click a
+card for typed fields and a live preview, use its plus button for defaults, or
+drag it onto the timeline. Double-click an existing object to edit it. LaTeX has
+snippets, formula templates and a Write on preset. See the
+[math workflow](docs/architecture.md#mathematical-object-workflow) and the
+[CLI guide](docs/cli.md) for automation equivalents.

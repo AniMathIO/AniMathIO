@@ -91,6 +91,12 @@ impl Editor {
             }
             return;
         }
+        if event.click_count >= 2
+            && let Some(hit) = timeline::hit_test(&layout, &self.project, x, y)
+            && self.edit_math(hit.clip, window, cx)
+        {
+            return;
+        }
         if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
             self.select_only(clip_id, cx);
             self.selected_field = None;

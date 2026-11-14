@@ -154,6 +154,18 @@ pub(crate) struct AddMath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddMathObject {
+    /// latex, text, point, line, vector, polygon, plot, circle, ellipse, cartesian or polar.
+    pub(crate) kind: String,
+    /// Typed fields in math units, e.g. {"x":"1", "y":"2", "radius":"0.2"}.
+    #[serde(default)]
+    pub(crate) fields: std::collections::BTreeMap<String, String>,
+    pub(crate) color: Option<String>,
+    pub(crate) start_ms: Option<f64>,
+    pub(crate) duration_ms: Option<f64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddGraph {
     pub(crate) x_min: Option<f64>,
     pub(crate) x_max: Option<f64>,
@@ -1205,6 +1217,51 @@ impl McpServer {
                 error.to_string(),
             )])),
         }
+    }
+
+    #[tool(
+        description = "Add a typed math object using the same defaults and math units as the Math panel. Kinds: latex, text, point, line, vector, polygon, plot, circle, ellipse, cartesian, polar. Fields: source/size for latex and text (size is percent of short edge); x/y/radius for point and circle; x/y/rx/ry for ellipse; x1/y1/x2/y2 for line and vector; vertices as x,y; x,y; ... for polygon; expression/min/max for plot; extent for grids. One undoable batch on a free layer."
+    )]
+    async fn add_math_object(
+        &self,
+        Parameters(p): Parameters<AddMathObject>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let state = backend.project_get().map_err(mcp_error)?;
+        let kind = serde_json::from_value(serde_json::Value::String(p.kind))
+            .map_err(|e| invalid(&e.to_string()))?;
+        let mut draft = animathio_control::MathObjectDraft::new(kind);
+        draft.fields.extend(p.fields);
+        if let Some(color) = p.color {
+            draft.color = color;
+        }
+        let start = p.start_ms.map(ms_to_ticks).transpose()?.unwrap_or(Time(0));
+        let duration = p
+            .duration_ms
+            .map(ms_to_ticks)
+            .transpose()?
+            .unwrap_or(Time(5 * TICKS_PER_SECOND));
+        let end = start
+            .0
+            .checked_add(duration.0)
+            .ok_or_else(|| invalid("time overflow"))?;
+        let range = TimeRange::new(start, Time(end)).map_err(|e| invalid(&e.to_string()))?;
+        let mut host = super::plugin_host().map_err(|e| invalid(&e.to_string()))?;
+        let size = (state.project.width().max(1), state.project.height().max(1));
+        let (plugin, params) = draft.parameters(size).map_err(mcp_error)?;
+        host.render_clip(
+            &plugin,
+            &std::collections::BTreeMap::new(),
+            &params,
+            0,
+            size,
+        )
+        .map_err(|e| invalid(&e.to_string()))?;
+        let (command, added) =
+            animathio_control::math_object_command(&state.project, &draft, range, None)
+                .map_err(mcp_error)?;
+        backend.command_apply(command).map_err(mcp_error)?;
+        tool_text(added)
     }
 
     #[tool(

@@ -188,7 +188,7 @@ impl Guest for ShapesPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "shapes".to_string(),
-            version: "1.0.0".to_string(),
+            version: "1.1.0".to_string(),
             description: "Basic vector shapes: rect, ellipse, polygon, star, arrow, line"
                 .to_string(),
             kinds: vec!["clip-source".into()],
@@ -216,6 +216,7 @@ impl Guest for ShapesPlugin {
                         options: vec![
                             "rect".to_string(),
                             "ellipse".to_string(),
+                            "point".to_string(),
                             "polygon".to_string(),
                             "star".to_string(),
                             "arrow".to_string(),
@@ -378,8 +379,8 @@ impl Guest for ShapesPlugin {
 
         let path = match shape.as_str() {
             "path" => parse_path(&get_string(&params, "path", "[]")),
-            "ellipse" if normalized => normalized_ellipse(x, y, width, height),
-            "ellipse" => ellipse(x, y, width / 2.0, height / 2.0),
+            "ellipse" | "point" if normalized => normalized_ellipse(x, y, width, height),
+            "ellipse" | "point" => ellipse(x, y, width / 2.0, height / 2.0),
             "polygon" => polygon(x, y, radius, points, rotation),
             "star" => star(x, y, radius, radius * 0.45, points, rotation),
             "arrow" => arrow(x - width / 2.0, y, x + width / 2.0, y, height, height * 0.5),

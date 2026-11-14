@@ -816,3 +816,26 @@ Options:
   -h, --help             Print help
 ```
 <!-- /help:freeze-frame -->
+
+## `math-objects`
+
+The Math panel's typed object catalogue is also available headlessly. List prints
+all default definitions; add accepts field overrides in math units and puts the
+object on a free visual layer. The size field for text and LaTeX is a percentage
+of the short canvas edge. The same plugins validate and render the result.
+
+<!-- help:math-objects -->
+<!-- /help:math-objects -->
+
+```sh
+animathio-cli math-objects list
+animathio-cli math-objects add project.amio --kind vector --field x1=-2 --field y1=-1 --field x2=2 --field y2=1 -o vector.amio
+animathio-cli math-objects add project.amio --kind latex --field 'source=e^{i\pi}+1=0' --write-on -o formula.amio
+animathio-cli math-objects add project.amio --kind polygon --field 'vertices=-2,-1; 2,-1; 0,2' -o polygon.amio
+```
+
+Kinds: `latex`, `text`, `point`, `line`, `vector`, `polygon`, `plot`, `circle`,
+`ellipse`, `cartesian`, `polar`. Omitted fields retain the defaults printed by list.
+Write on uses the animation plugin's typewriter entrance preset and is available
+for LaTeX. Parametric curves are deferred; plots currently use the graph plugin's
+function-of-X expression language.

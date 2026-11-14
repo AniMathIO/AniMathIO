@@ -12,6 +12,11 @@
 
 mod animations;
 mod authoring;
+mod math_objects;
+pub use math_objects::{
+    LATEX_SNIPPETS, LATEX_TEMPLATES, MathObjectDraft, MathObjectField, MathObjectKind,
+    math_object_command, math_object_draft, math_object_range,
+};
 mod beats;
 pub use beats::{
     BeatDetectParams, BeatDetection, BeatInfo, BeatMarkerOptions, BeatMarkersParams,
