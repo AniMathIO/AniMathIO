@@ -156,6 +156,20 @@ pub trait ControlHandler {
         from_value(self.handle(Call::ImportManim { params })?)
     }
 
+    /// Propose automatic cuts for review without mutation.
+    fn propose_autocuts(
+        &mut self,
+        params: crate::AutocutParams,
+    ) -> Result<crate::AutocutProposal, ControlError> {
+        from_value(self.handle(Call::ProposeAutocuts { params })?)
+    }
+    /// Apply enabled cuts as one undo step.
+    fn apply_autocuts(
+        &mut self,
+        proposal: crate::AutocutProposal,
+    ) -> Result<crate::TrimSilenceResult, ControlError> {
+        from_value(self.handle(Call::ApplyAutocuts { proposal })?)
+    }
     /// Detect silent audio and ripple-remove it, returning the removed ranges.
     fn trim_silence(
         &mut self,

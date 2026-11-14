@@ -387,6 +387,16 @@ impl ControlHandler for HeadlessHandler {
                 self.import_v1(&path)?;
                 serde_json::to_value(())?
             }
+            Call::ProposeAutocuts { params } => serde_json::to_value(crate::propose_autocuts(
+                &self.project,
+                &self.assets,
+                &params,
+            )?)?,
+            Call::ApplyAutocuts { proposal } => serde_json::to_value(crate::apply_autocuts(
+                &mut self.project,
+                &mut self.history,
+                &proposal,
+            )?)?,
             Call::TrimSilence { params } => serde_json::to_value(crate::trim_silence(
                 &mut self.project,
                 &mut self.history,

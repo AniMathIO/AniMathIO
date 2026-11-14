@@ -5,7 +5,6 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use animathio_audio::{AudioPool, SymphoniaSource};
 use animathio_core::{
     AssetId, Clip, ClipId, ClipKind, Command, FrameRate, History, Project, TICKS_PER_SECOND, Time,
     TimeRange, Track, TrackId, Transform,
@@ -13,12 +12,6 @@ use animathio_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::{ControlError, clip_kind_label};
-
-/// Analysis sample rate. `TICKS_PER_SECOND / 16_000` is an exact integer.
-const ANALYSIS_RATE: u32 = 16_000;
-/// RMS window length (10 ms).
-const WINDOW_FRAMES: usize = 160;
-const TICKS_PER_SAMPLE: i64 = TICKS_PER_SECOND / ANALYSIS_RATE as i64;
 
 /// Arguments for `timeline.trim_silence`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -102,103 +95,21 @@ pub fn detect_silence(
     assets: &BTreeMap<AssetId, Vec<u8>>,
     params: &TrimSilenceParams,
 ) -> Result<Vec<TimeRange>, ControlError> {
-    if !params.threshold_db.is_finite() || params.min_silence.0 <= 0 || params.padding.0 < 0 {
-        return Err(ControlError::InvalidParams(
-            "threshold must be finite, min_silence positive and padding nonnegative".to_owned(),
-        ));
-    }
-    let mut analysis = project.clone();
-    if let Some(keep) = params.track {
-        if !project.tracks().iter().any(|t| t.id() == keep) {
-            return Err(ControlError::InvalidParams(format!(
-                "track {} missing",
-                keep.0
-            )));
-        }
-        let others: Vec<_> = project
-            .tracks()
-            .iter()
-            .map(Track::id)
-            .filter(|id| *id != keep)
-            .collect();
-        for id in others {
-            Command::RemoveTrack { id }.apply(&mut analysis)?;
-        }
-    }
-    let mut pool = AudioPool::default();
-    let mut span: Option<(Time, Time)> = None;
-    for clip in analysis.tracks().iter().flat_map(|t| t.clips().values()) {
-        let ClipKind::Audio(id) = &clip.kind else {
-            continue;
-        };
-        span = Some(span.map_or((clip.range.start, clip.range.end), |(s, e)| {
-            (s.min(clip.range.start), e.max(clip.range.end))
-        }));
-        if pool.contains(id) {
-            continue;
-        }
-        let bytes = assets.get(id).ok_or_else(|| {
-            ControlError::Other(format!("audio asset {} not loaded", id.as_str()))
-        })?;
-        let source = SymphoniaSource::from_bytes(bytes.clone()).map_err(audio_error)?;
-        pool.insert(id.clone(), &source).map_err(audio_error)?;
-    }
-    let Some((start, end)) = span else {
-        return Err(ControlError::InvalidParams(
-            "no audio clips to analyse".to_owned(),
-        ));
-    };
-    // Silence is judged on the dry source signal, so no effect processor is needed.
-    let samples = pool
-        .prepare(ANALYSIS_RATE, 1)
-        .map_err(audio_error)?
-        .dry()
-        .mix(&analysis, TimeRange::new(start, end)?)
-        .map_err(audio_error)?;
-    // Tick of the first mixed sample (the mixer rounds the range start up).
-    // Range starts are nonnegative, so this is a ceiling division.
-    let first_tick = (start.0 + TICKS_PER_SAMPLE - 1) / TICKS_PER_SAMPLE * TICKS_PER_SAMPLE;
-    let threshold = 10_f64.powf(params.threshold_db / 20.0);
-    let window_ticks = TICKS_PER_SAMPLE * i64::try_from(WINDOW_FRAMES).unwrap_or(i64::MAX);
-
-    let mut ranges = Vec::new();
-    let mut run_start: Option<i64> = None;
-    let windows = samples.chunks(WINDOW_FRAMES);
-    let count = windows.len();
-    for (index, window) in windows.enumerate() {
-        let energy: f64 = window.iter().map(|s| f64::from(*s).powi(2)).sum();
-        #[allow(clippy::cast_precision_loss)]
-        let rms = (energy / window.len() as f64).sqrt();
-        let tick = first_tick + i64::try_from(index).unwrap_or(i64::MAX) * window_ticks;
-        if rms < threshold {
-            run_start.get_or_insert(tick);
-        }
-        let last = index + 1 == count;
-        if (rms >= threshold || last)
-            && let Some(begin) = run_start.take()
-        {
-            let finish = if rms < threshold { end.0 } else { tick };
-            push_run(&mut ranges, begin.max(start.0), finish.min(end.0), params);
-        }
-    }
-    Ok(ranges)
-}
-
-fn push_run(ranges: &mut Vec<TimeRange>, begin: i64, finish: i64, params: &TrimSilenceParams) {
-    if finish - begin < params.min_silence.0 {
-        return;
-    }
-    let (from, to) = (begin + params.padding.0, finish - params.padding.0);
-    if to > from
-        && let Ok(range) = TimeRange::new(Time(from), Time(to))
-    {
-        ranges.push(range);
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn audio_error(error: animathio_audio::Error) -> ControlError {
-    ControlError::Other(error.to_string())
+    let proposal = crate::propose_autocuts(
+        project,
+        assets,
+        &crate::AutocutParams {
+            silence_db: params.threshold_db,
+            hysteresis_db: 0.0,
+            min_silence: params.min_silence,
+            padding_before: params.padding,
+            padding_after: params.padding,
+            track: params.track,
+            all_unlocked_tracks: true,
+            ..crate::AutocutParams::default()
+        },
+    )?;
+    Ok(proposal.cuts.into_iter().map(|c| c.range).collect())
 }
 
 /// Format ticks as `HH:MM:SS.mmm` (rounded down to the millisecond).

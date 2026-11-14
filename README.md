@@ -276,3 +276,9 @@ Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, 
 ## License
 
 [MIT](LICENSE)
+
+Automatic cuts for recordings are available through Clip > Automatic cuts,
+`animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence
+ranges on the timeline before applying one undoable linked audio/video ripple edit.
+Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see the
+[CLI reference](docs/cli.md#autocut) and [review rules](docs/mcp.md#automatic-cut-review).

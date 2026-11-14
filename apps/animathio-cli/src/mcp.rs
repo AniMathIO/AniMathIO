@@ -318,6 +318,56 @@ pub(crate) struct TrimSilence {
 }
 
 #[derive(Deserialize, JsonSchema)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct ProposeAutocuts {
+    /// Silence entry threshold in dBFS (default -40).
+    silence_db: Option<f64>,
+    /// Minimum raw pause length in milliseconds (default 500).
+    min_silence_ms: Option<f64>,
+    /// Exit hysteresis in dB (default 3).
+    hysteresis_db: Option<f64>,
+    /// Use peak amplitude instead of RMS.
+    #[serde(default)]
+    peak: bool,
+    /// Preserve pauses shorter than min_silence_ms (default true).
+    keep_short_pauses: Option<bool>,
+    /// Silence kept before speech in milliseconds (default 100).
+    padding_before_ms: Option<f64>,
+    /// Silence kept after speech in milliseconds (default 100).
+    padding_after_ms: Option<f64>,
+    /// Analyse a clip (video resolves its linked audio).
+    clip: Option<u64>,
+    /// Analyse one track's audio mix.
+    track: Option<u64>,
+    /// Inclusive start of the analysis range in milliseconds (requires to_ms).
+    from_ms: Option<f64>,
+    /// Exclusive end of the analysis range in milliseconds (requires from_ms).
+    to_ms: Option<f64>,
+    /// Cut every unlocked track instead of the selected tracks and companions.
+    #[serde(default)]
+    all_unlocked_tracks: bool,
+    /// Include filler/repeat cuts; requires Whisper.
+    #[serde(default)]
+    fillers: bool,
+    /// Language code; omitted means automatic detection.
+    language: Option<String>,
+    /// Filler phrase override; empty uses language defaults (English and Hungarian).
+    #[serde(default)]
+    filler_words: Vec<String>,
+    /// Local Whisper model (default base).
+    model: Option<String>,
+    /// Explicit consent to download a missing model.
+    #[serde(default)]
+    download_model: bool,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ApplyAutocuts {
+    /// Exact proposal object returned by propose_autocuts. Toggle cuts[].enabled
+    /// for review; range start/end and total_saved are integer timeline ticks.
+    proposal: serde_json::Value,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct AutoSubtitles {
     /// Whisper model size: "tiny" (78 MB), "base" (148 MB, default) or "small" (488 MB).
     #[serde(default = "default_subtitle_model")]
@@ -1462,6 +1512,69 @@ impl McpServer {
             .command_apply(Command::RippleDelete { clip })
             .map_err(mcp_error)?;
         tool_text(json!({"deleted": clip.0}))
+    }
+
+    #[tool(
+        description = "Propose automatic silence cuts and optional Whisper filler/repeat cuts without changing the project. Returns a revision-bound proposal with integer-tick ranges, heuristic confidence and enabled toggles. Review and pass the proposal to apply_autocuts. Selected tracks and every linked companion ripple together; locked companions cause an error."
+    )]
+    async fn propose_autocuts(
+        &self,
+        Parameters(p): Parameters<ProposeAutocuts>,
+    ) -> Result<CallToolResult, McpError> {
+        let range = match (p.from_ms, p.to_ms) {
+            (None, None) => None,
+            (Some(s), Some(e)) => Some(
+                TimeRange::new(ms_to_ticks(s)?, ms_to_ticks(e)?)
+                    .map_err(|e| invalid(&e.to_string()))?,
+            ),
+            _ => return Err(invalid("give both from_ms and to_ms")),
+        };
+        let params = animathio_control::AutocutParams {
+            silence_db: p.silence_db.unwrap_or(-40.0),
+            min_silence: ms_to_ticks(p.min_silence_ms.unwrap_or(500.0))?,
+            hysteresis_db: p.hysteresis_db.unwrap_or(3.0),
+            metric: if p.peak {
+                animathio_control::SilenceMetric::Peak
+            } else {
+                animathio_control::SilenceMetric::Rms
+            },
+            keep_short_pauses: p.keep_short_pauses.unwrap_or(true),
+            padding_before: ms_to_ticks(p.padding_before_ms.unwrap_or(100.0))?,
+            padding_after: ms_to_ticks(p.padding_after_ms.unwrap_or(100.0))?,
+            clip: p.clip.map(ClipId),
+            track: p.track.map(TrackId),
+            range,
+            all_unlocked_tracks: p.all_unlocked_tracks,
+            fillers: p.fillers,
+            language: p.language,
+            filler_words: p.filler_words,
+            model: p.model.unwrap_or_else(|| "base".into()),
+            download_model: p.download_model,
+        };
+        let result = self
+            .backend
+            .lock()
+            .await
+            .propose_autocuts(params)
+            .map_err(mcp_error)?;
+        tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
+    }
+
+    #[tool(
+        description = "Apply a reviewed proposal from propose_autocuts as one undoable ripple batch. Set cuts[].enabled=false to keep a proposed range. Rejects stale project revisions, overlapping ranges and locked tracks; linked video/audio stays aligned. Coordinates remain those of the original project."
+    )]
+    async fn apply_autocuts(
+        &self,
+        Parameters(p): Parameters<ApplyAutocuts>,
+    ) -> Result<CallToolResult, McpError> {
+        let proposal = serde_json::from_value(p.proposal).map_err(|e| invalid(&e.to_string()))?;
+        let result = self
+            .backend
+            .lock()
+            .await
+            .apply_autocuts(proposal)
+            .map_err(mcp_error)?;
+        tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
     }
 
     #[tool(

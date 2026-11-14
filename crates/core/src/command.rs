@@ -312,6 +312,14 @@ pub enum Command {
         /// Close the gap by shifting later content left on every track.
         ripple: bool,
     },
+    /// Ripple-remove a range on selected tracks. The selection must contain every
+    /// linked companion's track; locked tracks are rejected atomically.
+    RemoveRangeOnTracks {
+        /// Half-open timeline range to remove.
+        range: TimeRange,
+        /// Tracks to cut and ripple. Other tracks keep their positions.
+        tracks: Vec<TrackId>,
+    },
     /// Remove a clip and close the gap it leaves on its own track by shifting later
     /// clips on that track left by the clip's duration.
     RippleDelete {
@@ -524,7 +532,36 @@ impl Command {
                 apply_generated(project, &commands)?
             }
             Self::RemoveRange { range, ripple } => {
-                let commands = remove_range_commands(project, *range, *ripple)?;
+                let commands = remove_range_commands(project, *range, *ripple, None)?;
+                apply_generated(project, &commands)?
+            }
+            Self::RemoveRangeOnTracks { range, tracks } => {
+                if tracks.is_empty() {
+                    return Err(invalid("range selection has no tracks"));
+                }
+                for id in tracks {
+                    if project.tracks.iter().any(|t| t.id == *id && t.locked) {
+                        return Err(invalid("range selection includes a locked track"));
+                    }
+                    if !project.tracks.iter().any(|t| t.id == *id) {
+                        return Err(invalid("range selection includes a missing track"));
+                    }
+                }
+                let groups: std::collections::BTreeSet<_> = project
+                    .tracks
+                    .iter()
+                    .filter(|t| tracks.contains(&t.id))
+                    .flat_map(|t| t.clips.values().filter_map(|c| c.link_group))
+                    .collect();
+                if project.tracks.iter().any(|t| {
+                    !tracks.contains(&t.id)
+                        && t.clips
+                            .values()
+                            .any(|c| c.link_group.is_some_and(|g| groups.contains(&g)))
+                }) {
+                    return Err(invalid("range selection omits a linked companion track"));
+                }
+                let commands = remove_range_commands(project, *range, true, Some(tracks))?;
                 apply_generated(project, &commands)?
             }
             Self::RippleDelete { clip } => {
@@ -1386,6 +1423,7 @@ fn remove_range_commands(
     project: &Project,
     range: TimeRange,
     ripple: bool,
+    tracks: Option<&[TrackId]>,
 ) -> Result<Vec<Command>, Error> {
     range.validate()?;
     let (cut_start, cut_end) = (range.start.0, range.end.0);
@@ -1394,6 +1432,9 @@ fn remove_range_commands(
     let mut next = next_clip_id(project)?;
     let mut commands = Vec::new();
     for track in &project.tracks {
+        if tracks.is_some_and(|ids| !ids.contains(&track.id)) {
+            continue;
+        }
         for clip in track.clips.values() {
             let (start, end) = (clip.range.start.0, clip.range.end.0);
             let offset = clip.source_offset.0;
@@ -1450,7 +1491,10 @@ fn remove_range_commands(
             }
         }
     }
-    if ripple && project.duration.0 > cut_start {
+    if ripple
+        && tracks.is_none_or(|ids| project.tracks.iter().all(|t| ids.contains(&t.id)))
+        && project.duration.0 > cut_start
+    {
         let removed = project.duration.0.min(cut_end) - cut_start;
         commands.push(Command::SetSettings {
             width: project.width,

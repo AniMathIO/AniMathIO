@@ -532,3 +532,13 @@ rendered off-thread and cached in editor session state by project canvas size.
   popover and control calls) with a progress phase and a cancel flag
   that whisper.cpp polls, shows it in a status-bar popover in the export-queue style and
   applies the cues on the UI thread; control clients get their reply when it finishes.
+
+Automatic cuts live in the control layer's `autocut` helper, shared by the editor,
+CLI and MCP. The legacy silence-trimming helper calls the same detector. Analysis
+uses the transcription audio-preparation adapter; pure silence and word-timestamp
+logic need no speech engine. Review drafts carry a project content hash and no model
+state is stored in the project. `Command::RemoveRangeOnTracks` reuses range-removal
+logic with explicit track scope and validates companion closure and locks. Reverse
+ordered range commands are wrapped in one serializable batch for undo/redo.
+The editor's `autocut` module owns ephemeral review state, cancellable background
+analysis, sliders, per-cut toggles and timeline overlays.

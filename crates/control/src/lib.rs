@@ -11,6 +11,12 @@
 //! constant time.
 
 mod authoring;
+mod autocut;
+pub use autocut::{
+    Autocut, AutocutParams, AutocutProposal, AutocutReason, SilenceMetric, apply_autocuts,
+    autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
+    propose_autocuts_cancellable,
+};
 mod client;
 mod edit;
 mod effects;
