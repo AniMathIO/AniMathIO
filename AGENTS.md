@@ -143,6 +143,9 @@ overrides it). Cue splitting and SRT/WebVTT are pure and unit-tested; the model-
 ignored: `cargo test -p animathio-transcribe --features whisper --test whisper_tiny -- --ignored`.
 The editor job (`subtitle_job.rs`, `editor/subtitles.rs`) runs on a worker with progress and cancel
 and applies the cues as one `Command::Batch` through `control::subtitle_command`.
+Caption styles (`control::captions`, `org.animathio.text` 1.1.0 parameters `caption_style`, `words`,
+`accent`, ...) are plugin parameters on the caption clips, not format fields; per-word timings
+ride on `Cue::words` and `subtitles.style` / `set_caption_style` restyle existing captions.
 
 Audio clips use numeric `gain` (linear, default 1) and `muted` (nonzero means muted,
 default 0) parameters, including clip-local keyframes. Track gain is changed through

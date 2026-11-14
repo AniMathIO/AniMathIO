@@ -124,11 +124,7 @@ pub fn parse_cues(text: &str) -> Result<Vec<Cue>, Error> {
         if body.trim().is_empty() {
             continue;
         }
-        cues.push(Cue {
-            start,
-            end,
-            text: body.trim().to_owned(),
-        });
+        cues.push(Cue::new(start, end, body.trim()));
     }
     Ok(cues)
 }

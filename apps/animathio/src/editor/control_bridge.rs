@@ -284,8 +284,7 @@ impl Editor {
             })?,
             Call::ProjectOpen { path } => {
                 self.error = None;
-                self.open_path(&path, cx);
-                if self.path.as_deref() != Some(path.as_path()) {
+                if !self.try_open_path(&path, cx) {
                     return Err(ControlError::Other(
                         self.error
                             .take()
@@ -480,6 +479,15 @@ impl Editor {
             Call::SubtitlesExport { params } => {
                 serde_json::to_value(animathio_control::export_subtitles(&self.project, &params)?)?
             }
+            Call::SubtitlesStyle { params } => {
+                let result = animathio_control::apply_caption_style(
+                    &mut self.project,
+                    &mut self.history,
+                    &params,
+                )?;
+                self.after_edit(cx);
+                serde_json::to_value(result)?
+            }
             Call::SubtitlesImport { params } => {
                 let result = animathio_control::import_subtitles(
                     &mut self.project,
@@ -499,11 +507,8 @@ impl Editor {
                     &call,
                 )?;
                 if replace {
-                    self.marks = InOut::default();
-                    self.shuttle = Shuttle::default();
+                    self.reset_project_session();
                     self.path = None;
-                    self.clear_selection();
-                    self.selected_field = None;
                     self.seek_to(Time(0), cx);
                 }
                 self.next_id = next_id(&self.project);
@@ -574,16 +579,14 @@ impl Editor {
             eprintln!("warning: {warning}");
         }
         let _ = self.clock.pause();
-        self.marks = InOut::default();
-        self.shuttle = Shuttle::default();
+        self.audio_generation = self.audio_generation.wrapping_add(1);
+        self.reset_project_session();
         self.project = project;
         self.history = History::default();
         self.assets = Arc::new(assets.into_iter().map(|a| (a.id, a.bytes)).collect());
         self.path = None;
         self.position = Time(0);
         self.playing = false;
-        self.clear_selection();
-        self.selected_field = None;
         self.pool = AudioPool::default();
         if let Err(error) = load_audio(&mut self.pool, &self.project, &self.assets) {
             self.error = Some(error);
@@ -593,6 +596,7 @@ impl Editor {
         self.next_id = next_id(&self.project);
         self.dirty = true;
         self.worker.load(self.assets.clone());
+        self.request_render(Time(0));
         Ok(())
     }
 }

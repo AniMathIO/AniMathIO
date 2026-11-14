@@ -1,6 +1,6 @@
 //! Subtitle clips, SRT/WebVTT export and import, without a speech model.
 use animathio_control::{
-    Call, ControlError, ControlHandler, HeadlessHandler, SubtitleExportParams,
+    Call, CaptionStyleParams, ControlError, ControlHandler, HeadlessHandler, SubtitleExportParams,
     SubtitleGenerateParams, SubtitleImportParams, apply_cues, subtitle_command, track_cues,
 };
 use animathio_core::{
@@ -13,11 +13,7 @@ use std::collections::BTreeMap;
 const MS: i64 = TICKS_PER_SECOND / 1000;
 
 fn cue(start: i64, end: i64, text: &str) -> Cue {
-    Cue {
-        start: Time(start * MS),
-        end: Time(end * MS),
-        text: text.to_owned(),
-    }
+    Cue::new(Time(start * MS), Time(end * MS), text)
 }
 
 fn cues() -> Vec<Cue> {
@@ -52,7 +48,8 @@ fn project_with_track() -> Project {
 #[test]
 fn subtitle_command_adds_two_tracks_with_linked_pairs() {
     let project = project_with_track();
-    let (command, added) = subtitle_command(&project, &cues()).unwrap();
+    let (command, added) =
+        subtitle_command(&project, &cues(), &CaptionStyleParams::default()).unwrap();
     let mut applied = project.clone();
     command.apply(&mut applied).unwrap();
     assert_eq!(applied.tracks().len(), 3);
@@ -61,7 +58,7 @@ fn subtitle_command_adds_two_tracks_with_linked_pairs() {
     let text = &applied.tracks()[2];
     let bars = &applied.tracks()[1];
     assert_eq!(text.id(), added.track_id);
-    assert_eq!(bars.id(), added.background_track_id);
+    assert_eq!(bars.id(), added.background_track_id.unwrap());
     assert_eq!(
         (text.clips().len(), bars.clips().len(), added.cues),
         (3, 3, 3)
@@ -88,8 +85,22 @@ fn subtitle_command_adds_two_tracks_with_linked_pairs() {
 fn generating_twice_names_the_second_track_uniquely() {
     let mut project = project_with_track();
     let mut history = History::default();
-    apply_cues(&mut project, &mut history, "en".into(), &cues()).unwrap();
-    apply_cues(&mut project, &mut history, "en".into(), &cues()).unwrap();
+    apply_cues(
+        &mut project,
+        &mut history,
+        "en".into(),
+        &cues(),
+        &CaptionStyleParams::default(),
+    )
+    .unwrap();
+    apply_cues(
+        &mut project,
+        &mut history,
+        "en".into(),
+        &cues(),
+        &CaptionStyleParams::default(),
+    )
+    .unwrap();
     let names: Vec<_> = project.tracks().iter().map(Track::name).collect();
     assert_eq!(
         names,
@@ -108,7 +119,14 @@ fn adding_subtitles_is_one_undo_step() {
     let mut project = project_with_track();
     let before = project.clone();
     let mut history = History::default();
-    let result = apply_cues(&mut project, &mut history, "en".into(), &cues()).unwrap();
+    let result = apply_cues(
+        &mut project,
+        &mut history,
+        "en".into(),
+        &cues(),
+        &CaptionStyleParams::default(),
+    )
+    .unwrap();
     assert_eq!(result.added.unwrap().cues, 3);
     assert_ne!(project, before);
     assert!(history.undo(&mut project).unwrap());
@@ -122,7 +140,14 @@ fn empty_cue_list_changes_nothing() {
     let mut project = project_with_track();
     let before = project.clone();
     let mut history = History::default();
-    let result = apply_cues(&mut project, &mut history, "en".into(), &[]).unwrap();
+    let result = apply_cues(
+        &mut project,
+        &mut history,
+        "en".into(),
+        &[],
+        &CaptionStyleParams::default(),
+    )
+    .unwrap();
     assert!(result.added.is_none());
     assert_eq!(project, before);
     assert!(!history.undo(&mut project).unwrap());
@@ -136,7 +161,12 @@ fn handler() -> HeadlessHandler {
         },
         None,
     );
-    let (command, _) = subtitle_command(&handler.project_get().unwrap().project, &cues()).unwrap();
+    let (command, _) = subtitle_command(
+        &handler.project_get().unwrap().project,
+        &cues(),
+        &CaptionStyleParams::default(),
+    )
+    .unwrap();
     handler.command_apply(command).unwrap();
     handler
 }
@@ -217,6 +247,7 @@ fn export_then_import_round_trips_the_cues() {
             .subtitles_import(SubtitleImportParams {
                 path,
                 offset: Time(0),
+                style: CaptionStyleParams::default(),
             })
             .unwrap();
         assert_eq!(result.cues.len(), 3);
@@ -247,6 +278,7 @@ fn import_offset_shifts_and_clamps() {
         .subtitles_import(SubtitleImportParams {
             path,
             offset: Time(-1500 * MS),
+            style: CaptionStyleParams::default(),
         })
         .unwrap();
     // A ends at 0.5 s (kept, clamped to start at 0), B at 1.5-2.5 s.
@@ -280,7 +312,8 @@ fn export_without_subtitles_and_bad_import_are_errors() {
         empty
             .subtitles_import(SubtitleImportParams {
                 path: bad,
-                offset: Time(0)
+                offset: Time(0),
+                style: CaptionStyleParams::default(),
             })
             .is_err()
     );
@@ -343,7 +376,8 @@ fn import_rejects_absurd_offsets_and_far_future_cues_do_not_overflow() {
             handler
                 .subtitles_import(SubtitleImportParams {
                     path: path.clone(),
-                    offset: Time(offset)
+                    offset: Time(offset),
+                    style: CaptionStyleParams::default(),
                 })
                 .is_err()
         );
@@ -352,5 +386,6 @@ fn import_rejects_absurd_offsets_and_far_future_cues_do_not_overflow() {
     let _ = handler.subtitles_import(SubtitleImportParams {
         path,
         offset: Time(50_000 * 3600 * TICKS_PER_SECOND),
+        style: CaptionStyleParams::default(),
     });
 }

@@ -118,6 +118,13 @@ impl FieldPool {
         self.enums.retain(|key, _| keep(key));
     }
 
+    /// Drop multi-selection widgets other than those keyed with `prefix`.
+    fn retain_multi(&mut self, prefix: &str) {
+        let keep = |key: &String| !key.starts_with("multi:") || key.starts_with(prefix);
+        self.inputs.retain(|key, _| keep(key));
+        self.sliders.retain(|key, _| keep(key));
+    }
+
     /// Drop widgets that belong to clips other than `clip`.
     fn retain_clip(&mut self, clip: ClipId) {
         let prefix = format!("c{}:", clip.0);
@@ -285,7 +292,8 @@ impl Editor {
                 field: Field::Transform(TransformProperty::Opacity),
                 ..
             } | InputTarget::SelectionField {
-                field: Field::Transform(TransformProperty::Opacity)
+                field: Field::Transform(TransformProperty::Opacity),
+                ..
             }
         );
         let state = self.input_state(key, target, format_number(value), step, window, cx);
@@ -411,9 +419,8 @@ impl Editor {
     fn numeric_gesture_command(&self, target: InputTarget, value: f64) -> Option<Command> {
         match target {
             InputTarget::Field { id, field } => self.scrub_field_command(id, &field, value),
-            InputTarget::SelectionField { field } => {
-                let commands = self
-                    .selected_ids()
+            InputTarget::SelectionField { field, ids } => {
+                let commands = ids
                     .into_iter()
                     .filter_map(|id| self.scrub_field_command(id, &field, value))
                     .collect();
@@ -428,7 +435,7 @@ impl Editor {
             InputTarget::PluginPoint { id, name, axis } => {
                 let mut point = self.plugin_point_value(id, &name);
                 point[axis] = value as f32;
-                Some(self.plugin_param_command(id, name, json!(point)))
+                self.plugin_param_command(id, name, json!(point))
             }
             _ => None,
         }
@@ -503,14 +510,13 @@ impl Editor {
                         return;
                     }
                     field.synced = next;
-                    this.preview_color(
-                        this.plugin_param_command(
-                            id,
-                            param.clone(),
-                            json!([next[0], next[1], next[2], next[3]]),
-                        ),
-                        cx,
-                    );
+                    if let Some(command) = this.plugin_param_command(
+                        id,
+                        param.clone(),
+                        json!([next[0], next[1], next[2], next[3]]),
+                    ) {
+                        this.preview_color(command, cx);
+                    }
                 },
             );
             state.update(cx, |state, cx| state.set_value(to_hsla(color), window, cx));
@@ -578,10 +584,7 @@ impl Editor {
                     let SelectEvent::Confirm(Some(value)) = event else {
                         return;
                     };
-                    this.execute(
-                        &this.plugin_param_command(id, param.clone(), json!(value)),
-                        cx,
-                    );
+                    this.execute_plugin_param(id, param.clone(), json!(value), cx);
                 },
             );
             self.fields.enums.insert(
@@ -657,10 +660,7 @@ impl Editor {
                     let SelectEvent::Confirm(Some(value)) = event else {
                         return;
                     };
-                    this.execute(
-                        &this.plugin_param_command(id, name.clone(), json!(value)),
-                        cx,
-                    );
+                    this.execute_plugin_param(id, name.clone(), json!(value), cx);
                 },
             );
             self.fields.assets.insert(
@@ -697,10 +697,7 @@ impl Editor {
             Switch::new(SharedString::from(format!("switch-{}-{name}", id.0)))
                 .checked(value)
                 .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
-                    this.execute(
-                        &this.plugin_param_command(id, param.clone(), json!(*checked)),
-                        cx,
-                    );
+                    this.execute_plugin_param(id, param.clone(), json!(*checked), cx);
                 })),
         )
     }
@@ -1211,6 +1208,16 @@ impl Editor {
         if all_audio {
             shared.push((Field::Param("gain".to_owned()), "Gain"));
         }
+        // Shared fields are keyed by the selection, so a value typed for one
+        // selection can never commit into the next one.
+        let prefix = format!(
+            "multi:{}:",
+            ids.iter()
+                .map(|id| id.0.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        self.fields.retain_multi(&prefix);
         let primary = self.selected.and_then(|id| self.find_clip(id).cloned());
         let rows: Vec<Div> = shared
             .into_iter()
@@ -1221,13 +1228,14 @@ impl Editor {
                     .map_or(values[0], |clip| field_value(clip, &field));
                 let mixed = values.iter().any(|v| (v - value).abs() > f64::EPSILON);
                 let key = match &field {
-                    Field::Transform(property) => format!("multi:f:{property:?}"),
-                    Field::Param(name) => format!("multi:p:{name}"),
+                    Field::Transform(property) => format!("{prefix}f:{property:?}"),
+                    Field::Param(name) => format!("{prefix}p:{name}"),
                 };
                 let control = self.number_control(
                     &key,
                     InputTarget::SelectionField {
                         field: field.clone(),
+                        ids: ids.clone(),
                     },
                     value,
                     field_step(&field),
@@ -1353,13 +1361,9 @@ impl Editor {
                     .child(message.clone()),
             );
         }
-        let transform_rows = self.transform_rows(id, window, cx);
-        let transform = self.section(
-            "transform",
-            "Transform",
-            div().flex().flex_col().children(transform_rows),
-            cx,
-        );
+        // Audio has no picture: transform, compositing and visual effects do not
+        // apply, and its gain/mute controls live in the Audio section.
+        let visual = !matches!(clip.kind, ClipKind::Audio(_));
         let mut body = div()
             .id("inspector-scroll")
             .flex_1()
@@ -1368,10 +1372,21 @@ impl Editor {
             .flex_col()
             .p_1()
             .pb_3()
-            .bg(hex(color::PANEL))
-            .child(transform);
+            .bg(hex(color::PANEL));
+        if visual {
+            let transform_rows = self.transform_rows(id, window, cx);
+            body = body.child(self.section(
+                "transform",
+                "Transform",
+                div().flex().flex_col().children(transform_rows),
+                cx,
+            ));
+        }
         if let Some(rows) = title_fields {
             body = body.child(rows);
+        }
+        if let Some(section) = self.caption_style_section(id, cx) {
+            body = body.child(section);
         }
         let opacity = inspector::sampled_numeric(
             &clip,
@@ -1387,7 +1402,9 @@ impl Editor {
             window,
             cx,
         );
-        body = body.child(self.section("opacity", "Compositing", div().child(opacity_row), cx));
+        if visual {
+            body = body.child(self.section("opacity", "Compositing", div().child(opacity_row), cx));
+        }
         if matches!(clip.kind, ClipKind::Plugin { .. }) && !is_title {
             let rows = self.plugin_rows(id, window, cx);
             body = body.child(self.section(
@@ -1396,7 +1413,7 @@ impl Editor {
                 div().flex().flex_col().children(rows),
                 cx,
             ));
-        } else {
+        } else if visual {
             let rows = self.numeric_param_rows(id, window, cx);
             if !rows.is_empty() {
                 body = body.child(self.section(
@@ -1417,7 +1434,7 @@ impl Editor {
                 cx,
             ));
         }
-        {
+        if visual {
             let mut rows = self.effect_rows(id, cx);
             if rows.is_empty() {
                 rows.push(

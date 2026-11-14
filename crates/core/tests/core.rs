@@ -853,6 +853,114 @@ fn locked_tracks_reject_clip_edits_but_can_be_unlocked() {
 }
 
 #[test]
+fn moving_onto_a_locked_track_is_rejected() {
+    let mut project = base();
+    Command::AddClip {
+        track: TrackId(0),
+        clip: plugin(1, 200, 300),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::SetTrackLocked {
+        id: TrackId(1),
+        locked: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    let onto_locked = Command::MoveClip {
+        id: ClipId(1),
+        track: TrackId(1),
+        start: Time(0),
+    };
+    assert!(
+        onto_locked
+            .apply(&mut project)
+            .unwrap_err()
+            .0
+            .contains("locked")
+    );
+    assert_eq!(project, before);
+}
+
+#[test]
+fn batch_locks_are_checked_against_the_state_each_member_sees() {
+    let mut project = base();
+    Command::AddClip {
+        track: TrackId(0),
+        clip: plugin(1, 200, 300),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let lock = |locked| Command::SetTrackLocked {
+        id: TrackId(0),
+        locked,
+    };
+    let nudge = Command::MoveClip {
+        id: ClipId(1),
+        track: TrackId(0),
+        start: Time(210),
+    };
+    // Locking first and then editing the layer is refused, and rolled back.
+    let before = project.clone();
+    let lock_then_edit = Command::Batch {
+        commands: vec![lock(true), nudge.clone()],
+    };
+    assert!(
+        lock_then_edit
+            .apply(&mut project)
+            .unwrap_err()
+            .0
+            .contains("locked")
+    );
+    assert_eq!(project, before);
+    // Unlocking first makes the edit legal.
+    lock(true).apply(&mut project).unwrap();
+    let unlock_then_edit = Command::Batch {
+        commands: vec![lock(false), nudge, lock(true)],
+    };
+    let mut history = History::default();
+    history.execute(&mut project, &unlock_then_edit).unwrap();
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(1)].range.start,
+        Time(210)
+    );
+    // Undo and redo replay history even though the layer is locked again.
+    let after = project.clone();
+    let locked_before = {
+        let mut p = before.clone();
+        lock(true).apply(&mut p).unwrap();
+        p
+    };
+    assert!(history.undo(&mut project).unwrap());
+    assert_eq!(project, locked_before);
+    assert!(history.redo(&mut project).unwrap());
+    assert_eq!(project, after);
+}
+
+#[test]
+fn undo_of_an_add_that_locked_its_track_restores_the_project() {
+    let mut project = base();
+    let before = project.clone();
+    let add_and_lock = Command::Batch {
+        commands: vec![
+            Command::AddClip {
+                track: TrackId(0),
+                clip: plugin(1, 200, 300),
+            },
+            Command::SetTrackLocked {
+                id: TrackId(0),
+                locked: true,
+            },
+        ],
+    };
+    let mut history = History::default();
+    history.execute(&mut project, &add_and_lock).unwrap();
+    assert!(history.undo(&mut project).unwrap());
+    assert_eq!(project, before);
+}
+
+#[test]
 fn evaluate_honours_track_mute_and_solo() {
     let mut project = base();
     Command::AddClip {

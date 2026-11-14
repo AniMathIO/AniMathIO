@@ -132,85 +132,93 @@ impl Editor {
             },
             |n| n.to_string_lossy().into_owned(),
         );
-        TitleBar::new().h(px(46.)).child(
-            div()
-                .relative()
-                .flex()
-                .items_center()
-                .gap_3()
-                .w_full()
-                .h_full()
-                .px_2()
-                .child(img("brand.svg").size(px(30.)).flex_shrink_0())
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(430.))
-                        .h_full()
-                        .child(self.app_menu.clone()),
-                )
-                .when(f32::from(window.viewport_size().width) >= 1120., |row| {
-                    row.child(
+        let close_view = cx.entity().downgrade();
+        TitleBar::new()
+            .h(px(46.))
+            .on_close_window(move |_, window, cx| {
+                let _ = close_view.update(cx, |this, cx| {
+                    this.replace_project(ReplaceProject::CloseWindow, window, cx);
+                });
+            })
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .w_full()
+                    .h_full()
+                    .px_2()
+                    .child(img("brand.svg").size(px(30.)).flex_shrink_0())
+                    .child(
                         div()
-                            .absolute()
-                            .left(relative(0.38))
-                            .w(relative(0.24))
+                            .flex_1()
+                            .min_w(px(430.))
                             .h_full()
+                            .child(self.app_menu.clone()),
+                    )
+                    .when(f32::from(window.viewport_size().width) >= 1120., |row| {
+                        row.child(
+                            div()
+                                .absolute()
+                                .left(relative(0.38))
+                                .w(relative(0.24))
+                                .h_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .gap_2()
+                                .text_size(px(12.))
+                                .text_color(style::hex(color::TEXT_SECONDARY))
+                                .when(self.dirty, |title| {
+                                    title.child(
+                                        div()
+                                            .size(px(5.))
+                                            .rounded_full()
+                                            .bg(style::hex(color::ACCENT)),
+                                    )
+                                })
+                                .child(div().truncate().child(title)),
+                        )
+                    })
+                    .child(
+                        div()
                             .flex()
                             .items_center()
-                            .justify_center()
                             .gap_2()
-                            .text_size(px(12.))
+                            .px_2()
+                            .py_1()
+                            .rounded_full()
+                            .bg(style::hex(color::RAISED))
+                            .border_1()
+                            .border_color(style::hex(color::BORDER))
+                            .text_size(px(11.))
                             .text_color(style::hex(color::TEXT_SECONDARY))
-                            .when(self.dirty, |title| {
-                                title.child(
-                                    div()
-                                        .size(px(5.))
-                                        .rounded_full()
-                                        .bg(style::hex(color::ACCENT)),
-                                )
-                            })
-                            .child(div().truncate().child(title)),
-                    )
-                })
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .rounded_full()
-                        .bg(style::hex(color::RAISED))
-                        .border_1()
-                        .border_color(style::hex(color::BORDER))
-                        .text_size(px(11.))
-                        .text_color(style::hex(color::TEXT_SECONDARY))
-                        .child(div().size(px(5.)).rounded_full().bg(style::hex(
-                            if self.control.is_some() {
-                                color::SUCCESS
+                            .child(div().size(px(5.)).rounded_full().bg(style::hex(
+                                if self.control.is_some() {
+                                    color::SUCCESS
+                                } else {
+                                    color::TEXT_MUTED
+                                },
+                            )))
+                            .child(if self.control.is_some() {
+                                "MCP listening"
                             } else {
-                                color::TEXT_MUTED
-                            },
-                        )))
-                        .child(if self.control.is_some() {
-                            "MCP listening"
-                        } else {
-                            "MCP off"
-                        }),
-                )
-                .child(
-                    style::primary_button("title-export", cx)
-                        .small()
-                        .mr_2()
-                        .icon(icons::icon(IconName::Upload))
-                        .label("Export")
-                        .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.open_export_dialog(window, cx)),
-                        ),
-                ),
-        )
+                                "MCP off"
+                            }),
+                    )
+                    .child(
+                        style::primary_button("title-export", cx)
+                            .small()
+                            .mr_2()
+                            .icon(icons::icon(IconName::Upload))
+                            .label("Export")
+                            .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_export_dialog(window, cx);
+                            })),
+                    ),
+            )
     }
 
     pub(super) fn flush_notices(&mut self, window: &mut Window, cx: &mut Context<Self>) {

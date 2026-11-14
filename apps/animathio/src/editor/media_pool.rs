@@ -215,11 +215,28 @@ impl Editor {
             clip.params.insert("gain".into(), 1.0.into());
             clip.params.insert("muted".into(), 0.0.into());
         }
+        let info = match &clip.kind {
+            ClipKind::Video(id) => self.assets.get(id).and_then(|bytes| {
+                animathio_media::FilmCraftBackend::new()
+                    .probe_bytes("media", bytes.clone().into())
+                    .ok()
+            }),
+            _ => None,
+        };
+        // Use the media's real length, as importing a file does, instead of the
+        // placeholder length. Audio is already decoded in the pool.
+        let length = match &clip.kind {
+            ClipKind::Audio(id) => self.waveform_for(id).map(|wave| Time(wave.duration_ticks)),
+            _ => info.as_ref().map(|info| info.duration),
+        };
+        if let Some(duration) = length.filter(|d| d.0 > 0)
+            && let Some(end) = clip.range.start.0.checked_add(duration.0)
+            && let Ok(range) = TimeRange::new(clip.range.start, Time(end))
+        {
+            clip.range = range;
+        }
         if let ClipKind::Video(id) = &clip.kind
-            && let Some(bytes) = self.assets.get(id)
-            && let Ok(info) =
-                animathio_media::FilmCraftBackend::new().probe_bytes("media", bytes.clone().into())
-            && !info.audio.is_empty()
+            && info.as_ref().is_some_and(|info| !info.audio.is_empty())
         {
             let audio_track = TrackId(
                 self.project

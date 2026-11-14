@@ -223,3 +223,116 @@ fn ripple_delete_closes_the_gap_on_its_track_only() {
             .is_err()
     );
 }
+
+/// Opacity of clip `id` at timeline time `at`, as evaluated.
+fn opacity_at(project: &Project, id: u64, at: i64) -> f64 {
+    evaluate(project, Time(at))
+        .clips
+        .into_iter()
+        .find(|clip| clip.id == ClipId(id))
+        .map(|clip| clip.transform.opacity)
+        .unwrap()
+}
+
+#[test]
+fn remove_range_keeps_keyframes_of_the_kept_tail_in_place() {
+    // Track 0 clip 1 [0,100) fades opacity from 1 at local 50 to 0 at local 90.
+    let mut project = project();
+    for (time, value) in [(50, 1.0), (90, 0.0)] {
+        Command::AddKeyframe {
+            id: ClipId(1),
+            target: Target::Transform(TransformProperty::Opacity),
+            time: Time(time),
+            keyframe: Keyframe {
+                value: ParamValue::Number(value),
+                interpolation: Interpolation::Linear,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let before = project.clone();
+    let reference = [70, 80, 95].map(|t| opacity_at(&before, 1, t));
+
+    // Removing [20,40) without ripple splits the clip; the tail looks the same.
+    let gap = Command::RemoveRange {
+        range: range(20, 40),
+        ripple: false,
+    };
+    round_trip(&mut project, &gap);
+    let tail = project.tracks()[0]
+        .clips()
+        .values()
+        .find(|clip| clip.range.start == Time(40))
+        .unwrap()
+        .id
+        .0;
+    assert_eq!(
+        [70, 80, 95].map(|t| opacity_at(&project, tail, t)),
+        reference
+    );
+
+    // With ripple the tail moves left by 20 but keeps its animation.
+    let mut project = before.clone();
+    let ripple = Command::RemoveRange {
+        range: range(20, 40),
+        ripple: true,
+    };
+    round_trip(&mut project, &ripple);
+    let tail = project.tracks()[0]
+        .clips()
+        .values()
+        .find(|clip| clip.range.start == Time(20))
+        .unwrap()
+        .id
+        .0;
+    assert_eq!(
+        [50, 60, 75].map(|t| opacity_at(&project, tail, t)),
+        reference
+    );
+
+    // Cutting the clip's head keeps the id and re-bases its keys too.
+    let mut project = before.clone();
+    let head = Command::RemoveRange {
+        range: range(0, 30),
+        ripple: false,
+    };
+    round_trip(&mut project, &head);
+    assert_eq!(spans(&project, 0)[0], (1, 30, 100, 30));
+    assert_eq!([70, 80, 95].map(|t| opacity_at(&project, 1, t)), reference);
+}
+
+#[test]
+fn remove_range_keeps_split_tails_linked_to_each_other() {
+    // Clips 1 (track 0, [0,100)) and 3 (track 1, [50,250)) linked as one group.
+    let mut project = project();
+    for id in [1, 3] {
+        Command::SetClipLink {
+            id: ClipId(id),
+            group: Some(ClipId(1)),
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    round_trip(
+        &mut project,
+        &Command::RemoveRange {
+            range: range(60, 80),
+            ripple: false,
+        },
+    );
+    let group_of = |track: usize, start: i64| {
+        project.tracks()[track]
+            .clips()
+            .values()
+            .find(|clip| clip.range.start == Time(start))
+            .unwrap()
+            .link_group
+    };
+    // Heads stay in the original group; both tails share a new one.
+    assert_eq!(group_of(0, 0), Some(ClipId(1)));
+    assert_eq!(group_of(1, 50), Some(ClipId(1)));
+    assert!(group_of(0, 80).is_some());
+    assert_eq!(group_of(0, 80), group_of(1, 80));
+    assert_ne!(group_of(0, 80), Some(ClipId(1)));
+}

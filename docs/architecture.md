@@ -214,7 +214,13 @@ mute). A locked track rejects every clip-level edit (`AddClip`, `RemoveClip`,
 keyframe commands) in `Command::apply` itself, so the editor, the control
 protocol and MCP all see the same `track N is locked` error; layer-level
 commands (gain, mute, solo, lock) always work so a track can be unlocked.
-`SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks.
+`MoveClip` also refuses a locked destination track. Inside a `Batch` each member is
+checked against the locks as the earlier members left them, so a batch may unlock a
+track and then edit it but cannot lock one and then edit it. Undo and redo replay
+recorded history without the lock check (locks guard new edits, not history).
+`SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks. `RemoveRange`
+re-bases the keyframes of a clip whose head it removes, exactly as a split does, so
+fades and animations on the kept part stay where they were on screen.
 `RenameTrack` and `MoveTrack { id, index }` (the track's position after the move) are
 layer-level, so they work on locked tracks too. The editor's multi-clip edits (grouped
 move, nudge, delete, paste, duplicate, linked ripple) are plain `Batch`es planned by the
@@ -528,6 +534,19 @@ rendered off-thread and cached in editor session state by project canvas size.
   `control::subtitle_command` builds one `Command::Batch` with two new tracks, `Subtitles`
   (text) over `Subtitles background` (bars), one linked pair per cue using the **Caption
   bar** title preset, so undo removes everything in one step.
+- **Caption styles:** `control::captions` holds the bundled styles (`classic`,
+  `"word-highlight"`, `karaoke`, `pop`, `"one-word"`, `"bold-outline"`). A style is a set of
+  `org.animathio.text` clip parameters (`caption_style`, `words`, `accent`, `outline`,
+  `outline_width`, `max_words`, `font_size`, `color`, fit box) plus a safe-area placement,
+  so the format schema is untouched. `Cue::words` carries Whisper's per-word timings
+  (SRT/WebVTT imports spread the words evenly over the cue) and `subtitle_command` stores them
+  clip-relative in the `words` parameter. The text plugin renders the active word, pill, fill
+  or pop scale as a pure function of the clip's source time, so preview and export agree
+  (golden frames in `crates/render/tests/captions.rs`). `Call::SubtitlesStyle`
+  (`subtitles.style`, `set_caption_style`) and the editor's caption picker restyle existing
+  captions through one `Command::Batch` of `SetPluginParam`/`SetTransform` and bar add/remove
+  commands. The editor's `caption_styles` module is the shared picker (Generate dialog and the
+  caption inspector section).
 - **Threading:** the whole job is blocking and CPU-bound. The editor runs it on a worker
   thread (the app's `subtitle_job` module, with the `subtitles` editor module for the dialog,
   popover and control calls) with a progress phase and a cancel flag

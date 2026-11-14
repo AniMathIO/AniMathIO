@@ -38,6 +38,7 @@ use crate::timeline::{self, TimelineLayout, TrimEdge};
 pub(crate) mod actions;
 mod audio_effects;
 mod autocut;
+mod caption_styles;
 mod clip_ops;
 mod color_edit;
 mod commands;
@@ -62,6 +63,7 @@ mod transport;
 mod viewer;
 mod workspace;
 
+use dialogs::ReplaceProject;
 use support::*;
 pub(crate) use support::{
     color_from_json, load_plugins, point_from_json, read_project_with_recovery,
@@ -202,9 +204,11 @@ enum InputTarget {
         axis: usize,
     },
     Timecode,
-    /// A transform/parameter field applied to every selected clip.
+    /// A transform/parameter field applied to every clip of the selection it
+    /// was created for (not whatever is selected when it commits on blur).
     SelectionField {
         field: Field,
+        ids: BTreeSet<ClipId>,
     },
 }
 
@@ -487,6 +491,9 @@ pub(crate) struct Editor {
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
     path: Option<PathBuf>,
+    /// Bumped whenever the project is replaced (new, open, v1/Manim replace), so
+    /// background results started on an older project are discarded.
+    project_session: u64,
     clock: Box<dyn Clock>,
     playing: bool,
     position: Time,
@@ -526,6 +533,8 @@ pub(crate) struct Editor {
     export_queue_open: bool,
     /// The automatic-subtitle job, running or finished (see `editor/subtitles.rs`).
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
+    /// Remembered caption look: used for new subtitles and by the caption inspector.
+    caption_look: animathio_control::CaptionStyleParams,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
     duck_review: Option<ducking::DuckReview>,
@@ -618,6 +627,7 @@ impl Editor {
             pool,
             audio_ids,
             path,
+            project_session: 0,
             clock,
             playing: false,
             position: Time(0),
@@ -651,6 +661,7 @@ impl Editor {
             export_queue: crate::export_queue::ExportQueue::default(),
             export_queue_open: false,
             subtitle_job: None,
+            caption_look: animathio_control::CaptionStyleParams::default(),
             subtitle_panel_open: false,
             autocut_review: None,
             duck_review: None,
@@ -710,6 +721,18 @@ impl Editor {
                 .push(crate::style::Toast::info("Recovered from autosave"));
         }
         this.request_render(Time(0));
+        // A window-manager close asks before dropping unsaved work.
+        let close_view = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            close_view
+                .update(cx, |this, cx| {
+                    if this.dirty {
+                        this.replace_project(ReplaceProject::CloseWindow, window, cx);
+                    }
+                    !this.dirty
+                })
+                .unwrap_or(true)
+        });
         window.focus(
             if this.is_start_screen() {
                 &this.focus_handle

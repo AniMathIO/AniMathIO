@@ -121,6 +121,34 @@ pub(crate) struct AddGraph {
     pub(crate) draw_duration_ms: Option<f64>,
 }
 
+/// An id written as a JSON string (`"3"`) or number (`3`); `describe_timeline`
+/// prints ids as numbers, so agents naturally pass them back that way.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LenientId {
+    Text(String),
+    Number(u64),
+}
+
+impl From<LenientId> for String {
+    fn from(id: LenientId) -> Self {
+        match id {
+            LenientId::Text(text) => text,
+            LenientId::Number(number) => number.to_string(),
+        }
+    }
+}
+
+fn lenient_id<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    LenientId::deserialize(deserializer).map(String::from)
+}
+
+fn lenient_opt_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<LenientId>::deserialize(deserializer).map(|id| id.map(String::from))
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddMedia {
     pub(crate) path: String,
@@ -128,6 +156,8 @@ pub(crate) struct AddMedia {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddAnimation {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) target_id: String,
     pub(crate) kind: String,
     pub(crate) duration_ms: f64,
@@ -136,6 +166,8 @@ pub(crate) struct AddAnimation {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct UpdateElement {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) placement: Option<Placement>,
     pub(crate) time_frame: Option<TimeFrame>,
@@ -163,10 +195,16 @@ pub(crate) struct TimeFrame {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddTransitionArgs {
     /// Track id; optional, narrows the `at_time_ms` search.
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) track: Option<String>,
     /// Outgoing clip id (its end is the cut).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) between_clip_a: Option<String>,
     /// Incoming clip id (its start is the cut).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) clip_b: Option<String>,
     /// Pick the edit point nearest to this time instead of naming clips.
     pub(crate) at_time_ms: Option<f64>,
@@ -180,6 +218,8 @@ pub(crate) struct AddTransitionArgs {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ElementId {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
 }
 
@@ -193,6 +233,8 @@ pub(crate) struct SetCanvas {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SetParam {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) value: f64,
@@ -201,6 +243,8 @@ pub(crate) struct SetParam {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddEffect {
     /// Clip id.
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     /// Plugin id from `list_effects`, e.g. `org.animathio.effects-basic`.
     pub(crate) plugin: String,
@@ -213,9 +257,13 @@ pub(crate) struct AddEffect {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddAudioEffect {
     /// Clip id whose own audio chain to extend (give exactly one of `id` and `track`).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) id: Option<String>,
     /// Track id whose audio chain to extend; the effect then processes the sum of the track's
     /// clips before the track gain.
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) track: Option<String>,
     /// Plugin id from `list_audio_effects`, e.g. `org.animathio.audio-basic`.
     pub(crate) plugin: String,
@@ -229,6 +277,8 @@ pub(crate) struct AddAudioEffect {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddKeyframe {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) target: String,
     pub(crate) time_ms: f64,
@@ -502,6 +552,71 @@ pub(crate) struct AutoSubtitles {
     pub(crate) max_chars_per_line: Option<usize>,
     /// Most lines per subtitle. Default 2.
     pub(crate) max_lines: Option<usize>,
+    /// Caption style: "classic" (default, white text on a translucent bar), "word-highlight"
+    /// (active word on an accent pill), "karaoke" (words fill with the accent colour),
+    /// "pop" (active word scales up), "one-word" (one big word at a time) or "bold-outline"
+    /// (big uppercase type with a thick outline, centred on 9:16). Word timings from the
+    /// recogniser drive the animation.
+    pub(crate) style: Option<String>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
+}
+
+/// Optional overrides of a caption style.
+#[derive(Deserialize, JsonSchema, Default)]
+pub(crate) struct CaptionLook {
+    /// Font size relative to the shorter canvas dimension (0.01-0.2; style default, about 0.04-0.06).
+    pub(crate) font_size: Option<f64>,
+    /// Text colour as "#RRGGBB" or "#RRGGBBAA". Default white.
+    pub(crate) color: Option<String>,
+    /// Colour of the active word (pill, fill or pop), "#RRGGBB[AA]". Default yellow.
+    pub(crate) accent: Option<String>,
+    /// Outline colour, "#RRGGBB[AA]". Default black.
+    pub(crate) outline: Option<String>,
+    /// "top", "middle" or "bottom" inside the safe area (style default: bottom; bold-outline
+    /// on a portrait canvas: middle).
+    pub(crate) position: Option<String>,
+    /// Words per line, 0 to fit the box width. Style default (bold-outline: 3).
+    pub(crate) max_words: Option<u32>,
+}
+
+impl CaptionLook {
+    fn style_params(
+        &self,
+        style: Option<&str>,
+    ) -> Result<animathio_control::CaptionStyleParams, McpError> {
+        let color = |text: &Option<String>| {
+            text.as_deref()
+                .map(animathio_control::parse_caption_color)
+                .transpose()
+                .map_err(mcp_error)
+        };
+        Ok(animathio_control::CaptionStyleParams {
+            style: style.unwrap_or("classic").to_owned(),
+            font_size: self.font_size,
+            color: color(&self.color)?,
+            accent: color(&self.accent)?,
+            outline: color(&self.outline)?,
+            position: self
+                .position
+                .as_deref()
+                .map(animathio_control::CaptionPosition::parse)
+                .transpose()
+                .map_err(mcp_error)?,
+            max_words: self.max_words,
+        })
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct SetCaptionStyle {
+    /// Style id: "classic", "word-highlight", "karaoke", "pop", "one-word" or "bold-outline".
+    pub(crate) style: String,
+    /// Numeric id of the track holding the captions; default: every track named "Subtitles*"
+    /// that has caption clips.
+    pub(crate) track: Option<u64>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -525,6 +640,10 @@ pub(crate) struct ImportSubtitles {
     /// Shift all cues by this many milliseconds (may be negative). Default 0.
     #[serde(default)]
     pub(crate) offset_ms: f64,
+    /// Caption style (see `auto_subtitles`); words are spread evenly over each cue.
+    pub(crate) style: Option<String>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -613,7 +732,7 @@ fn subtitle_result_json(result: &animathio_control::SubtitleResult) -> serde_jso
     json!({
         "language": result.language,
         "track": result.added.map(|a| a.track_id.0),
-        "background_track": result.added.map(|a| a.background_track_id.0),
+        "background_track": result.added.and_then(|a| a.background_track_id).map(|id| id.0),
         "first_clip": result.added.map(|a| a.first_clip.0),
         "cues": result.cues.iter().map(|c| json!({
             "from_ms": ticks_to_ms(c.start),
@@ -1910,7 +2029,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Generate subtitles (captions) for the project's audio with a fully local Whisper speech recogniser (no cloud). Mixes the audio of the project, or of one clip/track/range, transcribes it, splits the text into readable cues (max 2 lines, max_chars_per_line chars per line, 0.8-6 s each, no overlaps) and adds them as caption-bar text clips on a new \"Subtitles\" track with a background bar track, as one undo step. The model must be installed: if it is not, the call fails with instructions unless download_model is true (one-time 78-488 MB download, SHA-256 verified; ask the user first). Can take from seconds to minutes. Returns the language, the new track ids and the cues (with start/end in ms). Requires an app build with the whisper feature."
+        description = "Generate subtitles (captions) for the project's audio with a fully local Whisper speech recogniser (no cloud). Mixes the audio of the project, or of one clip/track/range, transcribes it, splits the text into readable cues (max 2 lines, max_chars_per_line chars per line, 0.8-6 s each, no overlaps) and adds them as caption text clips on a new \"Subtitles\" track (with a background bar track for the default \"classic\" style) as one undo step. Pass `style` for an animated CapCut-style caption (word-highlight, karaoke, pop, one-word, bold-outline); the recogniser's per-word timings drive the animation. The model must be installed: if it is not, the call fails with instructions unless download_model is true (one-time 78-488 MB download, SHA-256 verified; ask the user first). Can take from seconds to minutes. Returns the language, the new track ids and the cues (with start/end in ms). Requires an app build with the whisper feature."
     )]
     async fn auto_subtitles(
         &self,
@@ -1933,10 +2052,27 @@ impl McpServer {
                 max_lines: p.max_lines,
                 ..animathio_control::SubtitleSplit::default()
             },
+            style: p.look.style_params(p.style.as_deref())?,
         };
         let mut backend = self.backend.lock().await;
         let result = backend.subtitles_generate(params).map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))
+    }
+
+    #[tool(
+        description = "Restyle existing caption clips (from auto_subtitles or import_subtitles) as one undo step: style (classic, word-highlight, karaoke, pop, one-word, bold-outline), font_size, colours, position (top, middle, bottom, safe-area aware) and max_words per line. Applies to every caption on the track (default: all \"Subtitles*\" tracks); adds or removes the background bars as the style needs. Returns the style and the number of captions changed."
+    )]
+    async fn set_caption_style(
+        &self,
+        Parameters(p): Parameters<SetCaptionStyle>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::SubtitleStyleParams {
+            track: p.track.map(TrackId),
+            style: p.look.style_params(Some(&p.style))?,
+        };
+        let mut backend = self.backend.lock().await;
+        let result = backend.subtitles_style(params).map_err(mcp_error)?;
+        tool_text(json!({ "style": result.style, "captions": result.captions }))
     }
 
     #[tool(
@@ -1965,7 +2101,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Import an SRT or WebVTT file as caption clips on a new \"Subtitles\" track (same look as auto_subtitles), as one undo step."
+        description = "Import an SRT or WebVTT file as caption clips on a new \"Subtitles\" track (same look and `style` choices as auto_subtitles), as one undo step."
     )]
     async fn import_subtitles(
         &self,
@@ -1981,6 +2117,7 @@ impl McpServer {
             .subtitles_import(animathio_control::SubtitleImportParams {
                 path: PathBuf::from(p.path),
                 offset,
+                style: p.look.style_params(p.style.as_deref())?,
             })
             .map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))
@@ -2194,5 +2331,29 @@ mod preset_tests {
             let parsed: ExportPresetParam = serde_json::from_value(json!(preset.name())).unwrap();
             assert_eq!(parsed.0, preset);
         }
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    #[test]
+    fn ids_accept_strings_and_numbers_and_stay_strings_in_the_schema() {
+        let numeric: AddTransitionArgs = serde_json::from_value(
+            json!({"between_clip_a": 3, "clip_b": "10", "duration_ms": 400.0}),
+        )
+        .unwrap();
+        assert_eq!(numeric.between_clip_a.as_deref(), Some("3"));
+        assert_eq!(numeric.clip_b.as_deref(), Some("10"));
+        assert_eq!(numeric.track, None);
+        let keyframe: AddKeyframe = serde_json::from_value(
+            json!({"id": 13, "target": "opacity", "time_ms": 0.0, "value": 1.0}),
+        )
+        .unwrap();
+        assert_eq!(keyframe.id, "13");
+        assert!(serde_json::from_value::<ElementId>(json!({"id": -1})).is_err());
+        let schema = serde_json::to_value(schemars::schema_for!(ElementId)).unwrap();
+        assert_eq!(schema["properties"]["id"]["type"], "string");
     }
 }
