@@ -85,6 +85,8 @@ impl AudioPool {
             channels,
             effects: None,
             dry: false,
+            lenient: false,
+            warnings: EffectWarnings::default(),
             cache: Arc::default(),
         })
     }
@@ -110,6 +112,28 @@ const SEGMENT_BLOCKS: usize = 64;
 /// Upper bound on the bytes of processed blocks the mixer keeps for reuse.
 const EFFECT_CACHE_BYTES: usize = 96 * 1024 * 1024;
 
+/// Collects warnings from a lenient [`Mixer`] (see [`Mixer::lenient`]). Cloning shares the
+/// underlying list, so a UI can keep a clone and drain it while the mix worker fills it.
+#[derive(Clone, Default)]
+pub struct EffectWarnings(Arc<Mutex<Vec<String>>>);
+impl EffectWarnings {
+    fn push(&self, message: String) {
+        let mut list = self.0.lock().expect("effect warnings lock");
+        // Every block of a broken chain repeats the same message; keep one.
+        if !list.contains(&message) && list.len() < 32 {
+            list.push(message);
+        }
+    }
+    /// Take and clear the collected warnings.
+    ///
+    /// # Panics
+    /// If a mixer thread panicked while holding the sink's lock.
+    #[must_use]
+    pub fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().expect("effect warnings lock"))
+    }
+}
+
 /// Immutable prepared resources shared by preview and export. Mixing is pure:
 /// its only inputs are project data, an explicit resource snapshot, and a range.
 ///
@@ -128,6 +152,9 @@ pub struct Mixer {
     effects: Option<Arc<dyn AudioEffectProcessor>>,
     /// Ignore every audio-effect chain (dry mix); see [`Mixer::dry`].
     dry: bool,
+    /// Skip failing effects with a warning instead of failing the mix; see [`Mixer::lenient`].
+    lenient: bool,
+    warnings: EffectWarnings,
     cache: Arc<Mutex<EffectCache>>,
 }
 impl Mixer {
@@ -148,6 +175,22 @@ impl Mixer {
         self.effects = Some(processor);
         self.cache = Arc::default();
         self
+    }
+    /// A mixer for preview: an effect that cannot run (plugin missing, trapped, over its
+    /// limits, or no processor attached) is skipped, so the audio passes through that effect
+    /// unprocessed, and a warning is recorded in the sink instead of failing the mix.
+    /// Blocks that skipped an effect are not cached. Without this (the default, used by
+    /// export) such a failure is an error naming the effect.
+    #[must_use]
+    pub fn lenient(mut self, warnings: EffectWarnings) -> Self {
+        self.lenient = true;
+        self.warnings = warnings;
+        self
+    }
+    /// The sink collecting this mixer's warnings (empty unless [`Mixer::lenient`]).
+    #[must_use]
+    pub fn warnings(&self) -> EffectWarnings {
+        self.warnings.clone()
     }
     /// A mixer that ignores all audio-effect chains, for analyses that want the raw source
     /// signal (for example silence detection) and need no effect processor.
@@ -446,29 +489,43 @@ impl Mixer {
         {
             return Ok(entry);
         }
-        let processor = self.effects.as_ref().ok_or_else(|| {
-            Error::Invalid(
-                "the project has audio effects but the mixer has no effect processor".into(),
-            )
-        })?;
         let segment = (block - block % SEGMENT_BLOCKS).max(first_block);
+        let skipped = std::cell::Cell::new(false);
         let run = |index: usize, states: &mut Vec<Vec<u8>>| -> Result<Vec<f32>, Error> {
             let mut samples = input(index)?;
             for (position, effect) in effects_at(index)?.iter().enumerate() {
-                let out = processor
-                    .process(
-                        effect,
-                        &AudioBlock {
-                            sample_rate: self.rate,
-                            channels: self.channels,
-                            start: start_time(index)?,
-                            samples: &samples,
-                        },
-                        &states[position],
-                    )
-                    .map_err(|e| Error::Invalid(format!("audio effect: {e}")))?;
-                samples = out.samples;
-                states[position] = out.state;
+                let outcome = match &self.effects {
+                    Some(processor) => processor
+                        .process(
+                            effect,
+                            &AudioBlock {
+                                sample_rate: self.rate,
+                                channels: self.channels,
+                                start: start_time(index)?,
+                                samples: &samples,
+                            },
+                            &states[position],
+                        )
+                        .map_err(|e| {
+                            format!("audio effect {}/{}: {e}", effect.plugin, effect.effect)
+                        }),
+                    None => Err(format!(
+                        "audio effect {}/{} needs an effect processor, but the mixer has none",
+                        effect.plugin, effect.effect
+                    )),
+                };
+                match outcome {
+                    Ok(out) => {
+                        samples = out.samples;
+                        states[position] = out.state;
+                    }
+                    Err(message) if self.lenient => {
+                        self.warnings
+                            .push(format!("{message}; audio passes through unprocessed"));
+                        skipped.set(true);
+                    }
+                    Err(message) => return Err(Error::Invalid(message)),
+                }
             }
             Ok(samples)
         };
@@ -494,15 +551,20 @@ impl Mixer {
         }
         let mut entry = None;
         for index in start..=block {
+            skipped.set(false);
             let samples = run(index, &mut states)?;
             let fresh = Arc::new(BlockEntry {
                 samples,
                 state_out: states.clone(),
             });
-            self.cache
-                .lock()
-                .expect("effect cache lock")
-                .insert(key, index, Arc::clone(&fresh));
+            // A block that skipped an effect is not the canonical result: never reuse it.
+            if !skipped.get() {
+                self.cache.lock().expect("effect cache lock").insert(
+                    key,
+                    index,
+                    Arc::clone(&fresh),
+                );
+            }
             entry = Some(fresh);
         }
         Ok(entry.expect("at least the requested block is processed"))

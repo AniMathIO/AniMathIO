@@ -129,8 +129,9 @@ introduced them. Chains run inside `Mixer::mix` on a fixed 2048-frame block latt
 state carried as opaque plugin blobs and a bounded warm-up per 64-block segment, so output is
 a pure function of the project; they need `Mixer::with_effect_processor(Arc::new(
 host.audio_effect_processor()))` (editor playback registers one in `playback.rs`, `Exporter`
-has `set_audio_effect_processor`). A mixer without a processor errors on a project with
-active effects; `Mixer::dry()` ignores chains (silence detection). Effects run in the mix
+has `set_audio_effect_processor`). A strict mixer (export, the default) errors on a project with
+active effects it cannot run; `Mixer::lenient(warnings)` (editor playback) skips the failing
+effect with a warning instead; `Mixer::dry()` ignores chains (silence detection). Effects run in the mix
 worker, never in the device callback.
 
 Audio clips use numeric `gain` (linear, default 1) and `muted` (nonzero means muted,

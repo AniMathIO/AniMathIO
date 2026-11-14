@@ -290,7 +290,7 @@ thread — never in the device callback.
 
 Projects reference an audio effect like a pixel effect (`EffectInstance { plugin, effect,
 params, bypass }`) on a clip's or a track's `audio_effects` chain; see
-[architecture.md](architecture.md#audio) for the signal flow.
+[architecture.md](architecture.md#audio-effects) for the signal flow.
 
 First-party `org.animathio.audio-basic` provides (all processing in `f64`, block-size
 independent, deterministic):
@@ -378,8 +378,9 @@ Audio-effect calls use a block-scaled budget (`SandboxLimits`):
 | Epoch deadline | 200 ticks → ~2 s backstop (`audio_epoch_deadline_ticks`) |
 
 A trap, limit violation, wrong-sized or non-finite output or `Err` result fails the block;
-the mixer then fails that `mix` call (preview stops with an error, export aborts) rather
-than playing unprocessed audio.
+the effect is skipped: preview passes the audio through that effect unprocessed and shows
+a warning toast, while export fails with an error naming the effect
+(`audio effect <plugin>/<effect>: ...`) rather than writing unprocessed audio.
 
 Host imports are separately capped:
 

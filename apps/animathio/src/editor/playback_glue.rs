@@ -34,6 +34,12 @@ impl Editor {
 
     pub(super) fn pump_results(&mut self, window: &mut Window) -> bool {
         let mut changed = false;
+        for warning in crate::playback::take_audio_warnings() {
+            self.notices.push(crate::style::Toast::warning(format!(
+                "Audio effect unavailable: {warning}"
+            )));
+            changed = true;
+        }
         while let Some(result) = self.worker.try_result() {
             if result.generation == self.request_generation {
                 changed = true;

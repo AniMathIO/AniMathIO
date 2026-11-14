@@ -22,7 +22,7 @@ the render/audio/export data flow. The authority for these rules is
 | `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with tree-sitter. |
 | `apps/animathio-cli` | Headless validation, PNG rendering, MP4 export, importers and the MCP sidecar. |
 | `apps/animathio` | The GPUI desktop editor: a thin view over the command-only core, plus an export worker and dialog. |
-| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `trap` (sandbox fixture), and `examples/hello`. |
+| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `audio-basic`, `trap` (sandbox fixture), and `examples/hello`. |
 
 Video clips decode through `render::FrameSource` via the `media` crate's
 `MediaPool`, so real video frames appear in preview, the CLI and headless
@@ -80,7 +80,7 @@ Rules that keep the layers honest:
 
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
-`fields`, `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
+`fields`, `audio_effects` (inspector audio-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
@@ -364,6 +364,11 @@ DSP, and a port in `core` connects them.
   bit-for-bit. A bounded (96 MiB) LRU of processed blocks, shared by mixer clones, makes
   sequential playback and export cost one pass of each chain; a cold seek costs at most
   one segment plus the warm-up.
+- **Failures.** A missing, trapping or over-limit effect plugin follows the video-effect
+  policy. The default (strict) mixer used by export fails with an error naming the effect;
+  the preview mixer (`Mixer::lenient`) skips the failing effect so the audio passes through
+  it unprocessed, records a warning in an `EffectWarnings` sink (the editor shows a toast) and
+  does not cache the affected blocks.
 - **Threading.** Plugin calls happen only in the mixer worker or the export thread. The
   device callback still only pops the ring: it allocates nothing and takes no lock.
 - **Cost.** Measured through the sandbox with pooled instances, 2048-frame blocks, 48 kHz

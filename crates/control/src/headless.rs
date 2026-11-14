@@ -278,6 +278,7 @@ impl HeadlessHandler {
 }
 
 impl ControlHandler for HeadlessHandler {
+    #[allow(clippy::too_many_lines)] // One arm per control method.
     fn handle(&mut self, call: Call) -> Result<Value, ControlError> {
         Ok(match call {
             Call::Export { params } => {

@@ -14,13 +14,7 @@ fn packages() -> &'static (tempfile::TempDir, Vec<PluginPackage>) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let target = root.join("target/plugin-tests");
         let mut packages = Vec::new();
-        for name in [
-            "text",
-            "shapes",
-            "latex",
-            "effects-basic",
-            "audio-basic",
-        ] {
+        for name in ["text", "shapes", "latex", "effects-basic", "audio-basic"] {
             let mut command = if cfg!(target_os = "linux") {
                 let mut command = Command::new("nice");
                 command.args(["-n", "19", "ionice", "-c3", "cargo"]);

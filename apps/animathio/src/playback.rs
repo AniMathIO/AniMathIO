@@ -1,11 +1,18 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use animathio_audio::{AudioPool, Mixer, Player, Speed};
+use animathio_audio::{AudioPool, EffectWarnings, Mixer, Player, Speed};
 use animathio_core::{AudioEffectProcessor, Project, Rounding, TICKS_PER_SECOND, Time};
 use std::sync::OnceLock;
 
 static AUDIO_EFFECTS: OnceLock<Arc<dyn AudioEffectProcessor>> = OnceLock::new();
+static AUDIO_WARNINGS: OnceLock<EffectWarnings> = OnceLock::new();
+
+/// Warnings from playback mixers whose audio effects could not run (the audio passed
+/// through unprocessed). Drained by the editor, which shows them as toasts.
+pub(crate) fn take_audio_warnings() -> Vec<String> {
+    AUDIO_WARNINGS.get().map_or_default(EffectWarnings::take)
+}
 
 /// Register the plugin runner that every playback mixer uses for audio effects. The handle
 /// shares the plugin host's registry, so it is installed once at startup.
@@ -13,8 +20,10 @@ pub(crate) fn install_audio_effects(processor: Arc<dyn AudioEffectProcessor>) {
     let _ = AUDIO_EFFECTS.set(processor);
 }
 
-/// Attach the registered audio-effect runner (if any) to a freshly prepared mixer.
+/// Make a freshly prepared playback mixer lenient (a failing audio effect is skipped with a
+/// warning, see `take_audio_warnings`) and attach the registered audio-effect runner, if any.
 pub(crate) fn with_audio_effects(mixer: Mixer) -> Mixer {
+    let mixer = mixer.lenient(AUDIO_WARNINGS.get_or_init(EffectWarnings::default).clone());
     match AUDIO_EFFECTS.get() {
         Some(processor) => mixer.with_effect_processor(Arc::clone(processor)),
         None => mixer,

@@ -6,7 +6,7 @@
     clippy::cast_possible_truncation,
     clippy::chunks_exact_to_as_chunks
 )]
-use animathio_audio::{AudioPool, Mixer, Pcm};
+use animathio_audio::{AudioPool, EffectWarnings, Mixer, Pcm};
 use animathio_core::*;
 use std::sync::{
     Arc,
@@ -463,4 +463,59 @@ fn chain_blocks_receive_chain_local_times() {
         start + TICKS_PER_SECOND / 2 + 100_000,
     );
     assert!((later[0] - 1500.0).abs() < 43.0, "{}", later[0]);
+}
+
+#[test]
+fn lenient_mixers_pass_audio_through_with_a_warning_and_strict_ones_fail_clearly() {
+    let (mut project, dry) = fixture(1, 0);
+    let plain = mixed(&dry, &project, 0, TICKS_PER_SECOND / 10);
+    add(
+        &mut project,
+        AudioChain::Clip(ClipId(0)),
+        fx(1, "gain", &[("gain", 2.0)]),
+    );
+    add(
+        &mut project,
+        AudioChain::Clip(ClipId(0)),
+        fx(2, "explode", &[]),
+    );
+
+    // Strict (export): the error names the failing effect.
+    let strict = dry.clone().with_effect_processor(Arc::new(Mock::default()));
+    let error = strict
+        .mix(&project, range(0, TICKS_PER_SECOND / 10))
+        .unwrap_err();
+    assert!(error.to_string().contains("mock/explode"), "{error}");
+
+    // Lenient (preview): the failing effect is skipped, the working one still applies.
+    let warnings = EffectWarnings::default();
+    let mock = Arc::new(Mock::default());
+    let lenient = dry
+        .clone()
+        .with_effect_processor(mock.clone())
+        .lenient(warnings.clone());
+    let out = mixed(&lenient, &project, 0, TICKS_PER_SECOND / 10);
+    for (a, b) in out.iter().zip(&plain) {
+        assert_eq!(*a, *b * 2.0);
+    }
+    let taken = warnings.take();
+    assert_eq!(taken.len(), 1, "{taken:?}");
+    assert!(taken[0].contains("mock/explode") && taken[0].contains("unprocessed"));
+    assert_eq!(warnings.take().len(), 0);
+
+    // Skipped blocks are never cached, so a retry runs (and warns) again.
+    let calls = mock.calls.load(Ordering::SeqCst);
+    mixed(&lenient, &project, 0, TICKS_PER_SECOND / 10);
+    assert!(mock.calls.load(Ordering::SeqCst) > calls);
+    assert_eq!(warnings.take().len(), 1);
+
+    // No processor at all: pass through everything, warn once.
+    let none = dry.lenient(warnings.clone());
+    assert_eq!(mixed(&none, &project, 0, TICKS_PER_SECOND / 10), plain);
+    assert!(
+        warnings
+            .take()
+            .iter()
+            .any(|w| w.contains("effect processor"))
+    );
 }
