@@ -2124,15 +2124,17 @@ impl McpServer {
             .media
             .into_iter()
             .map(|(id, path)| {
-                parse(id).map(|id| {
-                    (
-                        id,
-                        animathio_control::MediaFill {
-                            path: PathBuf::from(path),
-                            cover: p.cover,
-                        },
-                    )
-                })
+                let id = parse(id)?;
+                // Same rule as add_media: an existing regular file, canonicalized.
+                let path = animathio_control::validate_existing_file(std::path::Path::new(&path))
+                    .map_err(mcp_error)?;
+                Ok((
+                    id,
+                    animathio_control::MediaFill {
+                        path,
+                        cover: p.cover,
+                    },
+                ))
             })
             .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
         let fill = template.fill(&text, &media).map_err(mcp_error)?;
@@ -2142,7 +2144,17 @@ impl McpServer {
             .map_err(|e| invalid(&e.to_string()))?;
         let mut assets = template.assets.clone();
         assets.extend(fill.assets);
-        let path = PathBuf::from(p.output);
+        let requested = PathBuf::from(p.output);
+        if !requested
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("amio"))
+        {
+            return Err(invalid("output must be a .amio file"));
+        }
+        // Same rule as the other writers: the nearest existing ancestor must be a
+        // directory and an existing target must be a regular file (refused below).
+        animathio_control::validate_output_file(&requested).map_err(mcp_error)?;
+        let path = requested;
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
