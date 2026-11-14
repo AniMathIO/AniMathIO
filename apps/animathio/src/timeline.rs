@@ -1,4 +1,6 @@
-use animathio_core::{ClipId, Project, TICKS_PER_SECOND, Time, TrackId};
+use animathio_core::{
+    ClipId, FrameRate, MarkerId, Project, Rounding, TICKS_PER_SECOND, Time, TrackId,
+};
 
 /// Pixel geometry shared by timeline painting and hit-testing. All coordinates are
 /// relative to the timeline canvas origin (not the window origin); callers add the
@@ -10,8 +12,17 @@ pub(crate) struct TimelineLayout {
     pub(crate) duration_ticks: i64,
     pub(crate) pixels_per_tick: f64,
     pub(crate) scroll_x: f64,
+    /// When set, pointer times land on this rate's frame boundaries, so the
+    /// playhead, blade, drags and trims never produce mid-frame edits.
+    pub(crate) frame_rate: Option<FrameRate>,
 }
 impl TimelineLayout {
+    /// Quantize pointer times to `rate`'s frames.
+    pub(crate) fn with_frame_rate(mut self, rate: FrameRate) -> Self {
+        self.frame_rate = Some(rate);
+        self
+    }
+
     /// Build a layout with an explicit zoom (pixels-per-tick multiplier) and a
     /// horizontal scroll offset, both clamped to sane bounds.
     pub(crate) fn zoomed(
@@ -34,6 +45,7 @@ impl TimelineLayout {
             duration_ticks,
             pixels_per_tick,
             scroll_x: f64::from(scroll_x).clamp(0.0, max_scroll),
+            frame_rate: None,
         }
     }
 }
@@ -102,11 +114,30 @@ pub(crate) fn project_duration(project: &Project) -> i64 {
     seconds.saturating_mul(TICKS_PER_SECOND)
 }
 
+/// The editable timeline span: the content rounded up to a second plus headroom
+/// (10%, at least five seconds), so clips can be dragged, trimmed and dropped past
+/// the current end in one gesture.
+pub(crate) fn timeline_span(project: &Project) -> i64 {
+    let content = project_duration(project);
+    let headroom = (content / 10).max(5 * TICKS_PER_SECOND);
+    let span = content.saturating_add(headroom);
+    span.saturating_add(TICKS_PER_SECOND - 1) / TICKS_PER_SECOND * TICKS_PER_SECOND
+}
+
 /// Map a timeline x (relative to the canvas left edge) to a tick, clamped to the
 /// project range. Sub-tick pointer positions land on the nearest integer tick.
 pub(crate) fn x_to_time(layout: &TimelineLayout, x: f32) -> Time {
     let ticks = (f64::from(x) + layout.scroll_x) / layout.pixels_per_tick;
-    Time(ticks.clamp(0.0, layout.duration_ticks as f64) as i64)
+    let time = Time(ticks.clamp(0.0, layout.duration_ticks as f64) as i64);
+    layout
+        .frame_rate
+        .and_then(|rate| {
+            let frame = rate.time_to_frame(time, Rounding::Nearest).ok()?;
+            rate.frame_to_time(frame, Rounding::Nearest).ok()
+        })
+        .map_or(time, |snapped| {
+            Time(snapped.0.clamp(0, layout.duration_ticks))
+        })
 }
 
 /// Map a tick to a timeline x (relative to the canvas left edge).
@@ -167,6 +198,31 @@ pub(crate) fn snap_target_among(
     playhead: Time,
     candidate: Time,
 ) -> Option<Time> {
+    snap_target_excluding(layout, project, exclude, None, playhead, candidate)
+}
+
+/// Snap target for dragging marker `marker`: the playhead, clip edges and every other
+/// marker attract; the dragged marker itself does not.
+pub(crate) fn snap_marker(
+    layout: &TimelineLayout,
+    project: &Project,
+    marker: MarkerId,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
+    snap_target_excluding(layout, project, &[], Some(marker), playhead, candidate)
+}
+
+/// Snapping core: the playhead, clip edges and markers (the start and, for ranges, the
+/// end of each) are targets, except the excluded clips and marker.
+fn snap_target_excluding(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: &[ClipId],
+    exclude_marker: Option<MarkerId>,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
     let threshold = snap_threshold_ticks(layout);
     let mut best = None;
     let mut best_distance = i64::MAX;
@@ -186,7 +242,37 @@ pub(crate) fn snap_target_among(
             }
         }
     }
+    for marker in project.markers() {
+        if Some(marker.id) != exclude_marker {
+            consider(marker.time);
+            if marker.duration.is_some() {
+                consider(marker.end());
+            }
+        }
+    }
     best
+}
+
+/// Width in pixels of a marker's grab area, either side of its line.
+const MARKER_GRAB: f32 = 6.0;
+
+/// The marker whose flag or line is under a canvas-relative point on the ruler. When
+/// several overlap, the latest one on the timeline wins (it is drawn on top).
+pub(crate) fn hit_marker(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+) -> Option<MarkerId> {
+    if !(0.0..layout.ruler_height).contains(&y) {
+        return None;
+    }
+    project
+        .markers()
+        .iter()
+        .rev()
+        .find(|m| (time_to_x(layout, m.time) - x).abs() <= MARKER_GRAB)
+        .map(|m| m.id)
 }
 
 /// Position a newly dropped clip with the same snapping rules as a timeline edit.
@@ -459,6 +545,9 @@ mod tests {
     #[test]
     fn duration_rounds_up_to_whole_seconds_with_a_floor() {
         assert_eq!(project_duration(&Project::default()), TICKS_PER_SECOND);
+        // The editable span leaves room past the end.
+        assert_eq!(timeline_span(&Project::default()), 6 * TICKS_PER_SECOND);
+        assert!(timeline_span(&sample_project()) > project_duration(&sample_project()));
         assert_eq!(project_duration(&sample_project()), TICKS_PER_SECOND * 2);
     }
 
@@ -470,6 +559,14 @@ mod tests {
             assert_eq!(x_to_time(&layout, x), time);
         }
         assert_eq!(x_to_time(&layout, -5.0), Time(0));
+        // With a frame rate every pointer time is a frame boundary.
+        let rate = FrameRate::new(30, 1).unwrap();
+        let framed = self::layout().with_frame_rate(rate);
+        for x in [0.0, 13.7, 401.3, 999.9] {
+            let time = x_to_time(&framed, x);
+            let frame = rate.time_to_frame(time, Rounding::Nearest).unwrap();
+            assert_eq!(rate.frame_to_time(frame, Rounding::Nearest).unwrap(), time);
+        }
         assert_eq!(x_to_time(&layout, 10_000.0), Time(layout.duration_ticks));
     }
 
@@ -572,5 +669,34 @@ mod tests {
             drop_start(&layout, &project, raw_x, playhead, false),
             x_to_time(&layout, raw_x)
         );
+    }
+
+    #[test]
+    fn markers_are_snap_targets_and_hit_on_the_ruler_only() {
+        use animathio_core::{Marker, MarkerId};
+        let mut project = sample_project();
+        Command::AddMarker {
+            marker: Marker::new(MarkerId(1), Time(TICKS_PER_SECOND * 3 / 2)),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let layout = layout();
+        let marker_x = time_to_x(&layout, Time(TICKS_PER_SECOND * 3 / 2));
+        let near = x_to_time(&layout, marker_x + 2.0);
+        assert_eq!(
+            snap_target(&layout, &project, None, Time(0), near),
+            Some(Time(TICKS_PER_SECOND * 3 / 2))
+        );
+        // The dragged marker does not attract itself.
+        assert_eq!(
+            snap_marker(&layout, &project, MarkerId(1), Time(0), near),
+            None
+        );
+        assert_eq!(
+            hit_marker(&layout, &project, marker_x + 3.0, 10.0),
+            Some(MarkerId(1))
+        );
+        assert_eq!(hit_marker(&layout, &project, marker_x + 30.0, 10.0), None);
+        assert_eq!(hit_marker(&layout, &project, marker_x, 200.0), None);
     }
 }

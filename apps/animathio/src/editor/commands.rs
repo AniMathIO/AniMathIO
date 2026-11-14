@@ -9,10 +9,11 @@ impl Editor {
             width,
             RULER_H,
             self.dock.track_height.pixels(),
-            timeline::project_duration(&self.project),
+            timeline::timeline_span(&self.project),
             self.timeline_zoom,
             self.timeline_scroll,
         )
+        .with_frame_rate(self.project.frame_rate())
     }
 
     pub(super) fn timeline_relative(&self, position: Point<Pixels>) -> (f32, f32) {
@@ -80,6 +81,7 @@ impl Editor {
 
     pub(super) fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.invalidate_autocut();
+        self.invalidate_beats();
         self.dirty = true;
         self.next_id = self.next_id.max(next_id(&self.project));
         self.prune_selection();
@@ -169,8 +171,8 @@ impl Editor {
                 Ok(value) => self.commit_field(id, &field, value, cx),
                 Err(_) => self.error = Some("invalid number".into()),
             },
-            InputTarget::SelectionField { field } => match buffer.trim().parse::<f64>() {
-                Ok(value) => self.commit_selection_field(&field, value, cx),
+            InputTarget::SelectionField { field, ids } => match buffer.trim().parse::<f64>() {
+                Ok(value) => self.commit_selection_field(&field, &ids, value, cx),
                 Err(_) => self.error = Some("invalid number".into()),
             },
             InputTarget::AudioEffectParam {
@@ -211,7 +213,7 @@ impl Editor {
             }
             InputTarget::PluginText { id, name } => {
                 let value = buffer;
-                self.execute(&self.plugin_param_command(id, name, json!(value)), cx);
+                self.execute_plugin_param(id, name, json!(value), cx);
             }
             InputTarget::PluginPoint { id, name, axis } => {
                 let Ok(value) = buffer.trim().parse::<f64>() else {
@@ -221,10 +223,7 @@ impl Editor {
                 };
                 let mut point = self.plugin_point_value(id, &name);
                 point[axis] = value as f32;
-                self.execute(
-                    &self.plugin_param_command(id, name, json!([point[0], point[1]])),
-                    cx,
-                );
+                self.execute_plugin_param(id, name, json!([point[0], point[1]]), cx);
             }
         }
         cx.notify();
@@ -271,17 +270,36 @@ impl Editor {
             .find(|model| model.id() == name)
     }
 
-    pub(super) fn plugin_param_command(&self, id: ClipId, name: String, json: Value) -> Command {
-        let model = self
-            .plugin_model(id, &name)
-            .expect("plugin schema parameter");
+    /// The edit setting plugin parameter `name` of clip `id`, or `None` when the
+    /// clip or its schema parameter is gone (an input can commit on blur after
+    /// an undo, a control edit or a project switch removed its clip).
+    pub(super) fn plugin_param_command(
+        &self,
+        id: ClipId,
+        name: String,
+        json: Value,
+    ) -> Option<Command> {
+        let model = self.plugin_model(id, &name)?;
         let value = inspector::model_value(&model, Some(&json));
-        inspector::param_edit_command(
-            self.find_clip(id).expect("selected clip"),
+        Some(inspector::param_edit_command(
+            self.find_clip(id)?,
             name,
             value,
             self.position,
-        )
+        ))
+    }
+
+    /// Run a plugin parameter edit if its clip still exists.
+    pub(super) fn execute_plugin_param(
+        &mut self,
+        id: ClipId,
+        name: String,
+        json: Value,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(command) = self.plugin_param_command(id, name, json) {
+            self.execute(&command, cx);
+        }
     }
 
     pub(super) fn plugin_opaque(&self, id: ClipId, name: &str) -> Option<Value> {
@@ -348,10 +366,11 @@ impl Editor {
         self.execute(&command, cx);
     }
 
-    /// Apply one numeric field to every selected clip as a single undo step.
+    /// Apply one numeric field to every clip of `ids` as a single undo step.
     pub(super) fn commit_selection_field(
         &mut self,
         field: &Field,
+        ids: &BTreeSet<ClipId>,
         value: f64,
         cx: &mut Context<Self>,
     ) {
@@ -363,32 +382,47 @@ impl Editor {
             Field::Transform(TransformProperty::Opacity) => value.clamp(0.0, 1.0),
             _ => value,
         };
-        let commands: Vec<Command> = self
-            .selected_ids()
-            .into_iter()
-            .filter_map(|id| self.field_command(id, field, value))
+        let commands: Vec<Command> = ids
+            .iter()
+            .filter_map(|id| self.field_command(*id, field, value))
             .collect();
         if let Some(command) = selection::batch(commands) {
             self.execute(&command, cx);
         }
     }
 
+    /// The edit for a typed or stepped field value. Like scrubbing, an animated
+    /// property gets a keyframe at the playhead; setting only the base value
+    /// would leave the displayed (sampled) value unchanged.
     pub(super) fn field_command(&self, id: ClipId, field: &Field, value: f64) -> Option<Command> {
         let value = field_model_value(field, value);
-        match field {
-            Field::Transform(property) => {
-                let clip = self.find_clip(id)?;
-                Some(Command::SetTransform {
+        let clip = self.find_clip(id)?;
+        let target = match field {
+            Field::Transform(property) => Target::Transform(*property),
+            Field::Param(name) => Target::Param(name.clone()),
+        };
+        // Outside the clip there is no "value at the playhead" to key; set the
+        // base value instead of adding a key before or after the clip.
+        let inside = clip.range.start <= self.position && self.position < clip.range.end;
+        if !inside {
+            return Some(match field {
+                Field::Transform(property) => Command::SetTransform {
                     id,
-                    transform: with_transform(clip.transform, *property, value),
-                })
-            }
-            Field::Param(name) => Some(Command::SetParam {
-                id,
-                name: name.clone(),
-                value: Some(value),
-            }),
+                    transform: inspector::with_transform(clip.transform, *property, value),
+                },
+                Field::Param(name) => Command::SetParam {
+                    id,
+                    name: name.clone(),
+                    value: Some(value),
+                },
+            });
         }
+        Some(inspector::numeric_edit_command(
+            clip,
+            target,
+            value,
+            self.position,
+        ))
     }
 
     pub(super) fn split_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
@@ -436,9 +470,11 @@ impl Editor {
         self.set_fade(id, FadeEdge::Out, TICKS_PER_SECOND, cx);
     }
 
+    /// Remove both fades as one undo step.
     pub(super) fn clear_fades(&mut self, id: ClipId, cx: &mut Context<Self>) {
-        self.set_fade(id, FadeEdge::In, 0, cx);
-        self.set_fade(id, FadeEdge::Out, 0, cx);
+        if let Some(command) = fades::clear_fades_command(&self.project, id) {
+            self.execute(&command, cx);
+        }
     }
 
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
@@ -446,7 +482,10 @@ impl Editor {
         match self.history.undo(&mut self.project) {
             Ok(true) => self.after_edit(cx),
             Ok(false) => {}
-            Err(error) => self.error = Some(error.0),
+            Err(error) => {
+                self.error = Some(error.0);
+                cx.notify();
+            }
         }
     }
 
@@ -455,7 +494,10 @@ impl Editor {
         match self.history.redo(&mut self.project) {
             Ok(true) => self.after_edit(cx),
             Ok(false) => {}
-            Err(error) => self.error = Some(error.0),
+            Err(error) => {
+                self.error = Some(error.0);
+                cx.notify();
+            }
         }
     }
 
@@ -482,14 +524,9 @@ impl Editor {
         }
         // Core splits a clip's linked companions with it, so split each group once.
         let targets = selection::one_per_link_group(&self.project, &targets);
-        let commands: Vec<Command> = targets
-            .into_iter()
-            .map(|id| Command::SplitClip {
-                id,
-                right_id: self.next_clip_id(),
-                at: position,
-            })
-            .collect();
+        let (commands, next) =
+            selection::split_commands(&self.project, &targets, position, self.next_id);
+        self.next_id = next;
         if let Some(command) = selection::batch(commands) {
             self.execute(&command, cx);
         }

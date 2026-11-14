@@ -12,10 +12,27 @@ impl Editor {
         window.focus(&self.panel_focus[0], cx);
         self.context_menu = None;
         self.zoom_motion = None;
+        // A press always starts a new gesture; never resume one whose release was missed.
+        self.keyframe_drag = None;
         let (x, y) = self.timeline_relative(event.position);
         let layout = self.current_layout();
         if y < layout.ruler_height {
             self.selected_keyframe = None;
+            if let Some(id) = timeline::hit_marker(&layout, &self.project, x, y)
+                && let Some(marker) = self.project.marker(id)
+            {
+                if event.click_count >= 2 {
+                    self.open_marker_dialog(id, window, cx);
+                } else {
+                    self.gesture = Some(TimelineGesture::Marker(MarkerDrag {
+                        id,
+                        origin: marker.time,
+                        current: marker.time,
+                    }));
+                    cx.notify();
+                }
+                return;
+            }
             self.gesture = Some(TimelineGesture::Scrub);
             self.scrub_to(x, cx);
             return;
@@ -298,9 +315,19 @@ impl Editor {
         if !event.dragging() {
             return;
         }
-        if let Some(drag) = &mut self.keyframe_drag {
+        if self.keyframe_drag.is_some() {
             let raw = timeline::x_to_time(&layout, x);
-            drag.current = Time((raw.0 - drag.clip_start.0).max(0));
+            // Keep the key inside its clip, where it can be seen and dragged back.
+            let len = self
+                .keyframe_drag
+                .as_ref()
+                .and_then(|drag| self.find_clip(drag.clip_id))
+                .map_or(i64::MAX, |clip| {
+                    clip.range.end.0.saturating_sub(clip.range.start.0)
+                });
+            if let Some(drag) = &mut self.keyframe_drag {
+                drag.current = Time(raw.0.saturating_sub(drag.clip_start.0).clamp(0, len));
+            }
             cx.notify();
             return;
         }
@@ -421,6 +448,17 @@ impl Editor {
                 cx.notify();
             }
             Some(TimelineGesture::Scrub) => self.scrub_to(x, cx),
+            Some(TimelineGesture::Marker(drag)) => {
+                let raw = timeline::x_to_time(&layout, x);
+                let snapped = if self.snapping {
+                    timeline::snap_marker(&layout, &self.project, drag.id, self.position, raw)
+                } else {
+                    None
+                };
+                drag.current = snapped.unwrap_or(raw);
+                self.snap_line = snapped;
+                cx.notify();
+            }
             Some(TimelineGesture::Overview) | None => {}
         }
     }
@@ -434,22 +472,23 @@ impl Editor {
         self.snap_line = None;
         cx.notify();
         if let Some(drag) = self.keyframe_drag.take() {
-            self.selected_keyframe = Some(KeyframeSelection {
-                clip_id: drag.clip_id,
-                target: drag.target.clone(),
-                time: drag.current,
-            });
-            if drag.current != drag.origin {
-                self.execute(
+            // Select the key where it ended up: at the target if the move
+            // applied, still at its origin if core refused it (e.g. occupied).
+            let moved = drag.current != drag.origin
+                && self.try_execute(
                     &Command::MoveKeyframe {
                         id: drag.clip_id,
-                        target: drag.target,
+                        target: drag.target.clone(),
                         from: drag.origin,
                         to: drag.current,
                     },
                     cx,
                 );
-            }
+            self.selected_keyframe = Some(KeyframeSelection {
+                clip_id: drag.clip_id,
+                target: drag.target,
+                time: if moved { drag.current } else { drag.origin },
+            });
             cx.notify();
             return;
         }
@@ -469,7 +508,11 @@ impl Editor {
                 }
             }
             Some(TimelineGesture::Marquee(band)) => {
-                if !band.moved && band.base.is_empty() {
+                // A release outside the canvas (fast fling) is not a click.
+                if !band.moved
+                    && band.base.is_empty()
+                    && self.timeline_bounds.contains(&event.position)
+                {
                     // A plain click on empty space: deselect and park the playhead.
                     self.clear_selection();
                     let (x, _) = self.timeline_relative(event.position);
@@ -499,6 +542,28 @@ impl Editor {
                 }
             }
 
+            Some(TimelineGesture::Marker(drag)) => {
+                if drag.current == drag.origin {
+                    // A plain click on a marker parks the playhead on it.
+                    self.seek_to(drag.origin, cx);
+                } else if self
+                    .project
+                    .markers()
+                    .iter()
+                    .any(|m| m.id != drag.id && m.time == drag.current)
+                {
+                    self.error = Some("A marker already exists there".into());
+                } else {
+                    self.execute(
+                        &Command::MoveMarker {
+                            id: drag.id,
+                            time: drag.current,
+                        },
+                        cx,
+                    );
+                }
+                cx.notify();
+            }
             Some(TimelineGesture::Fade(fade)) => {
                 if let Some(command) = self
                     .find_clip(fade.clip_id)
@@ -660,7 +725,7 @@ impl Editor {
     }
 
     pub(super) fn build_timeline_snapshot(&self, cx: &App) -> TimelineSnapshot {
-        let duration = timeline::project_duration(&self.project);
+        let duration = timeline::timeline_span(&self.project);
         let mut clips = Vec::new();
         let mut overview = Vec::new();
         let mut transitions = Vec::new();
@@ -849,6 +914,7 @@ impl Editor {
                         })
                         .collect()
                 }),
+            markers: self.marker_paints(),
             snap_line: self.snap_line,
             marquee: self.marquee_rect(),
             theme: cx.theme().clone(),
@@ -1009,7 +1075,7 @@ impl Editor {
                     ))
                     .child(div().text_color(cx.theme().muted_foreground).child(format!(
                         "{:.1} s",
-                        timeline::project_duration(&self.project) as f64
+                        timeline::timeline_span(&self.project) as f64
                             / TICKS_PER_SECOND as f64
                             / f64::from(zoom)
                     )))
@@ -1129,6 +1195,12 @@ impl Editor {
                                                 cx.listener(Self::on_timeline_mouse_move),
                                             )
                                             .on_mouse_up(
+                                                MouseButton::Left,
+                                                cx.listener(Self::on_timeline_mouse_up),
+                                            )
+                                            // Releasing past the canvas (track headers, the
+                                            // empty space below the last track) still commits.
+                                            .on_mouse_up_out(
                                                 MouseButton::Left,
                                                 cx.listener(Self::on_timeline_mouse_up),
                                             )

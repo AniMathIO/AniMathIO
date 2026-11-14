@@ -4,7 +4,7 @@
 
 The full plan, architecture and roadmap live in **[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)**. Read it before proposing structure.
 
-**Looking for the current app?** AniMathIO 1.x lives on [`main`](https://github.com/AniMathIO/AniMathIO/tree/main). The [releases page](https://github.com/AniMathIO/AniMathIO/releases) still carries the 1.x Electron installers; no 2.0 release exists yet, so 2.0 is built from source (see [Building](#building)) or from the installer artifacts of the `Package` workflow.
+**Looking for the current app?** AniMathIO 1.x lives on [`main`](https://github.com/AniMathIO/AniMathIO/tree/main), and releases are on the [releases page](https://github.com/AniMathIO/AniMathIO/releases).
 
 ## What 2.0 is
 
@@ -24,14 +24,13 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 3) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 5) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding (streaming; Opus included), mixing, playback (cpal) | ✅ `audio` |
 | Plugin system (wasmtime Component Model) | ✅ ABI 1.0.0 frozen; first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
-| Auto-reframe to portrait/square (offline subject tracking) | ✅ editor, CLI and MCP |
 | Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
 | v1 and Manim importers | ✅ `import-v1`, `import-manim` |
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
@@ -54,18 +53,6 @@ Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview ba
 the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
 and 256-byte display strings.
 
-## Auto-reframe
-
-**Clip, Auto reframe…** follows motion and visual contrast in selected video clips
-(or all videos when none are selected). Choose 9:16, 1:1 or 4:5 and tracking
-smoothness, then Reframe. Progress and Cancel run alongside the editor. No models
-or downloads are needed. The canvas changes in place; video position/scale keys
-are replaced in one undo step. Other layers retain their normalized transforms.
-CLI: `animathio-cli reframe landscape.amio -o vertical.amio --aspect 9:16`.
-MCP `auto_reframe` provides the same operation. See [limitations](docs/mcp.md#auto-reframe).
-
-![Auto-reframe settings and vertical video preview](docs/screenshots/editor-auto-reframe.png)
-
 ## Automatic subtitles
 
 CapCut-style captions, fully local: **Clip, Generate subtitles…** transcribes the project's
@@ -74,6 +61,14 @@ caption-bar clips on a new `Subtitles` track, as one undo step; progress and can
 a status-bar popover like the export queue. `animathio-cli transcribe talk.mp4 --srt
 talk.srt`, the `auto_subtitles` / `export_subtitles` / `import_subtitles` MCP tools and SRT
 or WebVTT import and export work the same way.
+
+Captions can be animated CapCut-style from Whisper's per-word timings: **Classic bar**,
+**Word highlight**, **Karaoke fill**, **Pop**, **One word at a time** and **Bold outline**
+(big type with a thick outline, centred for 9:16). Pick one in the Generate dialog, or in the
+inspector of a selected caption (it restyles every caption on the track as one undo step; font
+size, colours, top/middle/bottom position and words per line included). On the command line
+use `transcribe lesson.amio --style karaoke -o out.amio`; over MCP pass `style` to
+`auto_subtitles` or call `set_caption_style` on existing captions.
 
 ![Generated subtitles on a Subtitles track with the progress popover](docs/screenshots/subtitles.png)
 
@@ -120,24 +115,6 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 - [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md) — what maps from 1.x and what doesn't
 - [`docs/design.md`](docs/design.md) — visual design tokens and UI rules
 - [`docs/release-checklist.md`](docs/release-checklist.md) — what is left before the 2.0 swap
-
-## Installing
-
-There is no published 2.0 release yet. Until `v2.0.0` is tagged, get an installer from the
-`Package` workflow (Actions tab, run on `v2`, artifacts `installers-linux`, `installers-windows`
-and `installers-macos`), or build from source below. Each installer ships both `animathio` and
-`animathio-cli` plus the first-party plugins:
-
-| Platform | Artifact | Notes |
-| --- | --- | --- |
-| Linux | `animathio_<version>_<arch>.AppImage` | the host provides the runtime libraries |
-| Linux (Debian/Ubuntu) | `animathio_<version>_amd64.deb` | declares its runtime libraries as dependencies |
-| Windows | `animathio_<version>_x64-setup.exe` | NSIS installer, unsigned (SmartScreen warns) |
-| macOS | `AniMathIO_<version>_<arch>.dmg` | unsigned and not notarized: right-click, Open |
-
-Verify with `animathio --version` and `animathio-cli --version`. Provenance of CI-built
-installers is attested with `actions/attest-build-provenance`
-(`gh attestation verify <file> --repo AniMathIO/AniMathIO`).
 
 ## Building
 
@@ -308,11 +285,23 @@ Video imports include a linked companion audio clip when the file contains audio
 
 ## Contributing
 
-Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and `AGENTS.md` for branch rules, automation and commands. Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
+Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See `AGENTS.md` for branch rules, automation and commands.
 
 ## License
 
 [MIT](LICENSE)
+
+Timeline markers and beat sync: press M to drop a coloured marker on the ruler at the
+playhead (Shift+M / Ctrl+Shift+M, or Cmd+Shift+M on macOS, jump to the next / previous
+marker). Double-click a flag to edit its name, colour and note, drag it to move it
+(markers snap, and clips and the playhead snap to markers). Clip > Markers and beat
+sync opens a panel that lists the markers, detects the tempo and beats of the project
+audio (or the selected clip) offline, adds markers at every beat, every Nth beat or the
+downbeats, and snaps the selected clips' cut points to beats and markers or splits
+them there, each as one undo step. The same actions are `animathio-cli markers` /
+`animathio-cli beats` and MCP `list_markers`, `add_marker`, `remove_marker`,
+`detect_beats` and `sync_cuts_to_beats`; see the [CLI reference](docs/cli.md#beats)
+and [MCP reference](docs/mcp.md#markers-and-beat-sync).
 
 Automatic cuts for recordings are available through Clip > Automatic cuts,
 `animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence
@@ -322,8 +311,10 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 
 ![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
 
-Project template foundations are available headlessly: `animathio-cli templates list`
-prints five bundled, media-free compositions and their placeholder clip ids;
-`animathio-cli new --template quote -o quote.amio` creates an independent project.
-Templates currently provide animated title/text layouts; the launcher library, media
-replacement, thumbnail cards, user-template menu and MCP integration are pending.
+The launcher lists five bundled project templates and saved user templates, with CPU
+thumbnail cards. Creating one opens Fill placeholders for text and picked media;
+media supports cover/contain and replacement is one undoable batch. File > Save as
+template stores the current project and selected placeholder clips in the user data
+library; user cards have Delete. The CLI keeps `templates list` and
+`new --template quote -o quote.amio`; MCP adds `list_templates` and
+`create_from_template`. Template card hover lifts use the shared surface tokens.

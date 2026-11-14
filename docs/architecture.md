@@ -9,9 +9,9 @@ the render/audio/export data flow. The authority for these rules is
 | Crate | Owns |
 | --- | --- |
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
-| `format` | Versioned `project.json` (schema version 3) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
+| `format` | Versioned `project.json` (schema version 5) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
-| `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, and cpal/rtrb device playback. No audio resources live in `Project`. |
+| `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, and cpal/rtrb device playback. No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
 | `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
@@ -82,7 +82,7 @@ Rules that keep the layers honest:
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
-(export queue popover), `start_screen`, `clip_ops`, `commands`, `project_io`,
+(export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
 number scrubbing and the viewer's transform gizmo all preview through it, so one
@@ -122,7 +122,11 @@ on the export worker (`crates/export` honours the cancel flag through its progre
 callback and leaves no partial file), and the editor polls the queue to drive the Export
 queue popover and toasts. Control-protocol exports appear in the same queue.
 
-`start_screen` provides project presets, recents and importer entry points. Workflow
+`start_screen` provides project presets, recents and importer entry points.
+`templates` supplies launcher cards, the placeholder fill dialog and user-library save/delete.
+Template manifests stay outside the project schema; source replacements are ordinary
+undoable command batches. Media fitting uses the `media_fit` clip parameter in both
+rendering backends. Workflow
 dialogs use gpui-component forms; export works on an immutable snapshot, so selecting
 a delivery preset does not change the open project. `control::ExportPreset` is the
 shared table for editor, CLI and MCP. Preferences persist under the application
@@ -202,7 +206,8 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
 `SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
-`AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `Batch`, `SplitAt`,
+`AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `AddMarker`, `RemoveMarker`,
+`MoveMarker`, `UpdateMarker`, `Batch`, `SplitAt`,
 `RemoveRange`, `RippleDelete`, plus the link-group variants `SetClipLink` and `RestoreClips`
 and `Exact` (replays one inverse edit without link propagation).
 
@@ -213,7 +218,13 @@ mute). A locked track rejects every clip-level edit (`AddClip`, `RemoveClip`,
 keyframe commands) in `Command::apply` itself, so the editor, the control
 protocol and MCP all see the same `track N is locked` error; layer-level
 commands (gain, mute, solo, lock) always work so a track can be unlocked.
-`SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks.
+`MoveClip` also refuses a locked destination track. Inside a `Batch` each member is
+checked against the locks as the earlier members left them, so a batch may unlock a
+track and then edit it but cannot lock one and then edit it. Undo and redo replay
+recorded history without the lock check (locks guard new edits, not history).
+`SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks. `RemoveRange`
+re-bases the keyframes of a clip whose head it removes, exactly as a split does, so
+fades and animations on the kept part stay where they were on screen.
 `RenameTrack` and `MoveTrack { id, index }` (the track's position after the move) are
 layer-level, so they work on locked tracks too. The editor's multi-clip edits (grouped
 move, nudge, delete, paste, duplicate, linked ripple) are plain `Batch`es planned by the
@@ -535,11 +546,53 @@ rendered off-thread and cached in editor session state by project canvas size.
   `control::subtitle_command` builds one `Command::Batch` with two new tracks, `Subtitles`
   (text) over `Subtitles background` (bars), one linked pair per cue using the **Caption
   bar** title preset, so undo removes everything in one step.
+- **Caption styles:** `control::captions` holds the bundled styles (`classic`,
+  `"word-highlight"`, `karaoke`, `pop`, `"one-word"`, `"bold-outline"`). A style is a set of
+  `org.animathio.text` clip parameters (`caption_style`, `words`, `accent`, `outline`,
+  `outline_width`, `max_words`, `font_size`, `color`, fit box) plus a safe-area placement,
+  so the format schema is untouched. `Cue::words` carries Whisper's per-word timings
+  (SRT/WebVTT imports spread the words evenly over the cue) and `subtitle_command` stores them
+  clip-relative in the `words` parameter. The text plugin renders the active word, pill, fill
+  or pop scale as a pure function of the clip's source time, so preview and export agree
+  (golden frames in `crates/render/tests/captions.rs`). `Call::SubtitlesStyle`
+  (`subtitles.style`, `set_caption_style`) and the editor's caption picker restyle existing
+  captions through one `Command::Batch` of `SetPluginParam`/`SetTransform` and bar add/remove
+  commands. The editor's `caption_styles` module is the shared picker (Generate dialog and the
+  caption inspector section).
 - **Threading:** the whole job is blocking and CPU-bound. The editor runs it on a worker
   thread (the app's `subtitle_job` module, with the `subtitles` editor module for the dialog,
   popover and control calls) with a progress phase and a cancel flag
   that whisper.cpp polls, shows it in a status-bar popover in the export-queue style and
   applies the cues on the UI thread; control clients get their reply when it finishes.
+
+### Markers and beat sync
+
+- **Model.** `Project::markers()` is a list of `Marker { id, time, duration?, name, color,
+  note }` kept sorted by `(time, id)`; `time` and `duration` are integer ticks and `color` is
+  one of the eight-entry `MarkerColor` palette. Markers never affect rendering or export.
+  They change only through `Command::{AddMarker, RemoveMarker, MoveMarker, UpdateMarker}`
+  (each returns its exact inverse, all work inside `Command::Batch`, and markers are never
+  blocked by a locked track). **Schema 5** introduced the `markers` key (`format` migrates
+  4 → 5 without changes; a missing key means no markers). Ripple edits do not move markers.
+- **Beat detection** lives in `audio` (`detect_beats`, `downbeat_indices`): pure, offline
+  and deterministic over mono samples, with no extra dependencies. Onset strength is a
+  log-compressed spectral flux (a small radix-2 FFT), the tempo is the peak of an
+  autocorrelation weighted towards moderate tempi, beats come from a dynamic-programming
+  tracker (Ellis 2007) and each beat is refined to the sharpest attack at sample resolution.
+  Downbeats are the phase of the beat grid with the most onset strength. The audio comes
+  from the transcription audio-preparation adapter (`Mixer::dry`, 16 kHz mono, so clip and
+  track gain apply and effect chains are ignored), for the whole mix or one clip, track or
+  range.
+- **Sync actions** live in the control layer's `beats` helper, shared by the editor, CLI and
+  MCP: `markers_at_beats_command` (every beat, every Nth beat or downbeats only; idempotent)
+  and `sync_cuts_command`, which snaps the selected clips' cut points to the nearest beat or
+  marker within `max_shift` as roll edits (both clips at a shared cut move, source content
+  stays put, linked companions follow through the normal link propagation) or splits clips at
+  the targets. Each builds one `Command::Batch`; edits that would overlap, collapse a clip or
+  touch a locked track are skipped and reported. Edits are rounded to the frame grid unless
+  `frame_align` is off.
+- **Editor.** The `markers` editor module owns the panel, the marker dialog and the ruler
+  flags (painted by `support`); `timeline` makes markers snap targets and hit-tests them.
 
 Automatic cuts live in the control layer's `autocut` helper, shared by the editor,
 CLI and MCP. The legacy silence-trimming helper calls the same detector. Analysis
@@ -550,12 +603,3 @@ logic with explicit track scope and validates companion closure and locks. Rever
 ordered range commands are wrapped in one serializable batch for undo/redo.
 The editor's `autocut` module owns ephemeral review state, cancellable background
 analysis, sliders, per-cut toggles and timeline overlays.
-
-## Auto-reframe
-
-The control layer's `reframe` helper owns deterministic low-resolution saliency,
-scene-change resets, a dead zone and rate-limited follow, path simplification and
-a snapshot-guarded command batch. Existing media decoders sample video in source
-time, including trims. The editor's `reframe` module owns settings and a worker
-with atomic progress/cancel; the CLI and MCP use the same helper. No runtime
-tracking state is stored in the project and the format schema is unchanged.

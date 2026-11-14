@@ -2,6 +2,7 @@
 //! No decoder or stream is stored in the serializable project. Assets stream: decoding,
 //! resampling and channel mapping run lazily in bounded blocks (see `AudioPool::prepare`).
 mod layout;
+mod beats;
 mod mixer;
 mod player;
 mod prepared;
@@ -10,6 +11,7 @@ mod speed;
 mod waveform;
 
 pub use layout::*;
+pub use beats::*;
 pub use mixer::*;
 pub use player::*;
 pub use prepared::PrepareOptions;

@@ -452,6 +452,7 @@ dependencies = [
  "parley",
  "pollster 0.4.0",
  "proptest",
+ "serde_json",
  "thiserror 2.0.21",
  "vello",
  "vello_cpu 0.4.0",

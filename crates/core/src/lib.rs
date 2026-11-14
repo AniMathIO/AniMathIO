@@ -3,6 +3,7 @@
 mod command;
 mod effects;
 mod keyframes;
+mod marker;
 mod model;
 mod params;
 mod time;
@@ -12,6 +13,7 @@ mod vector;
 pub use command::*;
 pub use effects::*;
 pub use keyframes::*;
+pub use marker::*;
 pub use model::*;
 pub use params::*;
 pub use time::*;

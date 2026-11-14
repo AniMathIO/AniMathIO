@@ -504,7 +504,11 @@ fn transform_value(transform: &Transform, property: TransformProperty) -> f64 {
     }
 }
 
-fn with_transform(mut transform: Transform, property: TransformProperty, value: f64) -> Transform {
+pub(crate) fn with_transform(
+    mut transform: Transform,
+    property: TransformProperty,
+    value: f64,
+) -> Transform {
     match property {
         TransformProperty::X => transform.x = value,
         TransformProperty::Y => transform.y = value,

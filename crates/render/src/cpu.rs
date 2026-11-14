@@ -267,7 +267,12 @@ fn composite_layer(ctx: &mut RenderContext, frame: &Frame) -> Result<(), Error> 
     Ok(())
 }
 
-fn draw_image(ctx: &mut RenderContext, frame: &Frame) -> Result<(), Error> {
+fn draw_image(
+    ctx: &mut RenderContext,
+    frame: &Frame,
+    clip: &SceneClip,
+    size: Size,
+) -> Result<(), Error> {
     frame.validate()?;
     let (width, height) = check_size(frame.size)?;
     // Use a fresh exactly-sized vector: Vello's cast requires capacity divisible by four.
@@ -282,11 +287,17 @@ fn draw_image(ctx: &mut RenderContext, frame: &Frame) -> Result<(), Error> {
         image: ImageSource::Pixmap(Arc::new(pixmap)),
         sampler: ImageSampler::default(),
     });
-    ctx.set_paint_transform(Affine::scale_non_uniform(
-        1.0 / f64::from(width),
-        1.0 / f64::from(height),
+    let (x, y, w, h) = media_fit_rect(clip, size, frame.size);
+    ctx.set_paint_transform(
+        Affine::translate((x, y))
+            * Affine::scale_non_uniform(w / f64::from(width), h / f64::from(height)),
+    );
+    ctx.fill_rect(&Rect::new(
+        x.max(0.),
+        y.max(0.),
+        (x + w).min(1.),
+        (y + h).min(1.),
     ));
-    ctx.fill_rect(&Rect::new(0.0, 0.0, 1.0, 1.0));
     ctx.set_paint_transform(Affine::IDENTITY);
     Ok(())
 }
@@ -302,10 +313,10 @@ impl CpuBackend {
         video: &mut dyn FrameSource,
     ) -> Result<(), Error> {
         match &clip.kind {
-            ClipKind::Image(id) => draw_image(ctx, pool.image(id)?.as_ref())?,
+            ClipKind::Image(id) => draw_image(ctx, pool.image(id)?.as_ref(), clip, size)?,
             ClipKind::Video(id) => {
                 if let Some(frame) = video.frame_at(id, clip.source_time) {
-                    draw_image(ctx, &frame)?;
+                    draw_image(ctx, &frame, clip, size)?;
                 } else {
                     self.placeholder(
                         ctx,
@@ -716,5 +727,76 @@ impl CpuBackend {
         self.text(ctx, resources, size, label, 0.12, [255; 4])?;
         ctx.set_transform(unit);
         Ok(())
+    }
+}
+
+/// Unit-square media bounds, centred and fitted to the physical placeholder box.
+pub(crate) fn media_fit_rect(clip: &SceneClip, canvas: Size, source: Size) -> (f64, f64, f64, f64) {
+    let Some(animathio_core::ParamValue::String(mode)) = clip.params.get("media_fit") else {
+        return (0., 0., 1., 1.);
+    };
+    let box_ratio = (f64::from(canvas.0) * clip.transform.scale_x).abs()
+        / (f64::from(canvas.1) * clip.transform.scale_y).abs();
+    let ratio = (f64::from(source.0) / f64::from(source.1)) / box_ratio;
+    if !ratio.is_finite() || ratio <= 0. {
+        return (0., 0., 1., 1.);
+    }
+    let (w, h) = match (mode.as_str(), ratio >= 1.) {
+        ("cover", true) | ("contain", false) => (ratio, 1.),
+        ("cover", false) | ("contain", true) => (1., 1. / ratio),
+        _ => (1., 1.),
+    };
+    ((1. - w) / 2., (1. - h) / 2., w, h)
+}
+
+#[cfg(test)]
+mod media_fit_tests {
+    #[test]
+    fn cover_crops_and_contain_letterboxes() {
+        let mut project = animathio_core::Project::default();
+        let mut clip = animathio_core::Clip::new(
+            animathio_core::ClipId(1),
+            animathio_core::ClipKind::Image(animathio_core::AssetId::of(b"image")),
+            animathio_core::TimeRange::new(animathio_core::Time(0), animathio_core::Time(100))
+                .unwrap(),
+        );
+        clip.params.insert(
+            "media_fit".into(),
+            animathio_core::ParamValue::String("contain".into()),
+        );
+        animathio_core::Command::Batch {
+            commands: vec![
+                animathio_core::Command::AddAsset {
+                    id: animathio_core::AssetId::of(b"image"),
+                    asset: animathio_core::Asset {
+                        name: "image.png".into(),
+                        media_type: "image/png".into(),
+                    },
+                },
+                animathio_core::Command::AddTrack {
+                    track: animathio_core::Track::new(animathio_core::TrackId(1), "Video"),
+                    index: 0,
+                },
+                animathio_core::Command::AddClip {
+                    track: animathio_core::TrackId(1),
+                    clip,
+                },
+            ],
+        }
+        .apply(&mut project)
+        .unwrap();
+        let mut scene = animathio_core::evaluate(&project, animathio_core::Time(0));
+        assert_eq!(
+            super::media_fit_rect(&scene.clips[0], (100, 100), (200, 100)),
+            (0., 0.25, 1., 0.5)
+        );
+        scene.clips[0].params.insert(
+            "media_fit".into(),
+            animathio_core::ParamValue::String("cover".into()),
+        );
+        assert_eq!(
+            super::media_fit_rect(&scene.clips[0], (100, 100), (200, 100)),
+            (-0.5, 0., 2., 1.)
+        );
     }
 }

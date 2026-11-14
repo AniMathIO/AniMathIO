@@ -10,8 +10,8 @@ use animathio_control::{
 };
 use animathio_core::{
     Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, Command, EffectId, FrameRate, History,
-    Interpolation, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track,
-    TrackId, Transform, TransformProperty, evaluate,
+    Interpolation, MarkerId, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange,
+    Track, TrackId, Transform, TransformProperty, evaluate,
 };
 use animathio_plugin_api::PluginKind;
 use animathio_plugin_host::PluginHost;
@@ -38,6 +38,7 @@ use crate::timeline::{self, TimelineLayout, TrimEdge};
 pub(crate) mod actions;
 mod audio_effects;
 mod autocut;
+mod caption_styles;
 mod clip_ops;
 mod color_edit;
 mod commands;
@@ -46,14 +47,15 @@ mod dialogs;
 mod export_panel;
 mod fields;
 mod inspector_view;
+mod markers;
 mod media_pool;
 mod menus;
 mod playback_glue;
 mod project_io;
-mod reframe;
 mod start_screen;
 mod subtitles;
 mod support;
+mod templates;
 mod timeline_thumbnails;
 mod timeline_view;
 mod titles;
@@ -61,6 +63,7 @@ mod transport;
 mod viewer;
 mod workspace;
 
+use dialogs::ReplaceProject;
 use support::*;
 pub(crate) use support::{
     color_from_json, load_plugins, point_from_json, read_project_with_recovery,
@@ -201,9 +204,11 @@ enum InputTarget {
         axis: usize,
     },
     Timecode,
-    /// A transform/parameter field applied to every selected clip.
+    /// A transform/parameter field applied to every clip of the selection it
+    /// was created for (not whatever is selected when it commits on blur).
     SelectionField {
         field: Field,
+        ids: BTreeSet<ClipId>,
     },
 }
 
@@ -304,6 +309,21 @@ struct TrimDrag {
     ripple: bool,
 }
 
+/// Dragging a ruler marker; `current` is the (snapped) time under the pointer.
+struct MarkerDrag {
+    id: MarkerId,
+    origin: Time,
+    current: Time,
+}
+
+/// A marker as painted on the ruler (with any drag already applied).
+struct MarkerPaint {
+    time: Time,
+    end: Option<Time>,
+    color: Hsla,
+    name: String,
+}
+
 /// Dragging a fade handle: `current` is the fade length in ticks.
 struct FadeDrag {
     clip_id: ClipId,
@@ -319,6 +339,7 @@ enum TimelineGesture {
     Trim(TrimDrag),
     Fade(FadeDrag),
     Marquee(MarqueeDrag),
+    Marker(MarkerDrag),
 }
 
 /// A right-click context menu target on the timeline.
@@ -404,6 +425,7 @@ struct TimelineSnapshot {
     row_height: f32,
     marks: InOut,
     autocuts: Vec<(TimeRange, usize)>,
+    markers: Vec<MarkerPaint>,
     snap_line: Option<Time>,
     /// Rubber band in canvas coordinates: `(left, top, right, bottom)`.
     marquee: Option<(f32, f32, f32, f32)>,
@@ -469,6 +491,9 @@ pub(crate) struct Editor {
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
     path: Option<PathBuf>,
+    /// Bumped whenever the project is replaced (new, open, v1/Manim replace), so
+    /// background results started on an older project are discarded.
+    project_session: u64,
     clock: Box<dyn Clock>,
     playing: bool,
     position: Time,
@@ -508,9 +533,12 @@ pub(crate) struct Editor {
     export_queue_open: bool,
     /// The automatic-subtitle job, running or finished (see `editor/subtitles.rs`).
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
+    /// Remembered caption look: used for new subtitles and by the caption inspector.
+    caption_look: animathio_control::CaptionStyleParams,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
-    reframe_panel: Option<reframe::ReframePanel>,
+    /// The markers and beat-sync panel (see `editor/markers.rs`).
+    marker_panel: Option<markers::Panel>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
     last_export_tick: Instant,
@@ -598,6 +626,7 @@ impl Editor {
             pool,
             audio_ids,
             path,
+            project_session: 0,
             clock,
             playing: false,
             position: Time(0),
@@ -631,9 +660,10 @@ impl Editor {
             export_queue: crate::export_queue::ExportQueue::default(),
             export_queue_open: false,
             subtitle_job: None,
+            caption_look: animathio_control::CaptionStyleParams::default(),
             subtitle_panel_open: false,
             autocut_review: None,
-            reframe_panel: None,
+            marker_panel: None,
             pending_export: None,
             last_export_tick: Instant::now(),
             keyframe_drag: None,
@@ -689,6 +719,18 @@ impl Editor {
                 .push(crate::style::Toast::info("Recovered from autosave"));
         }
         this.request_render(Time(0));
+        // A window-manager close asks before dropping unsaved work.
+        let close_view = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            close_view
+                .update(cx, |this, cx| {
+                    if this.dirty {
+                        this.replace_project(ReplaceProject::CloseWindow, window, cx);
+                    }
+                    !this.dirty
+                })
+                .unwrap_or(true)
+        });
         window.focus(
             if this.is_start_screen() {
                 &this.focus_handle
@@ -720,10 +762,9 @@ impl Editor {
                             cx.notify();
                         }
                         this.autosave_tick(cx);
-                        // Background-job progress is redrawn at 4 Hz, not every frame.
+                        // Export progress is redrawn at 4 Hz, not every frame.
                         if (this.pump_export_queue()
-                            || (this.export_queue.is_busy()
-                                || this.reframe_panel.as_ref().is_some_and(|p| p.busy))
+                            || this.export_queue.is_busy()
                                 && this.last_export_tick.elapsed() >= Duration::from_millis(250))
                             && !this.is_start_screen()
                         {
@@ -834,13 +875,13 @@ impl Render for Editor {
         if let Some(panel) = self.export_queue_panel(cx) {
             root = root.child(panel);
         }
-        if let Some(panel) = self.reframe_view(cx) {
-            root = root.child(panel);
-        }
         if let Some(panel) = self.autocut_panel(cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.subtitle_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.marker_panel(cx) {
             root = root.child(panel);
         }
         if let Some(menu) = self.context_menu_dropdown(cx) {
