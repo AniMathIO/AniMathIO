@@ -35,7 +35,8 @@ pub use edit::{
     detect_silence, timecode, title_command, trim_silence,
 };
 pub use effects::{
-    EffectAddParams, EffectAdded, EffectInfo, EffectParamInfo, add_effect_command, effect_infos,
+    AudioEffectAddParams, AudioEffectAdded, EffectAddParams, EffectAdded, EffectInfo,
+    EffectParamInfo, add_audio_effect_command, add_effect_command, effect_infos,
 };
 pub use error::ControlError;
 pub use export_presets::ExportPreset;

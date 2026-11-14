@@ -36,9 +36,23 @@ mod effect_world {
     });
 }
 
+/// Bindings for the audio-effect world (`audio-effect-plugin`); see [`effect_world`].
+mod audio_world {
+    wasmtime::component::bindgen!({
+        path: "../plugin-api/wit",
+        world: "audio-effect-plugin",
+        with: {
+            "animathio:plugin/types": crate::animathio::plugin::types,
+            "animathio:plugin/host": crate::animathio::plugin::host,
+        },
+    });
+}
+
+mod audio;
 mod discovery;
 mod effect_params;
 mod effects;
+pub use audio::AudioEffectHandle;
 pub use discovery::{PluginDirectory, plugin_search_dirs};
 pub use effect_params::{mentions_effect_params, validate_effect_command};
 pub use effects::{EffectDescriptor, EffectHandle, EffectParam};
@@ -121,6 +135,20 @@ pub struct SandboxLimits {
     pub effect_fuel_per_pixel: u64,
     /// Epoch deadline ticks for pixel effects (default: 1,000, a ~10 s backstop).
     pub effect_epoch_deadline_ticks: u64,
+    /// Most frames one audio-effect call may process (default: 65,536, about 1.4 s at
+    /// 48 kHz). Larger blocks are rejected before any plugin code runs.
+    pub max_audio_block_frames: usize,
+    /// Largest opaque state blob an audio effect may carry between blocks (default: 64 KiB).
+    pub max_audio_state_bytes: usize,
+    /// Ceiling on the memory of one audio-effect call (default: 256 MiB). The limit actually
+    /// applied is 16 MiB plus 64 bytes per interleaved sample, capped here.
+    pub audio_memory_bytes: usize,
+    /// Extra fuel per interleaved sample for audio effects, added to `fuel_per_call`
+    /// (default: 4,096, about 10x the cost of the heaviest first-party filter).
+    pub audio_fuel_per_sample: u64,
+    /// Epoch deadline ticks for audio effects (default: 200, a ~2 s backstop; a block is
+    /// worth well under 100 ms of real-time audio, so a stalled call is far over budget).
+    pub audio_epoch_deadline_ticks: u64,
 }
 
 impl Default for SandboxLimits {
@@ -134,6 +162,11 @@ impl Default for SandboxLimits {
             effect_memory_bytes: 1024 * 1024 * 1024,
             effect_fuel_per_pixel: 4096,
             effect_epoch_deadline_ticks: 1000,
+            max_audio_block_frames: 65_536,
+            max_audio_state_bytes: 64 * 1024,
+            audio_memory_bytes: 256 * 1024 * 1024,
+            audio_fuel_per_sample: 4096,
+            audio_epoch_deadline_ticks: 200,
         }
     }
 }
@@ -599,6 +632,8 @@ pub struct PluginHost {
     /// Registry and sandboxed runner for pixel-effect plugins, shared with every
     /// [`EffectHandle`] handed to a renderer.
     effects: Arc<effects::EffectRuntime>,
+    /// Registry and sandboxed, instance-pooled runner for audio-effect plugins.
+    audio_effects: Arc<audio::AudioRuntime>,
     /// Held only so its `Drop` stops and joins the epoch ticker thread.
     _epoch_ticker: Arc<EpochTicker>,
     /// One message per plugin package that was found but could not be loaded.
@@ -635,6 +670,13 @@ impl PluginHost {
         let output_cache = LruCache::new(NonZeroUsize::new(512).unwrap());
         let epoch_ticker = Arc::new(EpochTicker::start(engine.clone(), EPOCH_TICK_INTERVAL));
         let linker = Arc::new(linker);
+        let audio_effects = Arc::new(audio::AudioRuntime::new(
+            engine.clone(),
+            Arc::clone(&linker),
+            limits,
+            Arc::clone(&typeset),
+            Arc::clone(&epoch_ticker),
+        ));
         let effects = Arc::new(effects::EffectRuntime::new(
             engine.clone(),
             Arc::clone(&linker),
@@ -647,6 +689,7 @@ impl PluginHost {
             engine,
             linker,
             effects,
+            audio_effects,
             disk_cache,
             plugins: BTreeMap::new(),
             limits,
@@ -785,7 +828,13 @@ impl PluginHost {
 
         // Describe plugin to extract WIT manifest and parameter schema
         let mut store = self.create_store(CapabilityGrants::default())?;
-        let wit_manifest = if package.manifest.kinds.contains(&PluginKind::Effect) {
+        let wit_manifest = if package.manifest.kinds.contains(&PluginKind::AudioEffect) {
+            self.audio_effects
+                .register(&id, &component, &mut store)
+                .map_err(|e| {
+                    HostError::CompilationFailed(format!("audio effect plugin {id}: {e}"))
+                })?
+        } else if package.manifest.kinds.contains(&PluginKind::Effect) {
             self.effects
                 .register(&id, &component, &mut store)
                 .map_err(|e| HostError::CompilationFailed(format!("effect plugin {id}: {e}")))?
@@ -846,6 +895,20 @@ impl PluginHost {
     #[must_use]
     pub fn effects(&self) -> Vec<EffectDescriptor> {
         self.effects.descriptors()
+    }
+
+    /// Audio filters offered by every loaded audio-effect plugin, in plugin-id then listing order.
+    #[must_use]
+    pub fn audio_effects(&self) -> Vec<EffectDescriptor> {
+        self.audio_effects.descriptors()
+    }
+
+    /// A cheap handle that runs audio-effect plugins for the mixer. It shares this host's
+    /// plugin registry and warm-instance pools, so plugins loaded later become available to
+    /// existing handles.
+    #[must_use]
+    pub fn audio_effect_processor(&self) -> AudioEffectHandle {
+        AudioEffectHandle::new(Arc::clone(&self.audio_effects))
     }
 
     /// Check the effect parameters `command` would store against the loaded plugins'

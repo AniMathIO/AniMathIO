@@ -174,6 +174,19 @@ impl Exporter {
         self.ctx.set_effect_processor(processor);
     }
 
+    /// Install the plugin runner for clip and track audio effects (see
+    /// `PluginHost::audio_effect_processor`). Exporting a project that has active audio effects
+    /// fails without one.
+    pub fn set_audio_effect_processor(
+        &mut self,
+        processor: impl animathio_core::AudioEffectProcessor + 'static,
+    ) {
+        self.mixer = self
+            .mixer
+            .clone()
+            .with_effect_processor(Arc::new(processor));
+    }
+
     /// Render exactly the frame used as encoder input. Uses the same evaluation and renderer as preview.
     pub fn render_frame(
         &mut self,

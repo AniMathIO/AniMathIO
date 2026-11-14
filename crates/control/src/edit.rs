@@ -148,8 +148,12 @@ pub fn detect_silence(
             "no audio clips to analyse".to_owned(),
         ));
     };
+    // Silence is judged on the dry source signal, so no effect processor is needed.
     let samples = pool
-        .mix(&analysis, TimeRange::new(start, end)?, ANALYSIS_RATE, 1)
+        .prepare(ANALYSIS_RATE, 1)
+        .map_err(audio_error)?
+        .dry()
+        .mix(&analysis, TimeRange::new(start, end)?)
         .map_err(audio_error)?;
     // Tick of the first mixed sample (the mixer rounds the range start up).
     // Range starts are nonnegative, so this is a ceiling division.

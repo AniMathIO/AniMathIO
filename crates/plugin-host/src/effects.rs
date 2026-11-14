@@ -285,6 +285,25 @@ fn convert_descriptor(
     plugin_id: &str,
     descriptor: crate::effect_world::exports::animathio::plugin::frame_effects::EffectDescriptor,
 ) -> Result<EffectDescriptor, String> {
+    build_descriptor(
+        plugin_id,
+        descriptor.id,
+        descriptor.name,
+        descriptor.description,
+        descriptor.params,
+    )
+}
+
+/// Validate a plugin-declared descriptor (id syntax, numeric parameters, finite ranges and
+/// defaults inside them) and convert it to the host's plain-data form. Shared by pixel and
+/// audio effects, which declare their filters identically.
+pub(crate) fn build_descriptor(
+    plugin_id: &str,
+    id: String,
+    name: String,
+    description: String,
+    specs: Vec<wit_types::ParamSpec>,
+) -> Result<EffectDescriptor, String> {
     let valid_id = |id: &str| {
         !id.is_empty()
             && id.len() <= 64
@@ -292,16 +311,16 @@ fn convert_descriptor(
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
     };
-    if !valid_id(&descriptor.id) {
-        return Err(format!("invalid effect id {:?}", descriptor.id));
+    if !valid_id(&id) {
+        return Err(format!("invalid effect id {id:?}"));
     }
     let mut params = Vec::new();
     let mut seen = BTreeSet::new();
-    for spec in descriptor.params {
+    for spec in specs {
         let wit_types::ParamKind::Number(range) = spec.kind else {
             return Err(format!(
-                "effect {} parameter {:?} must be a number",
-                descriptor.id, spec.id
+                "effect {id} parameter {:?} must be a number",
+                spec.id
             ));
         };
         let finite = [range.min, range.max, range.default, range.step]
@@ -314,8 +333,8 @@ fn convert_descriptor(
             || !(range.min..=range.max).contains(&range.default)
         {
             return Err(format!(
-                "effect {} has an invalid parameter {:?}",
-                descriptor.id, spec.id
+                "effect {id} has an invalid parameter {:?}",
+                spec.id
             ));
         }
         params.push(EffectParam {
@@ -329,9 +348,9 @@ fn convert_descriptor(
     }
     Ok(EffectDescriptor {
         plugin_id: plugin_id.to_owned(),
-        effect_id: descriptor.id,
-        name: descriptor.name,
-        description: descriptor.description,
+        effect_id: id,
+        name,
+        description,
         params,
     })
 }

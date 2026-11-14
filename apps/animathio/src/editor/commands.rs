@@ -110,7 +110,9 @@ impl Editor {
             let result = cx
                 .background_spawn(async move {
                     load_audio(&mut pool, &project, &assets)?;
-                    let mixer = pool.prepare(rate, channels).map_err(|e| e.to_string())?;
+                    let mixer = crate::playback::with_audio_effects(
+                        pool.prepare(rate, channels).map_err(|e| e.to_string())?,
+                    );
                     Ok::<_, String>((pool, mixer))
                 })
                 .await;
@@ -170,6 +172,18 @@ impl Editor {
                 Ok(value) => self.commit_selection_field(&field, value, cx),
                 Err(_) => self.error = Some("invalid number".into()),
             },
+            InputTarget::AudioEffectParam { clip, effect, name } => {
+                match buffer.trim().parse::<f64>() {
+                    Ok(value) => {
+                        if let Some(command) =
+                            self.audio_effect_param_command(clip, effect, &name, value)
+                        {
+                            self.execute(&command, cx);
+                        }
+                    }
+                    Err(_) => self.error = Some("invalid number".into()),
+                }
+            }
             InputTarget::PluginNumber { id, name } => {
                 let Ok(value) = buffer.trim().parse::<f64>() else {
                     self.error = Some("invalid number".into());

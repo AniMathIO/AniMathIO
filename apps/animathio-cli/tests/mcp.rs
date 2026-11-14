@@ -98,6 +98,8 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
         "list_transitions",
         "list_effects",
         "add_effect",
+        "list_audio_effects",
+        "add_audio_effect",
     ] {
         assert!(
             names.contains(&expected),

@@ -269,7 +269,7 @@ impl Editor {
         self.commit_input_value(target, text, cx);
     }
 
-    fn number_control(
+    pub(super) fn number_control(
         &mut self,
         key: &str,
         target: InputTarget,
@@ -418,6 +418,9 @@ impl Editor {
                     .filter_map(|id| self.scrub_field_command(id, &field, value))
                     .collect();
                 Some(Command::Batch { commands })
+            }
+            InputTarget::AudioEffectParam { clip, effect, name } => {
+                self.audio_effect_param_command(clip, effect, &name, value)
             }
             InputTarget::PluginNumber { id, name } => self.plugin_number_command(id, &name, value),
             InputTarget::PluginPoint { id, name, axis } => {
@@ -795,7 +798,7 @@ impl Editor {
     }
 
     /// A row label that scrubs its number when dragged horizontally.
-    fn scrub_label(
+    pub(super) fn scrub_label(
         key: &str,
         text: String,
         target: InputTarget,
@@ -823,7 +826,7 @@ impl Editor {
     }
 
     /// A `label ........ control` row without the keyframe column.
-    fn param_row_flush(label: impl IntoElement, control: impl IntoElement) -> Div {
+    pub(super) fn param_row_flush(label: impl IntoElement, control: impl IntoElement) -> Div {
         div()
             .min_h(px(32.))
             .flex()
@@ -1384,7 +1387,8 @@ impl Editor {
             }
         }
         if matches!(clip.kind, ClipKind::Audio(_)) {
-            let rows = self.audio_rows(id, window, cx);
+            let mut rows = self.audio_rows(id, window, cx);
+            rows.extend(self.audio_effect_rows(id, window, cx));
             body = body.child(self.section(
                 "audio",
                 "Audio",

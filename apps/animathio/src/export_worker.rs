@@ -54,6 +54,7 @@ impl ExportTask {
                     let (mut host, _, _) = crate::editor::load_plugins();
                     if let Some(host) = &host {
                         exporter.set_effect_processor(host.effect_processor());
+                        exporter.set_audio_effect_processor(host.audio_effect_processor());
                     }
                     let destination = animathio_export::Destination {
                         path: output,

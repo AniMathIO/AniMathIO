@@ -51,3 +51,4 @@ build_plugin text
 build_plugin latex
 build_plugin graph
 build_plugin effects-basic
+build_plugin audio-basic

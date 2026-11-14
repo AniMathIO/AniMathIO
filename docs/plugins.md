@@ -6,7 +6,8 @@ is compiled to `wasm32-wasip2` and packaged as an `.amplugin` — a zip containi
 `plugin.toml` (metadata) and `plugin.wasm` (the component).
 
 A plugin is a pure function of `(params, time)` returning vector scenes — or, for an
-*effect* plugin, a pure function of `(pixels, params, time)` returning pixels. It never
+*effect* plugin, a pure function of `(pixels, params, time)` returning pixels, or for an
+*audio-effect* plugin, a pure function of `(PCM block, params, state)` returning PCM. It never
 touches files, sockets, the GPU or a font engine directly. Everything it needs is
 provided by **host imports**.
 
@@ -15,7 +16,7 @@ provided by **host imports**.
 The contract is `crates/plugin-api/wit/plugin.wit`:
 
 ```wit
-package animathio:plugin@0.2.1;
+package animathio:plugin@0.2.2;
 
 interface types { /* shared vector + schema types, see below */ }
 
@@ -44,6 +45,14 @@ world effect-plugin {
     export describe: func() -> manifest;
     export frame-effects;
 }
+
+// Audio-effect plugins implement this world (see "Audio-effect plugins" below).
+world audio-effect-plugin {
+    import host;
+    use types.{manifest};
+    export describe: func() -> manifest;
+    export audio-effects;
+}
 ```
 
 A clip-source or animation component implements the four exports of `world plugin`. The first three are selected by the
@@ -55,12 +64,16 @@ separate `effect-plugin` world below.
 
 ### API versions
 
-The WIT package is `animathio:plugin@0.2.1`. `0.2.1` is purely additive over `0.2.0`
-(it adds the `frame-effects` interface and the `effect-plugin` world), and the component
-model matches imports by semver-compatible version, so components built against
-`0.2.0` still link and run unchanged — the repository keeps a prebuilt `0.2.0` hello
-component as a test fixture. `plugin.toml` accepts any `0.2.x` `api_version`; effect
-plugins must declare `0.2.1` or later.
+The WIT package is `animathio:plugin@0.2.2`. `0.2.1` added the `frame-effects` interface
+and the `effect-plugin` world; `0.2.2` adds the `audio-effects` interface, the
+`audio-effect-plugin` world. The WIT `plugin-kind` enum is deliberately unchanged (a new
+case would fail the type check for `0.2.0` components); an audio-effect plugin reports
+`effect` from `describe` and declares `audio-effect` in `plugin.toml`, which the host
+treats as authoritative. Both bumps are purely additive over `0.2.0`, and the component model matches imports by
+semver-compatible version, so components built against `0.2.0` or `0.2.1` still link and
+run unchanged — the repository keeps a prebuilt `0.2.0` hello component as a test fixture.
+`plugin.toml` accepts any `0.2.x` `api_version`; effect plugins must declare `0.2.1` or
+later and audio-effect plugins `0.2.2` or later.
 
 ### Host imports
 
@@ -173,12 +186,12 @@ let t = time_ticks as f64 / TICKS_PER_SECOND;
 The manifest stored at the archive root of an `.amplugin`:
 
 ```toml
-api_version = "0.2.0"          # any "0.2.x"; effect plugins need "0.2.1"
+api_version = "0.2.0"          # any "0.2.x"; effect plugins need "0.2.1", audio-effect plugins "0.2.2"
 id = "com.example.hello"       # reverse-domain; [a-zA-Z0-9._-]
 name = "Hello"
 version = "0.1.0"
 description = "Minimal example plugin: a filled circle"
-kinds = ["clip-source"]        # "clip-source" | "effect" | "animation"; an effect plugin declares only ["effect"]
+kinds = ["clip-source"]        # "clip-source" | "effect" | "animation" | "audio-effect"; an effect or audio-effect plugin declares only that one kind
 capabilities = []              # requested host grants; empty = sandbox only
 ```
 
@@ -228,6 +241,68 @@ canvas height) and `opacity` (`amount`). Color filters work in linear light with
 `powf`-free sRGB table lookup, `invert` on encoded channels, `blur` on premultiplied
 linear light with edge replication. Its output is checked bit-for-bit against the former
 builtin implementation by `crates/plugin-host/tests/effects.rs` and by the render goldens.
+
+## Audio-effect plugins
+
+An audio-effect plugin is a filter library for sound. It declares
+`kinds = ["audio-effect"]` with `api_version = "0.2.2"` (or later), implements the
+`audio-effect-plugin` world and is built like any other plugin
+(`wit_bindgen::generate!({ path: ..., world: "audio-effect-plugin" })`). Its exports:
+
+```wit
+interface audio-effects {
+    use types.{param-map, param-spec};
+    record audio-effect-descriptor { id: string, name: string, description: string, params: list<param-spec> }
+    record audio-block { sample-rate: u32, channels: u16, start-ticks: s64, samples: list<f32> }
+    record block-output { samples: list<f32>, state: option<list<u8>> }
+    list-audio-effects: func() -> list<audio-effect-descriptor>;
+    process-block: func(effect: string, block: audio-block, params: param-map,
+                        state: option<list<u8>>) -> result<block-output, string>;
+}
+```
+
+- `list-audio-effects` advertises each filter exactly like `list-effects` does for pixels:
+  stable `id` (`[a-z0-9_-]`), name, description and `number` parameters (`min`/`max`/`step`
+  are UI hints, `default` seeds new instances). The editor's Effects tab and the MCP
+  `list_audio_effects` tool are generated from these descriptors.
+- `process-block` receives one block of interleaved `f32` PCM (`1..=32` channels, up to
+  `max_audio_block_frames` frames) and must return exactly as many samples. `start-ticks`
+  is the time of the first frame in the chain's own timeline: clip-local ticks for a clip
+  chain, project ticks for a track chain. Parameters arrive already evaluated
+  (keyframes sampled at the block start); missing ones should fall back to the declared
+  defaults and out-of-range ones should be clamped rather than rejected, so keyframe
+  overshoot never stops playback. Return an `Err` diagnostic only for genuinely invalid
+  input.
+- **State.** The plugin keeps no memory between calls. Filters, envelope followers and
+  gates return their memory as the opaque `state` blob, and the host hands it back with
+  the next contiguous block (`none` for the first block of a signal). A well-behaved
+  plugin is block-size independent: processing a signal in blocks of any size with the
+  state carried over is bit-identical to one big block (first-party tests assert this).
+  The host caps the blob at `max_audio_state_bytes`.
+- The call must be a pure function of its arguments: preview and export both rely on
+  identical output.
+
+The host compiles each component once, resolves its imports once and then **pools warm
+instances**: a finished call returns its store to the plugin's pool (up to eight idle) and
+the next call reuses it after refilling fuel, epoch deadline and the memory limit. A
+trapped call discards its instance. Audio effects run in the mix worker or the export
+thread — never in the device callback.
+
+Projects reference an audio effect like a pixel effect (`EffectInstance { plugin, effect,
+params, bypass }`) on a clip's or a track's `audio_effects` chain; see
+[architecture.md](architecture.md#audio-effects) for the signal flow.
+
+First-party `org.animathio.audio-basic` provides (all processing in `f64`, block-size
+independent, deterministic):
+
+| Effect id | Parameters (default) | Notes |
+| --- | --- | --- |
+| `gain` | `gain_db` (0, −60…24) | Gain / trim. Stateless. |
+| `eq3` | `low_gain_db`/`mid_gain_db`/`high_gain_db` (0, ±18), `low_freq` (120 Hz), `mid_freq` (1 kHz), `mid_q` (1), `high_freq` (6 kHz) | RBJ low shelf, peaking EQ and high shelf (slope 1). All gains 0 is an exact identity. |
+| `compressor` | `threshold_db` (−18), `ratio` (4), `attack_ms` (10), `release_ms` (100), `makeup_db` (0) | Feed-forward, channel-linked peak detector, gain reduction smoothed in dB. |
+| `gate` | `threshold_db` (−50), `attack_ms` (2), `hold_ms` (50), `release_ms` (150), `range_db` (60) | Starts open; closes to `−range_db` below the threshold after the hold. |
+| `highpass` | `frequency` (80 Hz, 10…2000) | 2nd-order Butterworth, 12 dB/octave. |
+| `voice_cleanup` | `highpass_hz` (80), `gate_threshold_db` (−55), `deess_freq` (6.5 kHz), `deess_threshold_db` (−30), `deess_amount` (0.5) | Preset: high-pass, gentle 12 dB gate, then a split-band de-esser (Linkwitz-Riley crossover; only the band above `deess_freq` is attenuated). No spectral processing. |
 
 ## Building an `.amplugin`
 
@@ -291,6 +366,21 @@ Pixel-effect calls use a frame-scaled budget (`SandboxLimits`):
 
 A trap, limit violation, wrong-sized output or `Err` result fails the frame with
 `render::Error::Effect`, and the caller's pixels are left untouched.
+
+Audio-effect calls use a block-scaled budget (`SandboxLimits`):
+
+| Limit | Default |
+| --- | --- |
+| Block size | 65,536 frames (`max_audio_block_frames`, ~1.4 s at 48 kHz) and 1–32 channels; larger blocks are rejected before any plugin code runs |
+| State blob | 64 KiB (`max_audio_state_bytes`), in and out |
+| Memory | 16 MiB + 64 bytes per interleaved sample, capped at 256 MiB (`audio_memory_bytes`) |
+| Fuel | `fuel_per_call` + 4,096 per interleaved sample (`audio_fuel_per_sample`) |
+| Epoch deadline | 200 ticks → ~2 s backstop (`audio_epoch_deadline_ticks`) |
+
+A trap, limit violation, wrong-sized or non-finite output or `Err` result fails the block;
+the effect is skipped: preview passes the audio through that effect unprocessed and shows
+a warning toast, while export fails with an error naming the effect
+(`audio effect <plugin>/<effect>: ...`) rather than writing unprocessed audio.
 
 Host imports are separately capped:
 
@@ -505,9 +595,10 @@ scale with it. Normalized shapes remain static unless their parameters are keyfr
 `[{"MoveTo":[0,0]},{"QuadTo":[[0.5,1],[1,0]]},"Close"]`.
 `CurveTo` carries three points (two controls and endpoint).
 
-The component ABI is now `animathio:plugin@0.2.1`: `0.2.0` (explicit scene units
-and text alignment) plus the additive `effect-plugin` world. Rebuild components against
-the current WIT and set `api_version` to `0.2.0` or `0.2.1` in `plugin.toml`; old 0.1
+The component ABI is now `animathio:plugin@0.2.2`: `0.2.0` (explicit scene units
+and text alignment) plus the additive `effect-plugin` (0.2.1) and `audio-effect-plugin`
+(0.2.2) worlds. Rebuild components against the current WIT and set `api_version` to
+`0.2.0`, `0.2.1` or `0.2.2` in `plugin.toml`; old 0.1
 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.

@@ -22,7 +22,7 @@ the render/audio/export data flow. The authority for these rules is
 | `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with tree-sitter. |
 | `apps/animathio-cli` | Headless validation, PNG rendering, MP4 export, importers and the MCP sidecar. |
 | `apps/animathio` | The GPUI desktop editor: a thin view over the command-only core, plus an export worker and dialog. |
-| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `trap` (sandbox fixture), and `examples/hello`. |
+| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `audio-basic`, `trap` (sandbox fixture), and `examples/hello`. |
 
 Video clips decode through `render::FrameSource` via the `media` crate's
 `MediaPool`, so real video frames appear in preview, the CLI and headless
@@ -80,7 +80,7 @@ Rules that keep the layers honest:
 
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
-`fields`, `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
+`fields`, `audio_effects` (inspector audio-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
@@ -320,11 +320,64 @@ flowchart LR
   `Mixer::mix(project, range)` produces immutable snapshots shared by preview and
   export; `Player` consumes the ring buffer and updates the latency-corrected
   master clock. The device callback only consumes the ring; `Player::now()` is
-  quantized to callbacks and freezes on underflow.
+  quantized to callbacks and freezes on underflow. Clip and track audio-effect
+  chains run inside `Mixer::mix` (see [Audio effects](#audio-effects)).
 - **Export.** Export steps the render path frame by frame —
   `render(evaluate(project, t))` per frame plus the audio mixer's snapshot for
   each inter-frame block — and encodes with `media::Mp4Encoder`. It is never a
   recording of playback.
+
+## Audio effects
+
+Audio effects mirror the pixel-effect design: the model owns plain data, a plugin owns the
+DSP, and a port in `core` connects them.
+
+- **Model.** `Clip::audio_effects` and `Track::audio_effects` are ordered chains of
+  `EffectInstance { id, plugin, effect, params, bypass }`. Effect ids are unique within a
+  clip (across its video and audio chains, so `Target::Effect` keyframes address either
+  unambiguously) or within a track. Chains are edited only through
+  `Command::{AddAudioEffect, RemoveAudioEffect, MoveAudioEffect, SetAudioEffectParam,
+  SetAudioEffectBypass}` addressed by `AudioChain::{Clip(id), Track(id)}`; every command
+  returns its exact inverse. Track-chain edits, like gain and mute, work on locked tracks.
+  Schema 4 introduced the fields (`format` migrates 3 → 4 without changes; fields absent
+  mean "no effects").
+- **Signal flow.** Per clip: source → clip `gain`/`muted` → clip chain → dissolve fades;
+  per track: sum of clips → track chain → track gain; then the sum of tracks. A clip's
+  chain parameters may be keyframed (`Target::Effect`) and are sampled at the start of
+  each block; track chains use their base parameters. Bypassed effects are skipped but keep
+  their parameters. A project without active chains takes the original per-frame path
+  unchanged (bit-identical output).
+- **Port.** `core::AudioEffectProcessor` takes `(EffectInstance, AudioBlock, state)` and
+  returns processed samples plus the next state blob. `plugin-host`'s `AudioEffectHandle`
+  implements it over the `audio-effect-plugin` world (pooled warm instances, fuel/epoch/
+  memory limits, see [plugins.md](plugins.md#audio-effect-plugins)); the mixer receives it
+  through `Mixer::with_effect_processor`, the exporter through
+  `Exporter::set_audio_effect_processor`, and the editor registers one for playback.
+  `Mixer::dry()` ignores all chains for analyses such as silence detection.
+- **Determinism.** Effects need state across blocks, yet `mix` must stay a pure function of
+  `(project, range)` that any caller may slice any way. The mixer therefore processes each
+  chain on a fixed lattice of 2048-frame blocks. Within a 64-block segment the state
+  flows exactly from block to block; the state entering a segment is defined as the state
+  reached after a fresh run over the preceding second of audio (or nothing at a clip's
+  first block). Whether blocks come from a cache or are recomputed, the result is
+  identical, so preview, export, seeks and `mix` calls over adjacent ranges agree
+  bit-for-bit. A bounded (96 MiB) LRU of processed blocks, shared by mixer clones, makes
+  sequential playback and export cost one pass of each chain; a cold seek costs at most
+  one segment plus the warm-up.
+- **Failures.** A missing, trapping or over-limit effect plugin follows the video-effect
+  policy. The default (strict) mixer used by export fails with an error naming the effect;
+  the preview mixer (`Mixer::lenient`) skips the failing effect so the audio passes through
+  it unprocessed, records a warning in an `EffectWarnings` sink (the editor shows a toast) and
+  does not cache the affected blocks.
+- **Threading.** Plugin calls happen only in the mixer worker or the export thread. The
+  device callback still only pops the ring: it allocates nothing and takes no lock.
+- **Cost.** Measured through the sandbox with pooled instances, 2048-frame blocks, 48 kHz
+  stereo, per second of audio on a shared development machine (debug profile, optimized
+  dependencies; `cargo test -p animathio-plugin-host --features test-support --test
+  audio_effects -- --ignored --nocapture bench_audio`): `gain` 1.3 ms, `highpass` 1.9 ms,
+  `eq3` 2.7 ms, `gate` 3.2 ms, `compressor` 3.7 ms, `voice_cleanup` 6.5 ms. Even a stack of
+  every effect is well under 2 % of real time; the state warm-up adds about a third on top
+  while a chain is played sequentially from a cold segment.
 
 ## Typed parameter animation
 

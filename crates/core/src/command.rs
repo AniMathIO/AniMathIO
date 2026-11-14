@@ -1,7 +1,7 @@
 use crate::{
-    Animation, Asset, AssetId, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error, FrameRate,
-    Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform, Transition,
-    TransitionId, invalid,
+    Animation, Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error,
+    FrameRate, Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform,
+    Transition, TransitionId, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -203,6 +203,51 @@ pub enum Command {
         /// New value; `None` removes it (only if not animated).
         value: Option<f64>,
     },
+    /// Insert an audio effect into a clip's or track's ordered audio-effect chain.
+    AddAudioEffect {
+        /// Chain to edit.
+        chain: AudioChain,
+        /// Position in the chain.
+        index: usize,
+        /// Effect instance (with an id unique within the clip, or within the track).
+        effect: EffectInstance,
+    },
+    /// Remove an audio effect by id; fails if any animation targets it.
+    RemoveAudioEffect {
+        /// Chain to edit.
+        chain: AudioChain,
+        /// Effect identity.
+        effect: EffectId,
+    },
+    /// Move an audio effect to another position in its chain.
+    MoveAudioEffect {
+        /// Chain to edit.
+        chain: AudioChain,
+        /// Effect identity.
+        effect: EffectId,
+        /// New index in the chain after the move.
+        index: usize,
+    },
+    /// Set or remove a base parameter of an audio effect.
+    SetAudioEffectParam {
+        /// Chain to edit.
+        chain: AudioChain,
+        /// Effect identity.
+        effect: EffectId,
+        /// Parameter name.
+        name: String,
+        /// New value; `None` removes it (only if not animated).
+        value: Option<f64>,
+    },
+    /// Bypass or re-enable an audio effect without removing it.
+    SetAudioEffectBypass {
+        /// Chain to edit.
+        chain: AudioChain,
+        /// Effect identity.
+        effect: EffectId,
+        /// New bypass state.
+        bypass: bool,
+    },
     /// Set or remove a typed plugin parameter override. Opaque plugin data is preserved.
     SetPluginParam {
         /// Clip identity.
@@ -342,6 +387,15 @@ impl Command {
             | Self::RemoveKeyframe { id, .. }
             | Self::MoveKeyframe { id, .. } => of_clip(*id),
             Self::MergeClip { left, right } => of_clip(*left).or_else(|| of_clip(*right)),
+            Self::AddAudioEffect { chain, .. }
+            | Self::RemoveAudioEffect { chain, .. }
+            | Self::MoveAudioEffect { chain, .. }
+            | Self::SetAudioEffectParam { chain, .. }
+            | Self::SetAudioEffectBypass { chain, .. } => match chain {
+                AudioChain::Clip(id) => of_clip(*id),
+                // Like gain and mute, track-level audio effects stay editable on a locked layer.
+                AudioChain::Track(_) => None,
+            },
             Self::Batch { commands } => commands
                 .iter()
                 .find_map(|command| command.locked_track(project)),
@@ -904,6 +958,111 @@ impl Command {
                     value: previous,
                 }
             }
+            Self::AddAudioEffect {
+                chain,
+                index,
+                effect,
+            } => {
+                let (list, animations) = audio_chain_mut(project, *chain)?;
+                if *index > list.len() {
+                    return Err(invalid("audio effect index out of bounds"));
+                }
+                if list.iter().any(|existing| existing.id == effect.id) {
+                    return Err(invalid("audio effect already exists"));
+                }
+                let _ = animations;
+                list.insert(*index, effect.clone());
+                Self::RemoveAudioEffect {
+                    chain: *chain,
+                    effect: effect.id,
+                }
+            }
+            Self::RemoveAudioEffect { chain, effect } => {
+                let (list, animations) = audio_chain_mut(project, *chain)?;
+                let index = list
+                    .iter()
+                    .position(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("audio effect missing"))?;
+                if animations.iter().any(|animation| {
+                    matches!(&animation.target, Target::Effect { effect: target, .. } if target == effect)
+                }) {
+                    return Err(invalid("audio effect is animated"));
+                }
+                let removed = list.remove(index);
+                Self::AddAudioEffect {
+                    chain: *chain,
+                    index,
+                    effect: removed,
+                }
+            }
+            Self::MoveAudioEffect {
+                chain,
+                effect,
+                index,
+            } => {
+                let (list, _) = audio_chain_mut(project, *chain)?;
+                let from = list
+                    .iter()
+                    .position(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("audio effect missing"))?;
+                if *index >= list.len() {
+                    return Err(invalid("audio effect index out of bounds"));
+                }
+                let moved = list.remove(from);
+                list.insert(*index, moved);
+                Self::MoveAudioEffect {
+                    chain: *chain,
+                    effect: *effect,
+                    index: from,
+                }
+            }
+            Self::SetAudioEffectParam {
+                chain,
+                effect,
+                name,
+                value,
+            } => {
+                let (list, animations) = audio_chain_mut(project, *chain)?;
+                let instance = list
+                    .iter_mut()
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("audio effect missing"))?;
+                if value.is_none()
+                    && animations.iter().any(|animation| {
+                        matches!(&animation.target, Target::Effect { effect: target, param } if target == effect && param == name)
+                    })
+                {
+                    return Err(invalid("audio effect parameter is animated"));
+                }
+                let previous = if let Some(value) = value {
+                    instance.params.insert(name.clone(), *value)
+                } else {
+                    instance.params.remove(name)
+                };
+                Self::SetAudioEffectParam {
+                    chain: *chain,
+                    effect: *effect,
+                    name: name.clone(),
+                    value: previous,
+                }
+            }
+            Self::SetAudioEffectBypass {
+                chain,
+                effect,
+                bypass,
+            } => {
+                let (list, _) = audio_chain_mut(project, *chain)?;
+                let instance = list
+                    .iter_mut()
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("audio effect missing"))?;
+                let previous = std::mem::replace(&mut instance.bypass, *bypass);
+                Self::SetAudioEffectBypass {
+                    chain: *chain,
+                    effect: *effect,
+                    bypass: previous,
+                }
+            }
             Self::SetPluginParam { id, name, value } => {
                 let clip = clip_mut(project, *id)?;
                 if !matches!(clip.kind, ClipKind::Plugin { .. }) {
@@ -1347,6 +1506,23 @@ fn clip_track_index(project: &Project, id: ClipId) -> Result<usize, Error> {
         .iter()
         .position(|t| t.clips.contains_key(&id))
         .ok_or_else(|| invalid("clip missing"))
+}
+/// Mutable access to an audio-effect chain plus the animations that may target it
+/// (track chains have none).
+fn audio_chain_mut(
+    project: &mut Project,
+    chain: AudioChain,
+) -> Result<(&mut Vec<EffectInstance>, &[Animation]), Error> {
+    match chain {
+        AudioChain::Clip(id) => {
+            let clip = clip_mut(project, id)?;
+            Ok((&mut clip.audio_effects, &clip.animations))
+        }
+        AudioChain::Track(id) => {
+            let index = track_index(project, id)?;
+            Ok((&mut project.tracks[index].audio_effects, &[]))
+        }
+    }
 }
 fn clip_mut(project: &mut Project, id: ClipId) -> Result<&mut Clip, Error> {
     let index = clip_track_index(project, id)?;

@@ -180,3 +180,12 @@ pub(super) fn migrate_effects(mut value: serde_json::Value) -> Result<serde_json
     value["schemaVersion"] = serde_json::json!(3);
     Ok(value)
 }
+
+/// Schema 4 adds optional audio-effect chains (`audio_effects` on clips and tracks) and a
+/// `bypass` flag on effects. Both are absent-means-default, so a schema-3 project is already
+/// valid schema 4; the bump exists so older readers refuse files that may carry audio effects
+/// instead of silently dropping them.
+pub(super) fn migrate_audio_effects(mut value: serde_json::Value) -> serde_json::Value {
+    value["schemaVersion"] = serde_json::json!(4);
+    value
+}

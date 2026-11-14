@@ -1,4 +1,4 @@
-package animathio:plugin@0.2.1;
+package animathio:plugin@0.2.2;
 
 /// Shared data types for vector graphics, parameter schemas and plugin manifests.
 interface types {
@@ -247,6 +247,73 @@ interface frame-effects {
     /// of bytes. `time-ticks` is the clip-local source time. The call is a pure
     /// function of its arguments. Returns a diagnostic string on invalid input.
     apply-frame: func(effect: string, pixels: list<u8>, size: size, params: param-map, time-ticks: s64) -> result<list<u8>, string>;
+}
+
+/// Audio effects, added in API 0.2.2.
+///
+/// An audio effect receives one block of interleaved f32 PCM and returns a block of
+/// the same size. The host splits longer signals into contiguous blocks and carries an
+/// opaque `state` blob from each call to the next, so filters, envelope followers and
+/// other stateful processors work across block boundaries without the plugin keeping any
+/// memory between calls. The host enforces block size, state size, fuel, wall-clock and
+/// memory limits on every call; see `SandboxLimits` in `plugin-host`.
+interface audio-effects {
+    use types.{param-map, param-spec};
+
+    /// One audio filter offered by an audio-effect plugin.
+    record audio-effect-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`), stored in projects.
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Numeric parameters with range, default and step; keyframeable on clip chains.
+        /// Only `number` kinds are supported.
+        params: list<param-spec>,
+    }
+
+    /// A block of interleaved 32-bit float PCM.
+    record audio-block {
+        /// Frames per second (1..=768000).
+        sample-rate: u32,
+        /// Interleaved channel count (1..=32).
+        channels: u16,
+        /// Time of the first frame in the chain's own timeline, in ticks: clip-local for a
+        /// clip chain, project time for a track chain.
+        start-ticks: s64,
+        /// `frames * channels` samples. Unclipped; values may exceed 1.0.
+        samples: list<f32>,
+    }
+
+    /// Result of processing one block.
+    record block-output {
+        /// Exactly as many samples as the input block.
+        samples: list<f32>,
+        /// State to hand back with the next contiguous block, or none for stateless filters.
+        state: option<list<u8>>,
+    }
+
+    /// List the audio filters this plugin provides.
+    list-audio-effects: func() -> list<audio-effect-descriptor>;
+
+    /// Process one block with filter `effect`. `state` is `none` for the first block of a
+    /// signal and otherwise exactly what the previous call returned. The call is a pure
+    /// function of its arguments. Returns a diagnostic string on invalid input.
+    process-block: func(effect: string, block: audio-block, params: param-map, state: option<list<u8>>) -> result<block-output, string>;
+}
+
+/// World for audio-effect plugins (`kinds = ["audio-effect"]`): describe plus audio filters.
+world audio-effect-plugin {
+    import host;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The audio filters themselves.
+    export audio-effects;
 }
 
 /// World for effect plugins (`kinds = ["effect"]`): describe plus pixel filters.

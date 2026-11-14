@@ -295,6 +295,7 @@ impl Editor {
     pub(super) fn effect_label(&self, plugin: &str, effect: &str) -> String {
         self.available_effects()
             .into_iter()
+            .chain(self.available_audio_effects())
             .find(|e| e.plugin_id == plugin && e.effect_id == effect)
             .map_or_else(|| effect.to_owned(), |e| e.name)
     }
@@ -322,6 +323,10 @@ impl Editor {
         effect: &str,
         cx: &mut Context<Self>,
     ) {
+        if self.is_audio_effect(plugin, effect) {
+            self.add_audio_effect_to_clip(id, plugin, effect, cx);
+            return;
+        }
         let Some(descriptor) = self
             .available_effects()
             .into_iter()
@@ -763,10 +768,34 @@ impl Editor {
             }
             LeftTab::Effects => {
                 let effects = self.available_effects();
-                if effects.is_empty() {
+                let audio_effects = self.available_audio_effects();
+                if effects.is_empty() && audio_effects.is_empty() {
                     body = body.child(empty_state("No effect plugins loaded", cx));
                 }
-                for descriptor in effects {
+                let group = |label: &'static str| {
+                    div()
+                        .px_2()
+                        .pt_2()
+                        .pb_1()
+                        .text_size(px(11.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(hex(color::TEXT_MUTED))
+                        .child(label)
+                };
+                if !effects.is_empty() {
+                    body = body.child(group("Video effects"));
+                }
+                let audio_start = effects.len();
+                for (position, descriptor) in effects.into_iter().chain(audio_effects).enumerate() {
+                    let audio = position >= audio_start;
+                    if audio && position == audio_start {
+                        body = body.child(group("Audio effects"));
+                    }
+                    let icon = if audio {
+                        IconName::AudioWaveform
+                    } else {
+                        IconName::Sparkles
+                    };
                     let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
                     let (click_plugin, click_effect) = (plugin.clone(), effect.clone());
                     body = body.child(
@@ -779,7 +808,7 @@ impl Editor {
                             .flex_row()
                             .items_center()
                             .gap_2()
-                            .child(icons::icon(IconName::Sparkles).small())
+                            .child(icons::icon(icon).small())
                             .child(descriptor.name)
                             .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {

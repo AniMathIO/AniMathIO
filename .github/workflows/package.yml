@@ -41,7 +41,7 @@ concurrency:
 env:
   CARGO_BUILD_JOBS: 3
   # Number of first-party `.amplugin` bundles `scripts/build-plugins.sh` writes.
-  PLUGIN_COUNT: 5
+  PLUGIN_COUNT: 6
 
 jobs:
   package:

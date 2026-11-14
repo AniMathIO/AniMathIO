@@ -14,7 +14,7 @@
 //! connects to a running editor's control socket. The tool surface covers
 //! v1's 13 tools, adapted to v2 [`animathio_core::Command`]s, plus
 //! `render_frame`, `undo`/`redo`, `set_param`, `add_keyframe`, `import_v1`, and the
-//! plugin-driven `list_effects`/`add_effect`.
+//! plugin-driven `list_effects`/`add_effect` and `list_audio_effects`/`add_audio_effect`.
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -208,6 +208,23 @@ pub(crate) struct AddEffect {
     pub(crate) effect: String,
     /// Parameter overrides by parameter id; other parameters keep their defaults.
     pub(crate) params: Option<std::collections::BTreeMap<String, f64>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddAudioEffect {
+    /// Clip id whose own audio chain to extend (give exactly one of `id` and `track`).
+    pub(crate) id: Option<String>,
+    /// Track id whose audio chain to extend; the effect then processes the sum of the track's
+    /// clips before the track gain.
+    pub(crate) track: Option<String>,
+    /// Plugin id from `list_audio_effects`, e.g. `org.animathio.audio-basic`.
+    pub(crate) plugin: String,
+    /// Effect id from `list_audio_effects`, e.g. `compressor`.
+    pub(crate) effect: String,
+    /// Parameter overrides by parameter id; other parameters keep their defaults.
+    pub(crate) params: Option<std::collections::BTreeMap<String, f64>>,
+    /// Position in the chain; omit to append.
+    pub(crate) index: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1098,6 +1115,50 @@ impl McpServer {
             })
             .map_err(mcp_error)?;
         tool_text(json!({"clip_id": added.clip.0, "effect_id": added.effect_id.0}))
+    }
+
+    #[tool(
+        description = "List the audio effects provided by loaded audio-effect plugins: plugin id, effect id, name, description and numeric parameters (id, min, max, default). Pass the plugin and effect ids to add_audio_effect."
+    )]
+    async fn list_audio_effects(&self) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let effects = backend.audio_effects_list().map_err(mcp_error)?;
+        tool_text(json!({"effects": effects}))
+    }
+
+    #[tool(
+        description = "Add an audio effect to a clip's own chain (id) or to a track's chain (track) as one undo step. Effects come from plugins; call list_audio_effects for the available plugin/effect ids and their parameters in dB, Hz and ms. Unspecified parameters keep the plugin default. Effects apply in chain order: clip chains right after the clip's gain, track chains to the summed track before its gain. Returns the effect id."
+    )]
+    async fn add_audio_effect(
+        &self,
+        Parameters(p): Parameters<AddAudioEffect>,
+    ) -> Result<CallToolResult, McpError> {
+        let clip = p.id.as_deref().map(parse_clip_id).transpose()?;
+        let track = p
+            .track
+            .as_deref()
+            .map(|id| {
+                id.parse::<u64>()
+                    .map(TrackId)
+                    .map_err(|_| invalid("track must be a numeric track id"))
+            })
+            .transpose()?;
+        let mut backend = self.backend.lock().await;
+        let added = backend
+            .audio_effects_add(animathio_control::AudioEffectAddParams {
+                clip,
+                track,
+                plugin: p.plugin,
+                effect: p.effect,
+                params: p.params.unwrap_or_default(),
+                index: p.index,
+            })
+            .map_err(mcp_error)?;
+        let chain = match added.chain {
+            animathio_core::AudioChain::Clip(id) => json!({"clip_id": id.0}),
+            animathio_core::AudioChain::Track(id) => json!({"track_id": id.0}),
+        };
+        tool_text(json!({"chain": chain, "effect_id": added.effect_id.0}))
     }
 
     #[tool(

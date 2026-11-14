@@ -148,17 +148,15 @@ impl HeadlessHandler {
 
     /// Load the plugin host lazily when the project contains plugin clips.
     fn ensure_plugins(&mut self) {
-        if self.plugins.is_none()
-            && self
-                .project
-                .tracks()
-                .iter()
-                .flat_map(|t| t.clips().values())
-                .any(|clip| {
+        let needs_plugins = self.project.tracks().iter().any(|track| {
+            !track.audio_effects().is_empty()
+                || track.clips().values().any(|clip| {
                     matches!(clip.kind, animathio_core::ClipKind::Plugin { .. })
                         || !clip.effects.is_empty()
+                        || !clip.audio_effects.is_empty()
                 })
-        {
+        });
+        if self.plugins.is_none() && needs_plugins {
             self.plugins = load_plugins();
         }
     }
@@ -166,6 +164,30 @@ impl HeadlessHandler {
     fn effects_list(&mut self) -> Vec<crate::EffectInfo> {
         self.ensure_effect_plugins();
         crate::effect_infos(self.plugins.as_ref().map_or_default(PluginHost::effects))
+    }
+
+    fn audio_effects_list(&mut self) -> Vec<crate::EffectInfo> {
+        self.ensure_effect_plugins();
+        crate::effect_infos(
+            self.plugins
+                .as_ref()
+                .map_or_default(PluginHost::audio_effects),
+        )
+    }
+
+    fn audio_effects_add(
+        &mut self,
+        params: &crate::AudioEffectAddParams,
+    ) -> Result<crate::AudioEffectAdded, ControlError> {
+        self.ensure_effect_plugins();
+        let descriptors = self
+            .plugins
+            .as_ref()
+            .map_or_default(PluginHost::audio_effects);
+        let (command, added) =
+            crate::add_audio_effect_command(&self.project, &descriptors, params)?;
+        self.history.execute(&mut self.project, &command)?;
+        Ok(added)
     }
 
     fn effects_add(
@@ -280,6 +302,7 @@ impl HeadlessHandler {
 }
 
 impl ControlHandler for HeadlessHandler {
+    #[allow(clippy::too_many_lines)] // One arm per control method.
     fn handle(&mut self, call: Call) -> Result<Value, ControlError> {
         Ok(match call {
             Call::Export { params } => {
@@ -302,6 +325,7 @@ impl ControlHandler for HeadlessHandler {
                     .map_err(|e| ControlError::Other(e.to_string()))?;
                 if let Some(host) = plugins.as_ref() {
                     exporter.set_effect_processor(host.effect_processor());
+                    exporter.set_audio_effect_processor(host.audio_effect_processor());
                 }
                 let destination = animathio_export::Destination {
                     path: output,
@@ -329,6 +353,10 @@ impl ControlHandler for HeadlessHandler {
                 serde_json::to_value(added)?
             }
             Call::EffectsList => serde_json::to_value(self.effects_list())?,
+            Call::AudioEffectsList => serde_json::to_value(self.audio_effects_list())?,
+            Call::AudioEffectsAdd { params } => {
+                serde_json::to_value(self.audio_effects_add(&params)?)?
+            }
             Call::EffectsAdd { params } => serde_json::to_value(self.effects_add(&params)?)?,
             Call::ProjectGet => serde_json::to_value(self.state())?,
             Call::ProjectOpen { path } => {

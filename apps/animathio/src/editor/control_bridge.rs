@@ -224,6 +224,21 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(added)?
             }
+            Call::AudioEffectsList => serde_json::to_value(animathio_control::effect_infos(
+                self.available_audio_effects(),
+            ))?,
+            Call::AudioEffectsAdd { params } => {
+                let (command, added) = animathio_control::add_audio_effect_command(
+                    &self.project,
+                    &self.available_audio_effects(),
+                    &params,
+                )?;
+                self.history
+                    .execute(&mut self.project, &command)
+                    .map_err(|error| ControlError::Other(error.0))?;
+                self.after_edit(cx);
+                serde_json::to_value(added)?
+            }
             Call::HistoryUndo => {
                 let undone = self
                     .history
