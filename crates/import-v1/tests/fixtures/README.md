@@ -22,9 +22,10 @@ reads the data URLs, so media embedding follows the original asynchronous code.
 Audio defaults (volume 1, muted false) are applied by v1 itself.
 
 For the translator only, replace the `@/utils` getUid import with a deterministic
-incrementing ID function, point the color import to `../color`, and replace the
-KaTeX renderer import with a function that throws (this fixture only uses Text).
-All translation and serialization logic remains from v1.
+incrementing ID function (`fixture-1`, `fixture-2`, …), point the color import to
+`../color`, and replace the KaTeX renderer import with a function that throws
+(this fixture only uses Text). All translation and serialization logic remains
+from v1.
 Generate the local public-domain media with:
 
 ```bash
@@ -33,6 +34,11 @@ ffmpeg -f lavfi -i color=c=blue:s=16x16:r=2 -t 1 -an -threads 1 -pix_fmt yuv420p
 ffmpeg -f lavfi -i sine=frequency=440:sample_rate=8000 -t 0.1 -threads 1 tone.wav
 npx tsx generate.ts /absolute/path/to/fixtures
 ```
+
+This regeneration was verified: rerunning the steps above at v1 revision
+`147f522d4609db9616b6f5f9fe19a19ce61fcbdf` reproduces every `.animathio`
+file in this directory byte for byte. Current v1 has no schema version and no
+migrations, so there is exactly one historical format to cover.
 
 ## Coverage and limits
 
