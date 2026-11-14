@@ -10,8 +10,8 @@ use animathio_control::{
 };
 use animathio_core::{
     Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, Command, EffectId, FrameRate, History,
-    Interpolation, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track,
-    TrackId, Transform, TransformProperty, evaluate,
+    Interpolation, MarkerId, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange,
+    Track, TrackId, Transform, TransformProperty, evaluate,
 };
 use animathio_plugin_api::PluginKind;
 use animathio_plugin_host::PluginHost;
@@ -47,6 +47,7 @@ mod ducking;
 mod export_panel;
 mod fields;
 mod inspector_view;
+mod markers;
 mod media_pool;
 mod menus;
 mod playback_glue;
@@ -304,6 +305,21 @@ struct TrimDrag {
     ripple: bool,
 }
 
+/// Dragging a ruler marker; `current` is the (snapped) time under the pointer.
+struct MarkerDrag {
+    id: MarkerId,
+    origin: Time,
+    current: Time,
+}
+
+/// A marker as painted on the ruler (with any drag already applied).
+struct MarkerPaint {
+    time: Time,
+    end: Option<Time>,
+    color: Hsla,
+    name: String,
+}
+
 /// Dragging a fade handle: `current` is the fade length in ticks.
 struct FadeDrag {
     clip_id: ClipId,
@@ -319,6 +335,7 @@ enum TimelineGesture {
     Trim(TrimDrag),
     Fade(FadeDrag),
     Marquee(MarqueeDrag),
+    Marker(MarkerDrag),
 }
 
 /// A right-click context menu target on the timeline.
@@ -404,6 +421,7 @@ struct TimelineSnapshot {
     row_height: f32,
     marks: InOut,
     autocuts: Vec<(TimeRange, usize)>,
+    markers: Vec<MarkerPaint>,
     snap_line: Option<Time>,
     /// Rubber band in canvas coordinates: `(left, top, right, bottom)`.
     marquee: Option<(f32, f32, f32, f32)>,
@@ -511,6 +529,8 @@ pub(crate) struct Editor {
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
     duck_review: Option<ducking::DuckReview>,
+    /// The markers and beat-sync panel (see `editor/markers.rs`).
+    marker_panel: Option<markers::Panel>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
     last_export_tick: Instant,
@@ -634,6 +654,7 @@ impl Editor {
             subtitle_panel_open: false,
             autocut_review: None,
             duck_review: None,
+            marker_panel: None,
             pending_export: None,
             last_export_tick: Instant::now(),
             keyframe_drag: None,
@@ -840,6 +861,9 @@ impl Render for Editor {
             root = root.child(panel);
         }
         if let Some(panel) = self.subtitle_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.marker_panel(cx) {
             root = root.child(panel);
         }
         if let Some(menu) = self.context_menu_dropdown(cx) {

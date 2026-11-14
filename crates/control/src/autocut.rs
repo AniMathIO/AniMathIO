@@ -305,9 +305,20 @@ pub(crate) fn selection(
     project: &Project,
     params: &AutocutParams,
 ) -> Result<Selection, ControlError> {
-    let mut clip = params.clip;
+    resolve_selection(project, params.clip, params.track, params.range)
+}
+
+/// Audio selection shared by the analysers: a video clip resolves to its linked audio.
+pub(crate) fn resolve_selection(
+    project: &Project,
+    clip: Option<ClipId>,
+    track: Option<TrackId>,
+    range: Option<TimeRange>,
+) -> Result<Selection, ControlError> {
+    let requested = clip;
+    let mut clip = clip;
     if let Some(id) = clip {
-        if let Some(track) = params.track
+        if let Some(track) = track
             && !project
                 .tracks()
                 .iter()
@@ -339,12 +350,8 @@ pub(crate) fn selection(
     }
     Ok(Selection {
         clip,
-        track: if params.clip == clip {
-            params.track
-        } else {
-            None
-        },
-        range: params.range,
+        track: if requested == clip { track } else { None },
+        range,
     })
 }
 fn target_tracks(project: &Project, params: &AutocutParams, selection: Selection) -> Vec<TrackId> {

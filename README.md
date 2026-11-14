@@ -24,7 +24,7 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 3) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 5) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding, mixing, playback (cpal) | ✅ `audio` (prototype limits) |
@@ -282,6 +282,18 @@ Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, 
 ## License
 
 [MIT](LICENSE)
+
+Timeline markers and beat sync: press M to drop a coloured marker on the ruler at the
+playhead (Shift+M / Ctrl+Shift+M, or Cmd+Shift+M on macOS, jump to the next / previous
+marker). Double-click a flag to edit its name, colour and note, drag it to move it
+(markers snap, and clips and the playhead snap to markers). Clip > Markers and beat
+sync opens a panel that lists the markers, detects the tempo and beats of the project
+audio (or the selected clip) offline, adds markers at every beat, every Nth beat or the
+downbeats, and snaps the selected clips' cut points to beats and markers or splits
+them there, each as one undo step. The same actions are `animathio-cli markers` /
+`animathio-cli beats` and MCP `list_markers`, `add_marker`, `remove_marker`,
+`detect_beats` and `sync_cuts_to_beats`; see the [CLI reference](docs/cli.md#beats)
+and [MCP reference](docs/mcp.md#markers-and-beat-sync).
 
 Automatic cuts for recordings are available through Clip > Automatic cuts,
 `animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence

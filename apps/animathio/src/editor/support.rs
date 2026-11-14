@@ -203,6 +203,7 @@ pub(super) fn paint_timeline(
             ));
         }
     }
+    super::markers::paint_markers(bounds, &layout, snapshot, height, window, cx);
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let playhead = style::hex(colors::PLAYHEAD);
     for (width, alpha) in [(7.0, 0.06), (3.0, 0.12), (1.0, 1.0)] {

@@ -184,6 +184,43 @@ pub trait ControlHandler {
     ) -> Result<crate::DuckResult, ControlError> {
         from_value(self.handle(Call::ApplyDuck { proposal })?)
     }
+    /// List the project's timeline markers.
+    fn markers_list(&mut self) -> Result<Vec<animathio_core::Marker>, ControlError> {
+        from_value(self.handle(Call::MarkersList)?)
+    }
+    /// Add a timeline marker.
+    fn markers_add(
+        &mut self,
+        params: crate::MarkerAddParams,
+    ) -> Result<crate::MarkerAdded, ControlError> {
+        from_value(self.handle(Call::MarkersAdd { params })?)
+    }
+    /// Remove a timeline marker.
+    fn markers_remove(&mut self, id: animathio_core::MarkerId) -> Result<(), ControlError> {
+        let () = from_value(self.handle(Call::MarkersRemove { id })?)?;
+        Ok(())
+    }
+    /// Analyse tempo and beats without mutation.
+    fn beats_detect(
+        &mut self,
+        params: crate::BeatDetectParams,
+    ) -> Result<crate::BeatDetection, ControlError> {
+        from_value(self.handle(Call::BeatsDetect { params })?)
+    }
+    /// Add markers at detected beats as one undo step.
+    fn beats_add_markers(
+        &mut self,
+        params: crate::BeatMarkersParams,
+    ) -> Result<crate::BeatMarkersResult, ControlError> {
+        from_value(self.handle(Call::BeatsAddMarkers { params })?)
+    }
+    /// Snap or split the selected clips at beats/markers as one undo step.
+    fn sync_cuts_to_beats(
+        &mut self,
+        params: crate::SyncCutsParams,
+    ) -> Result<crate::SyncCutsResult, ControlError> {
+        from_value(self.handle(Call::SyncCutsToBeats { params })?)
+    }
     /// Detect silent audio and ripple-remove it, returning the removed ranges.
     fn trim_silence(
         &mut self,

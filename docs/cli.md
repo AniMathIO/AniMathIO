@@ -27,6 +27,8 @@ Commands:
   transcribe    Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
   autocut       Propose or apply silence and optional filler cuts as one ripple edit
   duck          Lower music under speech with gain keyframes, as one undoable edit
+  markers       List, add or remove timeline markers
+  beats         Detect tempo and beats offline; optionally add markers at the beats
   models        List or download the local Whisper speech models
   new-sample    Write a three-second animated image/text/shape demo archive
   mcp           Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
@@ -302,6 +304,82 @@ cargo build -p animathio-cli --features whisper
 animathio-cli transcribe talk.mp4 --download --srt talk.srt --vtt talk.vtt
 animathio-cli transcribe lesson.amio --language de --output lesson-subtitled.amio
 ```
+
+## `markers`
+
+List, add or remove timeline markers (named, coloured points or ranges on the ruler;
+see [architecture](architecture.md#markers-and-beat-sync)). `markers PROJECT list` prints
+the markers as JSON with times in Nticks and seconds. `markers PROJECT add` takes
+`--time` (required), `--duration`, `--name`, `--color` and `--note`, and
+`markers PROJECT remove ID` removes one; both save atomically to the input unless
+`--output` is given (existing separate outputs require `--overwrite`).
+
+```bash
+animathio-cli markers song.amio list
+```
+
+<!-- help:markers -->
+```text
+List, add or remove timeline markers
+
+Usage: animathio-cli markers <PROJECT> <COMMAND>
+
+Commands:
+  list    Print every marker as JSON (times are Nticks and decimal seconds)
+  add     Add a marker, saving atomically to the input unless --output is given
+  remove  Remove a marker by id, saving atomically to the input unless --output is given
+  help    Print this message or the help of the given subcommand(s)
+
+Arguments:
+  <PROJECT>  Input project archive or project.json
+
+Options:
+  -h, --help  Print help
+```
+<!-- /help:markers -->
+
+## `beats`
+
+Detect tempo and beats offline from the decoded audio (the whole mix, or one `--clip`,
+`--track` or `--from`/`--to` range) and print them as JSON: `bpm`, `confidence`, beat
+`time` in Nticks and `seconds`, and `downbeats` indices. Analysis is deterministic and
+never changes the project. With `--add-markers` it also adds a marker at each selected beat
+(`--every N` or `--downbeats-only`, `--color`) as one batch and saves atomically to the
+input, or to `--output`. Needs audio clips with a clear pulse; silence and audio shorter
+than two seconds are errors.
+
+```bash
+animathio-cli beats song.amio --clip 1 --min-bpm 80 --max-bpm 180
+animathio-cli beats song.amio --add-markers --downbeats-only -o marked.amio
+```
+
+<!-- help:beats -->
+```text
+Detect tempo and beats offline; optionally add markers at the beats
+
+Usage: animathio-cli beats [OPTIONS] <PROJECT>
+
+Arguments:
+  <PROJECT>  Input project archive or project.json
+
+Options:
+      --clip <CLIP>                    Analyse a clip, including linked audio for a video clip
+      --track <TRACK>                  Analyse this track's audio mix
+      --from <FROM>                    Inclusive analysis start in seconds or Nticks (requires --to)
+      --to <TO>                        Exclusive analysis end in seconds or Nticks (requires --from)
+      --min-bpm <MIN_BPM>              Slowest tempo considered, in beats per minute [default: 60]
+      --max-bpm <MAX_BPM>              Fastest tempo considered, in beats per minute [default: 200]
+      --bpm <BPM>                      Force this tempo instead of estimating it
+      --beats-per-bar <BEATS_PER_BAR>  Beats per bar, used to pick downbeats [default: 4]
+      --add-markers                    Add a marker at each selected beat, saving atomically to the input unless --output is given
+      --every <EVERY>                  With --add-markers: use every Nth beat [default: 1]
+      --downbeats-only                 With --add-markers: only mark downbeats
+      --color <COLOR>                  With --add-markers: marker colour [default: cyan]
+  -o, --output <OUTPUT>                Save an edited archive here instead of changing the input
+      --overwrite                      Replace an existing output archive
+  -h, --help                           Print help
+```
+<!-- /help:beats -->
 
 ## `models`
 

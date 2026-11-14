@@ -1,11 +1,13 @@
 //! Engine-owned PCM, deterministic offline mixing, and device-master playback.
 //! No decoder or stream is stored in the serializable project.
+mod beats;
 mod mixer;
 mod player;
 mod source;
 mod speed;
 mod waveform;
 
+pub use beats::*;
 pub use mixer::*;
 pub use player::*;
 pub use source::*;

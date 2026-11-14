@@ -11,6 +11,13 @@
 //! constant time.
 
 mod authoring;
+mod beats;
+pub use beats::{
+    BeatDetectParams, BeatDetection, BeatInfo, BeatMarkerOptions, BeatMarkersParams,
+    BeatMarkersResult, BeatSelection, CutShift, MarkerAddParams, MarkerAdded, SyncCutsParams,
+    SyncCutsResult, SyncMode, SyncSource, add_marker_command, analyze_beats, apply_beat_markers,
+    apply_sync_cuts, markers_at_beats_command, select_beats, sync_cuts_command,
+};
 mod autocut;
 pub use autocut::{
     Autocut, AutocutParams, AutocutProposal, AutocutReason, SilenceMetric, apply_autocuts,

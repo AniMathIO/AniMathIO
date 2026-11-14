@@ -80,6 +80,8 @@ impl Editor {
                 MenuItem::action("Next frame", NextFrame),
                 MenuItem::action("Previous edit", PreviousEdit),
                 MenuItem::action("Next edit", NextEdit),
+                MenuItem::action("Previous marker", PreviousMarker),
+                MenuItem::action("Next marker", NextMarker),
                 MenuItem::action("Start", GoToStart),
                 MenuItem::action("End", GoToEnd),
                 MenuItem::action("Set in", MarkIn),
@@ -106,6 +108,8 @@ impl Editor {
                 MenuItem::action("Generate subtitles…", GenerateSubtitles),
                 MenuItem::action("Automatic cuts…", AutomaticCuts),
                 MenuItem::action("Auto duck…", AutoDuck),
+                MenuItem::action("Add marker at playhead", AddMarker),
+                MenuItem::action("Markers and beat sync…", ShowMarkers),
             ]),
             Menu::new("Help").items([
                 MenuItem::action("Keyboard shortcuts…", KeyboardShortcuts),

@@ -1,7 +1,7 @@
 use crate::{
     Animation, Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error,
-    FrameRate, Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform,
-    Transition, TransitionId, invalid,
+    FrameRate, Keyframe, Keyframes, Marker, MarkerId, Project, Target, Time, TimeRange, Track,
+    TrackId, Transform, Transition, TransitionId, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -344,6 +344,30 @@ pub enum Command {
         id: TransitionId,
         /// New positive duration in ticks.
         duration: Time,
+    },
+    /// Add a timeline marker (with a project-unique id). Markers are never locked.
+    AddMarker {
+        /// Marker to insert.
+        marker: Marker,
+    },
+    /// Remove a marker.
+    RemoveMarker {
+        /// Marker identity.
+        id: MarkerId,
+    },
+    /// Move a marker to another time, keeping everything else.
+    MoveMarker {
+        /// Marker identity.
+        id: MarkerId,
+        /// New nonnegative time.
+        time: Time,
+    },
+    /// Replace a marker's time, span, name, colour and note (its id must match).
+    UpdateMarker {
+        /// Marker identity.
+        id: MarkerId,
+        /// Replacement data; its `id` is ignored and kept as `id`.
+        marker: Marker,
     },
 }
 
@@ -1240,6 +1264,41 @@ impl Command {
                     duration: previous,
                 }
             }
+            Self::AddMarker { marker } => {
+                if project.markers.iter().any(|m| m.id == marker.id) {
+                    return Err(invalid("marker already exists"));
+                }
+                insert_marker(project, marker.clone());
+                Self::RemoveMarker { id: marker.id }
+            }
+            Self::RemoveMarker { id } => {
+                let marker = take_marker(project, *id)?;
+                Self::AddMarker { marker }
+            }
+            Self::MoveMarker { id, time } => {
+                let mut marker = take_marker(project, *id)?;
+                let previous = marker.time;
+                marker.time = *time;
+                insert_marker(project, marker);
+                Self::MoveMarker {
+                    id: *id,
+                    time: previous,
+                }
+            }
+            Self::UpdateMarker { id, marker } => {
+                let previous = take_marker(project, *id)?;
+                insert_marker(
+                    project,
+                    Marker {
+                        id: *id,
+                        ..marker.clone()
+                    },
+                );
+                Self::UpdateMarker {
+                    id: *id,
+                    marker: previous,
+                }
+            }
         })
     }
 }
@@ -1524,6 +1583,20 @@ fn ripple_delete_commands(project: &Project, id: ClipId) -> Result<Vec<Command>,
     Ok(commands)
 }
 
+fn insert_marker(project: &mut Project, marker: Marker) {
+    let position = project
+        .markers
+        .partition_point(|m| (m.time, m.id) < (marker.time, marker.id));
+    project.markers.insert(position, marker);
+}
+fn take_marker(project: &mut Project, id: MarkerId) -> Result<Marker, Error> {
+    let position = project
+        .markers
+        .iter()
+        .position(|m| m.id == id)
+        .ok_or_else(|| invalid("marker missing"))?;
+    Ok(project.markers.remove(position))
+}
 fn transition_index(project: &Project, id: TransitionId) -> Result<(usize, usize), Error> {
     project
         .tracks

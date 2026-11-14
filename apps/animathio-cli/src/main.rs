@@ -1,6 +1,7 @@
 //! Headless project validation and deterministic PNG rendering.
 mod autocut;
 mod duck;
+mod markers;
 mod mcp;
 mod transcribe;
 
@@ -123,6 +124,16 @@ enum Action {
     Duck {
         #[command(flatten)]
         args: duck::DuckArgs,
+    },
+    /// List, add or remove timeline markers.
+    Markers {
+        #[command(flatten)]
+        args: markers::MarkersArgs,
+    },
+    /// Detect tempo and beats offline; optionally add markers at the beats.
+    Beats {
+        #[command(flatten)]
+        args: markers::BeatsArgs,
     },
     /// List or download the local Whisper speech models.
     Models {
@@ -320,6 +331,8 @@ fn run(cli: Cli) -> Result<()> {
         Action::Transcribe { args } => transcribe::run(&args)?,
         Action::Autocut { args } => autocut::run(args)?,
         Action::Duck { args } => duck::run(args)?,
+        Action::Markers { args } => markers::run_markers(args)?,
+        Action::Beats { args } => markers::run_beats(args)?,
         Action::Models { args } => transcribe::run_models(&args)?,
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

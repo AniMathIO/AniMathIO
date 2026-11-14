@@ -49,6 +49,48 @@ impl Editor {
                 .detach();
                 continue;
             }
+            if let Call::BeatsDetect { params } = &call {
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                let params = params.clone();
+                cx.spawn(async move |_, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            Ok::<_, ControlError>(serde_json::to_value(
+                                animathio_control::analyze_beats(&project, &assets, &params)?,
+                            )?)
+                        })
+                        .await;
+                    let _ = reply.send(result);
+                })
+                .detach();
+                continue;
+            }
+            if let Some(detect) = super::markers::beat_analysis_params(&call) {
+                let expected = self.project.clone();
+                let snapshot = expected.clone();
+                let assets = self.assets.clone();
+                cx.spawn(async move |this, cx| {
+                    let analysed = cx
+                        .background_spawn(async move {
+                            animathio_control::analyze_beats(&snapshot, &assets, &detect)
+                        })
+                        .await;
+                    let _ = this.update(cx, |editor, cx| {
+                        let result = analysed.and_then(|detection| {
+                            if editor.project != expected {
+                                return Err(ControlError::Other(
+                                    "project changed during beat analysis; retry".into(),
+                                ));
+                            }
+                            editor.apply_beat_call(&call, Some(&detection), cx)
+                        });
+                        let _ = reply.send(result);
+                    });
+                })
+                .detach();
+                continue;
+            }
             if let Call::MediaAdd { path } = &call {
                 let path = path.clone();
                 let expected = self.project.clone();
@@ -398,6 +440,27 @@ impl Editor {
                     animathio_control::apply_duck(&mut self.project, &mut self.history, &proposal)?;
                 self.after_edit(cx);
                 serde_json::to_value(result)?
+            }
+            Call::MarkersList => serde_json::to_value(self.project.markers())?,
+            Call::MarkersAdd { params } => {
+                let (command, id) = animathio_control::add_marker_command(&self.project, &params)?;
+                self.history.execute(&mut self.project, &command)?;
+                self.after_edit(cx);
+                serde_json::to_value(animathio_control::MarkerAdded { id })?
+            }
+            Call::MarkersRemove { id } => {
+                self.history
+                    .execute(&mut self.project, &Command::RemoveMarker { id })?;
+                self.after_edit(cx);
+                serde_json::to_value(())?
+            }
+            Call::BeatsDetect { .. } => {
+                return Err(ControlError::Other(
+                    "beat analysis is handled asynchronously".into(),
+                ));
+            }
+            call @ (Call::BeatsAddMarkers { .. } | Call::SyncCutsToBeats { .. }) => {
+                self.apply_beat_call(&call, None, cx)?
             }
             Call::TrimSilence { params } => {
                 let result = animathio_control::trim_silence(
