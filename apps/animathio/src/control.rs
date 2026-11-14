@@ -45,23 +45,58 @@ pub(crate) struct ControlRuntime {
     /// Kept alive for its [`Drop`] side effect: shutting the server down when
     /// the editor exits and removing the socket and token files.
     #[allow(dead_code)]
-    pub(crate) server: RunningServer,
+    pub(crate) server: Option<RunningServer>,
+    /// Startup failure shown in the MCP status chip instead of silently staying off.
+    pub(crate) error: Option<String>,
 }
 
 /// Start the control server on the well-known per-user socket.
-pub(crate) fn start(bridge: ControlBridge) -> Option<RunningServer> {
-    let spec = animathio_control::default_socket_spec().ok()?;
-    let server = match ControlServer::bind(spec).and_then(|server| server.spawn(bridge)) {
-        Ok(server) => server,
-        Err(error) => {
-            eprintln!("control server unavailable: {error}");
-            return None;
+pub(crate) fn start(bridge: ControlBridge) -> Result<RunningServer, String> {
+    start_with_spec(bridge, animathio_control::default_socket_spec())
+}
+
+fn start_with_spec(
+    bridge: ControlBridge,
+    spec: std::io::Result<animathio_control::SocketSpec>,
+) -> Result<RunningServer, String> {
+    let result = spec
+        .and_then(ControlServer::bind)
+        .and_then(|server| server.spawn(bridge));
+    match result {
+        Ok(server) => {
+            eprintln!(
+                "control server listening at {} (token {})",
+                server.socket_path().display(),
+                server.token_file().display()
+            );
+            Ok(server)
         }
-    };
-    eprintln!(
-        "control server listening at {} (token {})",
-        server.socket_path().display(),
-        server.token_file().display()
-    );
-    Some(server)
+        Err(error) => {
+            let message = format!("control server unavailable: {error}");
+            eprintln!("{message}");
+            Err(message)
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    #[test]
+    fn long_socket_paths_report_a_startup_failure() {
+        let (bridge, _) = ControlBridge::new();
+        // Binding fails before a worker is spawned. No process-wide env is changed.
+        let root =
+            std::env::temp_dir().join(format!("animathio-long-socket-{}", std::process::id()));
+        let spec = animathio_control::SocketSpec {
+            path: root.join("x".repeat(150)),
+            token_file: root.join("token"),
+        };
+        let Err(error) = start_with_spec(bridge, Ok(spec)) else {
+            panic!("overlong Unix socket unexpectedly bound");
+        };
+        assert!(error.starts_with("control server unavailable:"));
+        assert!(!error.ends_with(':'));
+        let _ = std::fs::remove_dir(&root);
+    }
 }

@@ -128,11 +128,13 @@ fn gpu_composites_cpu_effect_layers() {
     let mut effect = EffectInstance::basic(EffectId(1), "blur");
     effect.params.insert("radius".to_owned(), 3.0);
     let scene = Scene {
+        canvas: (0, 0),
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(0),
             kind: ClipKind::Image(id.clone()),
             source_time: Time(0),
+            fit: animathio_core::Fit::Stretch,
             transform: Transform {
                 opacity: 0.75,
                 ..Transform::default()

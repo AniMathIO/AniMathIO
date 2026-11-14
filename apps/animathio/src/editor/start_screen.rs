@@ -473,7 +473,7 @@ impl Editor {
                 .px_8()
                 .py_6()
                 .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                    let track = this.ensure_track(cx);
+                    let track = this.project.tracks().first().map_or(TrackId(this.next_id), Track::id);
                     this.import_paths(paths.paths(), Some((track, Time(0))), cx);
                 }))
                 .drag_over::<ExternalPaths>(|style, _, _, _| {

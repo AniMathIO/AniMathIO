@@ -252,6 +252,7 @@ impl Editor {
                     })
                     .child(
                         div()
+                            .id("mcp-status")
                             .flex()
                             .items_center()
                             .gap_2()
@@ -264,17 +265,32 @@ impl Editor {
                             .text_size(px(11.))
                             .text_color(style::hex(color::TEXT_SECONDARY))
                             .child(div().size(px(5.)).rounded_full().bg(style::hex(
-                                if self.control.is_some() {
+                                if self.control.as_ref().is_some_and(|c| c.server.is_some()) {
                                     color::SUCCESS
                                 } else {
                                     color::TEXT_MUTED
                                 },
                             )))
-                            .child(if self.control.is_some() {
-                                "MCP listening"
-                            } else {
-                                "MCP off"
-                            }),
+                            .child(
+                                if self.control.as_ref().is_some_and(|c| c.server.is_some()) {
+                                    "MCP listening"
+                                } else if self.control.as_ref().is_some_and(|c| c.error.is_some()) {
+                                    "MCP unavailable"
+                                } else {
+                                    "MCP off"
+                                },
+                            )
+                            .when_some(
+                                self.control.as_ref().and_then(|c| c.error.clone()),
+                                |chip, error| {
+                                    chip.text_color(style::hex(color::WARNING)).tooltip(
+                                        move |window, cx| {
+                                            gpui_component::tooltip::Tooltip::new(error.clone())
+                                                .build(window, cx)
+                                        },
+                                    )
+                                },
+                            ),
                     )
                     .child(
                         style::primary_button("title-export", cx)
@@ -391,8 +407,8 @@ impl Editor {
                         IconName::AudioWaveform,
                         "Audio effects",
                         true,
-                        Box::new(move |this, _, _| {
-                            this.clear_selection();
+                        Box::new(move |this, _, cx| {
+                            this.clear_selection(cx);
                             this.audio_inspector_track = Some(id);
                         }),
                     ),

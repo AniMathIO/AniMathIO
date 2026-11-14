@@ -1136,7 +1136,7 @@ fn animated_split_preserves_boundary_and_exact_undo_redo() {
 }
 
 #[test]
-fn merge_undo_restores_independent_clip_data() {
+fn merging_independent_clip_data_is_refused_without_dropping_it() {
     let mut project = base();
     let mut right = plugin(9, 100, 200);
     right.source_offset = Time(500);
@@ -1148,17 +1148,15 @@ fn merge_undo_restores_independent_clip_data() {
     .apply(&mut project)
     .unwrap();
     let original = project.clone();
-    let undo = Command::MergeClip {
-        left: ClipId(0),
-        right: ClipId(9),
-    }
-    .apply(&mut project)
-    .unwrap();
-    let merged = project.clone();
-    let redo = undo.apply(&mut project).unwrap();
+    assert!(
+        Command::MergeClip {
+            left: ClipId(0),
+            right: ClipId(9)
+        }
+        .apply(&mut project)
+        .is_err()
+    );
     assert_eq!(project, original);
-    redo.apply(&mut project).unwrap();
-    assert_eq!(project, merged);
 }
 
 #[test]

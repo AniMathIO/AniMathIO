@@ -14,11 +14,13 @@ fn render_effect(kind: &str, params: &[(&str, f64)], name: &str) {
         effect.params.insert((*param).to_owned(), *value);
     }
     let scene = Scene {
+        canvas: (0, 0),
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(0),
             kind: ClipKind::Image(animathio_core::AssetId::of(&bytes)),
             source_time: Time(0),
+            fit: animathio_core::Fit::Stretch,
             transform: Transform::default(),
             params: std::collections::BTreeMap::new(),
             effects: vec![effect],
@@ -138,11 +140,13 @@ impl animathio_core::EffectProcessor for Stub {
 
 fn effect_scene(bytes: &[u8], effects: Vec<EffectInstance>) -> Scene {
     Scene {
+        canvas: (0, 0),
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(7),
             kind: ClipKind::Image(animathio_core::AssetId::of(bytes)),
             source_time: Time(0),
+            fit: animathio_core::Fit::Stretch,
             transform: Transform::default(),
             params: std::collections::BTreeMap::new(),
             effects,

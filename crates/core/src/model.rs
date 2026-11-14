@@ -131,6 +131,105 @@ impl Transform {
     }
 }
 
+/// How an image or video source is placed inside its clip's frame (the canvas-sized unit
+/// square that [`Transform`] positions and scales). Resolution independent: the fitted
+/// rectangle depends only on the source and canvas aspect ratios (and, for
+/// [`Fit::Original`], on the source size relative to the project resolution). Other clip
+/// kinds ignore it.
+///
+/// New media defaults to [`Fit::Contain`]. The format migrator explicitly assigns
+/// [`Fit::Stretch`] to pre-schema-6 media to preserve existing projects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Fit {
+    /// Show the whole source at its aspect ratio, letterboxed inside the frame ("fit").
+    #[default]
+    #[serde(alias = "fit")]
+    Contain,
+    /// Cover the whole frame at the source aspect ratio, cropping what overflows ("fill").
+    #[serde(alias = "fill")]
+    Cover,
+    /// Distort the source to exactly fill the frame (pre-schema-6 behaviour).
+    Stretch,
+    /// One source pixel per project pixel, centred in the frame.
+    #[serde(alias = "none")]
+    Original,
+}
+impl Fit {
+    /// Every mode, in UI order.
+    pub const ALL: [Self; 4] = [Self::Contain, Self::Cover, Self::Stretch, Self::Original];
+    /// Stable lowercase name, as serialized.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Contain => "contain",
+            Self::Cover => "cover",
+            Self::Stretch => "stretch",
+            Self::Original => "original",
+        }
+    }
+    /// Parse a serialized name or one of its aliases (`fit`, `fill`, `none`).
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "contain" | "fit" => Self::Contain,
+            "cover" | "fill" => Self::Cover,
+            "stretch" => Self::Stretch,
+            "original" | "none" => Self::Original,
+            _ => return None,
+        })
+    }
+    /// The source rectangle `[x0, y0, width, height]` inside the unit frame square, for a
+    /// `source` of `(width, height)` pixels on a physical fit target of `canvas` pixels.
+    /// Native pixel fitting uses project resolution. Degenerate sizes fall
+    /// back to the full frame.
+    #[must_use]
+    pub fn unit_rect(self, source: (u32, u32), canvas: (u32, u32)) -> [f64; 4] {
+        self.rect(source, canvas, Transform::default())
+    }
+    /// Source placement inside the transformed clip frame. Nonuniform clip scales
+    /// change the frame's aspect ratio, as in template placeholders. Original keeps
+    /// source pixels at project resolution even when the preview is downsampled.
+    #[must_use]
+    pub fn rect(self, source: (u32, u32), canvas: (u32, u32), transform: Transform) -> [f64; 4] {
+        let cw = f64::from(canvas.0) * transform.scale_x.abs();
+        let ch = f64::from(canvas.1) * transform.scale_y.abs();
+        if cw <= 0.0 || ch <= 0.0 || source.0 == 0 || source.1 == 0 {
+            return [0.0, 0.0, 1.0, 1.0];
+        }
+        let ratio = (f64::from(source.0) / f64::from(source.1)) / (cw / ch);
+        if !ratio.is_finite() || ratio <= 0.0 {
+            return [0.0, 0.0, 1.0, 1.0];
+        }
+        let (w, h) = match self {
+            Self::Stretch => (1.0, 1.0),
+            Self::Contain if ratio > 1.0 => (1.0, 1.0 / ratio),
+            Self::Contain => (ratio, 1.0),
+            Self::Cover if ratio > 1.0 => (ratio, 1.0),
+            Self::Cover => (1.0, 1.0 / ratio),
+            Self::Original => (
+                f64::from(source.0) / f64::from(canvas.0),
+                f64::from(source.1) / f64::from(canvas.1),
+            ),
+        };
+        [(1.0 - w) / 2.0, (1.0 - h) / 2.0, w, h]
+    }
+
+    /// Visible source bounds after clipping to the unit frame, shared by gizmos
+    /// and picking. The renderer uses the same rectangle before clipping.
+    #[must_use]
+    pub fn visible_rect(
+        self,
+        source: (u32, u32),
+        canvas: (u32, u32),
+        transform: Transform,
+    ) -> [f64; 4] {
+        let [x, y, w, h] = self.rect(source, canvas, transform);
+        let (left, top) = (x.max(0.0), y.max(0.0));
+        [left, top, (x + w).min(1.0) - left, (y + h).min(1.0) - top]
+    }
+}
+
 /// Core media or an opaque plugin source, preserved even without that plugin installed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ClipKind {
@@ -209,6 +308,9 @@ pub struct Clip {
     pub source_offset: Time,
     /// Base transform.
     pub transform: Transform,
+    /// Placement of an image or video source inside the frame; new clips default to contain.
+    #[serde(default)]
+    pub fit: Fit,
     /// Named base typed parameters (e.g. gain or a graph coefficient).
     pub params: BTreeMap<String, ParamValue>,
     /// Ordered visual effects, applied after rasterizing the clip source.
@@ -223,9 +325,15 @@ pub struct Clip {
     pub animations: Vec<Animation>,
 }
 impl Clip {
-    /// Construct a draft clip with an identity transform and no automation.
+    /// Construct a draft clip with an identity transform and no automation. Image and
+    /// video clips get [`Fit::Contain`]; every other kind ignores the fit mode.
     #[must_use]
     pub fn new(id: ClipId, kind: ClipKind, range: TimeRange) -> Self {
+        let fit = if matches!(kind, ClipKind::Image(_) | ClipKind::Video(_)) {
+            Fit::Contain
+        } else {
+            Fit::Stretch
+        };
         Self {
             id,
             link_group: None,
@@ -233,6 +341,7 @@ impl Clip {
             range,
             source_offset: Time(0),
             transform: Transform::default(),
+            fit,
             params: BTreeMap::new(),
             effects: Vec::new(),
             audio_effects: Vec::new(),
@@ -279,7 +388,7 @@ pub struct Track {
     /// Locked layers reject clip edits (add, move, trim, split, delete, effects).
     #[serde(default)]
     pub(crate) locked: bool,
-    /// Edit-point transitions between adjacent clips of this track.
+    /// Edit-point transitions between adjacent clips of this track, sorted by id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) transitions: Vec<crate::Transition>,
     /// Ordered audio effects applied to the sum of this track's clips, before its gain.
@@ -407,6 +516,9 @@ impl TryFrom<ProjectData> for Project {
             markers: p.markers,
         };
         project.markers.sort_by_key(|m| (m.time, m.id));
+        for track in &mut project.tracks {
+            track.transitions.sort_by_key(|t| t.id);
+        }
         project.validate()?;
         Ok(project)
     }
@@ -579,6 +691,10 @@ impl Project {
 pub struct Scene {
     /// Active clips in back-to-front track order.
     pub clips: Vec<SceneClip>,
+    /// Project resolution in pixels, or `(0, 0)` when unset; native-pixel [`Fit::Original`]
+    /// uses it even in smaller previews (renderers fall back to the output size).
+    #[serde(default)]
+    pub canvas: (u32, u32),
 }
 /// One resolved active clip, containing no runtime resources.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -593,6 +709,9 @@ pub struct SceneClip {
     pub source_time: Time,
     /// Evaluated transform.
     pub transform: Transform,
+    /// Placement of an image or video source inside the frame.
+    #[serde(default)]
+    pub fit: Fit,
     /// Evaluated typed parameters.
     pub params: BTreeMap<String, ParamValue>,
     /// Evaluated effect chain, with keyframed parameters resolved.
@@ -618,7 +737,10 @@ impl SceneClip {
 /// negative; its source time is clamped to zero (holding the first source frame).
 #[must_use]
 pub fn evaluate(project: &Project, time: Time) -> Scene {
-    let mut scene = Scene::default();
+    let mut scene = Scene {
+        canvas: (project.width, project.height),
+        ..Scene::default()
+    };
     let any_solo = project.tracks.iter().any(Track::is_solo);
     for track in &project.tracks {
         if track.muted || (any_solo && !track.solo) {
@@ -636,6 +758,7 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                 kind: clip.kind.clone(),
                 source_time: Time((clip.source_offset.0 + local_time.0).max(0)),
                 transform: clip.transform,
+                fit: clip.fit,
                 params: clip.params.clone(),
                 effects: clip.effects.iter().filter(|e| !e.bypass).cloned().collect(),
                 transition: span.transition_at(clip, time),

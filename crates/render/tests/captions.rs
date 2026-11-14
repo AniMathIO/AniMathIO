@@ -28,6 +28,7 @@ fn scene(style: &str, extra: &serde_json::Value, time_ms: i64) -> Scene {
         params[key] = value.clone();
     }
     Scene {
+        canvas: (0, 0),
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(0),
@@ -36,6 +37,7 @@ fn scene(style: &str, extra: &serde_json::Value, time_ms: i64) -> Scene {
                 params,
             },
             source_time: Time(time_ms * MS),
+            fit: animathio_core::Fit::Stretch,
             transform: Transform {
                 y: 0.6,
                 scale_x: 0.9,

@@ -53,7 +53,11 @@ fn main() {
     let bench = bench_viewport_enabled();
     let control = if control_enabled() {
         let (bridge, rx) = control::ControlBridge::new();
-        control::start(bridge).map(|server| control::ControlRuntime { rx, server })
+        let (server, error) = match control::start(bridge) {
+            Ok(server) => (Some(server), None),
+            Err(error) => (None, Some(error)),
+        };
+        Some(control::ControlRuntime { rx, server, error })
     } else {
         None
     };

@@ -22,6 +22,7 @@ const FONT: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
 
 /// Single-threaded scalar Vello CPU reference backend, with embedded fonts only.
 pub struct CpuBackend {
+    pub(crate) canvas: Size,
     fonts: FontContext,
     layout: LayoutContext<()>,
 }
@@ -33,6 +34,7 @@ impl Default for CpuBackend {
         });
         collection.register_fonts(Blob::new(Arc::new(FONT)), None);
         Self {
+            canvas: (0, 0),
             fonts: FontContext {
                 collection,
                 source_cache: SourceCache::default(),
@@ -50,6 +52,7 @@ impl Backend for CpuBackend {
         video: &mut dyn FrameSource,
         size: Size,
     ) -> Result<Frame, Error> {
+        self.canvas = fit_canvas(scene.canvas, size);
         let (width, height) = check_size(size)?;
         // Rebuild drawing state each frame. Only immutable media/font data may be cached.
         let mut ctx = RenderContext::new_with(
@@ -312,11 +315,18 @@ impl CpuBackend {
         pool: &mut ResourcePool,
         video: &mut dyn FrameSource,
     ) -> Result<(), Error> {
+        // Aspect fitting follows the physical render target, including rounded
+        // preview sizes; only native pixels need the project's full resolution.
+        let canvas = if clip.fit == animathio_core::Fit::Original {
+            self.canvas
+        } else {
+            size
+        };
         match &clip.kind {
-            ClipKind::Image(id) => draw_image(ctx, pool.image(id)?.as_ref(), clip, size)?,
+            ClipKind::Image(id) => draw_image(ctx, pool.image(id)?.as_ref(), clip, canvas)?,
             ClipKind::Video(id) => {
                 if let Some(frame) = video.frame_at(id, clip.source_time) {
-                    draw_image(ctx, &frame, clip, size)?;
+                    draw_image(ctx, &frame, clip, canvas)?;
                 } else {
                     self.placeholder(
                         ctx,
@@ -730,73 +740,17 @@ impl CpuBackend {
     }
 }
 
-/// Unit-square media bounds, centred and fitted to the physical placeholder box.
-pub(crate) fn media_fit_rect(clip: &SceneClip, canvas: Size, source: Size) -> (f64, f64, f64, f64) {
-    let Some(animathio_core::ParamValue::String(mode)) = clip.params.get("media_fit") else {
-        return (0., 0., 1., 1.);
-    };
-    let box_ratio = (f64::from(canvas.0) * clip.transform.scale_x).abs()
-        / (f64::from(canvas.1) * clip.transform.scale_y).abs();
-    let ratio = (f64::from(source.0) / f64::from(source.1)) / box_ratio;
-    if !ratio.is_finite() || ratio <= 0. {
-        return (0., 0., 1., 1.);
+/// The project resolution defines pixel-sized fit; render size is only a fallback.
+pub(crate) fn fit_canvas(canvas: Size, output: Size) -> Size {
+    if canvas.0 == 0 || canvas.1 == 0 {
+        output
+    } else {
+        canvas
     }
-    let (w, h) = match (mode.as_str(), ratio >= 1.) {
-        ("cover", true) | ("contain", false) => (ratio, 1.),
-        ("cover", false) | ("contain", true) => (1., 1. / ratio),
-        _ => (1., 1.),
-    };
-    ((1. - w) / 2., (1. - h) / 2., w, h)
 }
 
-#[cfg(test)]
-mod media_fit_tests {
-    #[test]
-    fn cover_crops_and_contain_letterboxes() {
-        let mut project = animathio_core::Project::default();
-        let mut clip = animathio_core::Clip::new(
-            animathio_core::ClipId(1),
-            animathio_core::ClipKind::Image(animathio_core::AssetId::of(b"image")),
-            animathio_core::TimeRange::new(animathio_core::Time(0), animathio_core::Time(100))
-                .unwrap(),
-        );
-        clip.params.insert(
-            "media_fit".into(),
-            animathio_core::ParamValue::String("contain".into()),
-        );
-        animathio_core::Command::Batch {
-            commands: vec![
-                animathio_core::Command::AddAsset {
-                    id: animathio_core::AssetId::of(b"image"),
-                    asset: animathio_core::Asset {
-                        name: "image.png".into(),
-                        media_type: "image/png".into(),
-                    },
-                },
-                animathio_core::Command::AddTrack {
-                    track: animathio_core::Track::new(animathio_core::TrackId(1), "Video"),
-                    index: 0,
-                },
-                animathio_core::Command::AddClip {
-                    track: animathio_core::TrackId(1),
-                    clip,
-                },
-            ],
-        }
-        .apply(&mut project)
-        .unwrap();
-        let mut scene = animathio_core::evaluate(&project, animathio_core::Time(0));
-        assert_eq!(
-            super::media_fit_rect(&scene.clips[0], (100, 100), (200, 100)),
-            (0., 0.25, 1., 0.5)
-        );
-        scene.clips[0].params.insert(
-            "media_fit".into(),
-            animathio_core::ParamValue::String("cover".into()),
-        );
-        assert_eq!(
-            super::media_fit_rect(&scene.clips[0], (100, 100), (200, 100)),
-            (-0.5, 0., 2., 1.)
-        );
-    }
+/// Unit-square placement shared by CPU and GPU; both crop to the clip frame.
+pub(crate) fn media_fit_rect(clip: &SceneClip, canvas: Size, source: Size) -> (f64, f64, f64, f64) {
+    let [x, y, w, h] = clip.fit.rect(source, canvas, clip.transform);
+    (x, y, w, h)
 }

@@ -40,6 +40,7 @@ struct InputField {
 /// the whole focus session commits as one undo step.
 struct TextareaField {
     state: Entity<TextareaState>,
+    target: (ClipId, String),
     /// Model text last written to (or committed from) the editor.
     synced: String,
     _subscription: Subscription,
@@ -265,6 +266,41 @@ impl Editor {
         field.synced.clone_from(&buffer);
         let target = field.target.clone();
         self.commit_input_value(target, buffer, cx);
+    }
+
+    /// Flush before selection changes can drop widgets and their blur subscriptions.
+    /// Each input carries its original clip ids, never the current selection.
+    pub(super) fn commit_pending_inspector_inputs(&mut self, cx: &mut Context<Self>) {
+        let keys: Vec<_> = self
+            .fields
+            .inputs
+            .iter()
+            .filter(|(_, field)| !matches!(field.target, InputTarget::Timecode))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            self.commit_input(&key, cx);
+        }
+        // Flush a final textarea change even if its Change/Blur event is still queued.
+        let textareas: Vec<_> = self
+            .fields
+            .textareas
+            .values_mut()
+            .filter_map(|field| {
+                let text = field.state.read(cx).value().to_string();
+                if text == field.synced {
+                    return None;
+                }
+                field.synced.clone_from(&text);
+                Some((field.target.clone(), text))
+            })
+            .collect();
+        for ((id, name), text) in textareas {
+            if let Some(command) = self.plugin_param_command(id, name, json!(text)) {
+                self.preview_live(command, cx);
+            }
+        }
+        self.finish_color_edit(cx);
     }
 
     /// The +/- buttons and the Up/Down keys of a [`NumberInput`].
@@ -549,6 +585,7 @@ impl Editor {
                 key.clone(),
                 TextareaField {
                     state,
+                    target: (id, name.to_owned()),
                     synced: value.to_owned(),
                     _subscription: subscription,
                 },
@@ -1017,7 +1054,7 @@ impl Editor {
                 "Rotation (deg)",
             ),
         ];
-        transform
+        let mut rows: Vec<Div> = transform
             .into_iter()
             .map(|(field, label)| {
                 let target = match &field {
@@ -1034,7 +1071,32 @@ impl Editor {
                 let value = field_display_value(&field, model);
                 self.number_row(id, field, label, value, window, cx)
             })
-            .collect()
+            .collect();
+        if matches!(clip.kind, ClipKind::Image(_) | ClipKind::Video(_)) {
+            rows.insert(0, Self::fit_row(id, clip.fit, cx));
+        }
+        rows
+    }
+
+    /// Fit / Fill / Stretch / 1:1 choice for an image or video clip.
+    fn fit_row(id: ClipId, current: Fit, cx: &mut Context<Self>) -> Div {
+        let mut buttons = div().flex().flex_row().gap_1();
+        for fit in Fit::ALL {
+            buttons = buttons.child(
+                Button::new(SharedString::from(format!("fit-{}-{}", id.0, fit.name())))
+                    .ghost()
+                    .compact()
+                    .label(fit_label(fit))
+                    .tooltip(fit_tooltip(fit))
+                    .selected(fit == current)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.find_clip(id).is_some_and(|clip| clip.fit != fit) {
+                            this.execute(&Command::SetClipFit { id, fit }, cx);
+                        }
+                    })),
+            );
+        }
+        Self::param_row_flush("Fit", buttons)
     }
 
     pub(super) fn numeric_param_rows(
@@ -1637,6 +1699,25 @@ pub(super) fn to_hsla(color: [u8; 4]) -> Hsla {
         b: f32::from(color[2]) / 255.0,
         a: f32::from(color[3]) / 255.0,
     })
+}
+
+/// Short inspector label for a fit mode.
+pub(super) fn fit_label(fit: Fit) -> &'static str {
+    match fit {
+        Fit::Contain => "Fit",
+        Fit::Cover => "Fill",
+        Fit::Stretch => "Stretch",
+        Fit::Original => "1:1",
+    }
+}
+
+fn fit_tooltip(fit: Fit) -> &'static str {
+    match fit {
+        Fit::Contain => "Show the whole frame at its aspect ratio (letterbox)",
+        Fit::Cover => "Fill the canvas at its aspect ratio, cropping the overflow",
+        Fit::Stretch => "Distort the frame to fill the canvas",
+        Fit::Original => "One source pixel per project pixel",
+    }
 }
 
 #[cfg(test)]

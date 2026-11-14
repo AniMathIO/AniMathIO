@@ -72,7 +72,7 @@ const MAX_STILLS: usize = 16;
 struct WorkerCaches {
     bytes: Lru<AssetId, Arc<[u8]>>,
     decoders: Lru<AssetId, Arc<dyn VideoDecoder>>,
-    stills: Lru<AssetId, image::RgbaImage>,
+    stills: Lru<AssetId, (image::RgbaImage, (u32, u32))>,
 }
 
 impl WorkerCaches {
@@ -86,7 +86,12 @@ impl WorkerCaches {
 }
 
 type Key = (AssetId, Time, u32);
-type ResultImage = (Key, Option<Arc<RenderImage>>);
+#[derive(Clone)]
+pub(super) struct Thumbnail {
+    pub image: Arc<RenderImage>,
+    pub source_size: (u32, u32),
+}
+type ResultImage = (Key, Option<Thumbnail>);
 struct Request {
     key: Key,
     image: bool,
@@ -97,7 +102,7 @@ pub(super) struct Thumbnails {
     tx: SyncSender<Request>,
     rx: Receiver<ResultImage>,
     /// Decoded tiles, least recently used evicted first.
-    images: Lru<Key, Option<Arc<RenderImage>>>,
+    images: Lru<Key, Option<Thumbnail>>,
     pending: BTreeSet<Key>,
 }
 impl Default for Thumbnails {
@@ -135,7 +140,7 @@ impl Thumbnails {
         changed
     }
     /// Store a decoded tile, evicting the least recently used one when full.
-    fn insert(&mut self, key: Key, image: Option<Arc<RenderImage>>) {
+    fn insert(&mut self, key: Key, image: Option<Thumbnail>) {
         self.images.insert(key, image);
     }
 
@@ -146,7 +151,7 @@ impl Thumbnails {
         height: u32,
         image: bool,
         assets: &Arc<BTreeMap<AssetId, Vec<u8>>>,
-    ) -> Option<Arc<RenderImage>> {
+    ) -> Option<Thumbnail> {
         let key = (asset.clone(), if image { Time(0) } else { time }, height);
         if let Some(found) = self.images.get(&key) {
             return found.clone();
@@ -166,17 +171,16 @@ impl Thumbnails {
         None
     }
 }
-fn decode(request: &Request, caches: &mut WorkerCaches) -> Option<Arc<RenderImage>> {
+fn decode(request: &Request, caches: &mut WorkerCaches) -> Option<Thumbnail> {
     let (asset, time, height) = &request.key;
     let bytes = request.assets.get(asset)?;
-    let rgba = if request.image {
+    let (rgba, source_size) = if request.image {
         if caches.stills.get(asset).is_none() {
             // Retain only a small source thumbnail, never the full decoded still.
-            let small = image::load_from_memory(bytes)
-                .ok()?
-                .thumbnail(256, 144)
-                .to_rgba8();
-            caches.stills.insert(asset.clone(), small);
+            let image = image::load_from_memory(bytes).ok()?;
+            let source_size = (image.width(), image.height());
+            let small = image.thumbnail(256, 144).to_rgba8();
+            caches.stills.insert(asset.clone(), (small, source_size));
         }
         caches.stills.get(asset)?.clone()
     } else {
@@ -193,7 +197,10 @@ fn decode(request: &Request, caches: &mut WorkerCaches) -> Option<Arc<RenderImag
         }
         let decoder = Arc::clone(caches.decoders.get(asset)?);
         let frame = decoder.frame_at(*time).ok()?;
-        image::RgbaImage::from_raw(frame.width, frame.height, frame.pixels.to_vec())?
+        (
+            image::RgbaImage::from_raw(frame.width, frame.height, frame.pixels.to_vec())?,
+            (frame.width, frame.height),
+        )
     };
     let height = (*height).clamp(16, 96);
     let width = (u64::from(rgba.width()) * u64::from(height) / u64::from(rgba.height().max(1)))
@@ -203,7 +210,10 @@ fn decode(request: &Request, caches: &mut WorkerCaches) -> Option<Arc<RenderImag
     for pixel in small.pixels_mut() {
         pixel.0.swap(0, 2);
     }
-    Some(Arc::new(RenderImage::new([image::Frame::new(small)])))
+    Some(Thumbnail {
+        image: Arc::new(RenderImage::new([image::Frame::new(small)])),
+        source_size,
+    })
 }
 
 #[cfg(test)]
@@ -211,6 +221,24 @@ mod tests {
     use super::*;
     // `gpui::test` is glob-imported through `super::*`; keep the std attribute.
     use core::prelude::v1::test;
+
+    #[test]
+    fn native_dimensions_survive_the_bounded_still_thumbnail() {
+        let image = image::RgbaImage::from_pixel(640, 480, image::Rgba([255, 0, 0, 255]));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        let bytes = encoded.into_inner();
+        let asset = AssetId::of(&bytes);
+        let request = Request {
+            key: (asset.clone(), Time(0), 24),
+            image: true,
+            assets: Arc::new(BTreeMap::from([(asset, bytes)])),
+        };
+        let tile = decode(&request, &mut WorkerCaches::new()).unwrap();
+        assert_eq!(tile.source_size, (640, 480));
+    }
 
     #[test]
     fn lru_evicts_the_entry_used_longest_ago_not_the_smallest_key() {

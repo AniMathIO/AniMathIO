@@ -310,6 +310,12 @@ impl Editor {
                 serde_json::to_value(target.display().to_string())?
             }
             Call::CommandApply { command } => {
+                if command.is_internal() {
+                    return Err(ControlError::InvalidParams(
+                        "Exact and RestoreClips are internal-only commands".into(),
+                    ));
+                }
+
                 self.check_effect_params(&command)
                     .map_err(ControlError::InvalidParams)?;
                 self.history

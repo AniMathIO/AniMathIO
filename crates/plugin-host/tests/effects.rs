@@ -437,6 +437,7 @@ fn components_built_for_api_0_2_0_still_load_and_render() {
     let mut host = PluginHost::new(cache.path()).unwrap();
     let id = host.load_plugin_package(package).unwrap();
     let scene = Scene {
+        canvas: (0, 0),
         clips: vec![SceneClip {
             id: ClipId(1),
             track: TrackId(1),
@@ -445,6 +446,7 @@ fn components_built_for_api_0_2_0_still_load_and_render() {
                 params: serde_json::json!({}),
             },
             source_time: Time(0),
+            fit: animathio_core::Fit::Stretch,
             transform: Transform::default(),
             params: BTreeMap::new(),
             effects: Vec::new(),

@@ -150,6 +150,7 @@ impl GpuBackend {
         video: &mut dyn FrameSource,
         size: Size,
     ) -> Result<(), Error> {
+        self.cpu.canvas = crate::cpu::fit_canvas(scene.canvas, size);
         self.scene.reset();
         let canvas = Rect::new(0.0, 0.0, f64::from(size.0), f64::from(size.1));
         for clip in &scene.clips {
@@ -244,8 +245,13 @@ impl GpuBackend {
         clip: &SceneClip,
         size: Size,
     ) {
+        let canvas = if clip.fit == animathio_core::Fit::Original {
+            self.cpu.canvas
+        } else {
+            size
+        };
         let (left, top, width, height) =
-            crate::cpu::media_fit_rect(clip, size, (image.width, image.height));
+            crate::cpu::media_fit_rect(clip, canvas, (image.width, image.height));
         self.scene.push_layer(
             Fill::NonZero,
             Mix::Normal,

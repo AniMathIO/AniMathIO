@@ -153,7 +153,10 @@ pub enum Command {
         /// Original clip snapshots.
         clips: Vec<Clip>,
     },
-    /// Merge two adjacent clips back into one (the inverse of `SplitClip`).
+    /// Merge two adjacent clips back into one (the inverse of `SplitClip`). Refused
+    /// unless the right clip is exactly what splitting the merged clip at the join would
+    /// produce: same kind, continuous source time, and identical transform, fit,
+    /// parameters, effects and (re-based) automation. Nothing is silently dropped.
     MergeClip {
         /// Left clip identity.
         left: ClipId,
@@ -166,6 +169,13 @@ pub enum Command {
         id: ClipId,
         /// New base transform.
         transform: Transform,
+    },
+    /// Set how an image or video source is placed inside the clip's frame.
+    SetClipFit {
+        /// Clip identity.
+        id: ClipId,
+        /// New fit mode.
+        fit: crate::Fit,
     },
     /// Set or remove a base numeric parameter.
     SetParam {
@@ -457,6 +467,7 @@ impl Command {
             | Self::TrimClip { id, .. }
             | Self::SplitClip { id, .. }
             | Self::SetTransform { id, .. }
+            | Self::SetClipFit { id, .. }
             | Self::SetParam { id, .. }
             | Self::AddEffect { id, .. }
             | Self::RemoveEffect { id, .. }
@@ -494,6 +505,19 @@ impl Command {
                 .iter()
                 .find_map(|command| command.locked_track(project)),
             _ => None,
+        }
+    }
+
+    /// Whether this is (or a batch contains) an undo-internal primitive: [`Command::Exact`]
+    /// bypasses linked-companion propagation and [`Command::RestoreClips`] replaces clip
+    /// data wholesale. Both appear in recorded inverses; external callers (control
+    /// protocol, MCP) must not send them.
+    #[must_use]
+    pub fn is_internal(&self) -> bool {
+        match self {
+            Self::Exact { .. } | Self::RestoreClips { .. } => true,
+            Self::Batch { commands } => commands.iter().any(Self::is_internal),
+            _ => false,
         }
     }
 
@@ -736,8 +760,12 @@ impl Command {
                 if *index > project.tracks.len() {
                     return Err(invalid("track index out of bounds"));
                 }
-                project.tracks.insert(*index, track.clone());
-                Self::RemoveTrack { id: track.id }
+                let mut track = track.clone();
+                // Transitions are kept sorted by id so add/remove round trips are exact.
+                track.transitions.sort_by_key(|t| t.id);
+                let id = track.id;
+                project.tracks.insert(*index, track);
+                Self::RemoveTrack { id }
             }
             Self::SetTrackGain { id, gain } => {
                 let index = track_index(project, *id)?;
@@ -984,6 +1012,25 @@ impl Command {
                 if left_clip.kind != right_clip.kind {
                     return Err(invalid("merge clips must share a kind"));
                 }
+                // Merge only a true split pair: the right clip must be exactly what
+                // splitting the merged clip at the join would produce (continuous source
+                // time, the same settings and the left's automation, re-based).
+                let mut whole = left_clip.clone();
+                whole.range = TimeRange::new(left_clip.range.start, right_clip.range.end)?;
+                let mut continuation = split_right(&whole, right_clip.range.start, *right)?;
+                continuation.link_group = right_clip.link_group;
+                if continuation.source_offset != right_clip.source_offset {
+                    return Err(invalid(
+                        "merge clips must be continuous in source time (the right clip must \
+                         start where the left one ends)",
+                    ));
+                }
+                if continuation != right_clip {
+                    return Err(invalid(
+                        "merge clips must have identical settings (transform, fit, \
+                         parameters, effects and automation)",
+                    ));
+                }
                 let restored = project.tracks[left_index]
                     .clips
                     .get_mut(left)
@@ -1004,6 +1051,18 @@ impl Command {
                     transform: clip.transform,
                 };
                 clip.transform = *transform;
+                inverse
+            }
+            Self::SetClipFit { id, fit } => {
+                let clip = clip_mut(project, *id)?;
+                if !matches!(clip.kind, ClipKind::Image(_) | ClipKind::Video(_)) {
+                    return Err(invalid("fit requires an image or video clip"));
+                }
+                let inverse = Self::SetClipFit {
+                    id: *id,
+                    fit: clip.fit,
+                };
+                clip.fit = *fit;
                 inverse
             }
             Self::SetParam { id, name, value } => {
@@ -1622,7 +1681,12 @@ fn split_right(clip: &Clip, at: Time, id: ClipId) -> Result<Clip, Error> {
     let mut right = clip.clone();
     right.id = id;
     right.range = TimeRange::new(at, clip.range.end)?;
-    right.source_offset = Time(clip.source_offset.0 + duration);
+    right.source_offset = Time(
+        clip.source_offset
+            .0
+            .checked_add(duration)
+            .ok_or_else(|| invalid("source offset overflow"))?,
+    );
     for animation in &mut right.animations {
         let boundary = animation.keys.sample(Time(duration));
         let interpolation = animation

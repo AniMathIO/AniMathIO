@@ -128,7 +128,7 @@ clears its undo history.
 | `add_graph` | Add an `org.animathio.graph` plugin clip | bounds (always fully visible; the plane is scaled uniformly so circles stay round on any canvas aspect), newline-separated `items`, `show_grid`/`show_axes`/`show_labels`, `color`, `x`/`y`, `start_ms`, `duration_ms`, `draw_duration_ms` |
 | `add_media` | Import image/video/audio by absolute path, add a clip (one undo step); audio starts with animatable gain/mute defaults | |
 | `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction` |
-| `update_element` | Update a clip's placement and/or visible time frame | |
+| `update_element` | Update placement, visible time frame or image/video fit | |
 | `remove_element` | Remove a clip by id | |
 | `set_canvas` | Canvas width/height, background color, duration | `background_color`: `#RRGGBB`/`#RRGGBBAA`; `max_time_ms`: duration in ms |
 | `set_param` | Set/change a clip's named numeric parameter | |
@@ -433,7 +433,7 @@ false: contain). It refuses existing destinations, unknown placeholders, audio f
 placeholder present in both maps, writes the project and opens it through the current
 control backend. Replacement swaps the clip's source in place, retaining its timing,
 transform, effects, animation and linked companions. The media is fitted to the
-placeholder's box through the clip's `media_fit` parameter (`cover` crops, `contain`
+placeholder's box through the clip's `fit` field (`cover` crops, `contain`
 letterboxes), honoured by both render backends. User templates live in the platform user
 data directory under `templates`, separate from the project schema; the editor's
 File > Save as template… writes them and the launcher lists them with a delete action.
@@ -490,3 +490,24 @@ which case those keys are removed first. Apply is a single `Command::Batch` of
 `AddKeyframe` / `RemoveKeyframe` (nested in chunks when it exceeds the core's 1024-edit
 limit), so undo restores the project exactly; a stale proposal (project revision changed) is
 rejected. The editor panel shades the ducked spans on the music track rows before Apply.
+
+
+## Media fit and command boundaries
+
+`update_element` accepts optional `fit`: `fit`/`contain`, `fill`/`cover`, `stretch`,
+or `none`/`original` (1:1 source pixels at project resolution). Placement, timing
+and fit in the same call form one undo step. Fit is only valid on image/video
+clips; new clips default to contain. Existing pre-schema-6 media stays stretched,
+except template contain/cover fitting, which migrates unchanged.
+
+The equivalent control request is:
+
+```json
+{"method":"command.apply","params":{"command":{"SetClipFit":{"id":3,"fit":"fill"}}}}
+```
+
+`command.apply` refuses internal `Exact` and `RestoreClips` commands, including in
+nested batches. `MergeClip` requires adjacent timeline ranges, continuous source
+time, identical settings (including fit and effects), and automation matching a
+split at the join. It refuses a merge that would discard the right clip's edits;
+undo restores both clips exactly.

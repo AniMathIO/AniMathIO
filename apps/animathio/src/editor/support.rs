@@ -474,6 +474,32 @@ pub(super) fn timeline_content_preview(clip: &Clip) -> String {
     }
 }
 
+/// The filmstrip uses the same physical frame aspect as the rendered clip.
+pub(super) fn filmstrip_tile_width(height: f32, canvas: (u32, u32), transform: Transform) -> f32 {
+    let ratio = (f64::from(canvas.0) * transform.scale_x).abs()
+        / (f64::from(canvas.1.max(1)) * transform.scale_y)
+            .abs()
+            .max(1e-9);
+    (height * ratio as f32).clamp(8., 256.) + 1.
+}
+
+/// Keep the physical frame aspect even when an extreme transform caps tile width.
+fn filmstrip_frame(
+    tile: Bounds<Pixels>,
+    canvas: (u32, u32),
+    transform: Transform,
+) -> Bounds<Pixels> {
+    let w = (f64::from(canvas.0) * transform.scale_x).abs().max(1e-9);
+    let h = (f64::from(canvas.1) * transform.scale_y).abs().max(1e-9);
+    let scale =
+        (f64::from(f32::from(tile.size.width)) / w).min(f64::from(f32::from(tile.size.height)) / h);
+    let size = size(px((w * scale) as f32), px((h * scale) as f32));
+    Bounds::new(
+        tile.center() - point(size.width / 2., size.height / 2.),
+        size,
+    )
+}
+
 fn paint_filmstrip(
     bounds: Bounds<Pixels>,
     clip: &ClipPaint,
@@ -485,7 +511,11 @@ fn paint_filmstrip(
     }
     let top = y0 + px(20.);
     let height = y1 - top - px(3.);
-    let tile_width = (height * (16. / 9.)).max(px(32.));
+    let tile_width = px(filmstrip_tile_width(
+        f32::from(height),
+        clip.canvas,
+        clip.transform,
+    ));
     let left = x0 + px(5.);
     let first = (f32::from(bounds.left() - left) / f32::from(tile_width))
         .floor()
@@ -506,7 +536,22 @@ fn paint_filmstrip(
         let slot = index.saturating_sub(clip.thumbnail_first);
         if let Some(Some(image)) = clip.thumbnails.get(slot) {
             let tile = Bounds::new(point(x, top), size(tile_width - px(1.), height));
-            let _ = window.paint_image(mask, tile, Corners::all(px(2.)), image.clone(), 0, false);
+            let frame = filmstrip_frame(tile, clip.canvas, clip.transform);
+            let [fx, fy, fw, fh] = clip
+                .fit
+                .rect(image.source_size, clip.canvas, clip.transform);
+            let fitted = Bounds::new(
+                frame.origin + point(frame.size.width * fx as f32, frame.size.height * fy as f32),
+                size(frame.size.width * fw as f32, frame.size.height * fh as f32),
+            );
+            let _ = window.paint_image(
+                frame.intersect(&mask),
+                fitted,
+                Corners::default(),
+                image.image.clone(),
+                0,
+                false,
+            );
             window.paint_quad(fill(tile.intersect(&mask), style::hexa(colors::BG, 0.18)));
         }
     }

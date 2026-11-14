@@ -385,6 +385,12 @@ pub fn analyse_reframe(
                 }
             }
         }
+        // Tracking computes a canvas-sized source rectangle and its fill scale.
+        // Use stretch here to avoid applying an additional contain/cover fit.
+        commands.push(Command::SetClipFit {
+            id: clip.id,
+            fit: animathio_core::Fit::Stretch,
+        });
         let mut transform = clip.transform;
         transform.scale_x = scale_x;
         transform.scale_y = scale_y;
