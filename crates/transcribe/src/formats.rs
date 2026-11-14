@@ -37,6 +37,8 @@ impl Format {
 }
 
 const TICKS_PER_MS: i64 = TICKS_PER_SECOND / 1000;
+/// Largest hour field a parsed timestamp may have.
+const MAX_HOURS: i64 = 99_999;
 
 fn to_ms(time: Time) -> i64 {
     (time.0.max(0) + TICKS_PER_MS / 2) / TICKS_PER_MS
@@ -147,7 +149,11 @@ fn parse_stamp(text: &str) -> Result<Time, Error> {
     }
     let digits: String = fraction.chars().chain("000".chars()).take(3).collect();
     let millis = number(&digits)?;
-    if !(0..60).contains(&minutes) || !(0..60).contains(&seconds) || hours < 0 {
+    // 99999 hours is far beyond any timeline; bounding it keeps the arithmetic in range.
+    if !(0..60).contains(&minutes)
+        || !(0..60).contains(&seconds)
+        || !(0..=MAX_HOURS).contains(&hours)
+    {
         return Err(bad());
     }
     let total = ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis;

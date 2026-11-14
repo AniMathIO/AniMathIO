@@ -301,3 +301,17 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn parser_rejects_overflowing_timestamps() {
+    assert!(
+        parse_cues("1\n99999999999999999:00:00,000 --> 99999999999999999:00:01,000\nA\n").is_err()
+    );
+    assert!(parse_cues("1\n100000:00:00,000 --> 100000:00:01,000\nA\n").is_err());
+    assert_eq!(
+        parse_cues("1\n99999:59:59,999 --> 99999:59:59,999\nA\n")
+            .unwrap()
+            .len(),
+        1
+    );
+}

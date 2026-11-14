@@ -28,6 +28,8 @@ const PRESET: &str = "caption";
 const MAX_SUBTITLE_FILE: u64 = 8 * 1024 * 1024;
 /// Upper bound on the number of cues one import or generation may create.
 const MAX_CUES: usize = 5000;
+/// Largest import offset magnitude, in ticks (100000 hours).
+const MAX_IMPORT_OFFSET: u64 = 100_000 * 3600 * TICKS_PER_SECOND as u64;
 
 fn default_model() -> String {
     "base".to_owned()
@@ -455,6 +457,11 @@ pub fn import_subtitles(
     let text = String::from_utf8(bytes)
         .map_err(|_| ControlError::InvalidParams("subtitle file is not UTF-8".into()))?;
     let mut cues = parse_cues(&text)?;
+    if params.offset.0.unsigned_abs() > MAX_IMPORT_OFFSET {
+        return Err(ControlError::InvalidParams(
+            "offset must be within 100000 hours".into(),
+        ));
+    }
     for cue in &mut cues {
         cue.start = Time(cue.start.0.saturating_add(params.offset.0));
         cue.end = Time(cue.end.0.saturating_add(params.offset.0));
@@ -463,7 +470,7 @@ pub fn import_subtitles(
     for cue in &mut cues {
         cue.start = Time(cue.start.0.max(0));
         if cue.end.0 <= cue.start.0 {
-            cue.end = Time(cue.start.0 + TICKS_PER_SECOND / 1000);
+            cue.end = Time(cue.start.0.saturating_add(TICKS_PER_SECOND / 1000));
         }
     }
     apply_cues(project, history, String::new(), &cues)

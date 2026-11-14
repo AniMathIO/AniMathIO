@@ -325,3 +325,32 @@ fn unknown_clip_kind_is_not_exported() {
     // A track called Subtitles without text clips does not count.
     assert!(track_cues(&project, None).is_err());
 }
+
+#[test]
+fn import_rejects_absurd_offsets_and_far_future_cues_do_not_overflow() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.srt");
+    std::fs::write(&path, "1\n99999:00:00,000 --> 99999:00:01,000\nA\n").unwrap();
+    let mut handler = HeadlessHandler::from_bundle(
+        Bundle {
+            project: project_with_track(),
+            assets: BTreeMap::new(),
+        },
+        None,
+    );
+    for offset in [i64::MAX, i64::MIN] {
+        assert!(
+            handler
+                .subtitles_import(SubtitleImportParams {
+                    path: path.clone(),
+                    offset: Time(offset)
+                })
+                .is_err()
+        );
+    }
+    // The largest accepted timestamp plus a big offset must not panic.
+    let _ = handler.subtitles_import(SubtitleImportParams {
+        path,
+        offset: Time(50_000 * 3600 * TICKS_PER_SECOND),
+    });
+}
