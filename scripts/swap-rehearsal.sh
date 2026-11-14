@@ -18,7 +18,7 @@
 #      enable release-plz tagging/releases (the documented manual flips)
 #   4. Merge v2 into main with a merge commit
 #   5. Delete `staging` and `release-please--branches--*`
-# Then it verifies the resulting `main`: README/LICENSE/AGENTS.md/CLAUDE.md present,
+# Then it verifies the resulting `main`: README/LICENSE/AGENTS.md/CLAUDE.md/SECURITY.md/CONTRIBUTING.md and the issue/PR templates present,
 # no v1 files or workflows left, workflows and Renovate scoped to `main`, release-plz
 # enabled with exactly one tag-producing package, TOML/YAML still parse, the Cargo
 # workspace resolves at 2.0.0, and the docs checker still passes.
@@ -169,7 +169,7 @@ check "legacy survived the cleanup" git -C "$remote" rev-parse --verify refs/hea
 # --------------------------------------------------------------------------
 say "Verify main as 2.0"
 git checkout -q main
-for f in README.md LICENSE AGENTS.md CLAUDE.md Cargo.toml Cargo.lock release-plz.toml renovate.json deny.toml rust-toolchain.toml docs/architecture.md; do
+for f in README.md LICENSE AGENTS.md CLAUDE.md SECURITY.md CONTRIBUTING.md .github/pull_request_template.md .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml .github/ISSUE_TEMPLATE/config.yml Cargo.toml Cargo.lock release-plz.toml renovate.json deny.toml rust-toolchain.toml docs/architecture.md; do
   check "present: $f" test -f "$f"
 done
 for f in package.json .release-please-manifest.json release-please-config.json .github/dependabot.yml electron-builder.yml renderer; do
