@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use animathio_audio::{AudioPool, Mixer, Pcm};
+use animathio_audio::{AudioPool, Mixer};
 use animathio_core::{
     AssetId, ClipKind, FrameRate, Project, Rounding, Scene, TICKS_PER_SECOND, Time, TimeRange,
     evaluate,
@@ -14,6 +14,7 @@ use animathio_media::{
 use animathio_render::{Frame, RenderCtx, render};
 use serde::{Deserialize, Serialize};
 
+mod audio_source;
 mod output;
 mod plugin_check;
 
@@ -141,7 +142,7 @@ impl Exporter {
             let bytes: Arc<[u8]> = bytes.clone().into();
             let info = backend.probe_bytes("media", bytes.clone())?;
             let decoder = backend.open_audio_bytes("media", bytes)?;
-            let audio = decoder.info();
+            let audio = decoder.info().clone();
             let frames = usize::try_from(
                 (i128::from(info.duration.0) * i128::from(audio.sample_rate)
                     + i128::from(TICKS_PER_SECOND)
@@ -149,14 +150,14 @@ impl Exporter {
                     / i128::from(TICKS_PER_SECOND),
             )
             .map_err(|_| Error::Invalid("audio duration overflow".into()))?;
-            let samples = decoder.samples(Time(0), frames)?;
-            let pcm = Pcm::new(
+            let source = audio_source::DecoderSource::new(
+                decoder,
                 audio.sample_rate,
                 u16::try_from(audio.channels)
                     .map_err(|_| Error::Invalid("channel count overflow".into()))?,
-                samples.to_vec(),
-            )?;
-            pool.insert(id.clone(), &pcm)?;
+                frames as u64,
+            );
+            pool.insert(id.clone(), &source)?;
         }
         Ok(Self {
             ctx: RenderCtx::from_assets(assets.clone())?,

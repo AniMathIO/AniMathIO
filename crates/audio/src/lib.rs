@@ -1,15 +1,20 @@
 //! Engine-owned PCM, deterministic offline mixing, and device-master playback.
-//! No decoder or stream is stored in the serializable project.
+//! No decoder or stream is stored in the serializable project. Assets stream: decoding,
+//! resampling and channel mapping run lazily in bounded blocks (see `AudioPool::prepare`).
+mod layout;
 mod beats;
 mod mixer;
 mod player;
+mod prepared;
 mod source;
 mod speed;
 mod waveform;
 
+pub use layout::*;
 pub use beats::*;
 pub use mixer::*;
 pub use player::*;
+pub use prepared::PrepareOptions;
 pub use source::*;
 pub use speed::*;
 pub use waveform::*;

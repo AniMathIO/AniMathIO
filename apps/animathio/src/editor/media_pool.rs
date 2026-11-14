@@ -45,18 +45,20 @@ fn load_thumbnail(name: &str, media_type: &str, bytes: Vec<u8>) -> MediaThumbnai
         }
     } else if media_type.starts_with("audio/") {
         use animathio_audio::AudioSource;
+        // Thumbnails stream the asset (bounded memory), so any length is fine.
         if let Ok(source) = SymphoniaSource::from_bytes_with_limits(
             bytes,
             animathio_audio::DecodeLimits {
-                max_duration: Duration::from_secs(600),
-                max_samples: 48_000 * 2 * 600,
+                max_duration: Duration::from_hours(4),
+                max_samples: animathio_audio::MAX_INTERLEAVED_SAMPLES,
             },
-        ) && let Ok(pcm) = source.decode_all()
+        ) && let Ok(mut reader) = source.open_reader()
+            && let Ok(wave) = Waveform::from_reader(reader.as_mut(), 96)
         {
-            let wave = Waveform::from_pcm(&pcm, 96);
+            let info = source.info();
             result.duration = Time(wave.duration_ticks);
             result.peaks = wave.peaks.into();
-            result.detail = format!("{} Hz / {} ch", pcm.rate(), pcm.channels());
+            result.detail = format!("{} Hz / {} ch", info.rate, info.channels);
         }
     } else if media_type.starts_with("video/") {
         let backend = animathio_media::FilmCraftBackend::new();

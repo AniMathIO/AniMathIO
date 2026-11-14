@@ -240,6 +240,7 @@ dependencies = [
  "animathio-core",
  "arc-swap",
  "cpal",
+ "filmcraft-opus",
  "proptest",
  "rtrb",
  "rubato",
