@@ -381,6 +381,13 @@ impl ControlHandler for HeadlessHandler {
                 self.playing = false;
                 serde_json::to_value(())?
             }
+            Call::MediaAdd { path } => {
+                let (id, bytes, command, result) =
+                    crate::prepare_media_import(&self.project, &path)?;
+                self.history.execute(&mut self.project, &command)?;
+                self.assets.insert(id, bytes);
+                result
+            }
             Call::AssetsImport { path } => serde_json::to_value(self.import_asset(&path)?)?,
             Call::TimelineList => serde_json::to_value(self.timeline())?,
             Call::ProjectImportV1 { path } => {

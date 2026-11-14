@@ -15,6 +15,35 @@ impl Editor {
                 return;
             };
             self.finish_color_edit(cx);
+            if let Call::MediaAdd { path } = &call {
+                let path = path.clone();
+                let expected = self.project.clone();
+                let snapshot = expected.clone();
+                cx.spawn(async move |this, cx| {
+                    let prepared = cx
+                        .background_spawn(async move {
+                            animathio_control::prepare_media_import(&snapshot, &path)
+                        })
+                        .await;
+                    let _ = this.update(cx, |editor, cx| {
+                        let result = prepared.and_then(|(id, bytes, command, result)| {
+                            if editor.project != expected {
+                                return Err(ControlError::Other(
+                                    "project changed during import; retry".into(),
+                                ));
+                            }
+                            editor.history.execute(&mut editor.project, &command)?;
+                            Arc::make_mut(&mut editor.assets).insert(id, bytes);
+                            editor.worker.load(editor.assets.clone());
+                            editor.after_edit(cx);
+                            Ok(result)
+                        });
+                        let _ = reply.send(result);
+                    });
+                })
+                .detach();
+                continue;
+            }
             if let Call::AssetsImport { path } = &call {
                 let path = path.clone();
                 let expected_assets = self.assets.clone();
@@ -294,6 +323,15 @@ impl Editor {
                 }
                 cx.notify();
                 serde_json::to_value(())?
+            }
+            Call::MediaAdd { path } => {
+                let (id, bytes, command, result) =
+                    animathio_control::prepare_media_import(&self.project, &path)?;
+                self.history.execute(&mut self.project, &command)?;
+                Arc::make_mut(&mut self.assets).insert(id, bytes);
+                self.worker.load(self.assets.clone());
+                self.after_edit(cx);
+                result
             }
             Call::AssetsImport { path } => serde_json::to_value(self.import_control_asset(&path)?)?,
             Call::TimelineList => serde_json::to_value(timeline_of(&self.project))?,

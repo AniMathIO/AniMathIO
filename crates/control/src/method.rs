@@ -299,6 +299,12 @@ pub enum Call {
         /// Existing media file.
         path: PathBuf,
     },
+    /// Import and place media atomically from a bounded read.
+    #[serde(rename = "media.add")]
+    MediaAdd {
+        /// Existing media file.
+        path: PathBuf,
+    },
     /// Read the timeline summary.
     #[serde(rename = "timeline.list")]
     TimelineList,

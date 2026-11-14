@@ -99,6 +99,9 @@ impl AudioRuntime {
             .animathio_plugin_audio_effects()
             .call_list_audio_effects(&mut *store)
             .map_err(|e| e.to_string())?;
+        if listed.len() > 64 {
+            return Err("too many audio effects (maximum 64)".into());
+        }
         let effects = listed
             .into_iter()
             .map(|d| build_descriptor(plugin_id, d.id, d.name, d.description, d.params))
@@ -249,7 +252,12 @@ impl AudioRuntime {
                 wit_state.as_deref(),
             )
             .map_err(|e| format!("audio effect {label} trapped: {e}"))?
-            .map_err(|e| format!("audio effect {label} failed: {e}"))?;
+            .map_err(|e| {
+                format!(
+                    "audio effect {label} failed: {}",
+                    crate::truncate_utf8(&e, 256)
+                )
+            })?;
         let samples = called.samples;
         let new_state = called.state.unwrap_or_default();
         if samples.len() != block.samples.len() {
