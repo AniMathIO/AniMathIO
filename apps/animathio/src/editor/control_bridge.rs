@@ -192,6 +192,8 @@ impl Editor {
                 serde_json::to_value(target.display().to_string())?
             }
             Call::CommandApply { command } => {
+                self.check_effect_params(&command)
+                    .map_err(ControlError::InvalidParams)?;
                 self.history
                     .execute(&mut self.project, &command)
                     .map_err(|error| ControlError::Other(error.0))?;

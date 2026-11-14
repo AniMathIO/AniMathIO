@@ -287,8 +287,10 @@ impl Editor {
                         .unwrap_or(0)
                         + 1,
                 );
-                let mut audio =
-                    Clip::new(ClipId(clip_id.0 + 1), ClipKind::Audio(id.clone()), range);
+                // Reserved from the counter so a later file in the same import cannot
+                // be handed the same id.
+                let audio_id = self.next_clip_id();
+                let mut audio = Clip::new(audio_id, ClipKind::Audio(id.clone()), range);
                 audio.link_group = Some(clip_id);
                 audio.params.insert("gain".into(), 1.0.into());
                 audio.params.insert("muted".into(), 0.0.into());
@@ -315,6 +317,7 @@ impl Editor {
             self.history
                 .execute(&mut self.project, &Command::Batch { commands })
                 .map_err(|e| e.0)?;
+            self.next_id = self.next_id.max(next_id(&self.project));
         }
         Arc::make_mut(&mut self.assets).insert(id, bytes);
         Ok(end)

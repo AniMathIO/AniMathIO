@@ -440,7 +440,13 @@ of its filters (`plugin: "org.animathio.effects-basic"`, `effect: "grayscale"`) 
 keyframeable numeric parameters. `core` validates only identifiers and finiteness —
 parameter names, ranges and defaults belong to the plugin, which publishes them through
 `list-effects` so the editor menus, the Effects tab and the MCP `list_effects` tool show
-exactly what the loaded plugins provide.
+exactly what the loaded plugins provide. Because core cannot know ranges, command
+producers check them: the editor, the control socket and MCP call
+`PluginHost::validate_effect_command` before applying `AddEffect`, `SetEffectParam` and
+effect keyframes, and reject unknown or out-of-range values. Undo/redo (`Exact`) is exempt
+so history can never block. A value that is already stored out of range (hand-edited or
+old project) is clamped to the declared range when the effect runs, with a warning, instead
+of failing every frame.
 
 Rendering stays a pure function of the project. A backend rasterizes a clip with effects
 alone into a canvas-sized straight-alpha sRGB RGBA8 layer, then `render::effects` hands
@@ -466,7 +472,7 @@ for `wasm32-wasip2` with a shared target directory and resource limits. Subproce
 CLI tests receive an explicit bundle directory. CI builds bundles on both Linux
 and Windows; the WASI target must be installed for local tests too.
 
-Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.
+Clips optionally carry a serialized `link_group`. Move, trim, split, delete and ripple-delete propagate to companions transactionally; split halves get separate groups. Undo uses `Command::Exact` to replay individual inverse edits without propagating them twice. Trim applies the start/end/source-offset *deltas* to companions (a misaligned pair stays misaligned), `MergeClip` merges the companion pair too (and refuses to merge a linked clip with an unlinked one), and all offset arithmetic is checked. The editor lists only one member per link group when it splits a multi-selection, and an all-tracks ripple delete also ripples the companions' tracks. Generated inverses (`SplitAt`, `RemoveRange`, `RippleDelete`) longer than the 1024-command `Batch` cap are nested into chunks, so undo of a large edit always works; a history entry that fails to apply is dropped instead of blocking earlier undos. `SetClipLink` changes membership; the editor Unlink menu action clears the whole group in one batch. Locked companion tracks reject the complete edit.
 
 Offline export renders and mixes on its caller while an encoder worker consumes
 owned RGBA/PCM buffers through a channel with capacity one. Frame and audio order

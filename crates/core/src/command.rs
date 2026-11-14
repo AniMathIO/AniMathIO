@@ -409,6 +409,12 @@ impl Command {
                 command: Box::new(inverse),
             });
         }
+        if let Self::MergeClip { left, right } = self {
+            let commands = merge_commands(project, *left, *right)?;
+            if commands.len() > 1 {
+                return apply_generated(project, &commands);
+            }
+        }
         let id = match self {
             Self::MoveClip { id, .. }
             | Self::TrimClip { id, .. }
@@ -441,28 +447,29 @@ impl Command {
                         Self::MoveClip { start, .. } => Self::MoveClip {
                             id: clip.id,
                             track,
-                            start: Time(
-                                clip.range
-                                    .start
-                                    .0
-                                    .checked_add(start.0 - original.range.start.0)
-                                    .ok_or_else(|| invalid("move overflow"))?,
-                            ),
+                            start: shifted(clip.range.start, original.range.start, *start)
+                                .ok_or_else(|| invalid("move overflow"))?,
                         },
+                        // Apply the edit's deltas, not the absolute range, so a pair
+                        // that was ever misaligned keeps its relative offset.
                         Self::TrimClip {
                             range,
                             source_offset,
                             ..
                         } => Self::TrimClip {
                             id: clip.id,
-                            range: *range,
-                            source_offset: Time(
-                                clip.source_offset
-                                    .0
-                                    .checked_add(source_offset.0)
-                                    .and_then(|v| v.checked_sub(original.source_offset.0))
+                            range: TimeRange::new(
+                                shifted(clip.range.start, original.range.start, range.start)
                                     .ok_or_else(|| invalid("trim overflow"))?,
-                            ),
+                                shifted(clip.range.end, original.range.end, range.end)
+                                    .ok_or_else(|| invalid("trim overflow"))?,
+                            )?,
+                            source_offset: shifted(
+                                clip.source_offset,
+                                original.source_offset,
+                                *source_offset,
+                            )
+                            .ok_or_else(|| invalid("trim overflow"))?,
                         },
                         Self::SplitClip { at, .. } => {
                             let right_id = ClipId(next);
@@ -559,16 +566,12 @@ impl Command {
                                         commands.push(Self::MoveClip {
                                             id: companion.id,
                                             track: track.id,
-                                            start: Time(
-                                                companion
-                                                    .range
-                                                    .start
-                                                    .0
-                                                    .checked_add(start.0 - original.range.start.0)
-                                                    .ok_or_else(|| {
-                                                        invalid("ripple move overflow")
-                                                    })?,
-                                            ),
+                                            start: shifted(
+                                                companion.range.start,
+                                                original.range.start,
+                                                start,
+                                            )
+                                            .ok_or_else(|| invalid("ripple move overflow"))?,
                                         });
                                     }
                                 }
@@ -1203,6 +1206,11 @@ impl Command {
         })
     }
 }
+/// `value + (to - from)` in checked arithmetic.
+fn shifted(value: Time, from: Time, to: Time) -> Option<Time> {
+    value.0.checked_add(to.0.checked_sub(from.0)?).map(Time)
+}
+
 /// Apply `commands` in order without intermediate validation, returning the combined
 /// inverse. On failure the caller's candidate project is discarded by `Command::apply`.
 fn apply_all(project: &mut Project, commands: &[Command]) -> Result<Command, Error> {
@@ -1228,7 +1236,22 @@ fn apply_all(project: &mut Project, commands: &[Command]) -> Result<Command, Err
         inverses.push(command.apply_inner(project)?);
     }
     inverses.reverse();
-    Ok(Command::Batch { commands: inverses })
+    Ok(inverse_batch(inverses))
+}
+
+/// Combine generated inverses into one command. The user-facing [`MAX_BATCH`] cap
+/// applies when a batch is applied, so a long inverse list is nested into chunks of at
+/// most `MAX_BATCH` instead of exceeding it (undo of a large generated edit must work).
+fn inverse_batch(mut commands: Vec<Command>) -> Command {
+    while commands.len() > MAX_BATCH {
+        commands = commands
+            .chunks(MAX_BATCH)
+            .map(|chunk| Command::Batch {
+                commands: chunk.to_vec(),
+            })
+            .collect();
+    }
+    Command::Batch { commands }
 }
 
 /// Apply commands generated by a compound edit, rejecting any that touch a locked track.
@@ -1263,7 +1286,59 @@ fn apply_generated(project: &mut Project, commands: &[Command]) -> Result<Comman
         });
     }
     inverses.reverse();
-    Ok(Command::Batch { commands: inverses })
+    Ok(inverse_batch(inverses))
+}
+
+/// The merges needed to join `left` and `right`, plus their linked companions.
+///
+/// Two clips of one group (or two unlinked clips) merge alone. Clips of two different
+/// groups merge together with every companion pair, which must exist on one track each
+/// and be adjacent; a mix of linked and unlinked clips is refused because it would
+/// leave the companion desynchronized.
+fn merge_commands(project: &Project, left: ClipId, right: ClipId) -> Result<Vec<Command>, Error> {
+    let find = |id: ClipId| -> Result<Clip, Error> {
+        Ok(project.tracks[clip_track_index(project, id)?].clips[&id].clone())
+    };
+    let (l, r) = (find(left)?, find(right)?);
+    let mut commands = vec![Command::MergeClip { left, right }];
+    match (l.link_group, r.link_group) {
+        (None, None) => {}
+        (Some(a), Some(b)) if a == b => {}
+        (Some(a), Some(b)) => {
+            let members = |group: ClipId, skip: ClipId| -> Vec<(TrackId, Clip)> {
+                project
+                    .tracks
+                    .iter()
+                    .flat_map(|t| t.clips.values().map(move |c| (t.id, c.clone())))
+                    .filter(|(_, c)| c.id != skip && c.link_group == Some(group))
+                    .collect()
+            };
+            let (left_side, right_side) = (members(a, left), members(b, right));
+            if left_side.len() != right_side.len() {
+                return Err(invalid(
+                    "cannot merge linked clips: companion clips do not match",
+                ));
+            }
+            for (track, companion) in left_side {
+                let partner = right_side
+                    .iter()
+                    .find(|(t, c)| *t == track && c.range.start == companion.range.end)
+                    .ok_or_else(|| {
+                        invalid("cannot merge linked clips: companion clips do not match")
+                    })?;
+                commands.push(Command::MergeClip {
+                    left: companion.id,
+                    right: partner.1.id,
+                });
+            }
+        }
+        _ => {
+            return Err(invalid(
+                "cannot merge a linked clip with an unlinked clip; unlink first",
+            ));
+        }
+    }
+    Ok(commands)
 }
 
 /// First clip id strictly greater than every existing clip id.
@@ -1471,24 +1546,40 @@ impl History {
         self.redo.clear();
         Ok(())
     }
-    /// Undo one edit, returning false if the stack is empty.
+    /// Undo one edit, returning false if the stack is empty. An entry that fails to
+    /// apply is dropped (and the error returned) so it never blocks earlier undos.
     pub fn undo(&mut self, project: &mut Project) -> Result<bool, Error> {
         let Some(command) = self.undo.last() else {
             return Ok(false);
         };
-        let inverse = command.apply(project)?;
-        self.undo.pop();
-        self.redo.push(inverse);
-        Ok(true)
+        match command.apply(project) {
+            Ok(inverse) => {
+                self.undo.pop();
+                self.redo.push(inverse);
+                Ok(true)
+            }
+            Err(error) => {
+                // An entry that cannot be applied must not block every earlier undo.
+                self.undo.pop();
+                Err(error)
+            }
+        }
     }
-    /// Redo one edit, returning false if the stack is empty.
+    /// Redo one edit, returning false if the stack is empty. A failing entry is dropped.
     pub fn redo(&mut self, project: &mut Project) -> Result<bool, Error> {
         let Some(command) = self.redo.last() else {
             return Ok(false);
         };
-        let inverse = command.apply(project)?;
-        self.redo.pop();
-        self.undo.push(inverse);
-        Ok(true)
+        match command.apply(project) {
+            Ok(inverse) => {
+                self.redo.pop();
+                self.undo.push(inverse);
+                Ok(true)
+            }
+            Err(error) => {
+                self.redo.pop();
+                Err(error)
+            }
+        }
     }
 }

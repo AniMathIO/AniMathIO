@@ -27,6 +27,41 @@ pub(crate) fn existing(project: &Project, ids: &BTreeSet<ClipId>) -> BTreeSet<Cl
         .collect()
 }
 
+/// `ids` plus every linked companion of each of them.
+pub(crate) fn with_companions(project: &Project, ids: &BTreeSet<ClipId>) -> BTreeSet<ClipId> {
+    let groups: BTreeSet<ClipId> = project
+        .tracks()
+        .iter()
+        .flat_map(|track| track.clips().values())
+        .filter(|clip| ids.contains(&clip.id))
+        .filter_map(|clip| clip.link_group)
+        .collect();
+    project
+        .tracks()
+        .iter()
+        .flat_map(|track| track.clips().values())
+        .filter(|clip| {
+            ids.contains(&clip.id) || clip.link_group.is_some_and(|g| groups.contains(&g))
+        })
+        .map(|clip| clip.id)
+        .collect()
+}
+
+/// Keep one clip per link group (the first in `ids` order); core propagates a
+/// split/trim/move to the companions, so listing both members would apply it twice.
+pub(crate) fn one_per_link_group(project: &Project, ids: &[ClipId]) -> Vec<ClipId> {
+    let mut seen = BTreeSet::new();
+    ids.iter()
+        .copied()
+        .filter(|id| {
+            let group = track_of(project, *id)
+                .and_then(|track| track.clips().get(id))
+                .and_then(|clip| clip.link_group);
+            group.is_none_or(|group| seen.insert(group))
+        })
+        .collect()
+}
+
 /// Every clip of the project.
 pub(crate) fn all_clips(project: &Project) -> BTreeSet<ClipId> {
     project
@@ -283,6 +318,69 @@ pub(crate) mod tests {
 
     fn set(ids: &[u64]) -> BTreeSet<ClipId> {
         ids.iter().copied().map(ClipId).collect()
+    }
+
+    /// Link `ids` into one group named after the first.
+    pub(crate) fn link(project: &mut Project, ids: &[u64]) {
+        for id in ids {
+            Command::SetClipLink {
+                id: ClipId(*id),
+                group: Some(ClipId(ids[0])),
+            }
+            .apply(project)
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn splitting_both_members_of_a_linked_pair_succeeds_once_per_group() {
+        let mut project = project_with(&[(1, &[(1, 0, 100)][..]), (2, &[(2, 0, 100)][..])]);
+        link(&mut project, &[1, 2]);
+        let targets = one_per_link_group(&project, &[ClipId(1), ClipId(2)]);
+        assert_eq!(targets, [ClipId(1)]);
+        let batch = batch(
+            targets
+                .into_iter()
+                .zip(10u64..)
+                .map(|(id, right)| Command::SplitClip {
+                    id,
+                    right_id: ClipId(right),
+                    at: Time(50),
+                })
+                .collect(),
+        )
+        .unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &batch).unwrap();
+        assert_eq!(project.tracks()[0].clips().len(), 2);
+        assert_eq!(project.tracks()[1].clips().len(), 2);
+        // Without the dedupe the same selection is rejected.
+        let mut project = project_with(&[(1, &[(1, 0, 100)][..]), (2, &[(2, 0, 100)][..])]);
+        link(&mut project, &[1, 2]);
+        let both = Command::Batch {
+            commands: vec![
+                Command::SplitClip {
+                    id: ClipId(1),
+                    right_id: ClipId(10),
+                    at: Time(50),
+                },
+                Command::SplitClip {
+                    id: ClipId(2),
+                    right_id: ClipId(11),
+                    at: Time(50),
+                },
+            ],
+        };
+        assert!(both.apply(&mut project).is_err());
+    }
+
+    #[test]
+    fn with_companions_expands_link_groups() {
+        let mut project =
+            project_with(&[(1, &[(1, 0, 10)][..]), (2, &[(2, 0, 10), (3, 10, 20)][..])]);
+        link(&mut project, &[1, 2]);
+        assert_eq!(with_companions(&project, &set(&[1])), set(&[1, 2]));
+        assert_eq!(with_companions(&project, &set(&[3])), set(&[3]));
     }
 
     fn starts(project: &Project) -> Vec<(u64, u64, i64)> {
