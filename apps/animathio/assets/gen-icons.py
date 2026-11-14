@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the placeholder AniMathIO application icons.
+"""Regenerate the original AniMathIO application icons.
 
 The sources are checked in (`assets/icons/*.png`, `icon.ico`, `icon.icns`) so a
 packaging run never needs Python or Pillow; this script only documents how they
@@ -7,16 +7,19 @@ were produced and keeps them reproducible:
 
     python3 apps/animathio/assets/gen-icons.py
 
-The artwork is a placeholder: a rounded indigo/sky gradient tile with a white
-summation glyph. Replace it with the real brand asset before 2.0 ships; keep the
-file names and sizes so `[package.metadata.packager]` keeps working.
+The canonical brand.svg embeds the preserved 1.x artwork at high resolution.
+Read that source for every packaging format; keep the file names and sizes so
+`[package.metadata.packager]` keeps working.
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import pathlib
+import xml.etree.ElementTree as ET
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 MASTER = 1024
 OUT = pathlib.Path(__file__).resolve().parent / "icons"
@@ -28,50 +31,16 @@ ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 # macOS .icns types accepted by both Pillow and cargo-packager.
 ICNS_SIZES = (16, 32, 64, 128, 256, 512, 1024)
 
-TOP = (79, 70, 229)  # indigo-600
-BOTTOM = (14, 165, 233)  # sky-500
-RADIUS = 0.22  # corner radius as a fraction of the tile
-
-# Sigma polyline in unit coordinates: top bar right to left, diagonal in to the
-# waist, diagonal back out, bottom bar left to right.
-SIGMA = ((0.71, 0.27), (0.29, 0.27), (0.55, 0.50), (0.29, 0.73), (0.71, 0.73))
-STROKE = 0.085  # stroke width as a fraction of the tile
-
 
 def render() -> Image.Image:
-    """Draw the icon at 4x the master size, then downsample for smooth edges."""
-    scale = 4
-    size = MASTER * scale
-    # Vertical gradient.
-    gradient = Image.new("RGB", (1, size))
-    for y in range(size):
-        t = y / (size - 1)
-        gradient.putpixel(
-            (0, y),
-            tuple(round(a + (b - a) * t) for a, b in zip(TOP, BOTTOM)),
-        )
-    tile = gradient.resize((size, size), Image.Resampling.NEAREST).convert("RGBA")
-
-    # Rounded corners via a mask.
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).rounded_rectangle(
-        (0, 0, size - 1, size - 1), radius=round(RADIUS * size), fill=255
-    )
-    icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    icon.paste(tile, (0, 0), mask)
-
-    # Summation glyph, with round caps (PIL has no cap style, so draw circles).
-    draw = ImageDraw.Draw(icon)
-    width = round(STROKE * size)
-    points = [(round(x * size), round(y * size)) for x, y in SIGMA]
-    draw.line(points, fill=(255, 255, 255, 255), width=width, joint="curve")
-    for x, y in points:
-        draw.ellipse(
-            (x - width // 2, y - width // 2, x + width // 2, y + width // 2),
-            fill=(255, 255, 255, 255),
-        )
-
-    return icon.resize((MASTER, MASTER), Image.Resampling.LANCZOS)
+    """Read the preserved original artwork embedded in the canonical brand SVG."""
+    root = ET.parse(OUT.parent / "brand.svg").getroot()
+    artwork = root.find("{http://www.w3.org/2000/svg}image")
+    assert artwork is not None, "brand.svg must contain the original artwork"
+    uri = artwork.attrib["{http://www.w3.org/1999/xlink}href"]
+    assert uri.startswith("data:image/png;base64,")
+    image = Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
+    return image.convert("RGBA").resize((MASTER, MASTER), Image.Resampling.LANCZOS)
 
 
 def main() -> None:

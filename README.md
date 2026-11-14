@@ -385,3 +385,7 @@ template stores the current project and selected placeholder clips in the user d
 library; user cards have Delete. The CLI keeps `templates list` and
 `new --template quote -o quote.amio`; MCP adds `list_templates` and
 `create_from_template`. Template card hover lifts use the shared surface tokens.
+
+The launcher, editor title bar and application icons use the restored original
+AniMathIO logo, preserved in `apps/animathio/assets/brand.svg`. UI actions keep
+the violet-to-cyan accent. See [the design guide](docs/design.md).

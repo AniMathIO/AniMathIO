@@ -45,8 +45,13 @@ The dark gpui-component theme is installed from `style.rs` before the first
 window opens. Its solid palette, semantic widget backgrounds, scrollbar and
 resize-handle appearance are updated together using `Theme::update`. Inter
 Variable and JetBrains Mono are embedded; their OFL licenses ship beside the font
-sources under `apps/animathio/assets/fonts`. The bundled gradient brand is
-`apps/animathio/assets/brand.svg`.
+sources under `apps/animathio/assets/fonts`. The restored original AniMathIO 1.x logo is
+`apps/animathio/assets/brand.svg`: the white wordmark over cyan and brown panels
+and a red semicircle. Its SVG wrapper embeds a 2000px PNG resampled from the
+original 500px artwork, preserving its shapes, colours and proportions (the
+resampling adds no source detail). Launcher, title bar and packaged icons share
+this source; `apps/animathio/assets/gen-icons.py` regenerates the icon formats.
+The violet-to-cyan UI action accent remains defined in `style.rs`.
 
 The workspace wraps each resizable pane in a rounded panel with a consistent
 icon/title/action header and 6px shared gutters. The library uses a sliding active
