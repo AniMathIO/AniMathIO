@@ -350,6 +350,25 @@ pub enum Call {
         /// Detection parameters.
         params: crate::TrimSilenceParams,
     },
+    /// Transcribe audio locally and add the result as caption clips on a new `Subtitles`
+    /// track, as one undo step.
+    #[serde(rename = "subtitles.generate")]
+    SubtitlesGenerate {
+        /// Model, language, selection and splitting options.
+        params: crate::SubtitleGenerateParams,
+    },
+    /// Render a subtitle track as SRT or `WebVTT` text or file.
+    #[serde(rename = "subtitles.export")]
+    SubtitlesExport {
+        /// Format, track and optional output path.
+        params: crate::SubtitleExportParams,
+    },
+    /// Add the cues of an SRT or `WebVTT` file as caption clips, as one undo step.
+    #[serde(rename = "subtitles.import")]
+    SubtitlesImport {
+        /// File path and optional time offset.
+        params: crate::SubtitleImportParams,
+    },
 }
 
 /// Build a read-only timeline summary from a project.

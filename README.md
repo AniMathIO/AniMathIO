@@ -31,6 +31,7 @@ Editor and headless engine prototype. What works today:
 | Plugin system (wasmtime Component Model) | ✅ `plugin-api` + `plugin-host` + first-party plugins |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
+| Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
 | v1 and Manim importers | ✅ `import-v1`, `import-manim` |
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
 | Media decoding / video export | ✅ native decoding and offline H.264/AAC MP4 export |
@@ -45,6 +46,24 @@ compressor, noise gate, high-pass filter and a voice-cleanup preset (high-pass +
 de-esser). Clips and tracks carry ordered, undoable audio-effect chains that run in the shared
 mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
 Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools.
+
+## Automatic subtitles
+
+CapCut-style captions, fully local: **Clip, Generate subtitles…** transcribes the project's
+audio (or the selected clip, or the in/out range) with Whisper and adds the result as
+caption-bar clips on a new `Subtitles` track, as one undo step; progress and cancel live in
+a status-bar popover like the export queue. `animathio-cli transcribe talk.mp4 --srt
+talk.srt`, the `auto_subtitles` / `export_subtitles` / `import_subtitles` MCP tools and SRT
+or WebVTT import and export work the same way.
+
+![Generated subtitles on a Subtitles track with the progress popover](docs/screenshots/subtitles.png)
+
+The speech engine is whisper.cpp, built only with `--features whisper` on `animathio`
+and `animathio-cli` (needs cmake, a C++ compiler and libclang; the installers are built
+with it). No model ships with the app: pick `tiny` (78 MB), `base` (148 MB, default) or
+`small` (488 MB) and AniMathIO downloads it once on your confirmation, verifies its SHA-256 and
+stores it in the user data directory. The opt-in integration test runs the real tiny model:
+`cargo test -p animathio-transcribe --features whisper --test whisper_tiny -- --ignored`.
 
 ## Screenshot
 

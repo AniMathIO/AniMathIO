@@ -33,6 +33,7 @@ mod render_worker;
 mod ripple;
 mod selection;
 mod style;
+mod subtitle_job;
 mod timecode;
 mod timeline;
 

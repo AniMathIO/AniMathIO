@@ -14,6 +14,7 @@ the render/audio/export data flow. The authority for these rules is
 | `audio` | Engine-owned decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb device playback. No audio resources live in `Project`. |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
+| `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
 | `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
 | `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema, guest SDK and first-party clip authoring helpers (`sources`). |
 | `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, log) plugin scene resolution, and pixel-effect plugins (`PluginHost::effects`, `effect_processor`: instance-pre cached components, a fresh fuel/memory/epoch-limited store per call, frame-size caps). |
@@ -499,3 +500,35 @@ builder returns one `Command::Batch` and a fresh link group; it stores no runtim
 resources in the project. `_title_preset` / `_title_field` are opaque plugin JSON
 metadata for the editor's grouped text inspector. CPU library thumbnails are
 rendered off-thread and cached in editor session state by project canvas size.
+
+## Automatic subtitles
+
+`crates/transcribe` turns speech into editable captions without leaving the machine.
+
+- **Engine:** whisper.cpp through the whisper-rs bindings was chosen over a pure-Rust `candle` Whisper. It
+  is several times faster on CPU for the `tiny`/`base` models, ships the complete decoder
+  (language detection, hallucination suppression, token timestamps) and loads one ggml
+  file per model. Its cost is a C++ build, so it sits behind the `whisper` cargo feature
+  (`animathio-transcribe`, `animathio-control`, `animathio-cli` and `animathio` forward it).
+  Default builds and the default test run need no cmake and no model; CI builds and tests
+  the feature once on Linux and Windows.
+- **Models:** `tiny` (78 MB), `base` (148 MB, default) and `small` (488 MB) multilingual
+  ggml models from the `ggerganov/whisper.cpp` Hugging Face repository. Nothing is bundled.
+  A download needs explicit consent (editor Generate button, `animathio-cli models
+  --download`, MCP `download_model: true`), streams into `<file>.part` (resumed with an HTTP
+  `Range` request), is checked against a pinned size and SHA-256 and only then renamed into
+  `<user data dir>/models/whisper` (`ANIMATHIO_MODEL_DIR` overrides it). An absent model is
+  an offline error that says how to get it.
+- **Pipeline:** `prepare::mix_selection` mixes the dry audio of a clip, a track, a range or
+  the whole project to 16 kHz mono through `AudioPool`/`Mixer` (so gain, mute and track gain
+  apply and effects do not), the engine produces segments with word timings, and
+  `cues::split_segments` makes cues of at most two 42-character lines, 0.8 to 6 seconds
+  each, broken at sentence ends and pauses and never overlapping.
+  `control::subtitle_command` builds one `Command::Batch` with two new tracks, `Subtitles`
+  (text) over `Subtitles background` (bars), one linked pair per cue using the **Caption
+  bar** title preset, so undo removes everything in one step.
+- **Threading:** the whole job is blocking and CPU-bound. The editor runs it on a worker
+  thread (the app's `subtitle_job` module, with the `subtitles` editor module for the dialog,
+  popover and control calls) with a progress phase and a cancel flag
+  that whisper.cpp polls, shows it in a status-bar popover in the export-queue style and
+  applies the cues on the UI thread; control clients get their reply when it finishes.

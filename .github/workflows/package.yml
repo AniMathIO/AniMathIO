@@ -94,6 +94,8 @@ jobs:
             libxcb-sync-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
+            cmake \
+            libclang-dev \
             pkg-config
       - name: Build plugin bundles
         # The editor loads `.amplugin` files from `plugins/` next to the

@@ -103,6 +103,7 @@ impl Editor {
                 MenuItem::action("Add effect", ShowEffects),
                 MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),
+                MenuItem::action("Generate subtitles…", GenerateSubtitles),
             ]),
             Menu::new("Help").items([
                 MenuItem::action("Keyboard shortcuts…", KeyboardShortcuts),
@@ -436,5 +437,9 @@ impl Editor {
                 .to_owned(),
             ))
             .right(self.export_queue_button(cx))
+            .right(
+                self.subtitle_status_button(cx)
+                    .map_or_else(|| div().into_any_element(), IntoElement::into_any_element),
+            )
     }
 }

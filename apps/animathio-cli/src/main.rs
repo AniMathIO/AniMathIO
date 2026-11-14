@@ -1,5 +1,6 @@
 //! Headless project validation and deterministic PNG rendering.
 mod mcp;
+mod transcribe;
 
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
 use animathio_format::{Bundle, Limits, read_amio, read_json, save_amio};
@@ -105,6 +106,16 @@ enum Action {
         /// Output `.amio` archive.
         #[arg(short, long)]
         output: PathBuf,
+    },
+    /// Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips.
+    Transcribe {
+        #[command(flatten)]
+        args: transcribe::TranscribeArgs,
+    },
+    /// List or download the local Whisper speech models.
+    Models {
+        #[command(flatten)]
+        args: transcribe::ModelsArgs,
     },
     /// Write a three-second animated image/text/shape demo archive.
     NewSample {
@@ -294,6 +305,8 @@ fn run(cli: Cli) -> Result<()> {
                 animathio_core::timing::report();
             }
         }
+        Action::Transcribe { args } => transcribe::run(&args)?,
+        Action::Models { args } => transcribe::run_models(&args)?,
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {
             project,

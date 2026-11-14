@@ -163,6 +163,30 @@ pub trait ControlHandler {
     ) -> Result<crate::TrimSilenceResult, ControlError> {
         from_value(self.handle(Call::TrimSilence { params })?)
     }
+
+    /// Transcribe audio and add subtitle clips as one undo step.
+    fn subtitles_generate(
+        &mut self,
+        params: crate::SubtitleGenerateParams,
+    ) -> Result<crate::SubtitleResult, ControlError> {
+        from_value(self.handle(Call::SubtitlesGenerate { params })?)
+    }
+
+    /// Export a subtitle track as SRT or `WebVTT`.
+    fn subtitles_export(
+        &mut self,
+        params: crate::SubtitleExportParams,
+    ) -> Result<crate::SubtitleExportResult, ControlError> {
+        from_value(self.handle(Call::SubtitlesExport { params })?)
+    }
+
+    /// Import an SRT or `WebVTT` file as subtitle clips.
+    fn subtitles_import(
+        &mut self,
+        params: crate::SubtitleImportParams,
+    ) -> Result<crate::SubtitleResult, ControlError> {
+        from_value(self.handle(Call::SubtitlesImport { params })?)
+    }
 }
 
 /// Deserialize a JSON result value into a typed value.

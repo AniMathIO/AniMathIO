@@ -21,11 +21,19 @@ mod headless;
 mod method;
 mod path;
 mod server;
+mod subtitles;
 mod title_presets;
 mod token;
 pub use title_presets::{
     TitleAddParams, TitleCurve, TitleCurveSpace, TitleLayer, TitlePreset, title_preset_command,
     title_presets,
+};
+
+pub use subtitles::{
+    ProgressFn, SUBTITLE_TRACK, SubtitleCueInfo, SubtitleDraft, SubtitleExportParams,
+    SubtitleExportResult, SubtitleGenerateParams, SubtitleImportParams, SubtitleProgress,
+    SubtitleResult, SubtitleSplit, SubtitlesAdded, apply_cues, export_subtitles,
+    generate_subtitles, import_subtitles, subtitle_command, track_cues, transcribe_project,
 };
 
 pub use authoring::apply_authoring_call;

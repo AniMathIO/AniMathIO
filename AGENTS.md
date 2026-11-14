@@ -134,6 +134,16 @@ active effects it cannot run; `Mixer::lenient(warnings)` (editor playback) skips
 effect with a warning instead; `Mixer::dry()` ignores chains (silence detection). Effects run in the mix
 worker, never in the device callback.
 
+Automatic subtitles live in `crates/transcribe` (whisper.cpp through whisper-rs behind the
+opt-in `whisper` cargo feature, forwarded by `animathio-control`, `animathio-cli` and
+`animathio`; building it needs cmake, a C++ toolchain and libclang, so the default build and
+`cargo test --workspace` stay engine-free). Models (`tiny`/`base`/`small`) are never bundled:
+they download on demand with a pinned SHA-256 into the user data dir (`ANIMATHIO_MODEL_DIR`
+overrides it). Cue splitting and SRT/WebVTT are pure and unit-tested; the model-backed test is
+ignored: `cargo test -p animathio-transcribe --features whisper --test whisper_tiny -- --ignored`.
+The editor job (`subtitle_job.rs`, `editor/subtitles.rs`) runs on a worker with progress and cancel
+and applies the cues as one `Command::Batch` through `control::subtitle_command`.
+
 Audio clips use numeric `gain` (linear, default 1) and `muted` (nonzero means muted,
 default 0) parameters, including clip-local keyframes. Track gain is changed through
 `Command::SetTrackGain`. `AudioPool::prepare(rate, channels)` does decoding/resampling
