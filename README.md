@@ -27,7 +27,7 @@ Editor and headless engine prototype. What works today:
 | `.amio` / `project.json` format | ✅ `format` (schema version 3) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
-| Audio decoding, mixing, playback (cpal) | ✅ `audio` (prototype limits) |
+| Audio decoding (streaming; Opus included), mixing, playback (cpal) | ✅ `audio` |
 | Plugin system (wasmtime Component Model) | ✅ ABI 1.0.0 frozen; first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |

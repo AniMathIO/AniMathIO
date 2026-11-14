@@ -205,23 +205,27 @@ fn indexed_container(bytes: &[u8]) -> bool {
     bytes.get(4..8) == Some(b"ftyp") || bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
 }
 
-fn bounded_audio(bytes: &[u8]) -> Result<animathio_audio::Pcm> {
+/// Open audio-only media (WAV, MP3, FLAC, Vorbis, Opus, ...) as a streaming source: the
+/// asset is scanned once for its exact length, never held decoded in memory.
+fn bounded_audio(bytes: &[u8]) -> Result<animathio_audio::SymphoniaSource> {
     crate::limits::input(bytes)?;
     let source = animathio_audio::SymphoniaSource::from_bytes_with_limits(
         bytes.to_vec(),
         animathio_audio::DecodeLimits {
             max_duration: std::time::Duration::from_hours(4),
-            max_samples: crate::limits::MAX_AUDIO_SAMPLES,
+            max_samples: animathio_audio::MAX_INTERLEAVED_SAMPLES,
         },
     )
     .map_err(|e| MediaError::Decode(e.to_string()))?;
-    let pcm = source.pcm().clone();
-    crate::limits::audio(pcm.rate(), usize::from(pcm.channels()), pcm.frames())?;
-    Ok(pcm)
+    let info = source.info();
+    crate::limits::audio(info.rate, usize::from(info.channels), 0)?;
+    Ok(source)
 }
 
 struct BoundedAudioDecoder {
-    pcm: animathio_audio::Pcm,
+    reader: std::sync::Mutex<Box<dyn animathio_audio::PcmReader>>,
+    rate: u32,
+    channels: usize,
     info: AudioStreamInfo,
 }
 impl AudioDecoder for BoundedAudioDecoder {
@@ -233,16 +237,15 @@ impl AudioDecoder for BoundedAudioDecoder {
         if media_time.0 < 0 {
             return Err(crate::limits::invalid());
         }
-        let channels = usize::from(self.pcm.channels());
-        let start = usize::try_from(sample_index(media_time, self.pcm.rate()))
+        let start = u64::try_from(sample_index(media_time, self.rate))
             .map_err(|_| crate::limits::invalid())?;
-        let mut output = vec![0.0; len * channels];
-        let available = self.pcm.frames().saturating_sub(start).min(len);
-        if available > 0 {
-            output[..available * channels].copy_from_slice(
-                &self.pcm.samples()[start * channels..(start + available) * channels],
-            );
-        }
+        let mut output = Vec::with_capacity(len * self.channels);
+        self.reader
+            .lock()
+            .map_err(|_| crate::limits::invalid())?
+            .read_at(start, len, &mut output)
+            .map_err(|e| MediaError::Decode(e.to_string()))?;
+        output.resize(len * self.channels, 0.0);
         Ok(output.into())
     }
 }
@@ -289,20 +292,21 @@ impl MediaBackend for FilmCraftBackend {
     }
     fn probe_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<MediaInfo> {
         if !indexed_container(&bytes) {
-            let pcm = bounded_audio(&bytes)?;
+            let source = bounded_audio(&bytes)?;
+            let pcm = source.info();
             return Ok(MediaInfo {
                 kind: MediaKind::AudioOnly,
                 duration: Time(
                     i64::try_from(
-                        pcm.frames() as i128 * i128::from(TICKS_PER_SECOND)
-                            / i128::from(pcm.rate()),
+                        i128::from(pcm.frames) * i128::from(TICKS_PER_SECOND)
+                            / i128::from(pcm.rate),
                     )
                     .map_err(|_| crate::limits::invalid())?,
                 ),
                 video: None,
                 audio: vec![AudioStreamInfo {
-                    sample_rate: pcm.rate(),
-                    channels: u32::from(pcm.channels()),
+                    sample_rate: pcm.rate,
+                    channels: u32::from(pcm.channels),
                     codec: "PCM (Symphonia)".into(),
                 }],
                 container: "audio".into(),
@@ -345,13 +349,21 @@ impl MediaBackend for FilmCraftBackend {
     }
     fn open_audio_bytes(&self, name: &str, bytes: Arc<[u8]>) -> Result<Box<dyn AudioDecoder>> {
         if !indexed_container(&bytes) {
-            let pcm = bounded_audio(&bytes)?;
+            let source = bounded_audio(&bytes)?;
+            let stream = source.info();
             let info = AudioStreamInfo {
-                sample_rate: pcm.rate(),
-                channels: u32::from(pcm.channels()),
+                sample_rate: stream.rate,
+                channels: u32::from(stream.channels),
                 codec: "PCM (Symphonia)".into(),
             };
-            return Ok(Box::new(BoundedAudioDecoder { pcm, info }));
+            let reader = animathio_audio::AudioSource::open_reader(&source)
+                .map_err(|e| MediaError::Decode(e.to_string()))?;
+            return Ok(Box::new(BoundedAudioDecoder {
+                reader: std::sync::Mutex::new(reader),
+                rate: stream.rate,
+                channels: usize::from(stream.channels),
+                info,
+            }));
         }
         let source = open_source(name, bytes)?;
         let mi = source.info();

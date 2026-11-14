@@ -1,7 +1,7 @@
 //! Downsampled waveform peaks for timeline display. Peaks are derived from the
 //! pool's decoded PCM, never stored in the project.
 
-use crate::{AudioPool, Pcm};
+use crate::{AudioPool, Error, Pcm, PcmReader};
 use animathio_core::{AssetId, TICKS_PER_SECOND};
 
 /// Largest bucket count a caller may request; bounds memory for cached peaks.
@@ -17,31 +17,91 @@ pub struct Waveform {
     pub peaks: Vec<f32>,
 }
 
+/// Native frames read per step of a streaming waveform pass.
+const WAVEFORM_CHUNK_FRAMES: usize = 1 << 16;
+
+/// Accumulates peaks over interleaved frames pushed in order, in memory independent of length.
+struct PeakBuilder {
+    channels: usize,
+    total_frames: usize,
+    peaks: Vec<f32>,
+    frame: usize,
+}
+impl PeakBuilder {
+    fn new(channels: usize, total_frames: usize, buckets: usize) -> Self {
+        let buckets = buckets
+            .clamp(1, MAX_WAVEFORM_BUCKETS)
+            .min(total_frames.max(1));
+        Self {
+            channels,
+            total_frames,
+            peaks: vec![0.0; buckets],
+            frame: 0,
+        }
+    }
+    /// Fold interleaved `samples` (whole frames) into the buckets they fall in. Bucket `b`
+    /// holds the frames `ceil(b * total / buckets) .. ceil((b + 1) * total / buckets)`, which is
+    /// exactly `floor(frame * buckets / total) == b`, so each bucket costs two divisions
+    /// instead of one per frame.
+    fn push(&mut self, samples: &[f32]) {
+        let buckets = self.peaks.len() as u128;
+        let total = self.total_frames as u128;
+        let frames = samples.len() / self.channels;
+        let mut at = 0;
+        while at < frames && self.frame < self.total_frames {
+            let bucket = (self.frame as u128 * buckets / total) as usize;
+            let bucket_end = ((bucket as u128 + 1) * total).div_ceil(buckets) as usize;
+            let run = (bucket_end - self.frame).min(frames - at);
+            let peak = samples[at * self.channels..(at + run) * self.channels]
+                .iter()
+                .fold(0.0_f32, |acc, s| acc.max(s.abs()));
+            if peak > self.peaks[bucket] {
+                self.peaks[bucket] = peak.min(1.0);
+            }
+            at += run;
+            self.frame += run;
+        }
+        // Frames beyond the announced length (a source longer than it said) are ignored.
+    }
+    fn finish(self, rate: u32) -> Waveform {
+        let duration_ticks = i64::try_from(
+            self.total_frames as u128 * TICKS_PER_SECOND as u128 / u128::from(rate.max(1)),
+        )
+        .unwrap_or(i64::MAX);
+        Waveform {
+            duration_ticks,
+            peaks: self.peaks,
+        }
+    }
+}
+
 impl Waveform {
     /// Downsample `pcm` to at most `buckets` peaks (at least one).
     #[must_use]
     pub fn from_pcm(pcm: &Pcm, buckets: usize) -> Self {
-        let frames = pcm.frames();
-        let channels = usize::from(pcm.channels());
-        let buckets = buckets.clamp(1, MAX_WAVEFORM_BUCKETS).min(frames.max(1));
-        let mut peaks = vec![0.0_f32; buckets];
-        if frames > 0 {
-            for (frame, samples) in pcm.samples().chunks_exact(channels).enumerate() {
-                let bucket = (frame as u128 * buckets as u128 / frames as u128) as usize;
-                let peak = samples.iter().fold(0.0_f32, |acc, s| acc.max(s.abs()));
-                if peak > peaks[bucket] {
-                    peaks[bucket] = peak.min(1.0);
-                }
+        let mut builder = PeakBuilder::new(usize::from(pcm.channels()), pcm.frames(), buckets);
+        builder.push(pcm.samples());
+        builder.finish(pcm.rate())
+    }
+
+    /// Downsample a whole stream to at most `buckets` peaks in one bounded-memory pass; the
+    /// result equals [`Waveform::from_pcm`] on the fully decoded asset.
+    pub fn from_reader(reader: &mut dyn PcmReader, buckets: usize) -> Result<Self, Error> {
+        let info = reader.info().clone();
+        let total = usize::try_from(info.frames).unwrap_or(usize::MAX);
+        let mut builder = PeakBuilder::new(usize::from(info.channels), total, buckets);
+        let mut chunk = Vec::with_capacity(WAVEFORM_CHUNK_FRAMES * usize::from(info.channels));
+        let mut position = 0_u64;
+        while position < info.frames {
+            chunk.clear();
+            let got = reader.read_at(position, WAVEFORM_CHUNK_FRAMES, &mut chunk)?;
+            if got == 0 {
+                break;
             }
+            builder.push(&chunk);
+            position += got as u64;
         }
-        let duration_ticks = i64::try_from(
-            frames as u128 * TICKS_PER_SECOND as u128 / u128::from(pcm.rate().max(1)),
-        )
-        .unwrap_or(i64::MAX);
-        Self {
-            duration_ticks,
-            peaks,
-        }
+        Ok(builder.finish(info.rate))
     }
 
     /// Peak for the source-time interval `[start, end)` in ticks, or `0.0`
@@ -70,12 +130,28 @@ impl Waveform {
 }
 
 impl AudioPool {
-    /// Waveform peaks of a decoded asset, or `None` when it is not in the pool.
+    /// Waveform peaks of a pooled asset, computed in one streaming pass (bounded memory), or
+    /// `None` when it is not in the pool or cannot be read.
     #[must_use]
     pub fn waveform(&self, id: &AssetId, buckets: usize) -> Option<Waveform> {
-        self.sources
-            .get(id)
-            .map(|pcm| Waveform::from_pcm(pcm, buckets))
+        let asset = self.sources.get(id)?;
+        let info = asset.info.clone();
+        let total = usize::try_from(info.frames).unwrap_or(usize::MAX);
+        let mut builder = PeakBuilder::new(usize::from(info.channels), total, buckets);
+        let mut chunk = Vec::new();
+        let mut position = 0_u64;
+        while position < info.frames {
+            chunk.clear();
+            let got = asset
+                .read(position, WAVEFORM_CHUNK_FRAMES, &mut chunk)
+                .ok()?;
+            if got == 0 {
+                break;
+            }
+            builder.push(&chunk);
+            position += got as u64;
+        }
+        Some(builder.finish(info.rate))
     }
 }
 
