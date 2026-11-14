@@ -102,7 +102,7 @@ impl Editor {
         });
         let editor = cx.entity();
         let engine = animathio_transcribe::engine_available();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let look = editor.read(cx).caption_look.clone();
             let (editor, model, language, range) = (
                 editor.clone(),
@@ -118,6 +118,24 @@ impl Editor {
                 "This build of AniMathIO has no speech engine. Rebuild it with the `whisper` \
                  cargo feature to enable automatic subtitles."
             };
+            let color_pickers = editor.update(cx, |this, cx| {
+                [
+                    this.caption_color_control(
+                        "dialog-caption-text".into(),
+                        false,
+                        None,
+                        window,
+                        cx,
+                    ),
+                    this.caption_color_control(
+                        "dialog-caption-accent".into(),
+                        true,
+                        None,
+                        window,
+                        cx,
+                    ),
+                ]
+            });
             dialog
                 .title(
                     div()
@@ -168,6 +186,7 @@ impl Editor {
                             &look.style,
                             &look,
                             None,
+                            color_pickers,
                         )),
                 )
                 .footer(

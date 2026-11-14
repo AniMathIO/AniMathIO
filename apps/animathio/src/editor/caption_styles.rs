@@ -85,6 +85,7 @@ pub(super) fn caption_style_picker(
     active_style: &str,
     look: &CaptionStyleParams,
     target: Option<TrackId>,
+    color_pickers: [Div; 2],
 ) -> Div {
     let info = style_info(active_style);
     let font = look.font_size.unwrap_or(info.font_size);
@@ -175,6 +176,9 @@ pub(super) fn caption_style_picker(
             target,
         ));
     }
+    let [text_picker, accent_picker] = color_pickers;
+    texts = texts.child(text_picker);
+    accents = accents.child(accent_picker);
     let words_label = if words == 0 {
         "Auto".to_owned()
     } else {
@@ -312,6 +316,7 @@ impl Editor {
     pub(super) fn caption_style_section(
         &mut self,
         id: ClipId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let (track, clip) = self.caption_text_of(id)?;
@@ -322,6 +327,22 @@ impl Editor {
             self.caption_look.font_size = None;
             self.caption_look.max_words = None;
         }
+        let color_pickers = [
+            self.caption_color_control(
+                format!("c{}:caption-text:{}", id.0, track.0),
+                false,
+                Some(track),
+                window,
+                cx,
+            ),
+            self.caption_color_control(
+                format!("c{}:caption-accent:{}", id.0, track.0),
+                true,
+                Some(track),
+                window,
+                cx,
+            ),
+        ];
         let editor = cx.entity();
         let picker = caption_style_picker(
             &editor,
@@ -329,6 +350,7 @@ impl Editor {
             &active,
             &self.caption_look,
             Some(track),
+            color_pickers,
         );
         Some(self.section(
             "caption-style",
