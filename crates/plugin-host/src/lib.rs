@@ -666,7 +666,7 @@ impl PluginHost {
         SourcePlugin::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |s| s)?;
         compat::add_to_linker(&mut linker)?;
 
-        let font_data = load_system_font_bytes();
+        let font_data = default_font_bytes();
         let typeset = Arc::new(
             TypesetEngine::new().map_err(|e| HostError::CompilationFailed(e.to_string()))?,
         );
@@ -1406,26 +1406,12 @@ fn wit_manifest_to_inspector(manifest: &wit_types::Manifest) -> InspectorSchema 
     schema
 }
 
-fn load_system_font_bytes() -> Vec<u8> {
-    const CANDIDATES: &[&str] = &[
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/TTF/OpenSans-Regular.ttf",
-        "/usr/share/fonts/TTF/Lato-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        // Windows fallbacks (CI runs the host tests on windows-latest too).
-        "C:\\Windows\\Fonts\\arial.ttf",
-        "C:\\Windows\\Fonts\\segoeui.ttf",
-    ];
-
-    for path in CANDIDATES {
-        if let Ok(bytes) = fs::read(path) {
-            return bytes;
-        }
-    }
-
-    log::warn!("No system font found; host text shaping will return empty contours");
-    Vec::new()
+/// Font used by the host `shape_text` import. It is embedded (the same file the
+/// renderer uses) rather than discovered on the system so that text layout is
+/// identical on every machine and goldens stay portable.
+fn default_font_bytes() -> Vec<u8> {
+    const FONT: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
+    FONT.to_vec()
 }
 
 /// Truncate a string to at most `max` bytes on a UTF-8 character boundary.

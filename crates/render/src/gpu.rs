@@ -59,6 +59,16 @@ impl GpuBackend {
         }))
         .map_err(|e| Error::Gpu(format!("no GPU adapter: {e}")))?;
         let info = adapter.get_info();
+        // Software rasterizers (WARP / Microsoft Basic Render Driver, llvmpipe)
+        // gain nothing over the CPU backend and the Vello compute pipeline
+        // crashes on some of them (access violation on Windows runners), so
+        // treat them as "no GPU" and let callers fall back to `CpuBackend`.
+        if info.device_type == wgpu::DeviceType::Cpu {
+            return Err(Error::Gpu(format!(
+                "software adapter {} ({:?}) is not used for GPU preview",
+                info.name, info.backend
+            )));
+        }
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("animathio-render"),
             ..Default::default()

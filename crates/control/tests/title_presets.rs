@@ -6,6 +6,7 @@ use animathio_control::{
 use animathio_core::{
     ClipKind, Command, History, Project, TICKS_PER_SECOND, Time, TimeRange, evaluate,
 };
+use base64::Engine as _;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -161,6 +162,7 @@ fn linked_title_moves_together_and_rejects_invalid_requests() {
 fn title_cpu_goldens_and_safe_areas() {
     let mut host = animathio_plugin_host::test_support::host();
     let mut ctx = animathio_render::RenderCtx::default();
+    let mut failures = Vec::new();
     for format in ExportPreset::ALL {
         let (width, height) = format.resolution();
         let size = (width / 6, height / 6);
@@ -217,18 +219,43 @@ fn title_cpu_goldens_and_safe_areas() {
                 }
                 let expected = image_pixels(&path);
                 assert_eq!(frame.pixels.len(), expected.len());
-                assert!(
-                    frame
-                        .pixels
-                        .iter()
-                        .zip(expected)
-                        .all(|(a, b)| a.abs_diff(b) <= 2),
-                    "golden changed: {}",
-                    path.display()
-                );
+                let (mut count, mut max, mut x0, mut y0, mut x1, mut y1) =
+                    (0_u32, 0_u8, u32::MAX, u32::MAX, 0_u32, 0_u32);
+                for (index, (a, b)) in frame
+                    .pixels
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(expected.as_chunks::<4>().0.iter())
+                    .enumerate()
+                {
+                    let diff = (0..4).map(|c| a[c].abs_diff(b[c])).max().unwrap();
+                    if diff > 2 {
+                        let x = u32::try_from(index).unwrap() % size.0;
+                        let y = u32::try_from(index).unwrap() / size.0;
+                        (count, max) = (count + 1, max.max(diff));
+                        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                    }
+                }
+                if count > 0 {
+                    let actual = std::env::temp_dir().join(format!("title-{id}-actual.png"));
+                    frame.save_png(&actual).unwrap();
+                    failures.push(format!(
+                        "golden changed: {} ({count} px over tolerance, max diff {max}, bbox \
+                         {x0},{y0}..{x1},{y1}, actual saved to {})",
+                        path.display(),
+                        actual.display()
+                    ));
+                    failures.push(format!(
+                        "actual {id} png base64: {}",
+                        base64::engine::general_purpose::STANDARD
+                            .encode(std::fs::read(&actual).unwrap())
+                    ));
+                }
             }
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 fn image_pixels(path: &Path) -> Vec<u8> {

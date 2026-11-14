@@ -102,6 +102,13 @@ impl ControlServer {
             clients.retain(|client| !client.is_finished());
             match self.listener.accept() {
                 Ok(stream) if clients.len() < 8 => {
+                    // Windows named pipes cannot be polled this way: in
+                    // `PIPE_NOWAIT` mode an empty `ReadFile` fails with
+                    // `ERROR_NO_DATA`, which `interprocess` folds into EOF, so
+                    // every idle connection would look closed. Windows
+                    // connection threads therefore use blocking I/O and notice
+                    // shutdown when their client disconnects.
+                    #[cfg(not(windows))]
                     stream.set_nonblocking(true)?;
                     let handler = Arc::clone(&handler);
                     let shutdown = Arc::clone(shutdown);

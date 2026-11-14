@@ -139,7 +139,7 @@ To build a new 1.0 component:
 
 | Import | Signature | Purpose |
 | --- | --- | --- |
-| `shape-text` | `(text, font_size) -> result<list<path>, diagnostic>` | Text shaping via the host font engine; returns glyph outline paths. Keeps plugins small (no bundled fonts). |
+| `shape-text` | `(text, font_size) -> result<list<path>, diagnostic>` | Text shaping with the host's embedded DejaVu Sans (never a system font, so layout is identical on every machine); returns glyph outline paths. Keeps plugins small (no bundled fonts). |
 | `typeset-math` | `(source, mode, font_size) -> result<typeset-result, diagnostic>` | Typeset LaTeX or Typst math via the host (Typst + MiTeX); returns outline paths plus a tight bbox. |
 | `svg-to-paths` | `(svg_xml) -> result<list<path>, diagnostic>` | Parse an SVG XML string into vector paths. |
 | `log` | `(message)` | Host logging for diagnostics. |

@@ -313,7 +313,7 @@ flowchart LR
   (capped at 32 megapixels). The same call serves preview and frame-stepped export.
   Export and tests always use the CPU backend. The editor preview uses `GpuBackend`
   (Vello compute on a headless wgpu device, texture readback to RGBA8) when
-  `preview_backend(BackendKind::Gpu)` finds an adapter, and falls back to CPU with the
+  `preview_backend(BackendKind::Gpu)` finds a hardware adapter (software adapters such as WARP or llvmpipe are rejected), and falls back to CPU with the
   reason otherwise or when a GPU render fails. Clips with effects are rasterized, run
   through the effect plugins (the same `EffectProcessor` path as the CPU backend) and
   composited by the GPU backend as an image. `render_preview` is the preview-only
