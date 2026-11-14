@@ -202,6 +202,9 @@ enum Origin {
     Bytes(Arc<[u8]>),
 }
 
+/// Upper bound on the frames one packet may stand in for when it fails to decode.
+const MAX_PACKET_FRAMES: usize = 1 << 16;
+
 /// Native frames per decode segment. Decoding is canonical per segment: it starts at a packet
 /// at least [`preroll_frames`] before the segment and runs front to back, so the samples of a
 /// frame never depend on which frames were read before it.
@@ -653,7 +656,9 @@ impl Stream {
                     let channels = self.spec.as_ref().map(|s| usize::from(s.1));
                     match channels {
                         Some(channels) if soft && self.position < tolerate_before => {
-                            let frames = self.packet_frames(packet.dur);
+                            // The duration comes from the container: bound the silence by the
+                            // longest packet any supported codec produces (Opus: 120 ms).
+                            let frames = self.packet_frames(packet.dur).min(MAX_PACKET_FRAMES);
                             self.scratch.clear();
                             self.scratch.resize(frames * channels, 0.0);
                             self.position += frames as u64;
