@@ -65,6 +65,8 @@ gets a JSON-RPC error instead of a result.
 | `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults; unknown or out-of-range params are rejected |
 | `audio_effects.list` | — | `[EffectInfo]` (same shape as `effects.list`) from loaded audio-effect plugins |
 | `audio_effects.add` | `{ params: { clip? \| track?, plugin, effect, params?, index? } }` | `{ chain, effect_id }` where `chain` is `{ "Clip": id }` or `{ "Track": id }`; give exactly one of `clip` and `track`; unspecified params use the plugin defaults; unknown or out-of-range params are rejected |
+| `timeline.propose_autocuts` | `{ params: { silence_db?, hysteresis_db?, metric?, min_silence?, keep_short_pauses?, padding_before?, padding_after?, clip?, track?, range?, all_unlocked_tracks?, fillers?, language?, filler_words?, model?, download_model? } }` | snapshot-bound proposal `{ revision, tracks, cuts: [{ range: { start, end }, reason, confidence, enabled }], total_saved }`; all times are ticks; no mutation |
+| `timeline.apply_autocuts` | `{ proposal }` | removed ranges and total removed ticks; one undoable ripple batch; rejects stale project revisions, invalid/overlapping ranges, locked tracks and missing companion tracks |
 | `timeline.trim_silence` | `{ params: { threshold_db?, min_silence?, padding?, track? } }` | removed ranges; detects silent audio (RMS in 10 ms windows) and ripple-removes it from every track as one undo step; `min_silence` and `padding` are ticks |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
 | `subtitles.generate` | `{ params: { model?, language?, clip?, track?, range?, download_model?, split? } }` | `{ language, added?: { track_id, background_track_id, first_clip, cues }, cues: [{ start, end, text }] }`; transcribes the project's audio (or one clip, track or `range`) locally with Whisper and adds caption clips on a new `Subtitles` track as one undo step. `model` is `tiny`, `base` (default) or `small`; a missing model is an error unless `download_model` is true. The editor answers when the job finishes (it can take minutes) |
@@ -134,6 +136,8 @@ clears its undo history.
 | `cut_at` | Split every clip on every track at each time, as one undo step | `times_ms`: array; only clips that strictly contain a time are split |
 | `ripple_delete` | Delete one clip and close the gap on its own track | `id`; later clips on that track move left, other tracks are not shifted (use `remove_range` to keep tracks in sync); linked companions are deleted with it |
 | `remove_range` | Cut a section out of every track | `from_ms`, `to_ms`, `ripple` (default true: later content shifts left and an explicit canvas duration shrinks) |
+| `propose_autocuts` | Review automatic cuts without editing; returns a proposal with tick ranges, reason, heuristic confidence and enabled toggles | `silence_db` (-40), `min_silence_ms` (500), `hysteresis_db` (3), `peak` (false), `keep_short_pauses` (true), `padding_before_ms` / `padding_after_ms` (100), optional `clip`, `track`, paired `from_ms` / `to_ms`, `all_unlocked_tracks` (false), `fillers` (false), `language`, `filler_words`, `model` (base), `download_model` (false) |
+| `apply_autocuts` | Apply the reviewed proposal as one undo step; selected tracks and linked companions ripple together | `proposal`: the exact object from `propose_autocuts`, with unwanted `cuts[].enabled` set to false. Coordinates are ticks in the original project; stale proposals are rejected |
 | `trim_silence` | Remove pauses detected in the audio, ripple-closing the gaps, in one undo step | `threshold_db` (-40), `min_silence_ms` (400), `padding_ms` (100), optional audio `track` id |
 | `auto_subtitles` | Fully local automatic subtitles: transcribe the project's audio (or one `clip`/`track`, or `from_ms`..`to_ms`) with Whisper and add caption-bar clips on a new `Subtitles` track, one undo step | `model` (`tiny`/`base`/`small`, default `base`), `language` (ISO 639-1, omit to detect), `download_model` (false; set only with the user's consent: one-time 78-488 MB download, SHA-256 verified), `max_chars_per_line` (42), `max_lines` (2). Returns the language, track ids and the cues in ms. Needs a build with the `whisper` feature; blocks until done |
 | `export_subtitles` | Return or write the subtitle track as SRT or WebVTT | `format` (`srt`/`vtt`), `track`, `path`, `overwrite` |
@@ -323,3 +327,33 @@ intentionally cover the whole canvas.
 The shared project/export choices now include `portrait` (1080x1350, 4:5) alongside
 `youtube_1080p`, `youtube_4k`, `shorts_vertical` and `square`, all at 30 fps when applied.
 The editor labels vertical delivery “Shorts/Reels/TikTok 1080x1920 30fps”.
+
+### Automatic-cut review
+
+Silence analysis reuses the dry 16 kHz mono project mix (clip gain, keyframes, mute,
+solo and track gain; audio effects are ignored). RMS or peak is measured in 10 ms
+windows. Silence starts below the entry threshold and ends at the entry threshold
+plus hysteresis. The minimum applies to the raw pause; padding keeps the end of the
+previous speech and the start of the next speech. Disabling keep-short-pauses cuts
+all detected pauses that survive padding. Detection is limited to the selected
+clip, track or range. Video selection resolves linked companion audio.
+
+Application cuts the selected tracks and their complete companion-track graph;
+without a selection it cuts unlocked tracks. Selecting all unlocked tracks expands
+this scope. A locked companion causes an error so audio/video cannot drift. Scoped
+ripple leaves other tracks and explicit project duration unchanged; when every track
+is selected the explicit duration also shrinks. Review up to 1000 ranges at once.
+Application removes enabled intervals from last to first in one batch.
+
+Filler detection requires a build with the whisper feature and a local model. It uses
+word timestamps, never estimated segment-level word positions. English defaults are
+um, uh, erm, like, you know; Hungarian defaults are öö, ö, ő, hát, izé, szóval.
+Other languages need an explicit filler list. Immediate repeated words and
+hyphen-marked false starts are proposed with lower heuristic confidence. These
+scores are review hints, not calibrated speech-engine probabilities. Missing engines
+report a capability error; model downloads require explicit consent.
+
+In the editor, Clip > Automatic cuts opens `apps/animathio/src/editor/autocut.rs`: analysis runs on a
+worker, enabled ranges shade the affected timeline rows, and the panel offers sliders,
+per-range toggles, seek buttons, saved duration and Apply/Cancel. Edits invalidate the
+draft; Apply makes one undo entry. Cancel discards the draft and signals the worker.

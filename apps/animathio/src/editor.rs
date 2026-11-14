@@ -37,6 +37,7 @@ use crate::timeline::{self, TimelineLayout, TrimEdge};
 
 pub(crate) mod actions;
 mod audio_effects;
+mod autocut;
 mod clip_ops;
 mod color_edit;
 mod commands;
@@ -401,6 +402,7 @@ struct TimelineSnapshot {
     frame_rate: FrameRate,
     row_height: f32,
     marks: InOut,
+    autocuts: Vec<(TimeRange, usize)>,
     snap_line: Option<Time>,
     /// Rubber band in canvas coordinates: `(left, top, right, bottom)`.
     marquee: Option<(f32, f32, f32, f32)>,
@@ -506,6 +508,7 @@ pub(crate) struct Editor {
     /// The automatic-subtitle job, running or finished (see `editor/subtitles.rs`).
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
     subtitle_panel_open: bool,
+    autocut_review: Option<autocut::Review>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
     last_export_tick: Instant,
@@ -627,6 +630,7 @@ impl Editor {
             export_queue_open: false,
             subtitle_job: None,
             subtitle_panel_open: false,
+            autocut_review: None,
             pending_export: None,
             last_export_tick: Instant::now(),
             keyframe_drag: None,
@@ -824,6 +828,9 @@ impl Render for Editor {
             .child(workspace);
         root = root.child(self.status_line(cx));
         if let Some(panel) = self.export_queue_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.autocut_panel(cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.subtitle_panel(cx) {

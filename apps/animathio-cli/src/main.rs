@@ -1,4 +1,5 @@
 //! Headless project validation and deterministic PNG rendering.
+mod autocut;
 mod mcp;
 mod transcribe;
 
@@ -111,6 +112,11 @@ enum Action {
     Transcribe {
         #[command(flatten)]
         args: transcribe::TranscribeArgs,
+    },
+    /// Propose or apply silence and optional filler cuts as one ripple edit.
+    Autocut {
+        #[command(flatten)]
+        args: autocut::AutocutArgs,
     },
     /// List or download the local Whisper speech models.
     Models {
@@ -306,6 +312,7 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Action::Transcribe { args } => transcribe::run(&args)?,
+        Action::Autocut { args } => autocut::run(args)?,
         Action::Models { args } => transcribe::run_models(&args)?,
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

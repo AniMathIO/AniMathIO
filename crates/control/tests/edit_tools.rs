@@ -346,3 +346,21 @@ fn delivery_preset_table_has_stable_unique_names_and_settings() {
     }
     assert_eq!(ExportPreset::from_name("unknown"), None);
 }
+
+#[test]
+fn autocut_control_calls_round_trip_and_apply_one_history_entry() {
+    let mut handler = recording();
+    let original = handler.project().clone();
+    let proposal = handler
+        .propose_autocuts(animathio_control::AutocutParams::default())
+        .unwrap();
+    assert_eq!(handler.project(), &original);
+    let proposal = serde_json::from_value(serde_json::to_value(proposal).unwrap()).unwrap();
+    let result = handler.apply_autocuts(proposal).unwrap();
+    assert_eq!(result.removed.len(), 1);
+    let edited = handler.project().clone();
+    assert!(handler.history_undo().unwrap());
+    assert_eq!(handler.project(), &original);
+    assert!(handler.history_redo().unwrap());
+    assert_eq!(handler.project(), &edited);
+}

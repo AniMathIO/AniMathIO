@@ -25,6 +25,7 @@ Commands:
   import-v1     Convert a v1 `.animathio` project to a `.amio` archive
   import-manim  Convert a Manim Community scene script to a `.amio` archive
   transcribe    Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
+  autocut       Propose or apply silence and optional filler cuts as one ripple edit
   models        List or download the local Whisper speech models
   new-sample    Write a three-second animated image/text/shape demo archive
   mcp           Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
@@ -381,3 +382,79 @@ For the reproducible 10-second 1080p30 MP4/audio, text title, one-second dissolv
 and grayscale effect workload, build the release CLI and first-party plugins,
 then run `python3 scripts/bench-export.py [OUTPUT_DIRECTORY]` (requires ffmpeg).
 The script retains the source, project and exported MP4 for inspection.
+
+## `autocut`
+
+Analyse a recording before applying silence/filler cuts. Exactly one of `--dry-run`
+or `--apply` is required. Dry runs print a JSON proposal with integer-tick ranges,
+reasons and heuristic confidence. Apply atomically saves the input project, or writes
+a separate archive through `--output`; existing separate outputs require
+`--overwrite`. Dry runs preserve the input. For per-cut review, use the editor or
+MCP proposal and apply tools. See [automatic-cut review](mcp.md#automatic-cut-review) for scope,
+padding, hysteresis and language rules.
+
+```bash
+animathio-cli autocut recording.amio --silence-db -40 --min-silence 0.5 --dry-run
+animathio-cli autocut recording.amio --clip 1 --apply -o edited.amio
+animathio-cli autocut recording.amio --fillers --language hu --dry-run
+```
+
+Filler/repeat analysis needs a build with the whisper feature. Models are local and
+never bundled; `--download-model` grants consent to download a missing model.
+
+<!-- help:autocut -->
+```text
+Propose or apply silence and optional filler cuts as one ripple edit
+
+Usage: animathio-cli autocut [OPTIONS] <PROJECT>
+
+Arguments:
+  <PROJECT>  Input project archive or project.json
+
+Options:
+      --silence-db <SILENCE_DB>
+          Silence entry threshold in dBFS [default: -40]
+      --min-silence <MIN_SILENCE>
+          Minimum pause in seconds or Nticks [default: 0.5]
+      --hysteresis-db <HYSTERESIS_DB>
+          Silence exit threshold above the entry level, in dB [default: 3]
+      --peak
+          Use peak amplitude instead of RMS
+      --remove-short-pauses
+          Also remove pauses shorter than --min-silence
+      --padding-before <PADDING_BEFORE>
+          Silence retained before speech, in seconds or Nticks [default: 0.1]
+      --padding-after <PADDING_AFTER>
+          Silence retained after speech, in seconds or Nticks [default: 0.1]
+      --clip <CLIP>
+          Analyse a clip, including linked audio for a video clip
+      --track <TRACK>
+          Analyse this track's audio mix
+      --from <FROM>
+          Inclusive analysis start in seconds or Nticks (requires --to)
+      --to <TO>
+          Exclusive analysis end in seconds or Nticks (requires --from)
+      --all-unlocked-tracks
+          Ripple all unlocked tracks, rather than selected tracks and companions
+      --fillers
+          Include filler phrases and repeats; requires a build with Whisper
+      --language <LANGUAGE>
+          ISO language code for speech recognition and filler defaults
+      --filler-word <FILLER_WORDS>
+          Filler phrase override; may be repeated
+      --model <MODEL>
+          Whisper model: tiny, base or small [default: base]
+      --download-model
+          Consent to download a missing model
+      --apply
+          Apply the proposed cuts, saving atomically to the input unless --output is given
+      --dry-run
+          Print the review proposal as JSON without saving changes
+  -o, --output <OUTPUT>
+          Save an edited archive here instead of changing the input
+      --overwrite
+          Replace an existing output archive
+  -h, --help
+          Print help
+```
+<!-- /help:autocut -->
