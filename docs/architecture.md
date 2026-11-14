@@ -9,9 +9,9 @@ the render/audio/export data flow. The authority for these rules is
 | Crate | Owns |
 | --- | --- |
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
-| `format` | Versioned `project.json` (schema version 3) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
+| `format` | Versioned `project.json` (schema version 5) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
-| `audio` | Engine-owned decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb device playback. No audio resources live in `Project`. |
+| `audio` | Engine-owned decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb device playback. Also pure offline beat detection (`detect_beats`). No audio resources live in `Project`. |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
 | `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
@@ -201,8 +201,9 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `SetTrackLocked`, `RenameTrack`, `MoveTrack`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
-`SetEffectParam`, `SetEffectBypass`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
-`AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `Batch`, `SplitAt`,
+`SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
+`AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `AddMarker`, `RemoveMarker`,
+`MoveMarker`, `UpdateMarker`, `Batch`, `SplitAt`,
 `RemoveRange`, `RippleDelete`, plus the link-group variants `SetClipLink` and `RestoreClips`
 and `Exact` (replays one inverse edit without link propagation).
 
@@ -350,9 +351,7 @@ DSP, and a port in `core` connects them.
   per track: sum of clips → track chain → track gain; then the sum of tracks. A clip's
   chain parameters may be keyframed (`Target::Effect`) and are sampled at the start of
   each block; track chains use their base parameters. Bypassed effects are skipped but keep
-  their parameters; video effects bypass the same way (`Command::SetEffectBypass`, dropped by
-  `evaluate` and ignored by the renderer). The editor passes audio through an effect whose
-  plugin is missing or fails with a warning toast, while export fails strictly. A project without active chains takes the original per-frame path
+  their parameters. A project without active chains takes the original per-frame path
   unchanged (bit-identical output).
 - **Port.** `core::AudioEffectProcessor` takes `(EffectInstance, AudioBlock, state)` and
   returns processed samples plus the next state blob. `plugin-host`'s `AudioEffectHandle`
@@ -535,6 +534,35 @@ rendered off-thread and cached in editor session state by project canvas size.
   that whisper.cpp polls, shows it in a status-bar popover in the export-queue style and
   applies the cues on the UI thread; control clients get their reply when it finishes.
 
+### Markers and beat sync
+
+- **Model.** `Project::markers()` is a list of `Marker { id, time, duration?, name, color,
+  note }` kept sorted by `(time, id)`; `time` and `duration` are integer ticks and `color` is
+  one of the eight-entry `MarkerColor` palette. Markers never affect rendering or export.
+  They change only through `Command::{AddMarker, RemoveMarker, MoveMarker, UpdateMarker}`
+  (each returns its exact inverse, all work inside `Command::Batch`, and markers are never
+  blocked by a locked track). **Schema 5** introduced the `markers` key (`format` migrates
+  4 → 5 without changes; a missing key means no markers). Ripple edits do not move markers.
+- **Beat detection** lives in `audio` (`detect_beats`, `downbeat_indices`): pure, offline
+  and deterministic over mono samples, with no extra dependencies. Onset strength is a
+  log-compressed spectral flux (a small radix-2 FFT), the tempo is the peak of an
+  autocorrelation weighted towards moderate tempi, beats come from a dynamic-programming
+  tracker (Ellis 2007) and each beat is refined to the sharpest attack at sample resolution.
+  Downbeats are the phase of the beat grid with the most onset strength. The audio comes
+  from the transcription audio-preparation adapter (`Mixer::dry`, 16 kHz mono, so clip and
+  track gain apply and effect chains are ignored), for the whole mix or one clip, track or
+  range.
+- **Sync actions** live in the control layer's `beats` helper, shared by the editor, CLI and
+  MCP: `markers_at_beats_command` (every beat, every Nth beat or downbeats only; idempotent)
+  and `sync_cuts_command`, which snaps the selected clips' cut points to the nearest beat or
+  marker within `max_shift` as roll edits (both clips at a shared cut move, source content
+  stays put, linked companions follow through the normal link propagation) or splits clips at
+  the targets. Each builds one `Command::Batch`; edits that would overlap, collapse a clip or
+  touch a locked track are skipped and reported. Edits are rounded to the frame grid unless
+  `frame_align` is off.
+- **Editor.** The `markers` editor module owns the panel, the marker dialog and the ruler
+  flags (painted by `support`); `timeline` makes markers snap targets and hit-tests them.
+
 Automatic cuts live in the control layer's `autocut` helper, shared by the editor,
 CLI and MCP. The legacy silence-trimming helper calls the same detector. Analysis
 uses the transcription audio-preparation adapter; pure silence and word-timestamp
@@ -544,12 +572,3 @@ logic with explicit track scope and validates companion closure and locks. Rever
 ordered range commands are wrapped in one serializable batch for undo/redo.
 The editor's `autocut` module owns ephemeral review state, cancellable background
 analysis, sliders, per-cut toggles and timeline overlays.
-
-## Auto-reframe
-
-The control layer's `reframe` helper owns deterministic low-resolution saliency,
-scene-change resets, a dead zone and rate-limited follow, path simplification and
-a snapshot-guarded command batch. Existing media decoders sample video in source
-time, including trims. The editor's `reframe` module owns settings and a worker
-with atomic progress/cancel; the CLI and MCP use the same helper. No runtime
-tracking state is stored in the project and the format schema is unchanged.

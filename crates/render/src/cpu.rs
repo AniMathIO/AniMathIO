@@ -102,7 +102,12 @@ impl Backend for CpuBackend {
                 _ => unit_transform(clip.transform, size)?,
             };
             ctx.set_transform(transform);
-            if clip.has_active_effects() {
+            if clip.effects.is_empty() {
+                #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
+                ctx.push_opacity_layer(clip.transform.opacity as f32);
+                self.draw_clip(&mut ctx, &mut resources, size, clip, pool, video)?;
+                ctx.pop_layer();
+            } else {
                 // Rasterize the clip into its own layer, apply the effect chain
                 // there, then composite. Effects must not see other clips.
                 let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;
@@ -111,11 +116,6 @@ impl Backend for CpuBackend {
                 #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
                 ctx.push_opacity_layer(clip.transform.opacity as f32);
                 composite_layer(&mut ctx, &layer)?;
-                ctx.pop_layer();
-            } else {
-                #[allow(clippy::cast_possible_truncation)] // Core validates opacity in [0, 1].
-                ctx.push_opacity_layer(clip.transform.opacity as f32);
-                self.draw_clip(&mut ctx, &mut resources, size, clip, pool, video)?;
                 ctx.pop_layer();
             }
         }

@@ -1,4 +1,4 @@
-use animathio_core::{ClipId, Project, TICKS_PER_SECOND, Time, TrackId};
+use animathio_core::{ClipId, MarkerId, Project, TICKS_PER_SECOND, Time, TrackId};
 
 /// Pixel geometry shared by timeline painting and hit-testing. All coordinates are
 /// relative to the timeline canvas origin (not the window origin); callers add the
@@ -167,6 +167,31 @@ pub(crate) fn snap_target_among(
     playhead: Time,
     candidate: Time,
 ) -> Option<Time> {
+    snap_target_excluding(layout, project, exclude, None, playhead, candidate)
+}
+
+/// Snap target for dragging marker `marker`: the playhead, clip edges and every other
+/// marker attract; the dragged marker itself does not.
+pub(crate) fn snap_marker(
+    layout: &TimelineLayout,
+    project: &Project,
+    marker: MarkerId,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
+    snap_target_excluding(layout, project, &[], Some(marker), playhead, candidate)
+}
+
+/// Snapping core: the playhead, clip edges and markers (the start and, for ranges, the
+/// end of each) are targets, except the excluded clips and marker.
+fn snap_target_excluding(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: &[ClipId],
+    exclude_marker: Option<MarkerId>,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
     let threshold = snap_threshold_ticks(layout);
     let mut best = None;
     let mut best_distance = i64::MAX;
@@ -186,7 +211,37 @@ pub(crate) fn snap_target_among(
             }
         }
     }
+    for marker in project.markers() {
+        if Some(marker.id) != exclude_marker {
+            consider(marker.time);
+            if marker.duration.is_some() {
+                consider(marker.end());
+            }
+        }
+    }
     best
+}
+
+/// Width in pixels of a marker's grab area, either side of its line.
+const MARKER_GRAB: f32 = 6.0;
+
+/// The marker whose flag or line is under a canvas-relative point on the ruler. When
+/// several overlap, the latest one on the timeline wins (it is drawn on top).
+pub(crate) fn hit_marker(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+) -> Option<MarkerId> {
+    if !(0.0..layout.ruler_height).contains(&y) {
+        return None;
+    }
+    project
+        .markers()
+        .iter()
+        .rev()
+        .find(|m| (time_to_x(layout, m.time) - x).abs() <= MARKER_GRAB)
+        .map(|m| m.id)
 }
 
 /// Position a newly dropped clip with the same snapping rules as a timeline edit.
@@ -572,5 +627,34 @@ mod tests {
             drop_start(&layout, &project, raw_x, playhead, false),
             x_to_time(&layout, raw_x)
         );
+    }
+
+    #[test]
+    fn markers_are_snap_targets_and_hit_on_the_ruler_only() {
+        use animathio_core::{Marker, MarkerId};
+        let mut project = sample_project();
+        Command::AddMarker {
+            marker: Marker::new(MarkerId(1), Time(TICKS_PER_SECOND * 3 / 2)),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let layout = layout();
+        let marker_x = time_to_x(&layout, Time(TICKS_PER_SECOND * 3 / 2));
+        let near = x_to_time(&layout, marker_x + 2.0);
+        assert_eq!(
+            snap_target(&layout, &project, None, Time(0), near),
+            Some(Time(TICKS_PER_SECOND * 3 / 2))
+        );
+        // The dragged marker does not attract itself.
+        assert_eq!(
+            snap_marker(&layout, &project, MarkerId(1), Time(0), near),
+            None
+        );
+        assert_eq!(
+            hit_marker(&layout, &project, marker_x + 3.0, 10.0),
+            Some(MarkerId(1))
+        );
+        assert_eq!(hit_marker(&layout, &project, marker_x + 30.0, 10.0), None);
+        assert_eq!(hit_marker(&layout, &project, marker_x, 200.0), None);
     }
 }

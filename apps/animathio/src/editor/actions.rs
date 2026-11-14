@@ -35,7 +35,10 @@ actions!(
         WriteOn,
         GenerateSubtitles,
         AutomaticCuts,
-        AutoReframe,
+        AddMarker,
+        PreviousMarker,
+        NextMarker,
+        ShowMarkers,
         NewProject,
         OpenProject,
         SaveProject,
@@ -170,6 +173,12 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("secondary-l", Box::new(ToggleLoop), "Viewer"),
         ("secondary-l", Box::new(ToggleLoop), "Timeline"),
         ("n", Box::new(ToggleSnapping), "Timeline"),
+        ("m", Box::new(AddMarker), "Timeline"),
+        ("m", Box::new(AddMarker), "Viewer"),
+        ("shift-m", Box::new(NextMarker), "Timeline"),
+        ("shift-m", Box::new(NextMarker), "Viewer"),
+        ("secondary-shift-m", Box::new(PreviousMarker), "Timeline"),
+        ("secondary-shift-m", Box::new(PreviousMarker), "Viewer"),
         ("secondary-=", Box::new(ZoomIn), "Timeline"),
         ("secondary--", Box::new(ZoomOut), "Timeline"),
         ("shift-z", Box::new(ZoomToFit), "Timeline"),
@@ -544,8 +553,29 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     .on_action(cx.listener(|this, _: &ImportV1, _, cx| this.import_legacy(cx)))
     .on_action(cx.listener(|this, _: &ImportManim, window, cx| this.open_manim_import(window, cx)))
     .on_action(cx.listener(|this, _: &WriteOn, window, cx| this.open_write_on(window, cx)))
-    .on_action(cx.listener(|this, _: &AutoReframe, _, cx| this.open_reframe(cx)))
     .on_action(cx.listener(|this, _: &AutomaticCuts, _, cx| this.open_autocut(cx)))
+    .on_action(cx.listener(|this, _: &AddMarker, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.add_marker_at_playhead(cx);
+    }))
+    .on_action(cx.listener(|this, _: &NextMarker, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.jump_marker(1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &PreviousMarker, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.jump_marker(-1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &ShowMarkers, _, cx| this.open_marker_panel(cx)))
     .on_action(cx.listener(|this, _: &GenerateSubtitles, window, cx| {
         this.open_subtitles_dialog(window, cx);
     }))

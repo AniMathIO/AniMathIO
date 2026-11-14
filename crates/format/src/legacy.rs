@@ -189,3 +189,11 @@ pub(super) fn migrate_audio_effects(mut value: serde_json::Value) -> serde_json:
     value["schemaVersion"] = serde_json::json!(4);
     value
 }
+
+/// Schema 5 adds project-level timeline markers (`markers`). The key is absent when there are
+/// none, so a schema-4 project is already valid schema 5; the bump exists so older readers
+/// refuse files that may carry markers instead of silently dropping them.
+pub(super) fn migrate_markers(mut value: serde_json::Value) -> serde_json::Value {
+    value["schemaVersion"] = serde_json::json!(5);
+    value
+}

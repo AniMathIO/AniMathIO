@@ -11,14 +11,19 @@
 //! constant time.
 
 mod authoring;
+mod beats;
+pub use beats::{
+    BeatDetectParams, BeatDetection, BeatInfo, BeatMarkerOptions, BeatMarkersParams,
+    BeatMarkersResult, BeatSelection, CutShift, MarkerAddParams, MarkerAdded, SyncCutsParams,
+    SyncCutsResult, SyncMode, SyncSource, add_marker_command, analyze_beats, apply_beat_markers,
+    apply_sync_cuts, markers_at_beats_command, select_beats, sync_cuts_command,
+};
 mod autocut;
 pub use autocut::{
     Autocut, AutocutParams, AutocutProposal, AutocutReason, SilenceMetric, apply_autocuts,
     autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
     propose_autocuts_cancellable,
 };
-mod reframe;
-pub use reframe::{ReframeDraft, ReframeParams, analyse_reframe, auto_reframe, reframe_command};
 mod client;
 mod edit;
 mod effects;
@@ -69,6 +74,3 @@ pub use path::{read_bounded, validate_existing_file, validate_output_file};
 pub use server::{
     ControlServer, MAX_REQUEST_BYTES, RunningServer, SocketSpec, default_socket_spec,
 };
-
-mod templates;
-pub use templates::{Placeholder, ProjectTemplate, TemplateManifest, project_templates};

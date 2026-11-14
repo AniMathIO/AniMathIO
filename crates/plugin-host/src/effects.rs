@@ -139,11 +139,8 @@ impl EffectRuntime {
         let listed = instance
             .list_effects(&mut *store)
             .map_err(|e| e.to_string())?;
-        if listed.len() > crate::MAX_EFFECTS_PER_PLUGIN {
-            return Err(format!(
-                "too many effects (maximum {})",
-                crate::MAX_EFFECTS_PER_PLUGIN
-            ));
+        if listed.len() > 64 {
+            return Err("too many effects (maximum 64)".into());
         }
         let effects = listed
             .into_iter()

@@ -367,14 +367,83 @@ pub(crate) struct ApplyAutocuts {
     proposal: serde_json::Value,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct AutoReframe {
-    /// Target aspect: 9:16 (default), 1:1 or 4:5.
-    aspect: Option<String>,
-    /// Tracking smoothness in 0..=1 (default 0.5).
-    smoothness: Option<f64>,
-    /// Video clip ids; omitted or empty selects all video clips.
-    clips: Option<Vec<u64>>,
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddMarker {
+    /// Marker position in timeline milliseconds.
+    time_ms: f64,
+    /// Display name (default empty).
+    name: Option<String>,
+    /// Palette colour: red, orange, yellow, green, cyan, blue (default), purple or pink.
+    color: Option<String>,
+    /// Free-form note.
+    note: Option<String>,
+    /// Length in milliseconds for a range marker; omit for a point marker.
+    duration_ms: Option<f64>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct RemoveMarker {
+    /// Numeric marker id from `list_markers`.
+    id: u64,
+}
+#[derive(Deserialize, JsonSchema)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct DetectBeats {
+    /// Analyse one clip (video resolves to its linked audio); omit for the whole mix.
+    clip: Option<u64>,
+    /// Analyse one track's mixed audio.
+    track: Option<u64>,
+    /// Inclusive start of the analysis range in milliseconds (requires `to_ms`).
+    from_ms: Option<f64>,
+    /// Exclusive end of the analysis range in milliseconds (requires `from_ms`).
+    to_ms: Option<f64>,
+    /// Slowest tempo considered (default 60).
+    min_bpm: Option<f64>,
+    /// Fastest tempo considered (default 200).
+    max_bpm: Option<f64>,
+    /// Force this tempo instead of estimating it.
+    bpm: Option<f64>,
+    /// Beats per bar for downbeat picking (default 4).
+    beats_per_bar: Option<u32>,
+    /// Also add a marker at each selected beat (one undo step).
+    #[serde(default)]
+    add_markers: bool,
+    /// With `add_markers`: use every Nth beat (default 1).
+    every: Option<u32>,
+    /// With `add_markers`: only downbeats.
+    #[serde(default)]
+    downbeats_only: bool,
+    /// With `add_markers`: marker colour (default cyan).
+    color: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct SyncCutsToBeats {
+    /// Numeric ids of the clips whose cut points are edited. Linked companions follow.
+    clips: Vec<u64>,
+    /// Snap to `beats` (default), `markers` or `both`.
+    source: Option<String>,
+    /// `snap` (default) moves existing cut points to the nearest target as roll edits;
+    /// `split` cuts the clips into segments at the targets inside them.
+    mode: Option<String>,
+    /// Largest distance a cut may move in milliseconds (default 250).
+    max_shift_ms: Option<f64>,
+    /// `split` only: smallest segment in milliseconds (default 100).
+    min_segment_ms: Option<f64>,
+    /// Round edits to the frame grid (default true).
+    frame_align: Option<bool>,
+    /// Use every Nth beat (default 1).
+    every: Option<u32>,
+    /// Use only downbeats.
+    #[serde(default)]
+    downbeats_only: bool,
+    /// Analyse this clip's audio for beats (default: the whole mix).
+    analyze_clip: Option<u64>,
+    /// Analyse this track's audio for beats.
+    analyze_track: Option<u64>,
+    /// Force this tempo instead of estimating it.
+    bpm: Option<f64>,
+    /// Beats per bar for downbeat picking (default 4).
+    beats_per_bar: Option<u32>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -716,6 +785,54 @@ fn find_edit_point(
         .min_by_key(|candidate| candidate.3)
         .map(|(track, a, b, _)| (track, a, b))
         .ok_or_else(|| invalid("no edit point between adjacent clips found"))
+}
+
+fn parse_marker_color(value: Option<&str>) -> Result<animathio_core::MarkerColor, McpError> {
+    value.map_or(Ok(animathio_core::MarkerColor::default()), |name| {
+        animathio_core::MarkerColor::parse(name).ok_or_else(|| {
+            invalid("color must be red, orange, yellow, green, cyan, blue, purple or pink")
+        })
+    })
+}
+
+fn marker_json(marker: &animathio_core::Marker) -> serde_json::Value {
+    json!({
+        "id": marker.id.0,
+        "time_ms": ticks_to_ms(marker.time),
+        "ticks": marker.time.0,
+        "duration_ms": marker.duration.map(ticks_to_ms),
+        "name": marker.name,
+        "color": marker.color.name(),
+        "note": marker.note,
+    })
+}
+
+fn beat_range(from_ms: Option<f64>, to_ms: Option<f64>) -> Result<Option<TimeRange>, McpError> {
+    match (from_ms, to_ms) {
+        (None, None) => Ok(None),
+        (Some(s), Some(e)) => TimeRange::new(ms_to_ticks(s)?, ms_to_ticks(e)?)
+            .map(Some)
+            .map_err(|e| invalid(&e.to_string())),
+        _ => Err(invalid("give both from_ms and to_ms")),
+    }
+}
+
+fn detect_defaults(
+    clip: Option<u64>,
+    track: Option<u64>,
+    range: Option<TimeRange>,
+    bpm: Option<f64>,
+    beats_per_bar: Option<u32>,
+) -> animathio_control::BeatDetectParams {
+    let d = animathio_control::BeatDetectParams::default();
+    animathio_control::BeatDetectParams {
+        clip: clip.map(ClipId),
+        track: track.map(TrackId),
+        range,
+        bpm,
+        beats_per_bar: beats_per_bar.unwrap_or(d.beats_per_bar),
+        ..d
+    }
 }
 
 fn tool_text(value: impl serde::Serialize) -> Result<CallToolResult, McpError> {
@@ -1462,28 +1579,6 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Auto reframe video clips to 9:16, 1:1 or 4:5 using deterministic offline motion/contrast tracking. Changes the canvas and replaces selected videos' position/scale animation as one undo step; preserves opacity and effects. Unrotated unlocked videos only. No downloads. Returns the number of clips. Other layers keep their normalized transforms. Can take seconds to minutes."
-    )]
-    async fn auto_reframe(
-        &self,
-        Parameters(p): Parameters<AutoReframe>,
-    ) -> Result<CallToolResult, McpError> {
-        let params = animathio_control::ReframeParams {
-            aspect: p.aspect.unwrap_or_else(|| "9:16".into()),
-            smoothness: p.smoothness.unwrap_or(0.5),
-            clips: p
-                .clips
-                .unwrap_or_default()
-                .into_iter()
-                .map(ClipId)
-                .collect(),
-        };
-        let mut backend = self.backend.lock().await;
-        let count = backend.auto_reframe(params).map_err(mcp_error)?;
-        tool_text(json!({"clips":count}))
-    }
-
-    #[tool(
         description = "Propose automatic silence cuts and optional Whisper filler/repeat cuts without changing the project. Returns a revision-bound proposal with integer-tick ranges, heuristic confidence and enabled toggles. Review and pass the proposal to apply_autocuts. Selected tracks and every linked companion ripple together; locked companions cause an error."
     )]
     async fn propose_autocuts(
@@ -1544,6 +1639,167 @@ impl McpServer {
             .apply_autocuts(proposal)
             .map_err(mcp_error)?;
         tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
+    }
+
+    #[tool(
+        description = "List the timeline markers (named, coloured points or ranges on the ruler), sorted by time. Each has an id, time in ms and ticks, optional duration, name, colour and note."
+    )]
+    async fn list_markers(&self) -> Result<CallToolResult, McpError> {
+        let markers = self
+            .backend
+            .lock()
+            .await
+            .markers_list()
+            .map_err(mcp_error)?;
+        tool_text(json!({"markers": markers.iter().map(marker_json).collect::<Vec<_>>()}))
+    }
+
+    #[tool(
+        description = "Add a timeline marker at a time (one undo step). Markers never affect rendering; they are snap targets in the editor and targets for sync_cuts_to_beats. Returns the new marker id."
+    )]
+    async fn add_marker(
+        &self,
+        Parameters(p): Parameters<AddMarker>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::MarkerAddParams {
+            time: ms_to_ticks(p.time_ms)?,
+            duration: p.duration_ms.map(ms_to_ticks).transpose()?,
+            name: p.name.unwrap_or_default(),
+            color: parse_marker_color(p.color.as_deref())?,
+            note: p.note.unwrap_or_default(),
+        };
+        let added = self
+            .backend
+            .lock()
+            .await
+            .markers_add(params)
+            .map_err(mcp_error)?;
+        tool_text(json!({"id": added.id.0}))
+    }
+
+    #[tool(description = "Remove a timeline marker by id (one undo step).")]
+    async fn remove_marker(
+        &self,
+        Parameters(p): Parameters<RemoveMarker>,
+    ) -> Result<CallToolResult, McpError> {
+        self.backend
+            .lock()
+            .await
+            .markers_remove(animathio_core::MarkerId(p.id))
+            .map_err(mcp_error)?;
+        tool_text(json!({"removed": p.id}))
+    }
+
+    #[tool(
+        description = "Detect tempo and beats offline from the decoded audio (the whole mix, or one clip/track/range), deterministically and without editing. Returns bpm, a 0..1 confidence, beat times in ms and ticks, and downbeat indices. With add_markers=true it also adds a marker at each selected beat (every Nth, or downbeats only) as one undo step. Needs audio clips with a clear pulse; silence or very short audio is an error."
+    )]
+    async fn detect_beats(
+        &self,
+        Parameters(p): Parameters<DetectBeats>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut detect = detect_defaults(
+            p.clip,
+            p.track,
+            beat_range(p.from_ms, p.to_ms)?,
+            p.bpm,
+            p.beats_per_bar,
+        );
+        if let Some(v) = p.min_bpm {
+            detect.min_bpm = v;
+        }
+        if let Some(v) = p.max_bpm {
+            detect.max_bpm = v;
+        }
+        let mut backend = self.backend.lock().await;
+        let detection = backend.beats_detect(detect.clone()).map_err(mcp_error)?;
+        let mut out = json!({
+            "bpm": detection.bpm,
+            "confidence": detection.confidence,
+            "beats_ms": detection.beats.iter().map(|b| ticks_to_ms(b.time)).collect::<Vec<_>>(),
+            "beat_ticks": detection.beats.iter().map(|b| b.time.0).collect::<Vec<_>>(),
+            "downbeats": detection.downbeats,
+        });
+        if p.add_markers {
+            let options = animathio_control::BeatMarkerOptions {
+                selection: animathio_control::BeatSelection {
+                    every: p.every.unwrap_or(1),
+                    downbeats_only: p.downbeats_only,
+                },
+                color: p
+                    .color
+                    .as_deref()
+                    .map_or(Ok(animathio_core::MarkerColor::Cyan), |c| {
+                        parse_marker_color(Some(c))
+                    })?,
+                name_prefix: None,
+            };
+            let added = backend
+                .beats_add_markers(animathio_control::BeatMarkersParams { detect, options })
+                .map_err(mcp_error)?;
+            out["markers_added"] = json!(added.added);
+        }
+        tool_text(out)
+    }
+
+    #[tool(
+        description = "Sync edits to the beat or to markers, as one undo step. mode=snap moves the selected clips' cut points (clip edges) to the nearest beat/marker within max_shift_ms as roll edits (the neighbouring clip's edge moves too, source content stays in place, linked audio/video follows); mode=split cuts each clip into segments at the targets inside it. source is beats (analysed from the audio), markers or both. Cuts that would overlap, collapse a clip or touch a locked track are skipped and reported. Moving an edge later than a clip's source media extends it past its footage; keep max_shift_ms small for video."
+    )]
+    async fn sync_cuts_to_beats(
+        &self,
+        Parameters(p): Parameters<SyncCutsToBeats>,
+    ) -> Result<CallToolResult, McpError> {
+        let source = match p.source.as_deref().unwrap_or("beats") {
+            "beats" => animathio_control::SyncSource::Beats,
+            "markers" => animathio_control::SyncSource::Markers,
+            "both" => animathio_control::SyncSource::Both,
+            _ => return Err(invalid("source must be beats, markers or both")),
+        };
+        let mode = match p.mode.as_deref().unwrap_or("snap") {
+            "snap" => animathio_control::SyncMode::Snap,
+            "split" => animathio_control::SyncMode::Split,
+            _ => return Err(invalid("mode must be snap or split")),
+        };
+        let defaults = animathio_control::SyncCutsParams::default();
+        let params = animathio_control::SyncCutsParams {
+            clips: p.clips.into_iter().map(ClipId).collect(),
+            source,
+            mode,
+            max_shift: p.max_shift_ms.map_or(Ok(defaults.max_shift), ms_to_ticks)?,
+            min_segment: p
+                .min_segment_ms
+                .map_or(Ok(defaults.min_segment), ms_to_ticks)?,
+            frame_align: p.frame_align.unwrap_or(true),
+            selection: animathio_control::BeatSelection {
+                every: p.every.unwrap_or(1),
+                downbeats_only: p.downbeats_only,
+            },
+            detect: detect_defaults(
+                p.analyze_clip,
+                p.analyze_track,
+                None,
+                p.bpm,
+                p.beats_per_bar,
+            ),
+        };
+        let result = self
+            .backend
+            .lock()
+            .await
+            .sync_cuts_to_beats(params)
+            .map_err(mcp_error)?;
+        tool_text(json!({
+            "bpm": result.bpm,
+            "shifted": result.shifted.iter().map(|s| json!({
+                "track": s.track.0,
+                "left_clip": s.left.map(|c| c.0),
+                "right_clip": s.right.map(|c| c.0),
+                "from_ms": ticks_to_ms(s.from),
+                "to_ms": ticks_to_ms(s.to),
+            })).collect::<Vec<_>>(),
+            "splits_ms": result.splits.iter().map(|t| ticks_to_ms(*t)).collect::<Vec<_>>(),
+            "unchanged": result.unchanged,
+            "skipped": result.skipped,
+        }))
     }
 
     #[tool(

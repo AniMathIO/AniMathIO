@@ -360,6 +360,8 @@ pub struct Project {
     pub(crate) background: [u8; 4],
     /// Explicit project duration in ticks; `0` means derive from clips.
     pub(crate) duration: Time,
+    /// Timeline markers, sorted by `(time, id)`.
+    pub(crate) markers: Vec<crate::Marker>,
 }
 #[derive(Serialize, Deserialize)]
 struct ProjectData {
@@ -374,6 +376,8 @@ struct ProjectData {
     background: [u8; 4],
     #[serde(default)]
     duration: Time,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    markers: Vec<crate::Marker>,
 }
 impl From<Project> for ProjectData {
     fn from(p: Project) -> Self {
@@ -385,13 +389,14 @@ impl From<Project> for ProjectData {
             height: p.height,
             background: p.background,
             duration: p.duration,
+            markers: p.markers,
         }
     }
 }
 impl TryFrom<ProjectData> for Project {
     type Error = Error;
     fn try_from(p: ProjectData) -> Result<Self, Error> {
-        let project = Self {
+        let mut project = Self {
             frame_rate: p.frame_rate,
             tracks: p.tracks,
             assets: p.assets,
@@ -399,7 +404,9 @@ impl TryFrom<ProjectData> for Project {
             height: p.height,
             background: p.background,
             duration: p.duration,
+            markers: p.markers,
         };
+        project.markers.sort_by_key(|m| (m.time, m.id));
         project.validate()?;
         Ok(project)
     }
@@ -448,6 +455,27 @@ impl Project {
     pub const fn duration(&self) -> Time {
         self.duration
     }
+    /// Timeline markers, sorted by `(time, id)`.
+    #[must_use]
+    pub fn markers(&self) -> &[crate::Marker] {
+        &self.markers
+    }
+    /// The marker with this id.
+    #[must_use]
+    pub fn marker(&self, id: crate::MarkerId) -> Option<&crate::Marker> {
+        self.markers.iter().find(|m| m.id == id)
+    }
+    /// An unused marker id (one past the largest existing id).
+    #[must_use]
+    pub fn next_marker_id(&self) -> crate::MarkerId {
+        crate::MarkerId(
+            self.markers
+                .iter()
+                .map(|m| m.id.0)
+                .max()
+                .map_or(1, |m| m + 1),
+        )
+    }
     /// Check identities, references, finite values and nonoverlapping half-open ranges.
     pub fn validate(&self) -> Result<(), Error> {
         if self.width > 65_535 || self.height > 65_535 {
@@ -461,6 +489,23 @@ impl Project {
         }
         if self.duration.0 < 0 {
             return Err(invalid("negative project duration"));
+        }
+        if self.markers.len() > crate::MAX_MARKERS {
+            return Err(invalid("too many markers"));
+        }
+        let mut marker_ids = BTreeSet::new();
+        for marker in &self.markers {
+            marker.validate()?;
+            if !marker_ids.insert(marker.id) {
+                return Err(invalid("duplicate marker id"));
+            }
+        }
+        if self
+            .markers
+            .windows(2)
+            .any(|p| (p[0].time, p[0].id) > (p[1].time, p[1].id))
+        {
+            return Err(invalid("markers must be sorted by time"));
         }
         let mut track_ids = BTreeSet::new();
         let mut clip_ids = BTreeSet::new();
@@ -556,14 +601,6 @@ pub struct SceneClip {
     /// Transition state when this clip is inside a transition window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transition: Option<crate::SceneTransition>,
-}
-
-impl SceneClip {
-    /// Whether any effect in the chain will actually run (bypassed ones are skipped).
-    #[must_use]
-    pub fn has_active_effects(&self) -> bool {
-        self.effects.iter().any(|effect| !effect.bypass)
-    }
 }
 
 /// Resolve active clips at `time`, independently of previous calls or seek order.
