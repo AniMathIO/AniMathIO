@@ -66,8 +66,6 @@ jobs:
             artifact: macos
             subject: target/packages/*.dmg
     runs-on: ${{ matrix.os }}
-    # TODO: macOS dmg smoke test (mounted .app check) still fails; best effort until fixed.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     timeout-minutes: 150
     steps:
       - name: Checkout repository
@@ -184,31 +182,33 @@ jobs:
         run: |
           set -euo pipefail
 
-          # cargo-packager builds `AniMathIO.app` in the output directory and
-          # hands it to create-dmg, so both the bundle and the image are there.
-          app='target/packages/AniMathIO.app'
+          # cargo-packager removes the intermediate `AniMathIO.app` once the dmg
+          # is built, so test the bundle a user gets out of the image.
           dmg="$(find target/packages -maxdepth 1 -name '*.dmg' -print -quit)"
-          test -d "$app"
+          echo "dmg=$dmg"
           test -n "$dmg"
 
           check_bundle() {
             local bundle="$1"
+            echo "== checking $bundle"
+            ls -la "$bundle/Contents/MacOS"
             for exe in animathio animathio-cli; do
-              test -x "$bundle/Contents/MacOS/$exe"
+              test -x "$bundle/Contents/MacOS/$exe" || { echo "missing $exe" >&2; return 1; }
               "$bundle/Contents/MacOS/$exe" --version
             done
-            ls "$bundle/Contents/Resources/plugins"/*.amplugin >/dev/null
+            ls "$bundle/Contents/Resources/plugins"/*.amplugin
           }
 
-          check_bundle "$app"
-
-          # Repeat against what a user actually gets out of the image.
-          # `-acceptlicense` because the bundled license becomes a dmg EULA.
+          # The bundled LICENSE becomes a dmg EULA; answer its prompt with `yes`
+          # (process substitution, so yes's SIGPIPE doesn't trip pipefail).
           mountroot="$(mktemp -d)"
-          hdiutil attach "$dmg" -nobrowse -readonly -acceptlicense -mountroot "$mountroot" -quiet
+          hdiutil imageinfo "$dmg" | sed -n 1,20p || true
+          hdiutil attach "$dmg" -nobrowse -readonly -noverify -mountroot "$mountroot" < <(yes) > /dev/null || { echo "hdiutil attach failed with $?" >&2; exit 1; }
+          find "$mountroot" -maxdepth 2 -print
           trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
           mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
           test -n "$mounted_app"
+          plutil -p "$mounted_app/Contents/Info.plist"
           check_bundle "$mounted_app"
       - name: Attest build provenance
         # `id-token: write` is not granted to pull requests from forks.
