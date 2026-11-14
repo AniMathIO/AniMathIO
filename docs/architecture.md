@@ -201,7 +201,7 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `SetTrackLocked`, `RenameTrack`, `MoveTrack`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
-`SetEffectParam`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
+`SetEffectParam`, `SetEffectBypass`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
 `AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `Batch`, `SplitAt`,
 `RemoveRange`, `RippleDelete`, plus the link-group variants `SetClipLink` and `RestoreClips`
 and `Exact` (replays one inverse edit without link propagation).
@@ -350,7 +350,9 @@ DSP, and a port in `core` connects them.
   per track: sum of clips → track chain → track gain; then the sum of tracks. A clip's
   chain parameters may be keyframed (`Target::Effect`) and are sampled at the start of
   each block; track chains use their base parameters. Bypassed effects are skipped but keep
-  their parameters. A project without active chains takes the original per-frame path
+  their parameters; video effects bypass the same way (`Command::SetEffectBypass`, dropped by
+  `evaluate` and ignored by the renderer). The editor passes audio through an effect whose
+  plugin is missing or fails with a warning toast, while export fails strictly. A project without active chains takes the original per-frame path
   unchanged (bit-identical output).
 - **Port.** `core::AudioEffectProcessor` takes `(EffectInstance, AudioBlock, state)` and
   returns processed samples plus the next state blob. `plugin-host`'s `AudioEffectHandle`

@@ -48,7 +48,8 @@ de-esser). Clips and tracks carry ordered, undoable audio-effect chains that run
 mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
 Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools. Open a track header’s
 **Audio effects** context-menu entry to edit its chain with the same controls. Clip audio-effect
-parameters have keyframe controls, and parameter drags update playback live.
+parameters have keyframe controls, and parameter drags update playback live (throttled snapshots for the mix worker, never the
+device callback). Video effects in the inspector have a bypass switch like audio effects.
 
 Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
 the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters

@@ -558,6 +558,14 @@ pub struct SceneClip {
     pub transition: Option<crate::SceneTransition>,
 }
 
+impl SceneClip {
+    /// Whether any effect in the chain will actually run (bypassed ones are skipped).
+    #[must_use]
+    pub fn has_active_effects(&self) -> bool {
+        self.effects.iter().any(|effect| !effect.bypass)
+    }
+}
+
 /// Resolve active clips at `time`, independently of previous calls or seek order.
 /// Ranges are half-open; audio sources are included for the future mixer.
 /// Inside a transition window both the outgoing and the incoming clip are active and
