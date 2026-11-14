@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use animathio_core::{Clip, ClipId, Command, Project, Time, TimeRange, Track, TrackId};
 use serde::{Deserialize, Serialize};
 
-use crate::selection::{batch, existing};
+use crate::selection::{batch, existing, with_companions};
 
 /// Format tag so unrelated clipboard text is never mistaken for clips.
 const FORMAT: &str = "animathio.clips/1";
@@ -49,6 +49,13 @@ impl Clipboard {
             format: FORMAT.to_owned(),
             clips,
         })
+    }
+
+    /// Copy `ids` together with their linked companions, as the timeline edits
+    /// them (moving or deleting a linked clip takes its companions along), so
+    /// copying a video with linked audio pastes both, still linked.
+    pub(crate) fn copy_linked(project: &Project, ids: &BTreeSet<ClipId>) -> Option<Self> {
+        Self::copy(project, &with_companions(project, &existing(project, ids)))
     }
 
     /// Start of the earliest copied clip.
@@ -267,6 +274,32 @@ mod tests {
         assert!(pasted.iter().all(|id| group_of(&project, *id).is_none()));
         assert_eq!(group_of(&project, ClipId(1)), Some(ClipId(1)));
         assert_eq!(group_of(&project, ClipId(2)), Some(ClipId(1)));
+    }
+
+    #[test]
+    fn copying_a_linked_clip_brings_its_companion_along() {
+        let mut project = project_with(&[(1, &[(1, 0, 10)][..]), (2, &[(2, 0, 10)][..])]);
+        for id in [1, 2] {
+            Command::SetClipLink {
+                id: ClipId(id),
+                group: Some(ClipId(1)),
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let board = Clipboard::copy_linked(&project, &set(&[1])).unwrap();
+        assert_eq!(board.clips.len(), 2);
+        let (command, pasted) = board.paste(&project, Time(50), counter(&project)).unwrap();
+        command.apply(&mut project).unwrap();
+        let groups: BTreeSet<_> = project
+            .tracks()
+            .iter()
+            .flat_map(|track| track.clips().values())
+            .filter(|clip| pasted.contains(&clip.id))
+            .map(|clip| clip.link_group)
+            .collect();
+        assert_eq!(groups.len(), 1);
+        assert!(groups.into_iter().next().flatten().is_some());
     }
 
     #[test]
