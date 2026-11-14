@@ -556,8 +556,11 @@ interface importer {
 - `run-import` gets the source bytes (at most `max_import_source_bytes`) and a file-name
   hint. Files next to the source are reachable only through `read-sibling`, and only
   when the caller granted a directory (the editor, CLI and control API grant the
-  script's folder); paths are relative, `/`-separated, without `..`, and symlinks
-  resolving outside the directory are refused. Each call has file-size, total-byte and
+  script's folder); paths are relative, `/`-separated, without `..`. On Unix the host
+  opens each component with `openat(O_NOFOLLOW)` from the granted directory and reads
+  through that handle, so a symlink swapped in at any moment cannot escape. Every
+  symlink is refused, including ones that stay inside the directory. Elsewhere the host
+  canonicalizes and re-checks after opening (a weaker guard against races). Each call has file-size, total-byte and
   file-count budgets.
 - `commands` is a UTF-8 JSON document `{"version": 1, "commands": [...]}` of core
   `Command`s (`Project::rebuild_commands` produces one from a project). The host replays
