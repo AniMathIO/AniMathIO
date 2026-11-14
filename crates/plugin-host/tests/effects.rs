@@ -111,7 +111,7 @@ fn plugin_matches_the_builtin_reference_on_noise_and_a_full_ramp() {
 #[test]
 fn blur_matches_the_reference_within_one_level() {
     let mut handle = test_support::effect_processor();
-    for (radius, size) in [(0.05, (40, 30)), (0.2, (33, 21)), (3.0, (16, 16))] {
+    for (radius, size) in [(0.05, (40, 30)), (0.2, (33, 21)), (0.25, (16, 16))] {
         let source = noise(size.0 * size.1 * 4, 99);
         let mut actual = source.clone();
         handle
@@ -136,9 +136,7 @@ fn blur_matches_the_reference_within_one_level() {
 fn invalid_requests_fail_without_touching_the_frame() {
     let mut handle = test_support::effect_processor();
     let source = noise(4 * 4 * 4, 3);
-    let cases: [(EffectInstance, (u32, u32), &str); 5] = [
-        (instance("grayscale", "amount", 2.0), (4, 4), "[0, 1]"),
-        (instance("blur", "radius", -1.0), (4, 4), "nonnegative"),
+    let cases: [(EffectInstance, (u32, u32), &str); 3] = [
         (instance("vignette", "amount", 1.0), (4, 4), "no effect"),
         (
             EffectInstance::new(
@@ -163,6 +161,136 @@ fn invalid_requests_fail_without_touching_the_frame() {
         );
         assert_eq!(pixels, source, "a failed effect leaves the frame untouched");
     }
+}
+
+#[test]
+fn out_of_range_stored_params_are_clamped_not_failed() {
+    let mut handle = test_support::effect_processor();
+    let source = noise(4 * 4 * 4, 3);
+    for (effect, param, high, edge) in [
+        ("grayscale", "amount", 2.0, 1.0),
+        ("grayscale", "amount", -3.0, 0.0),
+        ("blur", "radius", -1.0, 0.0),
+        ("blur", "radius", 3.0, 0.25),
+    ] {
+        let mut actual = source.clone();
+        handle
+            .apply(&instance(effect, param, high), Time(0), (4, 4), &mut actual)
+            .unwrap_or_else(|e| panic!("{effect} {param}={high} must clamp, not fail: {e}"));
+        let mut expected = source.clone();
+        handle
+            .apply(
+                &instance(effect, param, edge),
+                Time(0),
+                (4, 4),
+                &mut expected,
+            )
+            .unwrap();
+        assert_eq!(
+            actual, expected,
+            "{effect} {param}={high} renders as {edge}"
+        );
+    }
+}
+
+#[test]
+fn effect_commands_are_validated_against_declared_ranges() {
+    use animathio_core::{
+        Clip, Command, Interpolation, Keyframe, Project, Target, TimeRange, Track, TrackId,
+    };
+    use animathio_plugin_host::validate_effect_command;
+    let host = test_support::host();
+    let descriptors = host.effects();
+    let mut project = Project::default();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "t"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut clip = Clip::new(
+        ClipId(1),
+        ClipKind::Error("x".into()),
+        TimeRange::new(Time(0), Time(100)).unwrap(),
+    );
+    clip.effects.push(instance("grayscale", "amount", 0.5));
+    Command::AddClip {
+        track: TrackId(1),
+        clip,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let check =
+        |command: &Command| validate_effect_command(&project, command, &|| descriptors.clone());
+    let set = |name: &str, value: f64| Command::SetEffectParam {
+        id: ClipId(1),
+        effect: EffectId(1),
+        name: name.into(),
+        value: Some(value),
+    };
+    assert!(check(&set("amount", 0.9)).is_ok());
+    assert!(check(&set("amount", 5.0)).unwrap_err().contains("outside"));
+    assert!(
+        check(&set("bogus", 0.5))
+            .unwrap_err()
+            .contains("no parameter")
+    );
+    // Removing a parameter and unrelated commands are never range checked.
+    assert!(
+        check(&Command::SetEffectParam {
+            id: ClipId(1),
+            effect: EffectId(1),
+            name: "amount".into(),
+            value: None,
+        })
+        .is_ok()
+    );
+    let add = |value: f64| Command::AddEffect {
+        id: ClipId(1),
+        index: 1,
+        effect: EffectInstance::new(
+            EffectId(2),
+            PLUGIN,
+            "sepia",
+            BTreeMap::from([("amount".to_owned(), value)]),
+        ),
+    };
+    assert!(check(&add(0.5)).is_ok());
+    assert!(check(&add(-1.0)).is_err());
+    // A batch is checked, including SetEffectParam on an effect added earlier in it.
+    let batch = Command::Batch {
+        commands: vec![
+            add(0.5),
+            Command::SetEffectParam {
+                id: ClipId(1),
+                effect: EffectId(2),
+                name: "amount".into(),
+                value: Some(9.0),
+            },
+        ],
+    };
+    assert!(check(&batch).is_err());
+    let keyframe = |value: f64| Command::AddKeyframe {
+        id: ClipId(1),
+        target: Target::Effect {
+            effect: EffectId(1),
+            param: "amount".into(),
+        },
+        time: Time(0),
+        keyframe: Keyframe {
+            value: value.into(),
+            interpolation: Interpolation::default(),
+        },
+    };
+    assert!(check(&keyframe(0.2)).is_ok());
+    assert!(check(&keyframe(5.0)).is_err());
+    // Undo/redo commands are exempt so history can never be blocked.
+    assert!(
+        check(&Command::Exact {
+            command: Box::new(set("amount", 5.0))
+        })
+        .is_ok()
+    );
 }
 
 fn limited_host(limits: SandboxLimits) -> PluginHost {

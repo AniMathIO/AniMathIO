@@ -48,10 +48,24 @@ impl Editor {
         self.try_execute(command, cx);
     }
 
+    /// Reject commands that store effect parameters outside the plugin's declared range.
+    pub(super) fn check_effect_params(&self, command: &Command) -> Result<(), String> {
+        if !animathio_plugin_host::mentions_effect_params(command) {
+            return Ok(());
+        }
+        match &self.plugin_host {
+            Some(host) => host.validate_effect_command(&self.project, command),
+            None => Ok(()),
+        }
+    }
+
     /// [`Editor::execute`], reporting whether the command was applied.
     pub(super) fn try_execute(&mut self, command: &Command, cx: &mut Context<Self>) -> bool {
         self.finish_color_edit(cx);
-        match self.history.execute(&mut self.project, command) {
+        let checked = self
+            .check_effect_params(command)
+            .map_err(animathio_core::Error);
+        match checked.and_then(|()| self.history.execute(&mut self.project, command)) {
             Ok(()) => {
                 self.after_edit(cx);
                 true
@@ -449,6 +463,8 @@ impl Editor {
                     .map(|c| c.id),
             );
         }
+        // Core splits a clip's linked companions with it, so split each group once.
+        let targets = selection::one_per_link_group(&self.project, &targets);
         let commands: Vec<Command> = targets
             .into_iter()
             .map(|id| Command::SplitClip {

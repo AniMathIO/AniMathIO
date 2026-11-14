@@ -108,6 +108,8 @@ animathio-cli render-seq sample.amio --from 30 --to 31 --width 1920 --height 108
 
 ## `export`
 
+> Export fails (non-zero exit, no output file) when a plugin clip in the range cannot be rendered: `clip N (plugin 'id') cannot be exported: ...`. Build the plugins first (`scripts/build-plugins.sh`) or set `ANIMATHIO_PLUGIN_DIR`; `render` and `render-seq` still draw placeholders and print `warning:` lines for plugins that did not load.
+
 Export an offline H.264 + AAC MP4. Export steps the preview renderer frame by
 frame and encodes with the FilmCraft backend; it is never a recording of
 playback. `--from`/`--to` accept the same exact decimal-second or `Nticks` forms

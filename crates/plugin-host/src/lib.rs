@@ -37,8 +37,10 @@ mod effect_world {
 }
 
 mod discovery;
+mod effect_params;
 mod effects;
 pub use discovery::{PluginDirectory, plugin_search_dirs};
+pub use effect_params::{mentions_effect_params, validate_effect_command};
 pub use effects::{EffectDescriptor, EffectHandle, EffectParam};
 
 use animathio::plugin::host::Host;
@@ -599,6 +601,8 @@ pub struct PluginHost {
     effects: Arc<effects::EffectRuntime>,
     /// Held only so its `Drop` stops and joins the epoch ticker thread.
     _epoch_ticker: Arc<EpochTicker>,
+    /// One message per plugin package that was found but could not be loaded.
+    load_failures: Vec<String>,
 }
 
 impl PluginHost {
@@ -652,6 +656,7 @@ impl PluginHost {
             cache_hits: AtomicUsize::new(0),
             cache_misses: AtomicUsize::new(0),
             _epoch_ticker: epoch_ticker,
+            load_failures: Vec::new(),
         })
     }
 
@@ -690,6 +695,36 @@ impl PluginHost {
         self.load_directory(dir.as_ref(), true)
     }
 
+    /// Packages that were found in a loaded directory but failed to load (bad
+    /// manifest, reserved id, compile error), one message each.
+    #[must_use]
+    pub fn load_failures(&self) -> &[String] {
+        &self.load_failures
+    }
+
+    /// Load every discovered plugin directory ([`plugin_search_dirs`]) and return one
+    /// message per problem: an `ANIMATHIO_PLUGIN_DIR` override that is not a
+    /// directory, an unreadable directory, or a package that failed to load. Optional
+    /// directories that simply do not exist are not problems. An empty list does not
+    /// mean any plugin was found; clips of a missing plugin fail at export.
+    pub fn load_discovered_plugins(&mut self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if let Some(path) = discovery::invalid_override_dir() {
+            problems.push(format!(
+                "ANIMATHIO_PLUGIN_DIR {} is not a directory",
+                path.display()
+            ));
+        }
+        for dir in plugin_search_dirs() {
+            let before = self.load_failures.len();
+            if let Err(error) = self.load_plugin_directory(&dir) {
+                problems.push(format!("plugins in {}: {error}", dir.path.display()));
+            }
+            problems.extend(self.load_failures[before..].iter().cloned());
+        }
+        problems
+    }
+
     /// Load a discovered directory, enforcing its reserved-id policy before
     /// compiling or instantiating any component.
     pub fn load_plugin_directory(
@@ -723,7 +758,11 @@ impl PluginHost {
             })();
             match result {
                 Ok(id) => ids.push(id),
-                Err(error) => log::warn!("plugin {} was not loaded: {error}", path.display()),
+                Err(error) => {
+                    log::warn!("plugin {} was not loaded: {error}", path.display());
+                    self.load_failures
+                        .push(format!("plugin {} was not loaded: {error}", path.display()));
+                }
             }
         }
         Ok(ids)
@@ -807,6 +846,16 @@ impl PluginHost {
     #[must_use]
     pub fn effects(&self) -> Vec<EffectDescriptor> {
         self.effects.descriptors()
+    }
+
+    /// Check the effect parameters `command` would store against the loaded plugins'
+    /// declared ranges (see [`validate_effect_command`]).
+    pub fn validate_effect_command(
+        &self,
+        project: &animathio_core::Project,
+        command: &animathio_core::Command,
+    ) -> Result<(), String> {
+        validate_effect_command(project, command, &|| self.effects())
     }
 
     /// A cheap handle that runs effect plugins for a renderer. It shares this host's

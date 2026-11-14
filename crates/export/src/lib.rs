@@ -15,6 +15,7 @@ use animathio_render::{Frame, RenderCtx, render};
 use serde::{Deserialize, Serialize};
 
 mod output;
+mod plugin_check;
 
 pub use output::AtomicOutput;
 
@@ -70,6 +71,16 @@ pub enum Error {
     /// Timeline arithmetic failed.
     #[error(transparent)]
     Model(#[from] animathio_core::Error),
+    /// A plugin clip in the export range is missing or failed to render.
+    #[error("clip {clip} (plugin '{plugin}') cannot be exported: {message}")]
+    Plugin {
+        /// Clip whose plugin could not run.
+        clip: u64,
+        /// Plugin id the clip refers to.
+        plugin: String,
+        /// Why it could not be resolved.
+        message: String,
+    },
 }
 
 /// Serializable output choices. Resolution comes from the project.
@@ -170,9 +181,12 @@ impl Exporter {
         time: Time,
         resolve: &mut impl FnMut(Scene) -> Scene,
     ) -> Result<Frame, Error> {
+        let scene = evaluate(project, time);
+        let pending = plugin_check::pending_plugins(&scene);
         let resolve_timer = animathio_core::timing::Timer::new("resolve-plugins");
-        let scene = resolve(evaluate(project, time));
+        let scene = resolve(scene);
         drop(resolve_timer);
+        plugin_check::check_resolved(&pending, &scene)?;
         Ok(render(&scene, &mut self.ctx, resolution(project))?)
     }
 
@@ -372,8 +386,8 @@ pub fn duration(project: &Project) -> Time {
     }
 }
 
-/// Convenience export with unresolved plugins displayed as in headless preview.
-/// Call `Exporter::export` with the editor's plugin resolver for installed plugins.
+/// Convenience export without a plugin resolver: it fails with [`Error::Plugin`] if the
+/// project has plugin clips in range. Call `Exporter::export` with a plugin resolver for those.
 pub fn export(
     project: &Project,
     assets: &BTreeMap<AssetId, Vec<u8>>,
@@ -389,7 +403,7 @@ pub fn export(
     Exporter::new(project, assets)?.export(project, range, settings, progress, |scene| scene)
 }
 
-/// Convenience atomic export with unresolved plugins displayed as in headless preview.
+/// Convenience atomic export without a plugin resolver (see [`export`]).
 /// The returned path is the destination, which is only created on success.
 pub fn export_to_file(
     project: &Project,
