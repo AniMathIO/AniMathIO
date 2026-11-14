@@ -16,26 +16,25 @@ provided by **host imports**.
 The contract is `crates/plugin-api/wit/plugin.wit`:
 
 ```wit
-package animathio:plugin@0.2.2;
+package animathio:plugin@1.0.0;
 
 interface types { /* shared vector + schema types, see below */ }
 
 interface host {
-    use types.{path, math-mode, typeset-result};
-    shape-text: func(text: string, font-size: f32) -> list<path>;
-    typeset-math: func(source: string, mode: math-mode, font-size: f32) -> typeset-result;
-    svg-to-paths: func(svg-xml: string) -> list<path>;
+    use types.{path, math-mode, typeset-result, diagnostic};
+    shape-text: func(text: string, font-size: f32) -> result<list<path>, diagnostic>;
+    typeset-math: func(source: string, mode: math-mode, font-size: f32) -> result<typeset-result, diagnostic>;
+    svg-to-paths: func(svg-xml: string) -> result<list<path>, diagnostic>;
+    limits: func() -> list<tuple<string, u64>>;
     log: func(message: string);
 }
 
-world plugin {
+world source-plugin {
     import host;
-    use types.{manifest, scene, param-map, size};
+    use types.{manifest, scene, param-map, size, diagnostic};
 
     export describe: func() -> manifest;
-    export render-clip: func(params: param-map, time-ticks: s64, size: size) -> scene;
-    export apply-effect: func(input: scene, params: param-map, time-ticks: s64, size: size) -> scene;
-    export evaluate-curve: func(time-ticks: s64, duration-ticks: s64, params: param-map) -> f64;
+    export render-clip: func(params: param-map, time-ticks: s64, size: size) -> result<scene, diagnostic>;
 }
 
 // Effect plugins implement this world instead (see "Effect plugins" below).
@@ -55,34 +54,96 @@ world audio-effect-plugin {
 }
 ```
 
-A clip-source or animation component implements the four exports of `world plugin`. The first three are selected by the
-plugin's declared `kinds` (`clip-source` uses `render-clip`, `effect` uses
-`apply-effect`, `animation` uses `evaluate-curve`), but the world requires all four
-— the unused ones can be stubs (return the input scene / `0.0`). `apply-effect`
-(vector-scene effects) is reserved and not called by the host; pixel effects use the
-separate `effect-plugin` world below.
+A clip-source component implements the two exports of `world source-plugin`.
+Effects implement their separate worlds; no unused stubs are required in 1.0.
+The legacy adapter retains the old source world's reserved vector-effect and
+curve hooks, without making them part of the frozen 1.0 contract.
 
-### API versions
+### API versions and compatibility policy
 
-The WIT package is `animathio:plugin@0.2.2`. `0.2.1` added the `frame-effects` interface
-and the `effect-plugin` world; `0.2.2` adds the `audio-effects` interface, the
-`audio-effect-plugin` world. The WIT `plugin-kind` enum is deliberately unchanged (a new
-case would fail the type check for `0.2.0` components); an audio-effect plugin reports
-`effect` from `describe` and declares `audio-effect` in `plugin.toml`, which the host
-treats as authoritative. Both bumps are purely additive over `0.2.0`, and the component model matches imports by
-semver-compatible version, so components built against `0.2.0` or `0.2.1` still link and
-run unchanged — the repository keeps a prebuilt `0.2.0` hello component as a test fixture.
-`plugin.toml` accepts any `0.2.x` `api_version`; effect plugins must declare `0.2.1` or
-later and audio-effect plugins `0.2.2` or later.
+The frozen contract is `animathio:plugin@1.0.0`. ABI semver is independent of the
+application's 2.0 version and each plugin's own version. The Rust SDK crate keeps
+its workspace version (2.0.0); `API_VERSION` identifies the component ABI. Its
+host-side kind and error enums are non-exhaustive so SDK callers handle future
+host classifications/errors with a fallback. Package `api_version` is
+an exact stable semantic version naming the **minimum host ABI required**, not a
+Cargo-style range. This host supports `1.0.0` and explicitly adapts legacy
+`0.2.0`, `0.2.1`, `0.2.2`. It rejects malformed versions, prereleases, build
+metadata, unknown majors and requirements newer than its implemented ABI before
+compiling the component. Merely changing `plugin.toml` cannot upgrade a component.
+The host checks the selected world's canonical types and versioned exports;
+for 1.x packages, known execution kinds, the plugin version and the parameter
+schema returned by `describe` must also agree with the package and be well formed;
+a mismatch fails loading before registry insertion. Legacy 0.2.x packages are not
+retroactively held to these `describe` checks, since they were accepted without
+them, only to the typed export checks.
+
+- A **patch** may fix implementation bugs or clarify documentation without changing
+  WIT layouts, required imports/exports, units or valid-input semantics.
+- A **minor** may add a separate interface/world or an optional advisory metadata
+  key. New hosts retain every old world and import namespace. New mandatory host
+  imports must live in a new world; a plugin using them raises its minimum ABI.
+  A minor cannot add fields (even optional fields) to an existing record, add cases
+  to an existing enum/variant/flags, change function signatures, or require old
+  plugins to export new functions. Optional WIT fields still change record layout.
+- A **major** is required for those structural or semantic breaks. It gets a new
+  WIT package version and an explicit adapter; no binary version rewriting.
+  A host introducing a new major must retain the previous major for at least one
+  full subsequent application minor release and announce removal one minor ahead.
+- Deprecated items retain their types and behavior for the entire 1.x line.
+  The 1.0 source world deliberately omits the old unused vector-effect and curve
+  hooks. Their signatures are checked only for legacy components. A future curve
+  execution interface must be a separate world with defined semantics.
+- Legacy 0.2.x support is guaranteed through **AniMathIO 2.1 inclusive**. Removal
+  can occur no earlier than 2.2, with release-note notice in 2.1 and a migration
+  guide. The immutable component fixtures are tested without rebuilding them. A frozen
+  1.0 hello fixture also guards this contract against future accidental breaks.
+
+WIT `plugin-kind` is now a **string**, with execution IDs `clip-source`,
+`effect`, `audio-effect`. The old `animation` package kind is accepted only for
+0.2.x; no animation execution world is implemented in 1.0. Adding a string value
+does not change canonical types.
+Unknown strings returned by `describe` are advisory classifications and grant no
+execution capability. Unknown execution kinds in `plugin.toml` are rejected with
+a diagnostic; the host cannot run worlds it does not implement. This avoids
+repeating the closed-enum failure found in #211. The 0.2 adapter maps that old
+world's `effect` report to `audio-effect` only for an audio-effect package.
+
+There is **no importer WIT world** in this release. The v1 and Manim importers are
+native crates behind the command/control API. Their Rust functions and JSON
+project serialization are not part of the frozen component ABI. A future importer
+world must define versioned command/project exchange and resource bounds before
+it can be offered as a new minor ABI feature. Raster generators and animation
+execution likewise need separate future worlds; the frozen source world returns
+vector scenes only.
+
+### Upgrading a 0.2 component
+
+Existing binaries can keep their original manifests and run through the adapter.
+To build a new 1.0 component:
+
+1. Generate against the current WIT. Source plugins select `world: "source-plugin"`
+   and remove the unused vector-effect/curve trait methods. Effect/audio world
+   names stay the same.
+2. Return `Result<Scene, Diagnostic>` from source rendering. Propagate fallible
+   host services with `?`. Frame/audio errors now use `Diagnostic` too; choose a
+   string code, a fallback message and empty metadata when no details are needed.
+3. Return string kind IDs from `describe`, including the real `audio-effect` kind,
+   and initialize its `metadata` field (an empty list is fine).
+4. Set package `api_version = "1.0.0"`; keep the plugin's own version consistent
+   between package and `describe`. Preserve existing parameter IDs, units and
+   enum values when retaining compatibility with saved projects.
+5. Rebuild for `wasm32-wasip2` and package the new binary with its matching manifest.
 
 ### Host imports
 
 | Import | Signature | Purpose |
 | --- | --- | --- |
-| `shape-text` | `(text, font_size) -> list<path>` | Text shaping via the host font engine; returns glyph outline paths. Keeps plugins small (no bundled fonts). |
-| `typeset-math` | `(source, mode, font_size) -> typeset-result` | Typeset LaTeX or Typst math via the host (Typst + MiTeX); returns outline paths plus a tight bbox. |
-| `svg-to-paths` | `(svg_xml) -> list<path>` | Parse an SVG XML string into vector paths. |
+| `shape-text` | `(text, font_size) -> result<list<path>, diagnostic>` | Text shaping via the host font engine; returns glyph outline paths. Keeps plugins small (no bundled fonts). |
+| `typeset-math` | `(source, mode, font_size) -> result<typeset-result, diagnostic>` | Typeset LaTeX or Typst math via the host (Typst + MiTeX); returns outline paths plus a tight bbox. |
+| `svg-to-paths` | `(svg_xml) -> result<list<path>, diagnostic>` | Parse an SVG XML string into vector paths. |
 | `log` | `(message)` | Host logging for diagnostics. |
+| `limits` | `() -> list<tuple<string, u64>>` | Configured sandbox policy and tick frequency; unique keys, unknown keys ignored. |
 
 `typeset-result` is `{ paths: list<path>, bbox: bbox }`; `math-mode` is `latex` or
 `typst`; `bbox` is `{ min-x, min-y, max-x, max-y }` (f32).
@@ -110,6 +171,37 @@ In generated Rust, `draw-command` variants are spelled
 `DrawCommand::FillPath((path, color))`, `DrawCommand::StrokePath((path, style))`
 and `DrawCommand::TextRun(element)`.
 
+### Units, purity and errors
+
+Time is signed integer flicks: **705,600,000 ticks per second**. Clip rendering and
+frame effects receive clip-local source time, including trims/rate changes; audio
+block time belongs to its chain, as specified below. `size` is the requested
+render canvas in integer pixels. Coordinates are finite, x right/y down.
+`canvas` scenes use pixel units; `normalized` scenes use the clip-local unit square
+scaled by canvas width/height and the clip transform. Stroke outlines use local
+units and follow that same possibly nonuniform transform. Coordinates outside
+0…1 are allowed. Normalized text size is a fraction of canvas height and its x/y
+are offsets from the centered text block. Host text/math services always use
+pixel font sizes and return pixel paths/bounds; normalize them explicitly if needed.
+
+All rendering, effects and audio processing must be pure in their arguments;
+opaque audio state is explicit. WASI clocks/randomness and retained guest memory
+must not influence output. Logs are diagnostics only. The error record is
+`diagnostic { code: string, message: string, metadata: list<tuple<string, string>> }`.
+Codes are open strings: `invalid-input`, `limit-exceeded`, `service-failed`,
+`plugin-error`. Unknown codes display the fallback message; message text is not a
+machine protocol. Metadata may include translation keys or extra context, and
+unknown keys are ignored. Traps remain host failures and discard the instance.
+
+ABI 1.0 clip rendering, frame/audio effects and host text/math/SVG services return
+an explicit `result` with that diagnostic. An empty successful scene/path list is
+valid. The 0.2 adapter preserves its old empty-result host services and direct
+scene return, translating string effect errors to `plugin-error`. The SVG service
+extracts double-quoted path `d` attributes (or raw SVG path data); it does not
+interpret transforms, styles, other primitives or external resources. Unsupported
+nonempty input fails explicitly in 1.0. Host math has a 4 KiB source limit, a
+positive font size up to 1,000 px and a 2 s service timeout.
+
 ## Param schema types
 
 `describe()` returns a `manifest` that declares the plugin's parameters. The host
@@ -121,7 +213,8 @@ record manifest {
     name: string,
     version: string,
     description: string,
-    kinds: list<plugin-kind>,      // clip-source, effect, animation
+    kinds: list<plugin-kind>,      // open string ids
+    metadata: list<tuple<string, string>>, // optional advisory entries
     params: list<param-spec>,
 }
 
@@ -157,6 +250,40 @@ fn get_number(params: &[ParamEntry], id: &str, default: f64) -> f64 {
 }
 ```
 
+### Schema validation and optional metadata
+
+Parameter IDs are stable, nonempty and unique within a schema. Numeric ranges
+are finite and inclusive with `min <= default <= max` and `step > 0`; step/range
+are UI hints, not a quantization of animation values. Enum options are unique,
+nonempty stable **values**, and the default must name one. Point defaults must be
+finite. Colors are straight-alpha sRGB RGBA8; asset strings identify project
+assets, not filesystem paths, and `media-type` is a MIME hint. Missing parameter
+entries use the plugin's declared default; input entries use unique IDs. Frame and
+audio effects currently support numeric parameters only. Numeric effect values
+outside the declared range are clamped; generators may choose their own validation.
+Changing an existing parameter ID, type, units or enum value is a plugin data
+migration concern, independent of the host ABI version.
+
+`manifest.metadata` is an optional-by-content list: supply `[]` when unused. Its
+record field is fixed in 1.0; new advisory keys can be added without positional
+record growth. Unique key conventions are `label-key`, `description-key`,
+`param.<id>.label-key`, `param.<id>.unit`, and
+`param.<id>.option.<value>.label-key`; effect metadata uses an
+`effect.<id>.` prefix before the parameter key. Units are descriptive (for example
+px, normalized, Hz, dB, ms), never implicit conversion instructions. Third-party
+keys should use a reverse-domain prefix. The host preserves metadata in the loaded
+description; the current inspector displays fallback labels and option values.
+A future localization UI can consume translation keys without an ABI change.
+In metadata keys, escape ID/option segments outside ASCII letters, digits,
+underscores and hyphens as uppercase percent-encoded UTF-8 bytes, including dots,
+so arbitrary enum values cannot create ambiguous key paths.
+
+The host bounds what `describe` returns after validating it: at most 8 kinds, 64
+metadata entries (keys up to 128 bytes, values up to 256), 32 parameters, 64 enum
+options per parameter and 256 bytes for names, labels, options and defaults;
+longer text is truncated at a UTF-8 boundary and extra entries are dropped. A
+plugin that needs more should split into several plugins.
+
 ### Keyframes
 
 Keyframes are **not** part of the WIT world — they live in the core model
@@ -186,7 +313,7 @@ let t = time_ticks as f64 / TICKS_PER_SECOND;
 The manifest stored at the archive root of an `.amplugin`:
 
 ```toml
-api_version = "0.2.0"          # any "0.2.x"; effect plugins need "0.2.1", audio-effect plugins "0.2.2"
+api_version = "1.0.0"          # minimum host ABI, not a version range
 id = "com.example.hello"       # reverse-domain; [a-zA-Z0-9._-]
 name = "Hello"
 version = "0.1.0"
@@ -206,11 +333,11 @@ the `effect-plugin` world and is built like any other plugin
 
 ```wit
 interface frame-effects {
-    use types.{size, param-map, param-spec};
+    use types.{size, param-map, param-spec, diagnostic};
     record effect-descriptor { id: string, name: string, description: string, params: list<param-spec> }
     list-effects: func() -> list<effect-descriptor>;
     apply-frame: func(effect: string, pixels: list<u8>, size: size,
-                      params: param-map, time-ticks: s64) -> result<list<u8>, string>;
+                      params: param-map, time-ticks: s64) -> result<list<u8>, diagnostic>;
 }
 ```
 
@@ -245,19 +372,19 @@ builtin implementation by `crates/plugin-host/tests/effects.rs` and by the rende
 ## Audio-effect plugins
 
 An audio-effect plugin is a filter library for sound. It declares
-`kinds = ["audio-effect"]` with `api_version = "0.2.2"` (or later), implements the
+`kinds = ["audio-effect"]` with `api_version = "1.0.0"`, implements the
 `audio-effect-plugin` world and is built like any other plugin
 (`wit_bindgen::generate!({ path: ..., world: "audio-effect-plugin" })`). Its exports:
 
 ```wit
 interface audio-effects {
-    use types.{param-map, param-spec};
+    use types.{param-map, param-spec, diagnostic};
     record audio-effect-descriptor { id: string, name: string, description: string, params: list<param-spec> }
     record audio-block { sample-rate: u32, channels: u16, start-ticks: s64, samples: list<f32> }
     record block-output { samples: list<f32>, state: option<list<u8>> }
     list-audio-effects: func() -> list<audio-effect-descriptor>;
     process-block: func(effect: string, block: audio-block, params: param-map,
-                        state: option<list<u8>>) -> result<block-output, string>;
+                        state: option<list<u8>>) -> result<block-output, diagnostic>;
 }
 ```
 
@@ -265,7 +392,7 @@ interface audio-effects {
   stable `id` (`[a-z0-9_-]`), name, description and `number` parameters (`min`/`max`/`step`
   are UI hints, `default` seeds new instances). The editor's Effects tab and the MCP
   `list_audio_effects` tool are generated from these descriptors.
-- `process-block` receives one block of interleaved `f32` PCM (`1..=32` channels, up to
+- `process-block` receives one block of interleaved `f32` PCM (finite, unclipped, `1..=32` channels, 1…768,000 Hz, up to
   `max_audio_block_frames` frames) and must return exactly as many samples. `start-ticks`
   is the time of the first frame in the chain's own timeline: clip-local ticks for a clip
   chain, project ticks for a track chain. Parameters arrive already evaluated
@@ -278,7 +405,10 @@ interface audio-effects {
   the next contiguous block (`none` for the first block of a signal). A well-behaved
   plugin is block-size independent: processing a signal in blocks of any size with the
   state carried over is bit-identical to one big block (first-party tests assert this).
-  The host caps the blob at `max_audio_state_bytes`.
+  The host caps the blob at `max_audio_state_bytes`. State formats are private to
+  the plugin and should carry their own version tag; the host never interprets
+  their contents. Empty state is equivalent to no state and is sent back as `none`. Channel order must be preserved (stereo is left/right); this
+  interface does not negotiate surround layouts or planar sample buffers.
 - The call must be a pure function of its arguments: preview and export both rely on
   identical output.
 
@@ -382,6 +512,20 @@ the effect is skipped: preview passes the audio through that effect unprocessed 
 a warning toast, while export fails with an error naming the effect
 (`audio effect <plugin>/<effect>: ...`) rather than writing unprocessed audio.
 
+Guests can call `host::limits()` to read configured policy. Keys match the
+`SandboxLimits` fields below with underscores replaced by hyphens; memory values
+are bytes, fuel is Wasmtime instruction fuel, and epoch deadlines are ticker
+counts, with `epoch-interval-ms = 10`. These are policy ceilings and budget
+formulas, not remaining resources. The query includes `ticks-per-second`,
+`max-audio-channels`, `max-audio-sample-rate`, and the import caps below as
+`max-shape-text-chars`, `max-shape-text-verbs`, `max-svg-input-bytes`,
+`max-svg-verbs`, `max-typeset-verbs`, `max-typeset-source-bytes`,
+`max-typeset-font-size-px`, `typeset-timeout-ms`, `max-log-message-bytes`,
+`max-log-entries`.
+Limits may be lower in a custom host. Unknown keys must be ignored; a missing
+optional key does not authorize unbounded work. Fuel, memory and time limits
+remain enforced even if the guest never queries them.
+
 Host imports are separately capped:
 
 | Import | Cap |
@@ -404,14 +548,14 @@ vars) default to none.
 
 A complete clip-source plugin — a filled circle with a keyframeable radius and a
 colour, plus one host log line. This example is built and verified (compiles for
-`wasm32-wasip2`, ~112 KB `.wasm`, packages as a valid `.amplugin`).
+`wasm32-wasip2`, ~108 KiB `.wasm`, packages as a valid `.amplugin`).
 
 **`plugins/examples/hello/Cargo.toml`**
 
 ```toml
 [package]
 name = "hello"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 publish = false
 
@@ -427,10 +571,10 @@ wit-bindgen = "0.40.0"
 **`plugins/examples/hello/plugin.toml`**
 
 ```toml
-api_version = "0.2.0"
+api_version = "1.0.0"
 id = "com.example.hello"
 name = "Hello"
-version = "0.1.0"
+version = "1.0.0"
 description = "Minimal example plugin: a filled circle"
 kinds = ["clip-source"]
 capabilities = []
@@ -440,11 +584,11 @@ capabilities = []
 
 ```rust
 //! Minimal `hello` example plugin: a filled circle with a keyframeable radius
-//! and colour, plus a host log line.
+//! and colour, plus a host log line. Use it as a starting point for new plugins.
 
 wit_bindgen::generate!({
     path: "../../../crates/plugin-api/wit",
-    world: "plugin",
+    world: "source-plugin",
 });
 
 use animathio::plugin::host;
@@ -453,14 +597,24 @@ use animathio::plugin::types::*;
 struct HelloPlugin;
 
 fn get_number(params: &[ParamEntry], id: &str, default: f64) -> f64 {
-    params.iter().find(|e| e.id == id)
-        .and_then(|e| match &e.value { ParamValue::Number(n) => Some(*n), _ => None })
+    params
+        .iter()
+        .find(|e| e.id == id)
+        .and_then(|e| match &e.value {
+            ParamValue::Number(n) => Some(*n),
+            _ => None,
+        })
         .unwrap_or(default)
 }
 
 fn get_color(params: &[ParamEntry], id: &str, default: Color) -> Color {
-    params.iter().find(|e| e.id == id)
-        .and_then(|e| match &e.value { ParamValue::Color(c) => Some(*c), _ => None })
+    params
+        .iter()
+        .find(|e| e.id == id)
+        .and_then(|e| match &e.value {
+            ParamValue::Color(c) => Some(*c),
+            _ => None,
+        })
         .unwrap_or(default)
 }
 
@@ -470,23 +624,47 @@ fn circle(cx: f32, cy: f32, r: f32) -> Vec<PathVerb> {
     vec![
         PathVerb::MoveTo(Point { x: cx + r, y: cy }),
         PathVerb::CubicTo((
-            Point { x: cx + r, y: cy + k },
-            Point { x: cx + k, y: cy + r },
+            Point {
+                x: cx + r,
+                y: cy + k,
+            },
+            Point {
+                x: cx + k,
+                y: cy + r,
+            },
             Point { x: cx, y: cy + r },
         )),
         PathVerb::CubicTo((
-            Point { x: cx - k, y: cy + r },
-            Point { x: cx - r, y: cy + k },
+            Point {
+                x: cx - k,
+                y: cy + r,
+            },
+            Point {
+                x: cx - r,
+                y: cy + k,
+            },
             Point { x: cx - r, y: cy },
         )),
         PathVerb::CubicTo((
-            Point { x: cx - r, y: cy - k },
-            Point { x: cx - k, y: cy - r },
+            Point {
+                x: cx - r,
+                y: cy - k,
+            },
+            Point {
+                x: cx - k,
+                y: cy - r,
+            },
             Point { x: cx, y: cy - r },
         )),
         PathVerb::CubicTo((
-            Point { x: cx + k, y: cy - r },
-            Point { x: cx + r, y: cy - k },
+            Point {
+                x: cx + k,
+                y: cy - r,
+            },
+            Point {
+                x: cx + r,
+                y: cy - k,
+            },
             Point { x: cx + r, y: cy },
         )),
         PathVerb::Close,
@@ -497,50 +675,73 @@ impl Guest for HelloPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "hello".to_string(),
-            version: "0.1.0".to_string(),
+            version: "1.0.0".to_string(),
             description: "Minimal example plugin: a filled circle".to_string(),
-            kinds: vec![PluginKind::ClipSource],
+            kinds: vec!["clip-source".into(), "com.example.circle".into()],
+            metadata: vec![
+                ("param.radius.unit".into(), "px".into()),
+                ("param.radius.label-key".into(), "hello.radius".into()),
+            ],
             params: vec![
                 ParamSpec {
                     id: "radius".to_string(),
                     label: "Radius".to_string(),
                     kind: ParamKind::Number(NumberRange {
-                        min: 1.0, max: 512.0, default: 96.0, step: 1.0,
+                        min: 1.0,
+                        max: 512.0,
+                        default: 96.0,
+                        step: 1.0,
                     }),
                 },
                 ParamSpec {
                     id: "color".to_string(),
                     label: "Color".to_string(),
                     kind: ParamKind::Color(ColorParam {
-                        default: Color { r: 90, g: 170, b: 255, a: 255 },
+                        default: Color {
+                            r: 90,
+                            g: 170,
+                            b: 255,
+                            a: 255,
+                        },
                     }),
                 },
             ],
         }
     }
 
-    fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
+    fn render_clip(
+        params: Vec<ParamEntry>,
+        _time_ticks: i64,
+        size: Size,
+    ) -> Result<Scene, Diagnostic> {
         let radius = get_number(&params, "radius", 96.0) as f32;
-        let color = get_color(&params, "color",
-            Color { r: 90, g: 170, b: 255, a: 255 });
-        host::log(&format!("hello: circle radius={radius} at {}x{}",
-            size.width, size.height));
+        let color = get_color(
+            &params,
+            "color",
+            Color {
+                r: 90,
+                g: 170,
+                b: 255,
+                a: 255,
+            },
+        );
+        let ticks_per_second = host::limits()
+            .into_iter()
+            .find(|(key, _)| key == "ticks-per-second")
+            .map(|(_, value)| value)
+            .unwrap_or(705_600_000);
+        host::log(&format!(
+            "hello: circle radius={radius} at {}x{} ({ticks_per_second} ticks/s)",
+            size.width, size.height
+        ));
 
-        Scene {
+        Ok(Scene {
             coordinate_space: CoordinateSpace::Canvas,
             elements: vec![DrawCommand::FillPath((
                 circle(size.width as f32 / 2.0, size.height as f32 / 2.0, radius),
                 color,
             ))],
-        }
-    }
-
-    fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {
-        input
-    }
-
-    fn evaluate_curve(_t: i64, _duration: i64, _params: Vec<ParamEntry>) -> f64 {
-        0.0
+        })
     }
 }
 
@@ -598,10 +799,7 @@ scale with it. Normalized shapes remain static unless their parameters are keyfr
 `[{"MoveTo":[0,0]},{"QuadTo":[[0.5,1],[1,0]]},"Close"]`.
 `CurveTo` carries three points (two controls and endpoint).
 
-The component ABI is now `animathio:plugin@0.2.2`: `0.2.0` (explicit scene units
-and text alignment) plus the additive `effect-plugin` (0.2.1) and `audio-effect-plugin`
-(0.2.2) worlds. Rebuild components against the current WIT and set `api_version` to
-`0.2.0`, `0.2.1` or `0.2.2` in `plugin.toml`; old 0.1
-packages are rejected.
+All first-party components and the example target ABI 1.0.0 and have plugin version
+1.0.0. The explicit 0.2.x adapter retains older binaries; 0.1 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.

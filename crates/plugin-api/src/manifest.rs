@@ -3,6 +3,7 @@ use thiserror::Error;
 
 /// Error validating or parsing a plugin manifest.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ManifestError {
     /// Required field is empty or missing.
     #[error("missing required field: {0}")]
@@ -24,16 +25,18 @@ pub enum ManifestError {
     ParseError(String),
 }
 
-/// Plugin kind declaration matching WIT plugin-kind.
+/// Host-supported execution kinds. The WIT uses open string ids; unknown wire
+/// kinds are advisory, but an unknown package execution kind is rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum PluginKind {
     /// Generates vector graphics scene.
     ClipSource,
     /// Pixel filter exported through the `effect-plugin` world (`frame-effects`).
     /// An effect plugin implements only that world, so it declares exactly this kind.
     Effect,
-    /// Evaluates a 1D value animation curve.
+    /// Legacy classification; no animation execution world is implemented in 1.0.
     Animation,
     /// Audio filter exported through the `audio-effect-plugin` world (`audio-effects`).
     /// Like `effect`, an audio-effect plugin declares exactly this kind.
@@ -43,8 +46,8 @@ pub enum PluginKind {
 /// Plugin manifest stored as `plugin.toml` inside `.amplugin` packages.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifestToml {
-    /// Plugin API version contract, e.g. "0.2.2". Any `0.2.x` is accepted;
-    /// `effect` plugins need `0.2.1` or newer and `audio-effect` plugins `0.2.2` or newer.
+    /// Minimum ABI version required by the component. Stable 1.0.0 and the
+    /// explicitly supported legacy releases 0.2.0, 0.2.1 and 0.2.2 are accepted.
     pub api_version: String,
     /// Reverse-domain plugin identifier, e.g. "org.animathio.shapes".
     pub id: String,
@@ -82,7 +85,12 @@ impl PluginManifestToml {
         if self.api_version.is_empty() {
             return Err(ManifestError::MissingField("api_version"));
         }
-        if !self.api_version.starts_with("0.2") {
+        let api = semver::Version::parse(&self.api_version)
+            .map_err(|_| ManifestError::UnsupportedApiVersion(self.api_version.clone()))?;
+        if !api.pre.is_empty()
+            || !api.build.is_empty()
+            || !matches!((api.major, api.minor, api.patch), (0, 2, 0..=2) | (1, 0, 0))
+        {
             return Err(ManifestError::UnsupportedApiVersion(
                 self.api_version.clone(),
             ));
@@ -103,8 +111,24 @@ impl PluginManifestToml {
         if self.version.is_empty() {
             return Err(ManifestError::MissingField("version"));
         }
+        if semver::Version::parse(&self.version).is_err() {
+            return Err(ManifestError::InvalidVersion(self.version.clone()));
+        }
+        if self
+            .kinds
+            .iter()
+            .enumerate()
+            .any(|(i, kind)| self.kinds[..i].contains(kind))
+        {
+            return Err(ManifestError::InvalidKinds("duplicate kind".into()));
+        }
         if self.kinds.is_empty() {
             return Err(ManifestError::MissingField("kinds"));
+        }
+        if api.major == 1 && self.kinds.contains(&PluginKind::Animation) {
+            return Err(ManifestError::InvalidKinds(
+                "animation execution has no 1.0 world; use native keyframes".into(),
+            ));
         }
         if self.kinds.contains(&PluginKind::Effect) {
             if self.kinds.len() != 1 {
@@ -132,5 +156,18 @@ impl PluginManifestToml {
             }
         }
         Ok(())
+    }
+}
+
+impl PluginKind {
+    /// Stable WIT string identifier for this execution kind.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ClipSource => "clip-source",
+            Self::Effect => "effect",
+            Self::Animation => "animation",
+            Self::AudioEffect => "audio-effect",
+        }
     }
 }

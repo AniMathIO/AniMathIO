@@ -22,7 +22,7 @@ use wasmtime_wasi::WasiCtxBuilder;
 
 use crate::animathio::plugin::types as wit_types;
 use crate::audio_world::exports::animathio::plugin::audio_effects as wit_audio;
-use crate::audio_world::{AudioEffectPlugin, AudioEffectPluginPre};
+use crate::compat::{Bindings as AudioEffectPlugin, Pre as AudioEffectPluginPre};
 use crate::effects::build_descriptor;
 use crate::{EffectDescriptor, EpochTicker, HostState, SandboxLimits, build_store};
 
@@ -34,9 +34,9 @@ const AUDIO_MEMORY_PER_SAMPLE: usize = 64;
 /// Most idle warm instances kept per plugin.
 const POOL_SIZE: usize = 8;
 /// Highest sample rate accepted by the mixer.
-const MAX_SAMPLE_RATE: u32 = 768_000;
+pub(crate) const MAX_SAMPLE_RATE: u32 = 768_000;
 /// Highest channel count accepted by the mixer.
-const MAX_CHANNELS: u16 = 32;
+pub(crate) const MAX_CHANNELS: u16 = 32;
 
 struct Pooled {
     store: Store<HostState>,
@@ -44,7 +44,7 @@ struct Pooled {
 }
 
 struct AudioPluginEntry {
-    pre: AudioEffectPluginPre<HostState>,
+    pre: AudioEffectPluginPre,
     effects: Vec<EffectDescriptor>,
     pool: Mutex<Vec<Pooled>>,
 }
@@ -81,23 +81,25 @@ impl AudioRuntime {
     /// Instantiate `component` once to `describe` it and list its filters, then register it.
     pub(crate) fn register(
         &self,
-        plugin_id: &str,
+        package: &animathio_plugin_api::PluginManifestToml,
         component: &Component,
         store: &mut Store<HostState>,
+        legacy: bool,
     ) -> Result<wit_types::Manifest, String> {
+        let plugin_id = package.id.as_str();
         let pre = AudioEffectPluginPre::new(
             self.linker
                 .instantiate_pre(component)
                 .map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
+            legacy,
+        );
         let instance = pre.instantiate(&mut *store).map_err(|e| e.to_string())?;
         let manifest = instance
-            .call_describe(&mut *store)
+            .describe(&mut *store, true)
             .map_err(|e| e.to_string())?;
+        crate::validate_manifest(package, &manifest).map_err(|e| e.to_string())?;
         let listed = instance
-            .animathio_plugin_audio_effects()
-            .call_list_audio_effects(&mut *store)
+            .list_audio_effects(&mut *store)
             .map_err(|e| e.to_string())?;
         if listed.len() > 64 {
             return Err("too many audio effects (maximum 64)".into());
@@ -164,8 +166,8 @@ impl AudioRuntime {
                 Vec::new(),
                 Arc::clone(&self.typeset),
                 self.limiter(samples),
-                self.fuel(samples),
-                self.limits.audio_epoch_deadline_ticks,
+                (self.fuel(samples), self.limits.audio_epoch_deadline_ticks),
+                self.limits,
             );
             let instance = entry
                 .pre
@@ -207,6 +209,9 @@ impl AudioRuntime {
                 self.limits.max_audio_block_frames
             ));
         }
+        if block.samples.iter().any(|sample| !sample.is_finite()) {
+            return Err("audio block contains non-finite samples".to_owned());
+        }
         if state.len() > self.limits.max_audio_state_bytes {
             return Err("audio effect state exceeds the size limit".to_owned());
         }
@@ -243,8 +248,7 @@ impl AudioRuntime {
         let label = format!("{}/{}", effect.plugin, effect.effect);
         let called = pooled
             .instance
-            .animathio_plugin_audio_effects()
-            .call_process_block(
+            .process_block(
                 &mut pooled.store,
                 &effect.effect,
                 &wit_block,
@@ -254,8 +258,9 @@ impl AudioRuntime {
             .map_err(|e| format!("audio effect {label} trapped: {e}"))?
             .map_err(|e| {
                 format!(
-                    "audio effect {label} failed: {}",
-                    crate::truncate_utf8(&e, 256)
+                    "audio effect {label} failed: {}: {}",
+                    crate::truncate_utf8(&e.code, 64),
+                    crate::truncate_utf8(&e.message, 256)
                 )
             })?;
         let samples = called.samples;

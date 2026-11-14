@@ -52,3 +52,11 @@ build_plugin latex
 build_plugin graph
 build_plugin effects-basic
 build_plugin audio-basic
+
+# Compile the documented SDK example too. It is not a shipped plugin bundle, so
+# packaging still contains exactly the six first-party plugins above.
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only "${cargo_command[@]}" build \
+    --manifest-path plugins/examples/hello/Cargo.toml \
+    --target wasm32-wasip2 \
+    --target-dir "$PWD/target" \
+    --release --locked

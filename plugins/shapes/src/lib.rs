@@ -2,7 +2,7 @@
 
 wit_bindgen::generate!({
     path: "../../crates/plugin-api/wit",
-    world: "plugin",
+    world: "source-plugin",
 });
 
 use animathio::plugin::types::*;
@@ -188,10 +188,11 @@ impl Guest for ShapesPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "shapes".to_string(),
-            version: "0.1.0".to_string(),
+            version: "1.0.0".to_string(),
             description: "Basic vector shapes: rect, ellipse, polygon, star, arrow, line"
                 .to_string(),
-            kinds: vec![PluginKind::ClipSource],
+            kinds: vec!["clip-source".into()],
+            metadata: vec![],
             params: vec![
                 ParamSpec {
                     id: "units".into(),
@@ -332,7 +333,11 @@ impl Guest for ShapesPlugin {
         }
     }
 
-    fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
+    fn render_clip(
+        params: Vec<ParamEntry>,
+        _time_ticks: i64,
+        size: Size,
+    ) -> Result<Scene, Diagnostic> {
         let _ = size;
         let normalized = get_string(&params, "units", "pixels") == "normalized";
 
@@ -397,22 +402,14 @@ impl Guest for ShapesPlugin {
         if stroke.a != 0 && stroke_width > 0.0 {
             elements.push(DrawCommand::StrokePath((path, style)));
         }
-        Scene {
+        Ok(Scene {
             coordinate_space: if normalized {
                 CoordinateSpace::Normalized
             } else {
                 CoordinateSpace::Canvas
             },
             elements,
-        }
-    }
-
-    fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {
-        input
-    }
-
-    fn evaluate_curve(_t: i64, _duration: i64, _params: Vec<ParamEntry>) -> f64 {
-        0.0
+        })
     }
 }
 

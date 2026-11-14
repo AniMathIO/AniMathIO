@@ -16,7 +16,7 @@ mod bindings {
 
     use crate::dsp;
     use animathio::plugin::types::{
-        NumberRange, ParamEntry, ParamKind, ParamSpec, ParamValue, PluginKind,
+        Diagnostic, NumberRange, ParamEntry, ParamKind, ParamSpec, ParamValue,
     };
     use exports::animathio::plugin::audio_effects::{
         AudioBlock, AudioEffectDescriptor, BlockOutput, Guest as AudioEffects,
@@ -28,11 +28,10 @@ mod bindings {
         fn describe() -> Manifest {
             Manifest {
                 name: "Basic Audio Effects".to_owned(),
-                version: "0.1.0".to_owned(),
+                version: "1.0.0".to_owned(),
                 description: "Gain, EQ, compressor, gate, high-pass and voice cleanup".to_owned(),
-                // The WIT enum has no audio case (adding one would break 0.2.0 components);
-                // the authoritative kind is `kinds = ["audio-effect"]` in plugin.toml.
-                kinds: vec![PluginKind::Effect],
+                kinds: vec!["audio-effect".into()],
+                metadata: vec![],
                 params: Vec::new(),
             }
         }
@@ -69,24 +68,31 @@ mod bindings {
             block: AudioBlock,
             params: Vec<ParamEntry>,
             state: Option<Vec<u8>>,
-        ) -> Result<BlockOutput, String> {
-            let params = params
-                .into_iter()
-                .map(|entry| match entry.value {
-                    ParamValue::Number(value) => Ok((entry.id, value)),
-                    _ => Err(format!("parameter {:?} must be a number", entry.id)),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut samples = block.samples;
-            let state = dsp::process(
-                &effect,
-                &params,
-                block.sample_rate,
-                usize::from(block.channels),
-                &mut samples,
-                state.as_deref(),
-            )?;
-            Ok(BlockOutput { samples, state })
+        ) -> Result<BlockOutput, Diagnostic> {
+            (|| -> Result<BlockOutput, String> {
+                let params = params
+                    .into_iter()
+                    .map(|entry| match entry.value {
+                        ParamValue::Number(value) => Ok((entry.id, value)),
+                        _ => Err(format!("parameter {:?} must be a number", entry.id)),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut samples = block.samples;
+                let state = dsp::process(
+                    &effect,
+                    &params,
+                    block.sample_rate,
+                    usize::from(block.channels),
+                    &mut samples,
+                    state.as_deref(),
+                )?;
+                Ok(BlockOutput { samples, state })
+            })()
+            .map_err(|message| Diagnostic {
+                code: "plugin-error".into(),
+                message,
+                metadata: vec![],
+            })
         }
     }
 

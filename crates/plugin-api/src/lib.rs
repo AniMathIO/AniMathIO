@@ -17,3 +17,6 @@ pub use schema::{
 
 /// Absolute path to the WIT definitions directory packaged with this crate.
 pub const WIT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/wit");
+
+/// Highest stable component ABI implemented by this release (not the crate version).
+pub const API_VERSION: &str = "1.0.0";

@@ -1,6 +1,6 @@
 # AniMathIO 2.0
 
-> **Pre-release, rewrite in progress.** This is the `v2` branch: a from-scratch **Rust** rewrite of AniMathIO, an editor for Manim-like math animation videos. Nothing here is stable yet — APIs, the file format and the CLI may change until 2.0 ships.
+> **Pre-release, rewrite in progress.** This is the `v2` branch: a from-scratch **Rust** rewrite of AniMathIO, an editor for Manim-like math animation videos. The plugin component ABI is frozen at 1.0.0; the file format and CLI may change until 2.0 ships.
 
 The full plan, architecture and roadmap live in **[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)**. Read it before proposing structure.
 
@@ -8,7 +8,7 @@ The full plan, architecture and roadmap live in **[issue #156](https://github.co
 
 ## What 2.0 is
 
-The core is a small, reliable video editor: media clips, a multi-track timeline, transforms and keyframes, audio, preview and export. Nothing math-specific lives in the core — **everything else is a plugin**: text, LaTeX, graphs, Manim import, effects and MCP, each a sandboxed WebAssembly component (wasmtime, Component Model, WIT).
+The core is a small, reliable video editor: media clips, a multi-track timeline, transforms and keyframes, audio, preview and export. Nothing math-specific lives in the core. Text, LaTeX, graphs, frame effects and audio effects are sandboxed WebAssembly components (wasmtime, Component Model, WIT). Importers and the MCP/control integration currently run as native crates and a sidecar; they have no frozen WIT world yet.
 
 The architectural rules from #156:
 
@@ -28,7 +28,7 @@ Editor and headless engine prototype. What works today:
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding, mixing, playback (cpal) | ✅ `audio` (prototype limits) |
-| Plugin system (wasmtime Component Model) | ✅ `plugin-api` + `plugin-host` + first-party plugins |
+| Plugin system (wasmtime Component Model) | ✅ ABI 1.0.0 frozen; first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
 | Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |

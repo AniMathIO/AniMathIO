@@ -224,3 +224,71 @@ fn rejects_the_incompatible_previous_component_abi() {
     };
     assert!(manifest.validate().is_err());
 }
+
+#[test]
+fn abi_negotiation_is_strict_and_rejects_future_requirements() {
+    let mut manifest = PluginManifestToml::parse(MINIMAL_MANIFEST).unwrap();
+    for api in ["0.2.0", "0.2.1", "0.2.2", "1.0.0"] {
+        manifest.api_version = api.into();
+        assert!(manifest.validate().is_ok(), "{api}");
+    }
+    for api in [
+        "0.20.0",
+        "0.2",
+        "0.2.garbage",
+        "0.2.3",
+        "0.3.0",
+        "1",
+        "1.0.1",
+        "1.1.0",
+        "2.0.0",
+        "1.0.0-rc.1",
+        "1.0.0+local",
+    ] {
+        manifest.api_version = api.into();
+        assert!(manifest.validate().is_err(), "{api}");
+    }
+    manifest.api_version = "1.0.0".into();
+    for kind in [
+        PluginKind::ClipSource,
+        PluginKind::Effect,
+        PluginKind::AudioEffect,
+    ] {
+        manifest.kinds = vec![kind];
+        assert!(manifest.validate().is_ok());
+    }
+    manifest.kinds = vec![PluginKind::ClipSource, PluginKind::ClipSource];
+    assert!(manifest.validate().is_err());
+    manifest.kinds = vec![PluginKind::ClipSource];
+    manifest.version = "garbage".into();
+    assert!(manifest.validate().is_err());
+}
+
+#[test]
+fn documented_example_is_verbatim_and_targets_the_frozen_abi() {
+    let docs = include_str!("../../../docs/plugins.md");
+    for (path, lang, contents) in [
+        (
+            "plugins/examples/hello/Cargo.toml",
+            "toml",
+            include_str!("../../../plugins/examples/hello/Cargo.toml"),
+        ),
+        (
+            "plugins/examples/hello/plugin.toml",
+            "toml",
+            include_str!("../../../plugins/examples/hello/plugin.toml"),
+        ),
+        (
+            "plugins/examples/hello/src/lib.rs",
+            "rust",
+            include_str!("../../../plugins/examples/hello/src/lib.rs"),
+        ),
+    ] {
+        let marker = format!("**`{path}`**\n\n```{lang}\n{}\n```", contents.trim_end());
+        assert!(docs.contains(&marker), "{path} must be copied verbatim");
+    }
+    assert!(
+        include_str!("../wit/plugin.wit")
+            .starts_with(&format!("package animathio:plugin@{API_VERSION};"))
+    );
+}

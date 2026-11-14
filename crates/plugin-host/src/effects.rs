@@ -17,7 +17,7 @@ use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::WasiCtxBuilder;
 
 use crate::animathio::plugin::types as wit_types;
-use crate::effect_world::EffectPluginPre;
+use crate::compat::Pre as EffectPluginPre;
 use crate::{EpochTicker, HostState, SandboxLimits, build_store};
 
 /// Interactive calls get a 200 ms backstop (the epoch ticker advances every 10 ms).
@@ -83,7 +83,7 @@ impl EffectDescriptor {
 }
 
 struct EffectPluginEntry {
-    pre: EffectPluginPre<HostState>,
+    pre: EffectPluginPre,
     effects: Vec<EffectDescriptor>,
 }
 
@@ -119,23 +119,25 @@ impl EffectRuntime {
     /// Instantiate `component` once to `describe` it and list its filters, then register it.
     pub(crate) fn register(
         &self,
-        plugin_id: &str,
+        package: &animathio_plugin_api::PluginManifestToml,
         component: &Component,
         store: &mut Store<HostState>,
+        legacy: bool,
     ) -> Result<wit_types::Manifest, String> {
+        let plugin_id = package.id.as_str();
         let pre = EffectPluginPre::new(
             self.linker
                 .instantiate_pre(component)
                 .map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
+            legacy,
+        );
         let instance = pre.instantiate(&mut *store).map_err(|e| e.to_string())?;
         let manifest = instance
-            .call_describe(&mut *store)
+            .describe(&mut *store, false)
             .map_err(|e| e.to_string())?;
+        crate::validate_manifest(package, &manifest).map_err(|e| e.to_string())?;
         let listed = instance
-            .animathio_plugin_frame_effects()
-            .call_list_effects(&mut *store)
+            .list_effects(&mut *store)
             .map_err(|e| e.to_string())?;
         if listed.len() > 64 {
             return Err("too many effects (maximum 64)".into());
@@ -188,8 +190,8 @@ impl EffectRuntime {
             Vec::new(),
             Arc::clone(&self.typeset),
             limiter,
-            fuel,
-            self.limits.effect_epoch_deadline_ticks,
+            (fuel, self.limits.effect_epoch_deadline_ticks),
+            self.limits,
         )
     }
 
@@ -267,8 +269,7 @@ impl EffectRuntime {
             .map_err(|e| format!("instantiating {:?}: {e}", effect.plugin))?;
         drop(setup);
         let output = instance
-            .animathio_plugin_frame_effects()
-            .call_apply_frame(
+            .apply_frame(
                 &mut store,
                 &effect.effect,
                 pixels,
@@ -279,10 +280,11 @@ impl EffectRuntime {
             .map_err(|e| format!("effect {}/{} trapped: {e}", effect.plugin, effect.effect))?
             .map_err(|e| {
                 format!(
-                    "effect {}/{} failed: {}",
+                    "effect {}/{} failed: {}: {}",
                     effect.plugin,
                     effect.effect,
-                    crate::truncate_utf8(&e, 256)
+                    crate::truncate_utf8(&e.code, 64),
+                    crate::truncate_utf8(&e.message, 256)
                 )
             })?;
         if output.len() != pixels.len() {
@@ -332,7 +334,7 @@ pub(crate) fn build_descriptor(
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
     };
-    if !valid_id(&id) {
+    if !valid_id(&id) || name.trim().is_empty() {
         return Err(format!(
             "invalid effect id {:?}",
             crate::truncate_utf8(&id, 256)
@@ -351,8 +353,10 @@ pub(crate) fn build_descriptor(
             .iter()
             .all(|v| v.is_finite());
         if !valid_id(&spec.id)
+            || spec.label.trim().is_empty()
             || !seen.insert(spec.id.clone())
             || !finite
+            || range.step <= 0.0
             || range.min > range.max
             || !(range.min..=range.max).contains(&range.default)
         {

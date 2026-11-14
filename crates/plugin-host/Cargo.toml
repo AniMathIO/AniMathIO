@@ -48,3 +48,7 @@ required-features = ["test-support"]
 [[test]]
 name = "audio_effects"
 required-features = ["test-support"]
+
+[[test]]
+name = "abi_conformance"
+required-features = ["test-support"]

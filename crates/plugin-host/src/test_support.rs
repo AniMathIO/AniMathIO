@@ -14,7 +14,14 @@ fn packages() -> &'static (tempfile::TempDir, Vec<PluginPackage>) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let target = root.join("target/plugin-tests");
         let mut packages = Vec::new();
-        for name in ["text", "shapes", "latex", "effects-basic", "audio-basic"] {
+        for name in [
+            "text",
+            "shapes",
+            "latex",
+            "effects-basic",
+            "audio-basic",
+            "examples/hello",
+        ] {
             let mut command = if cfg!(target_os = "linux") {
                 let mut command = Command::new("nice");
                 command.args(["-n", "19", "ionice", "-c3", "cargo"]);
@@ -46,11 +53,10 @@ fn packages() -> &'static (tempfile::TempDir, Vec<PluginPackage>) {
                     .unwrap(),
             )
             .unwrap();
-            let wasm = std::fs::read(
-                target
-                    .join("wasm32-wasip2/release")
-                    .join(format!("{}.wasm", name.replace('-', "_"))),
-            )
+            let wasm = std::fs::read(target.join("wasm32-wasip2/release").join(format!(
+                "{}.wasm",
+                name.rsplit('/').next().unwrap().replace('-', "_")
+            )))
             .unwrap();
             packages.push(PluginPackage::new(manifest, wasm).unwrap());
         }

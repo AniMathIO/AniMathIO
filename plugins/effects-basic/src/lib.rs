@@ -20,7 +20,7 @@ wit_bindgen::generate!({
 });
 
 use animathio::plugin::types::{
-    NumberRange, ParamEntry, ParamKind, ParamSpec, ParamValue, PluginKind, Size,
+    Diagnostic, NumberRange, ParamEntry, ParamKind, ParamSpec, ParamValue, Size,
 };
 use exports::animathio::plugin::frame_effects::{EffectDescriptor, Guest as FrameEffects};
 
@@ -30,9 +30,10 @@ impl Guest for BasicEffects {
     fn describe() -> Manifest {
         Manifest {
             name: "Basic Effects".to_owned(),
-            version: "0.1.0".to_owned(),
+            version: "1.0.0".to_owned(),
             description: "Color and blur filters".to_owned(),
-            kinds: vec![PluginKind::Effect],
+            kinds: vec!["effect".into()],
+            metadata: vec![],
             params: Vec::new(),
         }
     }
@@ -172,57 +173,64 @@ impl FrameEffects for BasicEffects {
         size: Size,
         params: Vec<ParamEntry>,
         _time_ticks: i64,
-    ) -> Result<Vec<u8>, String> {
-        let width = size.width as usize;
-        let height = size.height as usize;
-        if width == 0 || height == 0 || pixels.len() != width * height * 4 {
-            return Err("frame size does not match the pixel buffer".to_owned());
-        }
-        let spec = SPECS
-            .iter()
-            .find(|spec| spec.id == effect)
-            .ok_or_else(|| format!("unknown effect {effect:?}"))?;
-        let value = number(&params, spec.param).unwrap_or(spec.default);
-        if !value.is_finite() || value < 0.0 || (spec.unit && value > 1.0) {
-            return Err(if spec.unit {
-                format!("effect {} must be in [0, 1]", spec.param)
-            } else {
-                format!("effect {} must be nonnegative", spec.param)
-            });
-        }
-        match spec.id {
-            "grayscale" => color(&mut pixels, |r, g, b| {
-                let l = luminance(r, g, b);
-                (lerp(r, l, value), lerp(g, l, value), lerp(b, l, value))
-            }),
-            "sepia" => color(&mut pixels, |r, g, b| {
-                let sr = 0.393 * r + 0.769 * g + 0.189 * b;
-                let sg = 0.349 * r + 0.686 * g + 0.168 * b;
-                let sb = 0.272 * r + 0.534 * g + 0.131 * b;
-                (lerp(r, sr, value), lerp(g, sg, value), lerp(b, sb, value))
-            }),
-            "saturate" => color(&mut pixels, |r, g, b| {
-                let l = luminance(r, g, b);
-                (
-                    l + (r - l) * value,
-                    l + (g - l) * value,
-                    l + (b - l) * value,
-                )
-            }),
-            "brightness" => color(&mut pixels, |r, g, b| (r * value, g * value, b * value)),
-            "contrast" => color(&mut pixels, |r, g, b| {
-                (
-                    (r - 0.5) * value + 0.5,
-                    (g - 0.5) * value + 0.5,
-                    (b - 0.5) * value + 0.5,
-                )
-            }),
-            "invert" => invert(&mut pixels, value),
-            "opacity" => opacity(&mut pixels, value),
-            "blur" => blur(&mut pixels, width, height, value),
-            _ => unreachable!("SPECS and the match cover the same ids"),
-        }
-        Ok(pixels)
+    ) -> Result<Vec<u8>, Diagnostic> {
+        (|| -> Result<Vec<u8>, String> {
+            let width = size.width as usize;
+            let height = size.height as usize;
+            if width == 0 || height == 0 || pixels.len() != width * height * 4 {
+                return Err("frame size does not match the pixel buffer".to_owned());
+            }
+            let spec = SPECS
+                .iter()
+                .find(|spec| spec.id == effect)
+                .ok_or_else(|| format!("unknown effect {effect:?}"))?;
+            let value = number(&params, spec.param).unwrap_or(spec.default);
+            if !value.is_finite() || value < 0.0 || (spec.unit && value > 1.0) {
+                return Err(if spec.unit {
+                    format!("effect {} must be in [0, 1]", spec.param)
+                } else {
+                    format!("effect {} must be nonnegative", spec.param)
+                });
+            }
+            match spec.id {
+                "grayscale" => color(&mut pixels, |r, g, b| {
+                    let l = luminance(r, g, b);
+                    (lerp(r, l, value), lerp(g, l, value), lerp(b, l, value))
+                }),
+                "sepia" => color(&mut pixels, |r, g, b| {
+                    let sr = 0.393 * r + 0.769 * g + 0.189 * b;
+                    let sg = 0.349 * r + 0.686 * g + 0.168 * b;
+                    let sb = 0.272 * r + 0.534 * g + 0.131 * b;
+                    (lerp(r, sr, value), lerp(g, sg, value), lerp(b, sb, value))
+                }),
+                "saturate" => color(&mut pixels, |r, g, b| {
+                    let l = luminance(r, g, b);
+                    (
+                        l + (r - l) * value,
+                        l + (g - l) * value,
+                        l + (b - l) * value,
+                    )
+                }),
+                "brightness" => color(&mut pixels, |r, g, b| (r * value, g * value, b * value)),
+                "contrast" => color(&mut pixels, |r, g, b| {
+                    (
+                        (r - 0.5) * value + 0.5,
+                        (g - 0.5) * value + 0.5,
+                        (b - 0.5) * value + 0.5,
+                    )
+                }),
+                "invert" => invert(&mut pixels, value),
+                "opacity" => opacity(&mut pixels, value),
+                "blur" => blur(&mut pixels, width, height, value),
+                _ => unreachable!("SPECS and the match cover the same ids"),
+            }
+            Ok(pixels)
+        })()
+        .map_err(|message| Diagnostic {
+            code: "plugin-error".into(),
+            message,
+            metadata: vec![],
+        })
     }
 }
 
