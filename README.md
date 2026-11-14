@@ -4,7 +4,7 @@
 
 The full plan, architecture and roadmap live in **[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)**. Read it before proposing structure.
 
-**Looking for the current app?** AniMathIO 1.x lives on [`main`](https://github.com/AniMathIO/AniMathIO/tree/main), and releases are on the [releases page](https://github.com/AniMathIO/AniMathIO/releases).
+**Looking for the current app?** AniMathIO 1.x lives on [`main`](https://github.com/AniMathIO/AniMathIO/tree/main). The [releases page](https://github.com/AniMathIO/AniMathIO/releases) still carries the 1.x Electron installers; no 2.0 release exists yet, so 2.0 is built from source (see [Building](#building)) or from the installer artifacts of the `Package` workflow.
 
 ## What 2.0 is
 
@@ -31,6 +31,7 @@ Editor and headless engine prototype. What works today:
 | Plugin system (wasmtime Component Model) | ✅ ABI 1.0.0 frozen; first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
+| Auto-reframe to portrait/square (offline subject tracking) | ✅ editor, CLI and MCP |
 | Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
 | v1 and Manim importers | ✅ `import-v1`, `import-manim` |
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
@@ -47,11 +48,24 @@ de-esser). Clips and tracks carry ordered, undoable audio-effect chains that run
 mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
 Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools. Open a track header’s
 **Audio effects** context-menu entry to edit its chain with the same controls. Clip audio-effect
-parameters have keyframe controls, and parameter drags update playback live.
+parameters have keyframe controls, and parameter drags update playback live (throttled snapshots for the mix worker, never the
+device callback). Video effects in the inspector have a bypass switch like audio effects.
 
 Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
 the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
 and 256-byte display strings.
+
+## Auto-reframe
+
+**Clip, Auto reframe…** follows motion and visual contrast in selected video clips
+(or all videos when none are selected). Choose 9:16, 1:1 or 4:5 and tracking
+smoothness, then Reframe. Progress and Cancel run alongside the editor. No models
+or downloads are needed. The canvas changes in place; video position/scale keys
+are replaced in one undo step. Other layers retain their normalized transforms.
+CLI: `animathio-cli reframe landscape.amio -o vertical.amio --aspect 9:16`.
+MCP `auto_reframe` provides the same operation. See [limitations](docs/mcp.md#auto-reframe).
+
+![Auto-reframe settings and vertical video preview](docs/screenshots/editor-auto-reframe.png)
 
 ## Automatic subtitles
 
@@ -115,6 +129,24 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 - [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md) — what maps from 1.x and what doesn't
 - [`docs/design.md`](docs/design.md) — visual design tokens and UI rules
 - [`docs/release-checklist.md`](docs/release-checklist.md) — what is left before the 2.0 swap
+
+## Installing
+
+There is no published 2.0 release yet. Until `v2.0.0` is tagged, get an installer from the
+`Package` workflow (Actions tab, run on `v2`, artifacts `installers-linux`, `installers-windows`
+and `installers-macos`), or build from source below. Each installer ships both `animathio` and
+`animathio-cli` plus the first-party plugins:
+
+| Platform | Artifact | Notes |
+| --- | --- | --- |
+| Linux | `animathio_<version>_<arch>.AppImage` | the host provides the runtime libraries |
+| Linux (Debian/Ubuntu) | `animathio_<version>_amd64.deb` | declares its runtime libraries as dependencies |
+| Windows | `animathio_<version>_x64-setup.exe` | NSIS installer, unsigned (SmartScreen warns) |
+| macOS | `AniMathIO_<version>_<arch>.dmg` | unsigned and not notarized: right-click, Open |
+
+Verify with `animathio --version` and `animathio-cli --version`. Provenance of CI-built
+installers is attested with `actions/attest-build-provenance`
+(`gh attestation verify <file> --repo AniMathIO/AniMathIO`).
 
 ## Building
 
@@ -285,7 +317,7 @@ Video imports include a linked companion audio clip when the file contains audio
 
 ## Contributing
 
-Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See `AGENTS.md` for branch rules, automation and commands.
+Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and `AGENTS.md` for branch rules, automation and commands. Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
 
 ## License
 

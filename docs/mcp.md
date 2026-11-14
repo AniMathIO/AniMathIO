@@ -75,6 +75,7 @@ gets a JSON-RPC error instead of a result.
 | `beats.add_markers` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar?, every?, downbeats_only?, color?, name_prefix? } }` | `{ added, bpm, confidence }`; one batch adding a marker at each selected beat; beats that already carry a marker are skipped |
 | `timeline.sync_cuts_to_beats` | `{ params: { clips, source?, mode?, max_shift?, min_segment?, frame_align?, every?, downbeats_only?, detect? } }` | `{ shifted, splits, unchanged, skipped, bpm? }`; one batch, see [Markers and beat sync](#markers-and-beat-sync) |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
+| `video.reframe` | `{ params: { aspect?, smoothness?, clips? } }` | video clip count; one undo batch; editor replies after its cancellable worker completes |
 | `subtitles.generate` | `{ params: { model?, language?, clip?, track?, range?, download_model?, split?, style? } }` | `{ language, added?: { track_id, background_track_id?, first_clip, cues }, cues: [{ start, end, text }] }`; transcribes the project's audio (or one clip, track or `range`) locally with Whisper and adds caption clips on a new `Subtitles` track as one undo step. `model` is `tiny`, `base` (default) or `small`; a missing model is an error unless `download_model` is true. `style` is a caption style choice (see `subtitles.style`; default `classic`) and `background_track_id` is absent for styles without a bar. The editor answers when the job finishes (it can take minutes) |
 | `subtitles.export` | `{ params: { format?, output?, track?, overwrite? } }` | `{ format, track, cues, text?, path? }`; renders a subtitle track (default: the first track named `Subtitles` with text clips) as `srt` or `vtt`, returning the text or writing `output` (a `.vtt` extension selects WebVTT) |
 | `subtitles.style` | `{ params: { track?, style, font_size?, color?, accent?, outline?, position?, max_words? } }` | `{ style, captions }`; restyles the existing caption clips of `track` (default: every `Subtitles*` track with captions) as one undo step. `style` is `classic`, `word-highlight`, `karaoke`, `pop`, `one-word` or `bold-outline`; `font_size` is relative to the shorter canvas edge (0.01-0.2), `color`/`accent`/`outline` are RGBA byte arrays, `position` is `top`, `middle` or `bottom` (safe-area aware) and `max_words` is the words per line (0 fits the box). Classic keeps (or re-adds) the translucent bar clips, the other styles remove them |
@@ -153,6 +154,7 @@ clears its undo history.
 | `detect_beats` | Detect tempo and beats offline from the audio, without editing | optional `clip`, `track`, paired `from_ms` / `to_ms`, `min_bpm` (60), `max_bpm` (200), `bpm`, `beats_per_bar` (4); `add_markers` (false) also adds markers at the selected beats (`every`, `downbeats_only`, `color`) as one undo step. Returns `bpm`, `confidence`, `beats_ms`, `beat_ticks`, `downbeats` |
 | `sync_cuts_to_beats` | Snap the selected clips' cuts to beats/markers, or split them there, as one undo step | `clips` (ids), `source` (`beats`, `markers`, `both`), `mode` (`snap`, `split`), `max_shift_ms` (250), `min_segment_ms` (100, split only), `frame_align` (true), `every`, `downbeats_only`, `analyze_clip` / `analyze_track` / `bpm` / `beats_per_bar` for the beat analysis |
 | `trim_silence` | Remove pauses detected in the audio, ripple-closing the gaps, in one undo step | `threshold_db` (-40), `min_silence_ms` (400), `padding_ms` (100), optional audio `track` id |
+| `auto_reframe` | `aspect?`, `smoothness?`, `clips?` | Subject-following portrait/square video; changes canvas and position/scale animation as one undo step; returns `{clips}` |
 | `auto_subtitles` | Fully local automatic subtitles: transcribe the project's audio (or one `clip`/`track`, or `from_ms`..`to_ms`) with Whisper and add caption-bar clips on a new `Subtitles` track, one undo step | `model` (`tiny`/`base`/`small`, default `base`), `language` (ISO 639-1, omit to detect), `download_model` (false; set only with the user's consent: one-time 78-488 MB download, SHA-256 verified), `max_chars_per_line` (42), `max_lines` (2), `style` (`classic` default, `word-highlight`, `karaoke`, `pop`, `one-word`, `bold-outline`: animated CapCut-style captions driven by Whisper's per-word timings) with optional `font_size`, `color`, `accent`, `outline` (`#RRGGBB[AA]`), `position` (`top`/`middle`/`bottom`) and `max_words`. Returns the language, track ids and the cues in ms. Needs a build with the `whisper` feature; blocks until done |
 | `export_subtitles` | Return or write the subtitle track as SRT or WebVTT | `format` (`srt`/`vtt`), `track`, `path`, `overwrite` |
 | `import_subtitles` | Add an SRT or WebVTT file as caption clips on a new `Subtitles` track; words are spread evenly over each cue for the animated styles | `path`, `offset_ms`, `style` and the look options of `auto_subtitles` |
@@ -416,3 +418,33 @@ placeholder's box through the clip's `media_fit` parameter (`cover` crops, `cont
 letterboxes), honoured by both render backends. User templates live in the platform user
 data directory under `templates`, separate from the project schema; the editor's
 File > Save as template… writes them and the launcher lists them with a delete action.
+
+## Auto-reframe
+
+`auto_reframe` / `video.reframe` share offline deterministic motion, contrast and
+edge-energy tracking. `aspect` is `9:16` (default, 1080×1920), `1:1` (1080×1080) or
+`4:5` (1080×1350); `smoothness` is 0..=1 (default 0.5, higher follows more slowly).
+`clips` is a list of video ids, empty or omitted for all videos. Selected tracks
+must be unlocked and videos unrotated (including rotation animation).
+
+Analysis samples four frames per second and computes saliency at 96×54. A dead
+zone and rate-limited follow reduce jitter; frame-difference spikes reset tracking
+at scene cuts. Time-aware path simplification preserves both sides of detected
+cuts and limits each clip to 256 centre points (512 position keys plus two constant
+fill-scale keys). Analysis is
+bounded to 20000 decoded samples per call and rejects clips with more scene cuts
+than the key budget permits. Decode currently produces full-size frames before
+thumbnailing. Cancellation is checked between decodes. A project edit during the
+editor worker discards the draft. No project mutation occurs until completion.
+
+Application changes the current canvas, preserves source aspect while filling it,
+and replaces the targeted videos' position/scale curves; opacity, effects, timing,
+audio and other layers' normalized transforms remain. Undo restores the complete
+prior project in one step. Save explicitly after MCP use to retain changes.
+
+This is a visual-saliency heuristic, without face identity or semantic subject
+recognition. Multiple subjects, busy backgrounds, camera motion and short shots
+can need manual correction; scene cuts are located only at sampled times. Skin-tone
+priors, subject selection, rotated-video support and layout adaptation for titles
+are deferred. The editor menu provides aspect buttons, a smoothness slider,
+progress and cancellation; the CLI writes a separate archive by default.

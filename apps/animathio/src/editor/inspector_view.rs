@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::style::{color, hex};
+use gpui_component::switch::Switch;
 
 impl Editor {
     pub(super) fn toggle_keyframe(&mut self, id: ClipId, target: Target, cx: &mut Context<Self>) {
@@ -297,7 +298,7 @@ impl Editor {
 
     /// Read-only summary of the selected clip's effect chain. Effects whose plugin
     /// is not loaded, or that failed on the last preview frame, carry a warning.
-    pub(super) fn effect_rows(&self, id: ClipId, _cx: &mut Context<Self>) -> Vec<Div> {
+    pub(super) fn effect_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
         let Some(clip) = self.find_clip(id) else {
             return Vec::new();
         };
@@ -325,6 +326,8 @@ impl Editor {
                     } else {
                         None
                     };
+                let bypassed = instance.bypass;
+                let effect = instance.id;
                 let row = div().px_2().py_1().flex().flex_col().gap_1().child(
                     div()
                         .flex()
@@ -344,7 +347,32 @@ impl Editor {
                                 color::TEXT_SECONDARY
                             })),
                         )
-                        .child(div().flex_1().min_w_0().truncate().child(summary)),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(hex(if bypassed {
+                                    color::TEXT_MUTED
+                                } else {
+                                    color::TEXT
+                                }))
+                                .child(summary),
+                        )
+                        .child(
+                            Switch::new(SharedString::from(format!("c{}:fx{}-on", id.0, effect.0)))
+                                .checked(!bypassed)
+                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
+                                    this.execute(
+                                        &Command::SetEffectBypass {
+                                            id,
+                                            effect,
+                                            bypass: !*checked,
+                                        },
+                                        cx,
+                                    );
+                                })),
+                        ),
                 );
                 match warning {
                     Some(text) => row.child(

@@ -550,3 +550,53 @@ fn audio_effects_round_trip_through_json_and_old_files_still_load() {
     let text = serde_json::to_string(&command).unwrap();
     assert_eq!(serde_json::from_str::<Command>(&text).unwrap(), command);
 }
+
+#[test]
+fn video_effect_bypass_is_reversible_and_dropped_from_the_evaluated_scene() {
+    let mut project = project_with_clip();
+    let mut history = History::default();
+    history
+        .execute(
+            &mut project,
+            &Command::AddEffect {
+                id: ClipId(0),
+                index: 0,
+                effect: EffectInstance::basic(EffectId(1), "grayscale"),
+            },
+        )
+        .unwrap();
+    let evaluated = |project: &Project| evaluate(project, Time(10)).clips[0].effects.len();
+    assert_eq!(evaluated(&project), 1);
+
+    let bypass = |bypass| Command::SetEffectBypass {
+        id: ClipId(0),
+        effect: EffectId(1),
+        bypass,
+    };
+    history.execute(&mut project, &bypass(true)).unwrap();
+    assert!(clip(&project).effects[0].bypass);
+    // The effect stays in the chain with its parameters, but is not evaluated.
+    assert_eq!(clip(&project).effects[0].params["amount"], 1.0);
+    assert_eq!(evaluated(&project), 0);
+
+    history.undo(&mut project).unwrap();
+    assert!(!clip(&project).effects[0].bypass);
+    assert_eq!(evaluated(&project), 1);
+    history.redo(&mut project).unwrap();
+    assert!(clip(&project).effects[0].bypass);
+
+    // Serializable, and a missing effect is rejected without changing anything.
+    let json = serde_json::to_string(&bypass(true)).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Command>(&json).unwrap(),
+        bypass(true)
+    );
+    let before = project.clone();
+    let missing = Command::SetEffectBypass {
+        id: ClipId(0),
+        effect: EffectId(9),
+        bypass: true,
+    };
+    assert!(history.execute(&mut project, &missing).is_err());
+    assert_eq!(project, before);
+}
