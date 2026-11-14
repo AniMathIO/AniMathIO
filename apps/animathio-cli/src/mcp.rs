@@ -121,6 +121,34 @@ pub(crate) struct AddGraph {
     pub(crate) draw_duration_ms: Option<f64>,
 }
 
+/// An id written as a JSON string (`"3"`) or number (`3`); `describe_timeline`
+/// prints ids as numbers, so agents naturally pass them back that way.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LenientId {
+    Text(String),
+    Number(u64),
+}
+
+impl From<LenientId> for String {
+    fn from(id: LenientId) -> Self {
+        match id {
+            LenientId::Text(text) => text,
+            LenientId::Number(number) => number.to_string(),
+        }
+    }
+}
+
+fn lenient_id<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    LenientId::deserialize(deserializer).map(String::from)
+}
+
+fn lenient_opt_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<LenientId>::deserialize(deserializer).map(|id| id.map(String::from))
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddMedia {
     pub(crate) path: String,
@@ -128,6 +156,8 @@ pub(crate) struct AddMedia {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddAnimation {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) target_id: String,
     pub(crate) kind: String,
     pub(crate) duration_ms: f64,
@@ -136,6 +166,8 @@ pub(crate) struct AddAnimation {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct UpdateElement {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) placement: Option<Placement>,
     pub(crate) time_frame: Option<TimeFrame>,
@@ -163,10 +195,16 @@ pub(crate) struct TimeFrame {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddTransitionArgs {
     /// Track id; optional, narrows the `at_time_ms` search.
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) track: Option<String>,
     /// Outgoing clip id (its end is the cut).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) between_clip_a: Option<String>,
     /// Incoming clip id (its start is the cut).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) clip_b: Option<String>,
     /// Pick the edit point nearest to this time instead of naming clips.
     pub(crate) at_time_ms: Option<f64>,
@@ -180,6 +218,8 @@ pub(crate) struct AddTransitionArgs {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ElementId {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
 }
 
@@ -193,6 +233,8 @@ pub(crate) struct SetCanvas {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SetParam {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) value: f64,
@@ -201,6 +243,8 @@ pub(crate) struct SetParam {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddEffect {
     /// Clip id.
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     /// Plugin id from `list_effects`, e.g. `org.animathio.effects-basic`.
     pub(crate) plugin: String,
@@ -213,9 +257,13 @@ pub(crate) struct AddEffect {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddAudioEffect {
     /// Clip id whose own audio chain to extend (give exactly one of `id` and `track`).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) id: Option<String>,
     /// Track id whose audio chain to extend; the effect then processes the sum of the track's
     /// clips before the track gain.
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) track: Option<String>,
     /// Plugin id from `list_audio_effects`, e.g. `org.animathio.audio-basic`.
     pub(crate) plugin: String,
@@ -229,6 +277,8 @@ pub(crate) struct AddAudioEffect {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddKeyframe {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) target: String,
     pub(crate) time_ms: f64,
@@ -2210,5 +2260,29 @@ mod preset_tests {
             let parsed: ExportPresetParam = serde_json::from_value(json!(preset.name())).unwrap();
             assert_eq!(parsed.0, preset);
         }
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    #[test]
+    fn ids_accept_strings_and_numbers_and_stay_strings_in_the_schema() {
+        let numeric: AddTransitionArgs = serde_json::from_value(
+            json!({"between_clip_a": 3, "clip_b": "10", "duration_ms": 400.0}),
+        )
+        .unwrap();
+        assert_eq!(numeric.between_clip_a.as_deref(), Some("3"));
+        assert_eq!(numeric.clip_b.as_deref(), Some("10"));
+        assert_eq!(numeric.track, None);
+        let keyframe: AddKeyframe = serde_json::from_value(
+            json!({"id": 13, "target": "opacity", "time_ms": 0.0, "value": 1.0}),
+        )
+        .unwrap();
+        assert_eq!(keyframe.id, "13");
+        assert!(serde_json::from_value::<ElementId>(json!({"id": -1})).is_err());
+        let schema = serde_json::to_value(schemars::schema_for!(ElementId)).unwrap();
+        assert_eq!(schema["properties"]["id"]["type"], "string");
     }
 }
