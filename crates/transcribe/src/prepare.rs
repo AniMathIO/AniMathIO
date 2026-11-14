@@ -141,20 +141,30 @@ pub fn mix_selection(
 /// Decode a media file's first audio track to 16 kHz mono samples.
 pub fn mono_16k_from_bytes(bytes: Vec<u8>) -> Result<Vec<f32>, Error> {
     let source = SymphoniaSource::from_bytes(bytes).map_err(|e| audio_error(&e))?;
-    resample_pcm(source.pcm())
+    let (frames, rate) = (source.info().frames, source.info().rate);
+    resample_source(&source, frames, rate)
 }
 
 /// Resample decoded PCM to 16 kHz mono through the shared mixer path.
 pub fn resample_pcm(pcm: &Pcm) -> Result<Vec<f32>, Error> {
-    let frames = pcm.frames();
+    resample_source(pcm, pcm.frames() as u64, pcm.rate())
+}
+
+/// Resample a (possibly streaming) source of `frames` frames at `rate` Hz to 16 kHz mono.
+fn resample_source(
+    source: &impl animathio_audio::AudioSource,
+    frames: u64,
+    rate: u32,
+) -> Result<Vec<f32>, Error> {
     if frames == 0 {
         return Ok(Vec::new());
     }
     let id = AssetId::of(b"transcribe-input");
     let mut pool = AudioPool::default();
-    pool.insert(id.clone(), pcm).map_err(|e| audio_error(&e))?;
+    pool.insert(id.clone(), source)
+        .map_err(|e| audio_error(&e))?;
     let ticks = i64::try_from(
-        i128::from(animathio_core::TICKS_PER_SECOND) * frames as i128 / i128::from(pcm.rate()),
+        i128::from(animathio_core::TICKS_PER_SECOND) * i128::from(frames) / i128::from(rate),
     )
     .map_err(|_| Error::Audio("media too long".into()))?;
     let range =

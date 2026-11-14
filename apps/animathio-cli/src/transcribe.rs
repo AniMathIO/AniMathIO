@@ -2,8 +2,8 @@
 
 use super::{Result, load, parse_time};
 use animathio_control::{
-    ProgressFn, SubtitleGenerateParams, SubtitleProgress, SubtitleSplit, apply_cues,
-    transcribe_project,
+    CaptionPosition, CaptionStyleParams, ProgressFn, SubtitleGenerateParams, SubtitleProgress,
+    SubtitleSplit, apply_cues, transcribe_project,
 };
 use animathio_core::{History, Time, TimeRange};
 use animathio_format::save_amio;
@@ -58,9 +58,42 @@ pub(crate) struct TranscribeArgs {
     /// Most lines per subtitle.
     #[arg(long)]
     max_lines: Option<usize>,
+    /// Caption style for the clips added with `--output`: `classic` (default),
+    /// `word-highlight`, `karaoke`, `pop`, `one-word` or `bold-outline`.
+    #[arg(long, default_value = "classic")]
+    style: String,
+    /// Caption placement: `top`, `middle` or `bottom` (style default when omitted).
+    #[arg(long)]
+    position: Option<String>,
+    /// Accent colour of the active word, `#RRGGBB[AA]`.
+    #[arg(long)]
+    accent: Option<String>,
+    /// Words per line for the caption style (0 fits the box width).
+    #[arg(long)]
+    max_words: Option<u32>,
     /// Replace existing output files.
     #[arg(long)]
     overwrite: bool,
+}
+
+impl TranscribeArgs {
+    fn caption_style(&self) -> Result<CaptionStyleParams> {
+        Ok(CaptionStyleParams {
+            style: self.style.clone(),
+            position: self
+                .position
+                .as_deref()
+                .map(CaptionPosition::parse)
+                .transpose()?,
+            accent: self
+                .accent
+                .as_deref()
+                .map(animathio_control::parse_caption_color)
+                .transpose()?,
+            max_words: self.max_words,
+            ..CaptionStyleParams::default()
+        })
+    }
 }
 
 #[derive(Args)]
@@ -111,9 +144,26 @@ fn write_checked(path: &Path, text: &str, overwrite: bool) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn run(args: &TranscribeArgs) -> Result<()> {
     let cancel: Cancel = Arc::new(AtomicBool::new(false));
     let progress = progress_printer();
+    let style = args.caption_style()?;
+    if !animathio_control::caption_styles()
+        .iter()
+        .any(|s| s.id == style.style)
+    {
+        return Err(format!(
+            "unknown caption style `{}` (one of: {})",
+            style.style,
+            animathio_control::caption_styles()
+                .iter()
+                .map(|s| s.id)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into());
+    }
     let split = SubtitleSplit {
         max_chars_per_line: args.max_chars,
         max_lines: args.max_lines,
@@ -137,6 +187,7 @@ pub(crate) fn run(args: &TranscribeArgs) -> Result<()> {
             },
             download_model: args.download,
             split,
+            style,
         };
         let draft =
             transcribe_project(&bundle.project, &bundle.assets, &params, &cancel, &progress)?;
@@ -149,6 +200,7 @@ pub(crate) fn run(args: &TranscribeArgs) -> Result<()> {
                 &mut History::default(),
                 draft.language.clone(),
                 &draft.cues,
+                &params.style,
             )?;
             save_amio(output, &bundle.project, &bundle.assets)?;
             eprintln!("saved {}", output.display());

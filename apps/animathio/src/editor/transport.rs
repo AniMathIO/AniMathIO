@@ -14,6 +14,10 @@ impl Editor {
             self.shuttle = Shuttle::default();
             self.position = self.clock.now();
         } else {
+            if !self.loop_playback {
+                self.position =
+                    editing::play_start(self.position, animathio_export::duration(&self.project));
+            }
             self.shuttle = Shuttle(1, false);
             let _ = self.clock.set_rate(Speed::NORMAL);
             if let Err(error) = self.clock.seek(self.position) {

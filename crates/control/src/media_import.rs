@@ -7,6 +7,25 @@ use animathio_core::{
 use animathio_media::MediaBackend;
 use std::{path::Path, sync::Arc};
 
+/// Probe video and audio once. A video must probe (its audio companion depends on
+/// it); an audio file the prober cannot read keeps the default length.
+fn probe(
+    kind: &ClipKind,
+    name: &str,
+    bytes: &[u8],
+) -> Result<Option<animathio_media::MediaInfo>, ControlError> {
+    let probe = || {
+        animathio_media::FilmCraftBackend::new()
+            .probe_bytes(name, Arc::from(bytes))
+            .map_err(|e| ControlError::Other(e.to_string()))
+    };
+    Ok(match kind {
+        ClipKind::Video(_) => Some(probe()?),
+        ClipKind::Audio(_) => probe().ok(),
+        _ => None,
+    })
+}
+
 #[allow(clippy::type_complexity)]
 /// Prepare an import without mutating the project or retaining asset bytes.
 pub fn prepare_media_import(
@@ -43,31 +62,34 @@ pub fn prepare_media_import(
         .ok_or_else(|| ControlError::Other("id space exhausted".into()))?;
     let track_id = TrackId(base);
     let clip_id = ClipId(base + 1);
+    // Video and audio are probed once: the clip takes the media's own length.
+    let probed = probe(&kind, &info.name, &bytes)?;
+    let length = match &probed {
+        Some(media) if media.duration.0 > 0 => media.duration,
+        _ if project.duration().0 > 0 => project.duration(),
+        _ => Time(TICKS_PER_SECOND * 3),
+    };
     let mut clip = Clip::new(
         clip_id,
         kind,
-        TimeRange::new(
-            Time(0),
-            if project.duration().0 > 0 {
-                project.duration()
-            } else {
-                Time(TICKS_PER_SECOND * 3)
-            },
-        )
-        .map_err(|e| ControlError::Other(e.to_string()))?,
+        TimeRange::new(Time(0), length).map_err(|e| ControlError::Other(e.to_string()))?,
     );
     if matches!(clip.kind, ClipKind::Audio(_)) {
         clip.params.insert("gain".into(), 1.0.into());
         clip.params.insert("muted".into(), 0.0.into());
     }
-    let mut commands = vec![
-        Command::AddAsset {
+    let mut commands = Vec::new();
+    // Placing a file that is already in the project reuses its asset.
+    if !project.assets().contains_key(&info.id) {
+        commands.push(Command::AddAsset {
             id: info.id.clone(),
             asset: Asset {
                 name: info.name.clone(),
                 media_type: info.media_type.clone(),
             },
-        },
+        });
+    }
+    commands.extend([
         Command::AddTrack {
             track: Track::new(track_id, info.name.clone()),
             index: project.tracks().len(),
@@ -76,30 +98,29 @@ pub fn prepare_media_import(
             track: track_id,
             clip: clip.clone(),
         },
-    ];
-    if matches!(clip.kind, ClipKind::Video(_)) {
-        let info_media = animathio_media::FilmCraftBackend::new()
-            .probe_bytes(&info.name, Arc::from(bytes.as_slice()))
-            .map_err(|e| ControlError::Other(e.to_string()))?;
-        if !info_media.audio.is_empty() {
-            let audio_track = TrackId(base + 2);
-            let mut audio = Clip::new(ClipId(base + 3), ClipKind::Audio(info.id), clip.range);
-            audio.link_group = Some(clip_id);
-            audio.params.insert("gain".into(), 1.0.into());
-            audio.params.insert("muted".into(), 0.0.into());
-            commands.push(Command::SetClipLink {
+    ]);
+    if matches!(clip.kind, ClipKind::Video(_))
+        && probed.as_ref().is_some_and(|media| !media.audio.is_empty())
+    {
+        let audio_track = TrackId(base + 2);
+        let mut audio = Clip::new(ClipId(base + 3), ClipKind::Audio(info.id), clip.range);
+        audio.link_group = Some(clip_id);
+        audio.params.insert("gain".into(), 1.0.into());
+        audio.params.insert("muted".into(), 0.0.into());
+        commands.extend([
+            Command::SetClipLink {
                 id: clip_id,
                 group: Some(clip_id),
-            });
-            commands.push(Command::AddTrack {
+            },
+            Command::AddTrack {
                 track: Track::new(audio_track, "Audio"),
                 index: project.tracks().len() + 1,
-            });
-            commands.push(Command::AddClip {
+            },
+            Command::AddClip {
                 track: audio_track,
                 clip: audio,
-            });
-        }
+            },
+        ]);
     }
     Ok((
         asset_id,
@@ -130,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn placement_failure_preserves_existing_assets_and_history() {
+    fn placing_the_same_file_twice_reuses_its_asset() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("image.png");
         image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]))
@@ -140,13 +161,38 @@ mod tests {
         handler
             .handle(Call::MediaAdd { path: path.clone() })
             .unwrap();
-        let before = handler.project_get().unwrap();
+        let once = handler.project().clone();
         let assets = handler.assets().clone();
-        assert!(handler.handle(Call::MediaAdd { path }).is_err());
-        assert_eq!(before, handler.project_get().unwrap());
+        handler.handle(Call::MediaAdd { path }).unwrap();
+        assert_eq!(handler.project().assets().len(), 1);
+        assert_eq!(handler.project().tracks().len(), 2);
         assert_eq!(handler.assets(), &assets);
+        // Undoing the second placement keeps the first one and its asset.
         assert!(handler.history_undo().unwrap());
-        assert_eq!(handler.project().tracks(), []);
+        assert_eq!(handler.project(), &once);
+    }
+
+    #[test]
+    fn video_clip_takes_the_probed_media_length() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../media/tests/fixtures/sample.mp4");
+        let bytes = std::fs::read(&path).unwrap();
+        let expected = {
+            use animathio_media::MediaBackend;
+            animathio_media::FilmCraftBackend::new()
+                .probe_bytes("sample.mp4", bytes.into())
+                .unwrap()
+                .duration
+        };
+        let mut handler = HeadlessHandler::new();
+        handler.handle(Call::MediaAdd { path }).unwrap();
+        let clip = handler.project().tracks()[0]
+            .clips()
+            .values()
+            .next()
+            .unwrap()
+            .clone();
+        assert_eq!(clip.range.end, expected);
     }
 
     #[test]

@@ -7,7 +7,11 @@
 //! `caption` title preset (translucent bar plus text, fade in/out), one linked pair per
 //! cue, on two new tracks: `Subtitles` (text) above `Subtitles background` (bars).
 
-use crate::{ControlError, TitleAddParams, title_preset_command};
+use crate::{
+    CaptionStyleParams, ControlError, TitleAddParams,
+    captions::{resolve, style_new_bar_clip, style_new_text_clip, words_param},
+    title_preset_command,
+};
 use animathio_core::{
     AssetId, ClipId, ClipKind, Command, History, Project, TICKS_PER_SECOND, Time, TimeRange,
     TrackId,
@@ -99,6 +103,9 @@ pub struct SubtitleGenerateParams {
     /// Line-splitting overrides.
     #[serde(default)]
     pub split: SubtitleSplit,
+    /// Caption style for the new clips (default `classic`).
+    #[serde(default)]
+    pub style: CaptionStyleParams,
 }
 
 impl Default for SubtitleGenerateParams {
@@ -111,6 +118,7 @@ impl Default for SubtitleGenerateParams {
             range: None,
             download_model: false,
             split: SubtitleSplit::default(),
+            style: CaptionStyleParams::default(),
         }
     }
 }
@@ -120,8 +128,8 @@ impl Default for SubtitleGenerateParams {
 pub struct SubtitlesAdded {
     /// The `Subtitles` text track.
     pub track_id: TrackId,
-    /// The bar track behind it.
-    pub background_track_id: TrackId,
+    /// The bar track behind it; `None` for styles that draw no bar.
+    pub background_track_id: Option<TrackId>,
     /// First text clip.
     pub first_clip: ClipId,
     /// Number of cues created.
@@ -212,6 +220,8 @@ pub fn transcribe_project(
 ) -> Result<SubtitleDraft, ControlError> {
     let size = ModelSize::parse(&params.model)?;
     let split = params.split.options()?;
+    // Fail on a bad style before the slow work.
+    resolve(project, &params.style)?;
     // Mix first so "no audio" fails before a large download starts.
     let (samples, origin) = animathio_transcribe::mix_selection(
         project,
@@ -264,7 +274,7 @@ pub fn generate_subtitles(
     progress: &ProgressFn,
 ) -> Result<SubtitleResult, ControlError> {
     let draft = transcribe_project(project, assets, params, cancel, progress)?;
-    apply_cues(project, history, draft.language, &draft.cues)
+    apply_cues(project, history, draft.language, &draft.cues, &params.style)
 }
 
 /// Add already-known cues (from recognition or an imported file) as one undo step.
@@ -273,11 +283,12 @@ pub fn apply_cues(
     history: &mut History,
     language: String,
     cues: &[Cue],
+    style: &CaptionStyleParams,
 ) -> Result<SubtitleResult, ControlError> {
     let added = if cues.is_empty() {
         None
     } else {
-        let (command, added) = subtitle_command(project, cues)?;
+        let (command, added) = subtitle_command(project, cues, style)?;
         history.execute(project, &command)?;
         Some(added)
     };
@@ -295,8 +306,11 @@ pub fn apply_cues(
 pub fn subtitle_command(
     project: &Project,
     cues: &[Cue],
+    style: &CaptionStyleParams,
 ) -> Result<(Command, SubtitlesAdded), ControlError> {
     let invalid = |m: &str| ControlError::InvalidParams(m.to_owned());
+    let resolved = resolve(project, style)?;
+    let bars = resolved.info.bar;
     if cues.is_empty() {
         return Err(invalid("no subtitle cues"));
     }
@@ -347,16 +361,17 @@ pub fn subtitle_command(
     } else {
         format!("{text_name} background")
     };
-    let mut commands = vec![
-        Command::AddTrack {
+    let mut commands = Vec::new();
+    if bars {
+        commands.push(Command::AddTrack {
             track: animathio_core::Track::new(background_track, bar_name),
             index: project.tracks().len(),
-        },
-        Command::AddTrack {
-            track: animathio_core::Track::new(text_track, text_name),
-            index: project.tracks().len() + 1,
-        },
-    ];
+        });
+    }
+    commands.push(Command::AddTrack {
+        track: animathio_core::Track::new(text_track, text_name),
+        index: project.tracks().len() + usize::from(bars),
+    });
     let mut first_clip = None;
     for cue in cues {
         let range = TimeRange::new(cue.start, cue.end)
@@ -390,11 +405,17 @@ pub fn subtitle_command(
                     } else {
                         ClipId(take())
                     };
+                    if layer == 0 && !bars {
+                        continue;
+                    }
                     clip_ids.insert(clip.id, id);
                     clip.id = id;
                     clip.link_group = Some(group);
                     if layer == 1 {
                         first_clip.get_or_insert(id);
+                        style_new_text_clip(&mut clip, &resolved, words_param(cue));
+                    } else {
+                        style_new_bar_clip(&mut clip, &resolved);
                     }
                     commands.push(Command::AddClip {
                         track: if layer == 0 {
@@ -411,9 +432,13 @@ pub fn subtitle_command(
                     time,
                     keyframe,
                 } => {
-                    let id = *clip_ids
-                        .get(&ClipId(id.0))
-                        .ok_or_else(|| ControlError::Other("unexpected preset layout".into()))?;
+                    let Some(id) = clip_ids.get(&ClipId(id.0)).copied() else {
+                        // The bar of a style without bars was dropped.
+                        if bars {
+                            return Err(ControlError::Other("unexpected preset layout".into()));
+                        }
+                        continue;
+                    };
                     commands.push(Command::AddKeyframe {
                         id,
                         target,
@@ -429,7 +454,7 @@ pub fn subtitle_command(
         Command::Batch { commands },
         SubtitlesAdded {
             track_id: text_track,
-            background_track_id: background_track,
+            background_track_id: bars.then_some(background_track),
             first_clip: first_clip.ok_or_else(|| invalid("title preset has no text layer"))?,
             cues: cues.len(),
         },
@@ -444,6 +469,10 @@ pub struct SubtitleImportParams {
     /// Shift every cue by this many ticks (may be negative; cues ending before zero drop).
     #[serde(default)]
     pub offset: Time,
+    /// Caption style for the new clips (default `classic`). Imported cues have no word
+    /// timings, so the words are spread evenly over each cue.
+    #[serde(default)]
+    pub style: CaptionStyleParams,
 }
 
 /// Parse an SRT/`WebVTT` file and add its cues as one undo step.
@@ -473,7 +502,7 @@ pub fn import_subtitles(
             cue.end = Time(cue.start.0.saturating_add(TICKS_PER_SECOND / 1000));
         }
     }
-    apply_cues(project, history, String::new(), &cues)
+    apply_cues(project, history, String::new(), &cues, &params.style)
 }
 
 /// Arguments for `subtitles.export`.
@@ -540,11 +569,7 @@ pub fn track_cues(
         .clips()
         .values()
         .filter_map(|clip| {
-            clip_text(&clip.kind).map(|text| Cue {
-                start: clip.range.start,
-                end: clip.range.end,
-                text,
-            })
+            clip_text(&clip.kind).map(|text| Cue::new(clip.range.start, clip.range.end, text))
         })
         .collect();
     if cues.is_empty() {

@@ -40,6 +40,69 @@ pub struct Cue {
     pub end: Time,
     /// Display text; lines are separated by `\n`.
     pub text: String,
+    /// Per-word timings (absolute, one entry per whitespace-separated token of `text`).
+    /// Empty when the source had none (SRT/VTT imports); see [`Cue::timed_words`].
+    pub words: Vec<Word>,
+}
+
+impl Cue {
+    /// A cue without word timings.
+    #[must_use]
+    pub fn new(start: Time, end: Time, text: impl Into<String>) -> Self {
+        Self {
+            start,
+            end,
+            text: text.into(),
+            words: Vec::new(),
+        }
+    }
+
+    /// One timed word per whitespace-separated token of the text: the recognised timings
+    /// when they match the text, otherwise the words evenly spread (by character count)
+    /// over the cue interval. Timings are clamped inside the cue and monotonic.
+    #[must_use]
+    pub fn timed_words(&self) -> Vec<Word> {
+        let tokens: Vec<&str> = self.text.split_whitespace().collect();
+        let usable = self.words.len() == tokens.len()
+            && self
+                .words
+                .iter()
+                .zip(&tokens)
+                .all(|(w, t)| w.text.split_whitespace().collect::<String>() == *t);
+        if usable {
+            let mut floor = self.start.0;
+            return self
+                .words
+                .iter()
+                .map(|w| {
+                    let start = w.start.0.clamp(floor, self.end.0.max(floor));
+                    let end = w.end.0.clamp(start, self.end.0.max(start));
+                    floor = start;
+                    Word {
+                        text: w.text.clone(),
+                        start: Time(start),
+                        end: Time(end),
+                    }
+                })
+                .collect();
+        }
+        let total: usize = tokens.iter().map(|t| t.chars().count().max(1)).sum();
+        let span = (self.end.0 - self.start.0).max(0);
+        let mut done = 0usize;
+        tokens
+            .iter()
+            .map(|token| {
+                let from = self.start.0 + proportion(span, done, total);
+                done += token.chars().count().max(1);
+                let to = self.start.0 + proportion(span, done, total);
+                Word {
+                    text: (*token).to_owned(),
+                    start: Time(from),
+                    end: Time(to),
+                }
+            })
+            .collect()
+    }
 }
 
 /// Line-splitting and timing rules.
@@ -253,6 +316,7 @@ fn finish(group: &[Word], options: &SplitOptions) -> Option<Cue> {
         start: first.start,
         end: last.end.max(first.start),
         text: lines.join("\n"),
+        words: group.to_vec(),
     })
 }
 

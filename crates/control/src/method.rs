@@ -368,6 +368,40 @@ pub enum Call {
         /// Snapshot-bound proposal with per-cut toggles.
         proposal: crate::AutocutProposal,
     },
+    /// List the project's timeline markers.
+    #[serde(rename = "markers.list")]
+    MarkersList,
+    /// Add a timeline marker as one undo step.
+    #[serde(rename = "markers.add")]
+    MarkersAdd {
+        /// Time, name, colour, note and optional span.
+        params: crate::MarkerAddParams,
+    },
+    /// Remove a timeline marker as one undo step.
+    #[serde(rename = "markers.remove")]
+    MarkersRemove {
+        /// Marker identity.
+        id: animathio_core::MarkerId,
+    },
+    /// Analyse audio for tempo and beats without editing the project.
+    #[serde(rename = "beats.detect")]
+    BeatsDetect {
+        /// Audio selection and tempo range.
+        params: crate::BeatDetectParams,
+    },
+    /// Detect beats and add a marker at each (or every Nth, or each downbeat) as one undo step.
+    #[serde(rename = "beats.add_markers")]
+    BeatsAddMarkers {
+        /// Audio selection, beat subset and marker style.
+        params: crate::BeatMarkersParams,
+    },
+    /// Snap the selected clips' cut points to beats and/or markers, or split them there,
+    /// as one undo step.
+    #[serde(rename = "timeline.sync_cuts_to_beats")]
+    SyncCutsToBeats {
+        /// Clips, source, mode and tolerances.
+        params: crate::SyncCutsParams,
+    },
     /// Reframe video clips to a subject-following portrait or square canvas.
     #[serde(rename = "video.reframe")]
     AutoReframe {
@@ -386,6 +420,13 @@ pub enum Call {
     SubtitlesExport {
         /// Format, track and optional output path.
         params: crate::SubtitleExportParams,
+    },
+    /// Restyle the existing caption clips (style, colours, placement, words per line) as one
+    /// undo step.
+    #[serde(rename = "subtitles.style")]
+    SubtitlesStyle {
+        /// Style choice with optional overrides.
+        params: crate::SubtitleStyleParams,
     },
     /// Add the cues of an SRT or `WebVTT` file as caption clips, as one undo step.
     #[serde(rename = "subtitles.import")]

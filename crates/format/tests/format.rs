@@ -403,3 +403,38 @@ fn schema_two_migration_rejects_unknown_builtin_effects() {
     value["tracks"][0]["clips"]["1"]["effects"][0]["kind"] = json!("Vignette");
     assert!(read_json(serde_json::to_vec(&value).unwrap().as_slice()).is_err());
 }
+
+#[test]
+fn schema_four_projects_load_with_no_markers_and_markers_round_trip() {
+    let mut project = Project::default();
+    let mut old: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    assert!(old.get("markers").is_none(), "no markers, no key");
+    old["schemaVersion"] = json!(4);
+    let loaded = read_json(serde_json::to_vec(&old).unwrap().as_slice()).unwrap();
+    assert_eq!(loaded.markers(), []);
+    assert_eq!(loaded, project);
+
+    let mut marker = Marker::new(MarkerId(3), Time(705_600_000));
+    marker.name = "Drop".into();
+    marker.color = MarkerColor::Red;
+    marker.note = "chorus".into();
+    marker.duration = Some(Time(1_000));
+    Command::AddMarker {
+        marker: marker.clone(),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddMarker {
+        marker: Marker::new(MarkerId(1), Time(5)),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    assert_eq!(value["schemaVersion"], 5);
+    assert_eq!(value["markers"].as_array().unwrap().len(), 2);
+    assert_eq!(read_json(json_bytes(&project).as_slice()).unwrap(), project);
+    let mut cursor = write_amio(Cursor::new(Vec::new()), &project, &BTreeMap::new()).unwrap();
+    cursor.set_position(0);
+    let back = read_amio(cursor, Limits::default()).unwrap().project;
+    assert_eq!(back.marker(MarkerId(3)), Some(&marker));
+}

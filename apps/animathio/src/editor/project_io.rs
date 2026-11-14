@@ -4,12 +4,39 @@ use super::*;
 use animathio_media::MediaBackend;
 
 impl Editor {
-    pub(super) fn new_project(&mut self, cx: &mut Context<Self>) {
-        self.finish_color_edit(cx);
-        let _ = self.clock.pause();
+    /// Drop every piece of view state tied to the project that was just replaced:
+    /// pending gestures and drags, inline renames, inspector inputs (whose blur
+    /// would otherwise commit into the new project), the selection, autocut
+    /// review and cached waveforms. Bumps the session so background results
+    /// started on the old project are discarded.
+    pub(super) fn reset_project_session(&mut self) {
+        self.project_session = self.project_session.wrapping_add(1);
+        self.color_edit = None;
+        self.last_live_audio_sync = None;
         self.marks = InOut::default();
         self.shuttle = Shuttle::default();
         self.autocut_review = None;
+        self.marker_panel = None;
+        self.reframe_panel = None;
+        self.track_rename = None;
+        self.gesture = None;
+        self.keyframe_drag = None;
+        self.gain_drag = None;
+        self.context_menu = None;
+        self.pool_drag = None;
+        self.hovered_clip = None;
+        self.snap_line = None;
+        self.failed_effect_clips.clear();
+        self.end_gizmo();
+        self.fields = fields::FieldPool::default();
+        self.waveforms.borrow_mut().clear();
+        self.clear_selection();
+    }
+
+    pub(super) fn new_project(&mut self, cx: &mut Context<Self>) {
+        self.finish_color_edit(cx);
+        let _ = self.clock.pause();
+        self.reset_project_session();
         self.project = Project::new(self.project.frame_rate());
         Command::AddTrack {
             track: Track::new(TrackId(1), "Video 1"),
@@ -22,18 +49,36 @@ impl Editor {
         self.audio_generation = self.audio_generation.wrapping_add(1);
         self.pool = AudioPool::default();
         self.audio_ids.clear();
-        self.waveforms.borrow_mut().clear();
         self.clock = make_clock(&self.project, &self.pool);
         self.path = None;
         self.dirty = false;
-        self.clear_selection();
-        self.selected_field = None;
-        self.selected_keyframe = None;
         self.position = Time(0);
         self.playing = false;
         self.next_id = next_id(&self.project);
         self.worker.load(self.assets.clone());
         self.request_render(Time(0));
+        cx.notify();
+    }
+
+    /// A fresh project whose canvas is `preset`. The preset is part of the new
+    /// project, not an edit: it is not on the undo stack and leaves it clean.
+    pub(super) fn new_project_with_preset(
+        &mut self,
+        preset: animathio_control::ExportPreset,
+        cx: &mut Context<Self>,
+    ) {
+        self.new_project(cx);
+        match preset
+            .command(&self.project)
+            .map_err(|error| error.to_string())
+            .and_then(|command| command.apply(&mut self.project).map_err(|error| error.0))
+        {
+            Ok(_) => {
+                self.sync_audio(cx);
+                self.request_render(Time(0));
+            }
+            Err(error) => self.error = Some(error),
+        }
         cx.notify();
     }
 
@@ -111,13 +156,17 @@ impl Editor {
     }
 
     pub(super) fn open_path(&mut self, path: &Path, cx: &mut Context<Self>) {
+        self.try_open_path(path, cx);
+    }
+
+    /// [`Editor::open_path`], reporting whether the project was opened.
+    pub(super) fn try_open_path(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
         self.finish_color_edit(cx);
-        match read_project_with_recovery(path) {
+        let opened = match read_project_with_recovery(path) {
             Ok((project, assets, recovered)) => {
+                let _ = self.clock.pause();
                 self.audio_generation = self.audio_generation.wrapping_add(1);
-                self.marks = InOut::default();
-                self.shuttle = Shuttle::default();
-                self.autocut_review = None;
+                self.reset_project_session();
                 self.project = project;
                 self.history = History::default();
                 self.assets = Arc::new(assets.clone());
@@ -130,8 +179,6 @@ impl Editor {
                 }
                 self.audio_ids = audio_asset_ids(&self.project);
                 self.clock = make_clock(&self.project, &self.pool);
-                self.clear_selection();
-                self.selected_field = None;
                 self.position = Time(0);
                 self.playing = false;
                 self.next_id = next_id(&self.project);
@@ -142,10 +189,15 @@ impl Editor {
                     self.notices
                         .push(crate::style::Toast::info("Recovered from autosave"));
                 }
+                true
             }
-            Err(error) => self.error = Some(error),
-        }
+            Err(error) => {
+                self.error = Some(error);
+                false
+            }
+        };
         cx.notify();
+        opened
     }
 
     pub(super) fn import_media(&mut self, cx: &mut Context<Self>) {
@@ -237,8 +289,11 @@ impl Editor {
         }
         let (kind, duration) = if media_type.starts_with("audio/") {
             if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
-                let duration = frames_to_ticks(source.pcm().frames(), source.pcm().rate())
-                    .max(TICKS_PER_SECOND);
+                let duration = frames_to_ticks(
+                    usize::try_from(source.info().frames).unwrap_or(usize::MAX),
+                    source.info().rate,
+                )
+                .max(TICKS_PER_SECOND);
                 self.pool
                     .insert(id.clone(), &source)
                     .map_err(|e| e.to_string())?;

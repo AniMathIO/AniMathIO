@@ -216,16 +216,8 @@ proptest! {
 
 fn sample() -> Vec<Cue> {
     vec![
-        Cue {
-            start: t(0),
-            end: t(1500),
-            text: "Hello world".into(),
-        },
-        Cue {
-            start: t(61_005),
-            end: t(3_723_999),
-            text: "Second line\nthird line".into(),
-        },
+        Cue::new(t(0), t(1500), "Hello world"),
+        Cue::new(t(61_005), t(3_723_999), "Second line\nthird line"),
     ]
 }
 
@@ -294,7 +286,7 @@ proptest! {
         let cues: Vec<Cue> = raw
             .into_iter()
             .filter(|(_, _, text)| !text.trim().is_empty() && text.lines().all(|l| !l.trim().is_empty()))
-            .map(|(s, d, text)| Cue { start: t(s), end: t(s + d), text: text.trim().to_owned() })
+            .map(|(s, d, text)| Cue::new(t(s), t(s + d), text.trim()))
             .collect();
         for format in [Format::Srt, Format::Vtt] {
             prop_assert_eq!(parse_cues(&format_cues(&cues, format)).unwrap().len(), cues.len());

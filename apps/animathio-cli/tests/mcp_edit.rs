@@ -528,3 +528,86 @@ fn effects_come_from_loaded_plugins_and_render() {
     drop(session);
     let _ = child.wait();
 }
+
+#[test]
+fn marker_tools_add_list_remove_and_reject_bad_input() {
+    let dir = tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .args(["mcp", "--project"])
+        .arg(empty_project(dir.path()))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut session = Session {
+        stdout: BufReader::new(child.stdout.take().unwrap()),
+        stdin: child.stdin.take().unwrap(),
+        next: 0,
+    };
+    session.request(
+        "initialize",
+        json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"marker-test","version":"0.0.0"}}),
+    );
+    let tools = session.request("tools/list", json!({}));
+    let names: Vec<_> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_owned())
+        .collect();
+    for expected in [
+        "list_markers",
+        "add_marker",
+        "remove_marker",
+        "detect_beats",
+        "sync_cuts_to_beats",
+    ] {
+        assert!(names.iter().any(|name| name == expected), "{names:?}");
+    }
+
+    let first = session.json_tool(
+        "add_marker",
+        json!({"time_ms": 2000, "name": "Verse", "color": "green", "note": "start"}),
+    );
+    session.json_tool("add_marker", json!({"time_ms": 500, "duration_ms": 250}));
+    let listed = session.json_tool("list_markers", json!({}));
+    let markers = listed["markers"].as_array().unwrap();
+    assert_eq!(markers.len(), 2);
+    assert_eq!(markers[0]["time_ms"], 500.0, "sorted by time");
+    assert_eq!(markers[0]["duration_ms"], 250.0);
+    assert_eq!(markers[1]["name"], "Verse");
+    assert_eq!(markers[1]["color"], "green");
+
+    for (tool, arguments) in [
+        ("add_marker", json!({"time_ms": 1, "color": "magenta"})),
+        ("add_marker", json!({"time_ms": -5})),
+        ("remove_marker", json!({"id": 99})),
+        ("detect_beats", json!({})),
+        (
+            "sync_cuts_to_beats",
+            json!({"clips": [1], "source": "markers"}),
+        ),
+        (
+            "sync_cuts_to_beats",
+            json!({"clips": [1], "mode": "wobble"}),
+        ),
+    ] {
+        let response = session.request("tools/call", json!({"name": tool, "arguments": arguments}));
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "{tool} {response}"
+        );
+    }
+    session.json_tool("remove_marker", json!({"id": first["id"]}));
+    session.json_tool("undo", json!({}));
+    assert_eq!(
+        session.json_tool("list_markers", json!({}))["markers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    drop(session);
+    let _ = child.wait();
+}

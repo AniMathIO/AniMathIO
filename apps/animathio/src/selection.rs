@@ -62,6 +62,40 @@ pub(crate) fn one_per_link_group(project: &Project, ids: &[ClipId]) -> Vec<ClipI
         .collect()
 }
 
+/// `SplitClip` commands for `targets` at `at`, numbering the right halves from
+/// `first_id`. Core gives a linked companion's right half the id after its
+/// target's, so each target reserves one id per member of its link group; the
+/// returned id is the next free one.
+pub(crate) fn split_commands(
+    project: &Project,
+    targets: &[ClipId],
+    at: Time,
+    first_id: u64,
+) -> (Vec<Command>, u64) {
+    let mut next = first_id;
+    let commands = targets
+        .iter()
+        .map(|&id| {
+            let group = track_of(project, id)
+                .and_then(|track| track.clips().get(&id))
+                .and_then(|clip| clip.link_group);
+            let members = group.map_or(1, |group| {
+                project
+                    .tracks()
+                    .iter()
+                    .flat_map(|track| track.clips().values())
+                    .filter(|clip| clip.link_group == Some(group))
+                    .count()
+                    .max(1)
+            });
+            let right_id = ClipId(next);
+            next = next.saturating_add(members as u64);
+            Command::SplitClip { id, right_id, at }
+        })
+        .collect();
+    (commands, next)
+}
+
 /// Every clip of the project.
 pub(crate) fn all_clips(project: &Project) -> BTreeSet<ClipId> {
     project
@@ -372,6 +406,31 @@ pub(crate) mod tests {
             ],
         };
         assert!(both.apply(&mut project).is_err());
+    }
+
+    #[test]
+    fn splitting_a_linked_pair_and_another_clip_reserves_companion_ids() {
+        // Linked pair 1+2 and an unrelated clip 3, all under the playhead.
+        let mut project = project_with(&[
+            (1, &[(1, 0, 100)][..]),
+            (2, &[(2, 0, 100)][..]),
+            (3, &[(3, 0, 100)][..]),
+        ]);
+        link(&mut project, &[1, 2]);
+        let targets = one_per_link_group(&project, &[ClipId(1), ClipId(2), ClipId(3)]);
+        let (commands, next) = split_commands(&project, &targets, Time(50), 10);
+        assert_eq!(next, 13);
+        let mut history = History::default();
+        history
+            .execute(&mut project, &batch(commands).unwrap())
+            .unwrap();
+        for track in project.tracks() {
+            assert_eq!(track.clips().len(), 2, "{track:?}");
+        }
+        assert!(history.undo(&mut project).unwrap());
+        for track in project.tracks() {
+            assert_eq!(track.clips().len(), 1);
+        }
     }
 
     #[test]

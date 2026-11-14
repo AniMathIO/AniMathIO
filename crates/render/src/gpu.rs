@@ -213,12 +213,12 @@ impl GpuBackend {
                         image
                     }
                 };
-                self.draw_unit_image(t, image);
+                self.draw_unit_image(t, image, clip, size);
             }
             ClipKind::Video(id) => {
                 if let Some(frame) = video.frame_at(id, clip.source_time) {
                     let image = image_data(Arc::new(frame))?;
-                    self.draw_unit_image(t, image);
+                    self.draw_unit_image(t, image, clip, size);
                 } else {
                     let label =
                         format!("VIDEO {}\n{} ticks", &id.as_str()[..8], clip.source_time.0);
@@ -237,10 +237,32 @@ impl GpuBackend {
         Ok(())
     }
 
-    fn draw_unit_image(&mut self, t: Affine, image: ImageData) {
+    fn draw_unit_image(
+        &mut self,
+        transform: Affine,
+        image: ImageData,
+        clip: &SceneClip,
+        size: Size,
+    ) {
+        let (left, top, width, height) =
+            crate::cpu::media_fit_rect(clip, size, (image.width, image.height));
+        self.scene.push_layer(
+            Fill::NonZero,
+            Mix::Normal,
+            1.,
+            transform,
+            &Rect::new(0., 0., 1., 1.),
+        );
         let scale =
             Affine::scale_non_uniform(1.0 / f64::from(image.width), 1.0 / f64::from(image.height));
-        self.scene.draw_image(&ImageBrush::new(image), t * scale);
+        self.scene.draw_image(
+            &ImageBrush::new(image),
+            transform
+                * Affine::translate((left, top))
+                * Affine::scale_non_uniform(width, height)
+                * scale,
+        );
+        self.scene.pop_layer();
     }
 
     fn glyphs(&mut self, t: Affine, runs: &[ShapedRun], fill: VelloColor) {
