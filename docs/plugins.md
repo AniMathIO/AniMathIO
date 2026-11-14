@@ -278,6 +278,12 @@ In metadata keys, escape ID/option segments outside ASCII letters, digits,
 underscores and hyphens as uppercase percent-encoded UTF-8 bytes, including dots,
 so arbitrary enum values cannot create ambiguous key paths.
 
+The host bounds what `describe` returns after validating it: at most 8 kinds, 64
+metadata entries (keys up to 128 bytes, values up to 256), 32 parameters, 64 enum
+options per parameter and 256 bytes for names, labels, options and defaults;
+longer text is truncated at a UTF-8 boundary and extra entries are dropped. A
+plugin that needs more should split into several plugins.
+
 ### Keyframes
 
 Keyframes are **not** part of the WIT world — they live in the core model

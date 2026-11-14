@@ -1323,6 +1323,11 @@ fn bound_manifest(manifest: &mut wit_types::Manifest) {
     manifest.version = truncate_utf8(&manifest.version, 256);
     manifest.description = truncate_utf8(&manifest.description, 256);
     manifest.kinds.truncate(8);
+    manifest.metadata.truncate(64);
+    for (key, value) in &mut manifest.metadata {
+        *key = truncate_utf8(key, 128);
+        *value = truncate_utf8(value, 256);
+    }
     manifest.params.truncate(32);
     for param in &mut manifest.params {
         param.id = truncate_utf8(&param.id, 64);
@@ -1906,9 +1911,12 @@ mod tests {
             version: "v".repeat(300),
             description: "🙂".repeat(300),
             kinds: vec![],
+            metadata: vec![("k".repeat(300), "🙂".repeat(300)); 100],
             params: vec![param; 100],
         };
         bound_manifest(&mut manifest);
+        assert_eq!(manifest.metadata.len(), 64);
+        assert!(manifest.metadata[0].0.len() <= 128 && manifest.metadata[0].1.len() <= 256);
         assert_eq!(manifest.params.len(), 32);
         assert_eq!(manifest.name.len(), 256);
         assert_eq!(manifest.description.len(), 256);
