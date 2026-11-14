@@ -4,7 +4,10 @@
 
 use std::collections::BTreeSet;
 
-use animathio_core::{Clip, ClipId, Command, Project, Time, TimeRange, Track};
+use animathio_core::{
+    Clip, ClipId, Command, MarkerRipple, Project, Time, TimeRange, Track, TrackId,
+    ripple_marker_commands, ripple_marker_insert_commands,
+};
 
 use crate::editing;
 use crate::selection::{batch, existing, with_companions};
@@ -98,6 +101,7 @@ pub(crate) fn delete_command(
     project: &Project,
     ids: &BTreeSet<ClipId>,
     scope: RippleScope,
+    markers: MarkerRipple,
 ) -> Option<Command> {
     // Removing a linked clip removes its companions, so their tracks must ripple too.
     let removed = with_companions(project, &existing(project, ids));
@@ -117,6 +121,7 @@ pub(crate) fn delete_command(
         .iter()
         .map(|&id| Command::RemoveClip { id })
         .collect();
+    let mut affected: Vec<TrackId> = Vec::new();
     for track in project.tracks() {
         let gaps = match scope {
             RippleScope::ThisTrack => merge(spans(track)),
@@ -133,7 +138,17 @@ pub(crate) fn delete_command(
                 .map(|gap| gap.1 - gap.0)
                 .sum::<i64>()
         };
+        affected.push(track.id());
         commands.extend(slide_track(track, &removed, None, &pulled)?);
+    }
+    if let Some(first) = all_spans.first()
+        && markers.rides(project, Time(first.0), Some(&affected))
+    {
+        let gaps: Vec<TimeRange> = all_spans
+            .iter()
+            .filter_map(|g| TimeRange::new(Time(g.0), Time(g.1)).ok())
+            .collect();
+        commands.extend(ripple_marker_commands(project, &gaps));
     }
     batch(commands)
 }
@@ -141,6 +156,52 @@ pub(crate) fn delete_command(
 /// Trim one edge of a clip to `at`, rippling later clips by the length change. With
 /// [`RippleScope::AllTracks`] every unlocked track slides, not only the clip's own.
 pub(crate) fn trim_command(
+    project: &Project,
+    id: ClipId,
+    edge: TrimEdge,
+    at: Time,
+    scope: RippleScope,
+    markers: MarkerRipple,
+) -> Option<Command> {
+    let command = trim_tracks(project, id, edge, at, scope)?;
+    let clip = crate::selection::track_of(project, id)?.clips().get(&id)?;
+    let (old, new) = (
+        clip.range.end.0 - clip.range.start.0,
+        match edge {
+            TrimEdge::Left => clip.range.end.0 - at.0,
+            TrimEdge::Right => at.0 - clip.range.start.0,
+        },
+    );
+    let own = crate::selection::track_of(project, id)?.id();
+    let affected: Vec<TrackId> = match scope {
+        RippleScope::ThisTrack => vec![own],
+        RippleScope::AllTracks => project
+            .tracks()
+            .iter()
+            .filter(|t| !t.is_locked() || t.id() == own)
+            .map(Track::id)
+            .collect(),
+    };
+    let from = clip.range.end;
+    if new == old || !markers.rides(project, from, Some(&affected)) {
+        return Some(command);
+    }
+    let marker_commands = if new < old {
+        TimeRange::new(Time(from.0 - (old - new)), from)
+            .map(|gap| ripple_marker_commands(project, &[gap]))
+            .unwrap_or_default()
+    } else {
+        ripple_marker_insert_commands(project, from, new - old)
+    };
+    let mut commands = match command {
+        Command::Batch { commands } => commands,
+        other => vec![other],
+    };
+    commands.extend(marker_commands);
+    batch(commands)
+}
+
+fn trim_tracks(
     project: &Project,
     id: ClipId,
     edge: TrimEdge,
@@ -250,7 +311,13 @@ mod tests {
             (1, &[(1, 0, 10), (2, 10, 20), (3, 20, 30)][..]),
             (2, &[(4, 10, 20), (5, 25, 35)][..]),
         ]);
-        let command = delete_command(&project, &set(&[2]), RippleScope::ThisTrack).unwrap();
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
         let after = run(&mut project, &command);
         assert_eq!(
             starts(&after),
@@ -266,7 +333,13 @@ mod tests {
             (3, &[(5, 30, 40)][..]),
         ]);
         lock(&mut project, 3);
-        let command = delete_command(&project, &set(&[2]), RippleScope::AllTracks).unwrap();
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
         let after = run(&mut project, &command);
         assert_eq!(
             starts(&after),
@@ -281,7 +354,13 @@ mod tests {
         // close up to the straddler instead of overlapping it.
         let mut project =
             project_with(&[(1, &[(1, 10, 20)][..]), (2, &[(2, 5, 25), (3, 30, 40)][..])]);
-        let command = delete_command(&project, &set(&[1]), RippleScope::AllTracks).unwrap();
+        let command = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
         let after = run(&mut project, &command);
         assert_eq!(starts(&after), [(2, 5, 25), (3, 25, 35)]);
     }
@@ -292,11 +371,23 @@ mod tests {
             (1, &[(1, 0, 10), (2, 10, 20), (3, 20, 30), (4, 30, 40)][..]),
             (2, &[(5, 40, 50)][..]),
         ]);
-        let command = delete_command(&project, &set(&[2, 3]), RippleScope::AllTracks).unwrap();
+        let command = delete_command(
+            &project,
+            &set(&[2, 3]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
         let after = run(&mut project, &command);
         assert_eq!(starts(&after), [(1, 0, 10), (4, 10, 20), (5, 20, 30)]);
         // This-track mode with deletes on two tracks pulls each track independently.
-        let command = delete_command(&project, &set(&[1, 5]), RippleScope::ThisTrack).unwrap();
+        let command = delete_command(
+            &project,
+            &set(&[1, 5]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
         let after = run(&mut project, &command);
         assert_eq!(starts(&after), [(4, 0, 10)]);
     }
@@ -305,9 +396,23 @@ mod tests {
     fn deleting_on_a_locked_track_is_refused() {
         let mut project = project_with(&[(1, &[(1, 0, 10), (2, 10, 20)][..])]);
         lock(&mut project, 1);
-        let command = delete_command(&project, &set(&[1]), RippleScope::ThisTrack).unwrap();
+        let command = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
         assert!(History::default().execute(&mut project, &command).is_err());
-        assert!(delete_command(&project, &set(&[77]), RippleScope::ThisTrack).is_none());
+        assert!(
+            delete_command(
+                &project,
+                &set(&[77]),
+                RippleScope::ThisTrack,
+                MarkerRipple::Auto
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -325,6 +430,7 @@ mod tests {
             TrimEdge::Right,
             Time(6),
             RippleScope::AllTracks,
+            MarkerRipple::Auto,
         )
         .unwrap();
         let after = run(&mut project, &command);
@@ -340,6 +446,7 @@ mod tests {
             TrimEdge::Right,
             Time(14),
             RippleScope::AllTracks,
+            MarkerRipple::Auto,
         )
         .unwrap();
         let after = run(&mut project, &command);
@@ -352,6 +459,7 @@ mod tests {
             TrimEdge::Left,
             Time(4),
             RippleScope::AllTracks,
+            MarkerRipple::Auto,
         )
         .unwrap();
         let after = run(&mut project, &command);
@@ -366,6 +474,7 @@ mod tests {
             TrimEdge::Right,
             Time(6),
             RippleScope::ThisTrack,
+            MarkerRipple::Auto,
         )
         .unwrap();
         assert_eq!(
@@ -384,6 +493,7 @@ mod tests {
             TrimEdge::Right,
             Time(5),
             RippleScope::AllTracks,
+            MarkerRipple::Auto,
         )
         .unwrap();
         let after = run(&mut project, &command);
@@ -399,8 +509,126 @@ mod tests {
             (2, &[(2, 10, 20), (4, 20, 30)][..]),
         ]);
         crate::selection::tests::link(&mut project, &[1, 2]);
-        let command = delete_command(&project, &set(&[1]), RippleScope::AllTracks).unwrap();
+        let command = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
         let after = run(&mut project, &command);
         assert_eq!(starts(&after), [(3, 10, 20), (4, 10, 20)]);
+    }
+
+    fn marker_times(project: &Project) -> Vec<i64> {
+        project.markers().iter().map(|m| m.time.0).collect()
+    }
+    fn with_markers(project: &mut Project, times: &[i64]) {
+        for (i, t) in times.iter().enumerate() {
+            Command::AddMarker {
+                marker: animathio_core::Marker::new(
+                    animathio_core::MarkerId(i as u64 + 1),
+                    Time(*t),
+                ),
+            }
+            .apply(project)
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn markers_ride_a_ripple_delete_in_the_same_undo_step() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 10, 20), (3, 20, 30)][..])]);
+        let mut project = base.clone();
+        with_markers(&mut project, &[5, 12, 25]);
+        let before = project.clone();
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &command).unwrap();
+        // 12 was inside the removed clip: collapsed onto the cut. 25 slid by 10.
+        assert_eq!(marker_times(&project), [5, 10, 15]);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before, "one undo restores clips and markers");
+        // Opting out leaves markers alone.
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Stay,
+        )
+        .unwrap();
+        command.apply(&mut project).unwrap();
+        assert_eq!(marker_times(&project), [5, 12, 25]);
+    }
+
+    #[test]
+    fn this_track_ripple_keeps_markers_when_another_track_has_later_content() {
+        let mut project =
+            project_with(&[(1, &[(1, 0, 10), (2, 10, 20)][..]), (2, &[(3, 0, 40)][..])]);
+        with_markers(&mut project, &[25]);
+        let this = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        this.apply(&mut project.clone()).unwrap();
+        let mut a = project.clone();
+        this.apply(&mut a).unwrap();
+        assert_eq!(
+            marker_times(&a),
+            [25],
+            "track 2 is not rippled: markers stay"
+        );
+        let all = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut b = project;
+        all.apply(&mut b).unwrap();
+        assert_eq!(marker_times(&b), [15], "every track rippled: markers ride");
+    }
+
+    #[test]
+    fn markers_follow_ripple_trims() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 10, 20)][..])]);
+        let mut project = base;
+        with_markers(&mut project, &[4, 8, 15]);
+        let before = project.clone();
+        let shorten = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(6),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &shorten).unwrap();
+        assert_eq!(marker_times(&project), [4, 6, 11]);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before);
+        let lengthen = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(14),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        lengthen.apply(&mut project).unwrap();
+        assert_eq!(marker_times(&project), [4, 8, 19]);
     }
 }

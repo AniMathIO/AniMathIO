@@ -20,6 +20,12 @@ pub use beats::{
     apply_sync_cuts, markers_at_beats_command, select_beats, sync_cuts_command,
 };
 mod autocut;
+mod chapters;
+pub use chapters::{
+    Chapter, ChapterFormat, ChaptersExportParams, ChaptersExportResult, chapters, export_chapters,
+    format_chapters,
+};
+mod limits;
 pub use autocut::{
     Autocut, AutocutParams, AutocutProposal, AutocutReason, SilenceMetric, apply_autocuts,
     autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
@@ -32,6 +38,7 @@ pub use ducking::{
 };
 mod reframe;
 pub use reframe::{ReframeDraft, ReframeParams, analyse_reframe, auto_reframe, reframe_command};
+pub use limits::{SourceLimits, SourceSnapshot};
 mod client;
 mod edit;
 mod effects;

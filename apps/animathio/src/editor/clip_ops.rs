@@ -38,6 +38,9 @@ impl Editor {
         self.audio_inspector_track = None;
         self.selected = primary;
         self.selection = ids;
+        if self.selected.is_some() {
+            self.marker_selection.clear();
+        }
     }
 
     pub(super) fn select_only(&mut self, id: ClipId) {
@@ -45,6 +48,7 @@ impl Editor {
     }
 
     pub(super) fn clear_selection(&mut self) {
+        self.marker_selection.clear();
         self.audio_inspector_track = None;
         self.selected = None;
         self.selection.clear();
@@ -97,11 +101,21 @@ impl Editor {
 
     /// Copy the selection to the in-app clipboard and the system clipboard.
     pub(super) fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.selected_ids().is_empty()
+            && let Some(board) =
+                crate::marker_edit::MarkerBoard::copy(&self.project, &self.marker_selection)
+        {
+            self.marker_clipboard = Some(board);
+            self.clipboard = None;
+            cx.notify();
+            return true;
+        }
         let Some(board) = Clipboard::copy_linked(&self.project, &self.selected_ids()) else {
             return false;
         };
         cx.write_to_clipboard(ClipboardItem::new_string(board.to_json()));
         self.clipboard = Some(board);
+        self.marker_clipboard = None;
         cx.notify();
         true
     }
@@ -121,6 +135,16 @@ impl Editor {
     }
 
     pub(super) fn paste_clips(&mut self, cx: &mut Context<Self>) {
+        if let Some(markers) = self.marker_clipboard.clone() {
+            if let Some((command, created)) = markers.paste(&self.project, self.position)
+                && self.try_execute(&command, cx)
+            {
+                self.clear_selection();
+                self.marker_selection = created.into_iter().collect();
+                cx.notify();
+            }
+            return;
+        }
         let Some(board) = self.clipboard_contents(cx) else {
             return;
         };
@@ -165,6 +189,15 @@ impl Editor {
     /// Delete the whole selection as one undo step.
     pub(super) fn delete_selected(&mut self, cx: &mut Context<Self>) {
         let ids = self.selected_ids();
+        if ids.is_empty()
+            && let Some(command) =
+                crate::marker_edit::delete_command(&self.project, &self.marker_selection)
+        {
+            if self.try_execute(&command, cx) {
+                self.marker_selection.clear();
+            }
+            return;
+        }
         let Some(command) = selection::delete_command(&self.project, &ids) else {
             return;
         };
@@ -186,9 +219,9 @@ impl Editor {
                         .range(animathio_export::duration(&self.project).0)
                 })
                 .flatten();
-            editing::ripple_delete_command(None, range)
+            editing::ripple_delete_command(None, range, self.marker_ripple)
         } else {
-            ripple::delete_command(&self.project, &ids, self.ripple_scope)
+            ripple::delete_command(&self.project, &ids, self.ripple_scope, self.marker_ripple)
         };
         if let Some(command) = command
             && self.try_execute(&command, cx)
@@ -202,7 +235,20 @@ impl Editor {
     pub(super) fn nudge_selection(&mut self, frames: i64, cx: &mut Context<Self>) -> bool {
         let ids = self.selected_ids();
         if ids.is_empty() {
-            return false;
+            if self.marker_selection.is_empty() {
+                return false;
+            }
+            let rate = self.project.frame_rate();
+            if let Ok(span) = rate.frame_to_time(frames.abs(), Rounding::Nearest)
+                && let Some(command) = crate::marker_edit::move_command(
+                    &self.project,
+                    &self.marker_selection,
+                    span.0 * frames.signum(),
+                )
+            {
+                self.try_execute(&command, cx);
+            }
+            return true;
         }
         let rate = self.project.frame_rate();
         if let Ok(span) = rate.frame_to_time(frames.abs(), Rounding::Nearest)
@@ -212,6 +258,22 @@ impl Editor {
             self.try_execute(&command, cx);
         }
         true
+    }
+
+    pub(super) fn toggle_marker_ripple(&mut self, cx: &mut Context<Self>) {
+        self.marker_ripple = if self.marker_ripple == animathio_core::MarkerRipple::Stay {
+            animathio_core::MarkerRipple::Auto
+        } else {
+            animathio_core::MarkerRipple::Stay
+        };
+        self.notices.push(crate::style::Toast::info(
+            if self.marker_ripple == animathio_core::MarkerRipple::Stay {
+                "Markers stay put during ripple edits"
+            } else {
+                "Markers follow ripple edits"
+            },
+        ));
+        cx.notify();
     }
 
     pub(super) fn toggle_ripple_scope(&mut self, cx: &mut Context<Self>) {

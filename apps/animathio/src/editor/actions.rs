@@ -22,6 +22,7 @@ actions!(
         RippleDelete,
         UnlinkClips,
         ToggleRippleScope,
+        ToggleMarkerRipple,
         SelectAllClips,
         ClearSelection,
         CopyClips,
@@ -340,6 +341,9 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         this.duplicate_selection(cx);
+    }))
+    .on_action(cx.listener(|this, _: &ToggleMarkerRipple, _window, cx| {
+        this.toggle_marker_ripple(cx);
     }))
     .on_action(cx.listener(|this, _: &ToggleRippleScope, _window, cx| {
         this.toggle_ripple_scope(cx);

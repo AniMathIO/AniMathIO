@@ -6,7 +6,8 @@
 )]
 use animathio_control::{
     BeatDetectParams, BeatMarkerOptions, BeatSelection, ControlHandler, HeadlessHandler,
-    SyncCutsParams, SyncMode, SyncSource, analyze_beats, apply_beat_markers, apply_sync_cuts,
+    SourceLimits, SyncCutsParams, SyncMode, SyncSource, analyze_beats, apply_beat_markers,
+    apply_sync_cuts,
 };
 use animathio_core::{
     Asset, AssetId, Clip, ClipId, ClipKind, Command, History, Project, TICKS_PER_SECOND, Time,
@@ -227,7 +228,14 @@ fn snapping_moves_cuts_to_beats_keeps_linked_audio_and_is_one_undo_step() {
         max_shift: Time(250 * MS),
         ..SyncCutsParams::default()
     };
-    let result = apply_sync_cuts(&mut project, &mut history, Some(&detection), &params).unwrap();
+    let result = apply_sync_cuts(
+        &mut project,
+        &mut history,
+        Some(&detection),
+        &params,
+        &SourceLimits::new(),
+    )
+    .unwrap();
     assert_eq!(result.shifted.len(), 1, "{result:?}");
     let tolerance = SEC / 30; // frame alignment
     let moved = clip_range(&project, 11);
@@ -261,7 +269,16 @@ fn snapping_moves_cuts_to_beats_keeps_linked_audio_and_is_one_undo_step() {
         ..SyncCutsParams::default()
     };
     // Clip 11 starts exactly on a beat already; its end is 200 ms off.
-    assert!(apply_sync_cuts(&mut project, &mut history, Some(&detection), &none).is_err());
+    assert!(
+        apply_sync_cuts(
+            &mut project,
+            &mut history,
+            Some(&detection),
+            &none,
+            &SourceLimits::new()
+        )
+        .is_err()
+    );
     assert_eq!(project, original);
 }
 
@@ -284,7 +301,14 @@ fn snapping_to_markers_needs_no_audio_and_skips_invalid_edits() {
         source: SyncSource::Markers,
         ..SyncCutsParams::default()
     };
-    let result = apply_sync_cuts(&mut project, &mut history, None, &params).unwrap();
+    let result = apply_sync_cuts(
+        &mut project,
+        &mut history,
+        None,
+        &params,
+        &SourceLimits::new(),
+    )
+    .unwrap();
     assert_eq!(result.shifted.len(), 2);
     assert_eq!(
         clip_range(&project, 11),
@@ -304,7 +328,8 @@ fn snapping_to_markers_needs_no_audio_and_skips_invalid_edits() {
             &SyncCutsParams {
                 clips: vec![ClipId(11)],
                 ..SyncCutsParams::default()
-            }
+            },
+            &SourceLimits::new()
         )
         .is_err()
     );
@@ -330,6 +355,7 @@ fn snapping_to_markers_needs_no_audio_and_skips_invalid_edits() {
             max_shift: Time(5 * SEC),
             ..SyncCutsParams::default()
         },
+        &SourceLimits::new(),
     )
     .unwrap_err()
     .to_string();
@@ -351,7 +377,14 @@ fn splitting_long_clips_at_every_other_beat_keeps_linked_audio_in_sync() {
         },
         ..SyncCutsParams::default()
     };
-    let result = apply_sync_cuts(&mut project, &mut history, Some(&detection), &params).unwrap();
+    let result = apply_sync_cuts(
+        &mut project,
+        &mut history,
+        Some(&detection),
+        &params,
+        &SourceLimits::new(),
+    )
+    .unwrap();
     assert!(result.splits.len() >= 2, "{result:?}");
     for track in [2, 3] {
         let clips = project.tracks()[track - 1].clips();
@@ -469,4 +502,174 @@ fn call_wire_shapes_round_trip_with_flattened_params() {
     }))
     .unwrap();
     assert!(matches!(sync, Call::SyncCutsToBeats { params } if params.selection.every == 4));
+}
+
+// --- source-media limits ---------------------------------------------------------------
+
+/// Track 1: video clip 1 `[0, 4)` s (source 0..4) and clip 2 `[4, 6)` s reading source 3..5 s
+/// of a 5 s asset. Clip 2 therefore sits exactly at the end of its media.
+fn limited_session() -> (Project, SourceLimits) {
+    let asset = AssetId::of(b"five second video");
+    let mut project = Project::default();
+    Command::AddAsset {
+        id: asset.clone(),
+        asset: Asset {
+            name: "v.mp4".into(),
+            media_type: "video/mp4".into(),
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "V"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    for (id, s, e, offset) in [(1, 0, 4, 0), (2, 4, 6, 3)] {
+        let mut clip = Clip::new(
+            ClipId(id),
+            ClipKind::Video(asset.clone()),
+            range(s * SEC, e * SEC),
+        );
+        clip.source_offset = Time(offset * SEC);
+        Command::AddClip {
+            track: TrackId(1),
+            clip,
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let mut limits = SourceLimits::new();
+    limits.set(asset, Time(5 * SEC));
+    (project, limits)
+}
+fn add_markers(project: &mut Project, times: &[i64]) {
+    for (i, t) in times.iter().enumerate() {
+        Command::AddMarker {
+            marker: animathio_core::Marker::new(animathio_core::MarkerId(i as u64 + 1), Time(*t)),
+        }
+        .apply(project)
+        .unwrap();
+    }
+}
+
+#[test]
+fn snapping_never_extends_a_clip_past_its_source_media() {
+    let (mut project, limits) = limited_session();
+    // 4.2 s: moving the cut later trims clip 2's head (source 3.2..5.0, fits) and lengthens
+    // clip 1 (source 0..4.2, fits). 6.2 s: lengthening clip 2 would read to 5.2 s > 5 s.
+    add_markers(&mut project, &[4 * SEC + SEC / 5, 6 * SEC + SEC / 5]);
+    let mut history = History::default();
+    let result = apply_sync_cuts(
+        &mut project,
+        &mut history,
+        None,
+        &SyncCutsParams {
+            clips: vec![ClipId(1), ClipId(2)],
+            source: SyncSource::Markers,
+            frame_align: false,
+            max_shift: Time(SEC / 4),
+            ..SyncCutsParams::default()
+        },
+        &limits,
+    )
+    .unwrap();
+    assert_eq!(result.shifted.len(), 1, "{result:?}");
+    assert_eq!(result.skipped.len(), 1, "{result:?}");
+    assert!(result.skipped[0].contains("source media"), "{result:?}");
+    assert_eq!(clip_range(&project, 1).end, Time(4 * SEC + SEC / 5));
+    assert_eq!(clip_range(&project, 2).start, Time(4 * SEC + SEC / 5));
+    assert_eq!(
+        clip_range(&project, 2).end,
+        Time(6 * SEC),
+        "the cut that cannot fit stays"
+    );
+    assert!(history.undo(&mut project).unwrap());
+
+    // Only the impossible edit requested: an error, nothing changes.
+    let before = project.clone();
+    let only_bad = SyncCutsParams {
+        clips: vec![ClipId(2)],
+        source: SyncSource::Markers,
+        frame_align: false,
+        max_shift: Time(SEC / 4),
+        ..SyncCutsParams::default()
+    };
+    // Clip 2's head is a candidate too (4.0 -> 4.2 is valid), so restrict markers to 6.2 s.
+    Command::RemoveMarker {
+        id: animathio_core::MarkerId(1),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before_bad = project.clone();
+    let err = apply_sync_cuts(&mut project, &mut history, None, &only_bad, &limits)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("source media"), "{err}");
+    assert_eq!(project, before_bad);
+    // Without limits (unknown duration) the same edit is applied: no regression for
+    // generated clips and unprobed media.
+    apply_sync_cuts(
+        &mut project,
+        &mut history,
+        None,
+        &only_bad,
+        &SourceLimits::new(),
+    )
+    .unwrap();
+    assert_ne!(project, before);
+}
+
+#[test]
+fn splitting_never_leaves_a_clip_reading_past_its_media() {
+    let (mut project, limits) = limited_session();
+    add_markers(&mut project, &[SEC, 2 * SEC, 5 * SEC]);
+    let mut history = History::default();
+    let result = apply_sync_cuts(
+        &mut project,
+        &mut history,
+        None,
+        &SyncCutsParams {
+            clips: vec![ClipId(1), ClipId(2)],
+            source: SyncSource::Markers,
+            mode: SyncMode::Split,
+            ..SyncCutsParams::default()
+        },
+        &limits,
+    )
+    .unwrap();
+    assert_eq!(result.splits.len(), 3, "{result:?}");
+    // Every piece still ends at or before its media's 5 s.
+    for track in project.tracks() {
+        for clip in track.clips().values() {
+            let end = clip.source_offset.0 + clip.range.end.0 - clip.range.start.0;
+            assert!(end <= 5 * SEC, "{clip:?}");
+        }
+    }
+    project.validate().unwrap();
+}
+
+#[test]
+fn the_control_handler_rejects_trims_past_the_end_of_the_media() {
+    use animathio_control::Call;
+    let (mut project, assets) = session();
+    let _ = &mut project;
+    let mut handler =
+        HeadlessHandler::from_bundle(animathio_format::Bundle { project, assets }, None);
+    // Clip 1: a 12 s WAV placed at [1 s, 13 s) reading source 0..12 s.
+    let trim = |end: i64, offset: i64| Call::CommandApply {
+        command: Command::TrimClip {
+            id: ClipId(1),
+            range: range(SEC, end),
+            source_offset: Time(offset),
+        },
+    };
+    let err = handler.handle(trim(15 * SEC, 0)).unwrap_err().to_string();
+    assert!(err.contains("source media"), "{err}");
+    // Shifting the source window later would also read past the end.
+    assert!(handler.handle(trim(13 * SEC, SEC)).is_err());
+    // Shortening, or trimming within the media, is fine.
+    handler.handle(trim(10 * SEC, 0)).unwrap();
+    handler.handle(trim(12 * SEC, 0)).unwrap();
 }

@@ -449,6 +449,13 @@ pub enum Call {
         /// Style choice with optional overrides.
         params: crate::SubtitleStyleParams,
     },
+    /// Render the timeline markers as chapters (YouTube list, `WebVTT` or FFmpeg metadata),
+    /// returned as text or written to a file.
+    #[serde(rename = "chapters.export")]
+    ChaptersExport {
+        /// Format, output path and chapter rules.
+        params: crate::ChaptersExportParams,
+    },
     /// Add the cues of an SRT or `WebVTT` file as caption clips, as one undo step.
     #[serde(rename = "subtitles.import")]
     SubtitlesImport {

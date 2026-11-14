@@ -382,6 +382,22 @@ pub(crate) struct RemoveRange {
     /// Shift everything after the range left to close the gap (default true).
     #[serde(default = "default_true")]
     pub(crate) ripple: bool,
+    /// With `ripple`: whether timeline markers move left with the content. `auto` (default)
+    /// and `ride` move them (markers inside the range collapse onto the cut); `stay` leaves
+    /// them where they are.
+    #[serde(default)]
+    pub(crate) markers: Option<String>,
+}
+
+fn parse_marker_ripple(value: Option<&str>) -> Result<animathio_core::MarkerRipple, McpError> {
+    match value.map(str::trim) {
+        None | Some("" | "auto") => Ok(animathio_core::MarkerRipple::Auto),
+        Some("ride") => Ok(animathio_core::MarkerRipple::Ride),
+        Some("stay") => Ok(animathio_core::MarkerRipple::Stay),
+        Some(other) => Err(invalid(&format!(
+            "markers must be auto, ride or stay, got {other:?}"
+        ))),
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -505,6 +521,24 @@ pub(crate) struct AddMarker {
     note: Option<String>,
     /// Length in milliseconds for a range marker; omit for a point marker.
     duration_ms: Option<f64>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ExportChapters {
+    /// `youtube` (default; `M:SS Title` lines), `vtt` (`WebVTT` chapters) or `ffmetadata`
+    /// (FFmpeg chapter metadata).
+    format: Option<String>,
+    /// Write the chapters to this file instead of returning the text. A `.vtt`, `.ffmeta` or
+    /// `.txt` extension picks the format when `format` is omitted.
+    output: Option<String>,
+    /// Replace an existing output file.
+    #[serde(default)]
+    overwrite: bool,
+    /// Title for the synthetic first chapter added when the first marker is after 0:00
+    /// (default `Intro`; empty disables it).
+    intro_title: Option<String>,
+    /// Shortest chapter in milliseconds; closer markers are merged (default 10000, the
+    /// YouTube minimum; 0 keeps every marker).
+    min_length_ms: Option<f64>,
 }
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct RemoveMarker {
@@ -1782,6 +1816,7 @@ impl McpServer {
             .command_apply(Command::RemoveRange {
                 range,
                 ripple: p.ripple,
+                markers: parse_marker_ripple(p.markers.as_deref())?,
             })
             .map_err(mcp_error)?;
         tool_text(
@@ -1799,7 +1834,10 @@ impl McpServer {
         let clip = parse_clip_id(&p.id)?;
         let mut backend = self.backend.lock().await;
         backend
-            .command_apply(Command::RippleDelete { clip })
+            .command_apply(Command::RippleDelete {
+                clip,
+                markers: Default::default(),
+            })
             .map_err(mcp_error)?;
         tool_text(json!({"deleted": clip.0}))
     }
@@ -1938,6 +1976,47 @@ impl McpServer {
             .markers_list()
             .map_err(mcp_error)?;
         tool_text(json!({"markers": markers.iter().map(marker_json).collect::<Vec<_>>()}))
+    }
+
+    #[tool(
+        description = "Export the timeline markers as chapters: a YouTube-style `M:SS Title` list (default), `WebVTT` chapters or FFmpeg chapter metadata (`ffmpeg -i v.mp4 -i c.ffmeta -map_metadata 1 -codec copy out.mp4` embeds it). Each marker starts a chapter; markers closer than min_length_ms are merged. Returns the text, or writes `output`."
+    )]
+    async fn export_chapters(
+        &self,
+        Parameters(p): Parameters<ExportChapters>,
+    ) -> Result<CallToolResult, McpError> {
+        let defaults = animathio_control::ChaptersExportParams::default();
+        let params = animathio_control::ChaptersExportParams {
+            format: p
+                .format
+                .as_deref()
+                .map(animathio_control::ChapterFormat::parse)
+                .transpose()
+                .map_err(mcp_error)?
+                .unwrap_or_default(),
+            output: p.output.map(std::path::PathBuf::from),
+            overwrite: p.overwrite,
+            intro_title: p.intro_title.unwrap_or(defaults.intro_title),
+            min_length: p
+                .min_length_ms
+                .map(ms_to_ticks)
+                .transpose()?
+                .unwrap_or(defaults.min_length),
+            start: Time(0),
+            end: None,
+        };
+        let result = self
+            .backend
+            .lock()
+            .await
+            .chapters_export(params)
+            .map_err(mcp_error)?;
+        tool_text(json!({
+            "format": result.format.name(),
+            "chapters": result.chapters,
+            "text": result.text,
+            "path": result.path,
+        }))
     }
 
     #[tool(

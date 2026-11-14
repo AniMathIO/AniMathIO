@@ -325,6 +325,8 @@ struct MarkerDrag {
     id: MarkerId,
     origin: Time,
     current: Time,
+    /// Every marker that moves with the dragged one (the whole marker selection).
+    members: BTreeSet<MarkerId>,
 }
 
 /// A marker as painted on the ruler (with any drag already applied).
@@ -333,6 +335,7 @@ struct MarkerPaint {
     end: Option<Time>,
     color: Hsla,
     name: String,
+    selected: bool,
 }
 
 /// Dragging a fade handle: `current` is the fade length in ticks.
@@ -518,6 +521,14 @@ pub(crate) struct Editor {
     selection: BTreeSet<ClipId>,
     clipboard: Option<Clipboard>,
     ripple_scope: RippleScope,
+    /// Whether ripple edits carry timeline markers along (`Stay` turns it off).
+    marker_ripple: animathio_core::MarkerRipple,
+    /// Markers selected on the ruler (mutually exclusive with the clip selection).
+    marker_selection: BTreeSet<MarkerId>,
+    /// Probed media durations, so trims and beat sync never read past a source's end.
+    source_limits: animathio_control::SourceLimits,
+    /// Copied markers, pasted at the playhead.
+    marker_clipboard: Option<crate::marker_edit::MarkerBoard>,
     track_rename: Option<TrackRename>,
     selected_field: Option<Field>,
     worker: RenderWorker,
@@ -655,6 +666,10 @@ impl Editor {
             selection: BTreeSet::new(),
             clipboard: None,
             ripple_scope: RippleScope::default(),
+            marker_ripple: animathio_core::MarkerRipple::default(),
+            marker_selection: BTreeSet::new(),
+            source_limits: animathio_control::SourceLimits::new(),
+            marker_clipboard: None,
             track_rename: None,
             selected_field: None,
             worker,

@@ -94,6 +94,11 @@ enum Action {
         /// Replace an existing output file instead of failing.
         #[arg(long)]
         overwrite: bool,
+        /// Also write the project's markers as chapters to this sidecar file (`.txt` YouTube
+        /// list, `.vtt` WebVTT, `.ffmeta` FFmpeg metadata). The MP4 muxer has no chapter
+        /// atom, so chapters ship beside the video.
+        #[arg(long)]
+        chapters: Option<PathBuf>,
         /// Report wall time, fps and opt-in stage timings.
         #[arg(long)]
         bench: bool,
@@ -355,9 +360,23 @@ fn run(cli: Cli) -> Result<()> {
             preset,
             crf,
             overwrite,
+            chapters,
             bench,
         } => {
             let mut bundle = load(&project)?;
+            if let Some(path) = &chapters {
+                // Fail before the long render when the sidecar cannot be written.
+                let list = animathio_control::chapters(
+                    &bundle.project,
+                    &animathio_control::ChaptersExportParams::default(),
+                );
+                if list.is_empty() {
+                    return Err("--chapters needs at least one marker".into());
+                }
+                if path.exists() && !overwrite {
+                    return Err("chapters file exists; pass --overwrite".into());
+                }
+            }
             if let Some(preset) = preset {
                 preset
                     .command(&bundle.project)?
@@ -397,6 +416,23 @@ fn run(cli: Cli) -> Result<()> {
                 },
                 |scene| plugins.resolve(&scene, animathio_export::resolution(&bundle.project)),
             )?;
+            if let Some(path) = chapters {
+                let result = animathio_control::export_chapters(
+                    &bundle.project,
+                    &animathio_control::ChaptersExportParams {
+                        output: Some(path),
+                        overwrite,
+                        start: range.start,
+                        end: Some(range.end),
+                        ..animathio_control::ChaptersExportParams::default()
+                    },
+                )?;
+                eprintln!(
+                    "wrote {} chapters to {}",
+                    result.chapters,
+                    result.path.unwrap_or_default()
+                );
+            }
             if bench {
                 let elapsed = started.elapsed().as_secs_f64();
                 #[allow(clippy::cast_precision_loss)]

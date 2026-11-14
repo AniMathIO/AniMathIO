@@ -38,6 +38,7 @@ pub struct HeadlessHandler {
     playhead: Time,
     playing: bool,
     plugins: Option<PluginHost>,
+    limits: crate::SourceLimits,
 }
 
 impl HeadlessHandler {
@@ -58,6 +59,7 @@ impl HeadlessHandler {
             playhead: Time(0),
             playing: false,
             plugins: None,
+            limits: crate::SourceLimits::new(),
         }
     }
 
@@ -211,6 +213,9 @@ impl HeadlessHandler {
 
     fn command_apply(&mut self, command: &animathio_core::Command) -> Result<Value, ControlError> {
         self.check_effect_params(command)?;
+        self.limits
+            .guard(&self.project, &self.assets, command)
+            .map_err(ControlError::InvalidParams)?;
         self.history.execute(&mut self.project, command)?;
         Ok(serde_json::to_value(())?)
     }
@@ -476,11 +481,13 @@ impl ControlHandler for HeadlessHandler {
                 } else {
                     None
                 };
+                self.limits.probe_missing(&self.project, &self.assets);
                 serde_json::to_value(crate::apply_sync_cuts(
                     &mut self.project,
                     &mut self.history,
                     detection.as_ref(),
                     &params,
+                    &self.limits,
                 )?)?
             }
             Call::AutoReframe { params } => serde_json::to_value(crate::auto_reframe(
@@ -489,6 +496,9 @@ impl ControlHandler for HeadlessHandler {
                 &self.assets,
                 &params,
             )?)?,
+            Call::ChaptersExport { params } => {
+                serde_json::to_value(crate::export_chapters(&self.project, &params)?)?
+            }
             Call::SubtitlesGenerate { params } => serde_json::to_value(crate::generate_subtitles(
                 &mut self.project,
                 &mut self.history,

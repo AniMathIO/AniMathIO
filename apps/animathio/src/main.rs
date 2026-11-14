@@ -26,6 +26,7 @@ mod glyph_guard;
 mod icons;
 mod inspector;
 mod layout;
+mod marker_edit;
 mod playback;
 mod preferences;
 mod preview_settings;

@@ -358,9 +358,17 @@ the markers as JSON with times in Nticks and seconds. `markers PROJECT add` take
 `--time` (required), `--duration`, `--name`, `--color` and `--note`, and
 `markers PROJECT remove ID` removes one; both save atomically to the input unless
 `--output` is given (existing separate outputs require `--overwrite`).
+`markers PROJECT chapters` writes the markers as a chapter list (`--format youtube`, `vtt` or
+`ffmetadata`; stdout unless `--output`), and `export --chapters FILE` writes the same list as
+a sidecar for the exported range (the MP4 muxer has no chapter atom; embed an `ffmetadata`
+sidecar with `ffmpeg -i out.mp4 -i out.ffmeta -map_metadata 1 -codec copy final.mp4`).
+Markers move with ripple edits and autocut; see
+[architecture](architecture.md#markers-and-beat-sync).
 
 ```bash
 animathio-cli markers song.amio list
+animathio-cli markers song.amio chapters --format vtt -o chapters.vtt
+animathio-cli export song.amio -o song.mp4 --chapters song.txt
 ```
 
 <!-- help:markers -->

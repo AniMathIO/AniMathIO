@@ -157,6 +157,7 @@ fn remove_range_without_ripple_leaves_a_gap() {
     let command = Command::RemoveRange {
         range: range(80, 160),
         ripple: false,
+        markers: Default::default(),
     };
     round_trip(&mut project, &command);
     assert_eq!(spans(&project, 0), vec![(1, 0, 80, 0), (2, 160, 200, 10)]);
@@ -172,6 +173,7 @@ fn remove_range_with_ripple_closes_the_gap_everywhere() {
     let command = Command::RemoveRange {
         range: range(80, 160),
         ripple: true,
+        markers: Default::default(),
     };
     round_trip(&mut project, &command);
     assert_eq!(spans(&project, 0), vec![(1, 0, 80, 0), (2, 80, 120, 10)]);
@@ -182,6 +184,7 @@ fn remove_range_with_ripple_closes_the_gap_everywhere() {
     Command::RemoveRange {
         range: range(0, 100),
         ripple: true,
+        markers: Default::default(),
     }
     .apply(&mut project)
     .unwrap();
@@ -206,6 +209,7 @@ fn remove_range_with_ripple_shrinks_explicit_duration() {
         &Command::RemoveRange {
             range: range(80, 160),
             ripple: true,
+            markers: Default::default(),
         },
     );
     assert_eq!(project.duration(), Time(220));
@@ -214,13 +218,22 @@ fn remove_range_with_ripple_shrinks_explicit_duration() {
 #[test]
 fn ripple_delete_closes_the_gap_on_its_track_only() {
     let mut project = project();
-    round_trip(&mut project, &Command::RippleDelete { clip: ClipId(1) });
+    round_trip(
+        &mut project,
+        &Command::RippleDelete {
+            clip: ClipId(1),
+            markers: Default::default(),
+        },
+    );
     assert_eq!(spans(&project, 0), vec![(2, 50, 100, 0)]);
     assert_eq!(spans(&project, 1), vec![(3, 50, 250, 10)]);
     assert!(
-        Command::RippleDelete { clip: ClipId(42) }
-            .apply(&mut project)
-            .is_err()
+        Command::RippleDelete {
+            clip: ClipId(42),
+            markers: Default::default()
+        }
+        .apply(&mut project)
+        .is_err()
     );
 }
 

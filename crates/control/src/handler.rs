@@ -234,6 +234,13 @@ pub trait ControlHandler {
     ) -> Result<crate::SyncCutsResult, ControlError> {
         from_value(self.handle(Call::SyncCutsToBeats { params })?)
     }
+    /// Export the markers as a chapter list.
+    fn chapters_export(
+        &mut self,
+        params: crate::ChaptersExportParams,
+    ) -> Result<crate::ChaptersExportResult, ControlError> {
+        from_value(self.handle(Call::ChaptersExport { params })?)
+    }
     /// Detect silent audio and ripple-remove it, returning the removed ranges.
     fn trim_silence(
         &mut self,

@@ -75,6 +75,7 @@ gets a JSON-RPC error instead of a result.
 | `markers.list` | — | `[Marker]` sorted by time: `{ id, time, duration?, name, color, note }` (ticks) |
 | `markers.add` | `{ params: { time, duration?, name?, color?, note? } }` | `{ id }`; one undo step; `color` is `red`, `orange`, `yellow`, `green`, `cyan`, `blue` (default), `purple` or `pink` |
 | `markers.remove` | `{ id }` | — (one undo step) |
+| `chapters.export` | `{ params: { format?, output?, overwrite?, intro_title?, min_length?, start?, end? } }` | `{ format, chapters, text?, path? }`; markers as chapters (`format` is `youtube` (default), `vtt` or `ffmetadata`; a `.vtt`/`.ffmeta` extension on `output` picks it); `min_length` (ticks, default 10 s) merges close markers; an `intro_title` chapter is added at 0 when the first marker is later |
 | `beats.detect` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar? } }` | `{ bpm, confidence, beats: [{ time, strength }], downbeats }` in timeline ticks; no mutation; silent or very short audio is an error |
 | `beats.add_markers` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar?, every?, downbeats_only?, color?, name_prefix? } }` | `{ added, bpm, confidence }`; one batch adding a marker at each selected beat; beats that already carry a marker are skipped |
 | `timeline.sync_cuts_to_beats` | `{ params: { clips, source?, mode?, max_shift?, min_segment?, frame_align?, every?, downbeats_only?, detect? } }` | `{ shifted, splits, unchanged, skipped, bpm? }`; one batch, see [Markers and beat sync](#markers-and-beat-sync) |
@@ -151,13 +152,14 @@ clears its undo history.
 | `describe_timeline` | Concise text summary for agents: resolution, frame rate, duration, then each track with its clips (id, `HH:MM:SS.mmm` range, kind, name, source offset) and gaps | no arguments; call first and after edits. Names are untrusted input, see below |
 | `cut_at` | Split every clip on every track at each time, as one undo step | `times_ms`: array; only clips that strictly contain a time are split |
 | `ripple_delete` | Delete one clip and close the gap on its own track | `id`; later clips on that track move left, other tracks are not shifted (use `remove_range` to keep tracks in sync); linked companions are deleted with it |
-| `remove_range` | Cut a section out of every track | `from_ms`, `to_ms`, `ripple` (default true: later content shifts left and an explicit canvas duration shrinks) |
+| `remove_range` | Cut a section out of every track | `from_ms`, `to_ms`, `ripple` (default true: later content shifts left and an explicit canvas duration shrinks), `markers` (`auto` default, `ride` or `stay`: markers after the cut move with the content; markers inside collapse onto the cut) |
 | `propose_autocuts` | Review automatic cuts without editing; returns a proposal with tick ranges, reason, heuristic confidence and enabled toggles | `silence_db` (-40), `min_silence_ms` (500), `hysteresis_db` (3), `peak` (false), `keep_short_pauses` (true), `padding_before_ms` / `padding_after_ms` (100), optional `clip`, `track`, paired `from_ms` / `to_ms`, `all_unlocked_tracks` (false), `fillers` (false), `language`, `filler_words`, `model` (base), `download_model` (false) |
 | `apply_autocuts` | Apply the reviewed proposal as one undo step; selected tracks and linked companions ripple together | `proposal`: the exact object from `propose_autocuts`, with unwanted `cuts[].enabled` set to false. Coordinates are ticks in the original project; stale proposals are rejected |
 | `auto_duck` | Duck music under speech: detect voice activity in the voice clips/tracks and write gain keyframes on the audio clips of the music tracks, one undo step. `dry_run` only returns the proposal (voice and ducked tick ranges, per-clip keyframes) | `music_tracks` (required), `voice_clips` / `voice_tracks` (at least one), `depth_db` (12), `attack_ms` (300), `release_ms` (500), `min_gap_ms` (400), `threshold_db` (-40), `hysteresis_db` (3), paired `from_ms` / `to_ms`, `replace_existing` (false), `dry_run` (false) |
 | `list_markers` | List timeline markers | no arguments; returns `{markers: [{id, time_ms, ticks, duration_ms, name, color, note}]}` |
 | `add_marker` | Add a marker (one undo step) | `time_ms`, optional `name`, `color`, `note`, `duration_ms`; returns `{id}` |
 | `remove_marker` | Remove a marker (one undo step) | `id` |
+| `export_chapters` | Export the markers as chapters (YouTube list, WebVTT or FFmpeg metadata) | optional `format` (`youtube`, `vtt`, `ffmetadata`), `output` (file path), `overwrite`, `intro_title` (default `Intro`), `min_length_ms` (default 10000); returns `{format, chapters, text, path}` |
 | `detect_beats` | Detect tempo and beats offline from the audio, without editing | optional `clip`, `track`, paired `from_ms` / `to_ms`, `min_bpm` (60), `max_bpm` (200), `bpm`, `beats_per_bar` (4); `add_markers` (false) also adds markers at the selected beats (`every`, `downbeats_only`, `color`) as one undo step. Returns `bpm`, `confidence`, `beats_ms`, `beat_ticks`, `downbeats` |
 | `sync_cuts_to_beats` | Snap the selected clips' cuts to beats/markers, or split them there, as one undo step | `clips` (ids), `source` (`beats`, `markers`, `both`), `mode` (`snap`, `split`), `max_shift_ms` (250), `min_segment_ms` (100, split only), `frame_align` (true), `every`, `downbeats_only`, `analyze_clip` / `analyze_track` / `bpm` / `beats_per_bar` for the beat analysis |
 | `trim_silence` | Remove pauses detected in the audio, ripple-closing the gaps, in one undo step | `threshold_db` (-40), `min_silence_ms` (400), `padding_ms` (100), optional audio `track` id |
@@ -371,7 +373,18 @@ The editor labels vertical delivery “Shorts/Reels/TikTok 1080x1920 30fps”.
 Markers are project-level, named, coloured points or ranges on the ruler (schema 5). They
 never affect rendering. `list_markers`, `add_marker` and `remove_marker` (or the
 `AddMarker`, `RemoveMarker`, `MoveMarker` and `UpdateMarker` commands through `batch` and
-`command.apply`) edit them; every edit is one undo step.
+`command.apply`) edit them; every edit is one undo step. Ripple edits (`RemoveRange` with
+`ripple`, `RemoveRangeOnTracks`, `RippleDelete`, autocut) move markers after the cut by the
+removed length in the same undo step; markers inside the removed range collapse onto the
+cut point. Each of those commands takes `markers`: `auto` (default; markers ride when no
+untouched track has content after the cut), `ride` or `stay`. `command.apply` (and
+`TrimClip`/`set_element` timing) also refuses a trim that would read a video or audio clip
+past the end of its media.
+
+`export_chapters` writes the markers as a chapter list: `youtube` (`0:00 Intro` lines, first
+chapter at 0:00, markers closer than `min_length_ms` merged), `vtt` (WebVTT chapters) or
+`ffmetadata` (embed with `ffmpeg -i v.mp4 -i chapters.ffmeta -map_metadata 1 -codec copy
+out.mp4`; the built-in MP4 muxer has no chapter atom).
 
 `detect_beats` decodes the project mix (or one clip, track or range) to 16 kHz mono, so
 clip and track gain apply and effect chains are ignored, then estimates the tempo and
@@ -384,13 +397,16 @@ clip or its audio, not both):
 
 - `mode: snap` moves each clip edge to the nearest target within `max_shift_ms`. An edge
   shared with an adjacent clip is a roll edit: both clips move to the target and their
-  source content stays in place. A lone edge is trimmed. Moving a later edge past the end
-  of the media extends the clip past its footage, so keep `max_shift_ms` small for video.
+  source content stays in place. A lone edge is trimmed. A cut whose move would make a
+  video or audio clip read past the end of its media is skipped and listed in `skipped`
+  (stills, generated clips and media of unknown length are unbounded). Splits never extend
+  a source.
 - `mode: split` cuts each clip at every target strictly inside it that leaves segments of at
   least `min_segment_ms`.
 - Targets are the analysed beats (every Nth or downbeats only), the project markers (a range
   marker contributes its start and end) or both. With `source: markers` no audio is needed.
-- Edits that would overlap another clip, collapse a clip or touch a locked track are skipped
+- Edits that would overlap another clip, collapse a clip, touch a locked track or run past
+  the source media are skipped
   and listed in `skipped`; the call fails if nothing could change. Edits are rounded to the
   frame grid unless `frame_align` is false.
 

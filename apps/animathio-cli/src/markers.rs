@@ -50,6 +50,25 @@ enum MarkersAction {
         #[command(flatten)]
         save: SaveArgs,
     },
+    /// Write the markers as chapters: a YouTube description list, WebVTT chapters or FFmpeg
+    /// chapter metadata. Prints to stdout unless --output is given.
+    Chapters {
+        /// `youtube` (default), `vtt` or `ffmetadata`; a `.vtt`/`.ffmeta` output extension picks it.
+        #[arg(long, default_value = "youtube")]
+        format: String,
+        /// Write here instead of printing.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Replace an existing output file.
+        #[arg(long)]
+        overwrite: bool,
+        /// Title of the chapter added at 0:00 when the first marker is later (empty disables).
+        #[arg(long, default_value = "Intro")]
+        intro_title: String,
+        /// Shortest chapter in seconds; closer markers merge (YouTube needs 10; 0 keeps all).
+        #[arg(long, default_value = "10", value_parser = parse_time)]
+        min_length: Time,
+    },
     /// Remove a marker by id, saving atomically to the input unless --output is given.
     Remove {
         /// Marker id from `markers list`.
@@ -136,6 +155,33 @@ pub(crate) fn run_markers(args: MarkersArgs) -> Result<()> {
             History::default().execute(&mut bundle.project, &command)?;
             save(&args.project, &save_args, &bundle)?;
             println!("{}", json!({"id": id.0}));
+        }
+        MarkersAction::Chapters {
+            format,
+            output,
+            overwrite,
+            intro_title,
+            min_length,
+        } => {
+            let result = animathio_control::export_chapters(
+                &bundle.project,
+                &animathio_control::ChaptersExportParams {
+                    format: animathio_control::ChapterFormat::parse(&format)?,
+                    output,
+                    overwrite,
+                    intro_title,
+                    min_length,
+                    start: Time(0),
+                    end: None,
+                },
+            )?;
+            match (&result.text, &result.path) {
+                (Some(text), _) => print!("{text}"),
+                (None, Some(path)) => {
+                    println!("{}", json!({"path": path, "chapters": result.chapters}));
+                }
+                (None, None) => {}
+            }
         }
         MarkersAction::Remove {
             id,

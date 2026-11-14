@@ -121,11 +121,14 @@ impl Editor {
                 )?)?
             }
             Call::SyncCutsToBeats { params } => {
+                self.source_limits
+                    .probe_missing(&self.project, &self.assets);
                 serde_json::to_value(animathio_control::apply_sync_cuts(
                     &mut self.project,
                     &mut self.history,
                     detection,
                     params,
+                    &self.source_limits,
                 )?)?
             }
             _ => return Err(ControlError::Other("not a beat call".into())),
@@ -195,7 +198,14 @@ impl Editor {
                             panel.analysed_tracks = snapshot.tracks().to_vec();
                             panel.detection = Some(detection);
                         }
-                        Err(error) => panel.error = Some(error.to_string()),
+                        Err(error) => {
+                            panel.error = Some(
+                                error
+                                    .to_string()
+                                    .trim_start_matches("invalid params: ")
+                                    .to_owned(),
+                            );
+                        }
                     }
                 }
                 cx.notify();
@@ -203,6 +213,19 @@ impl Editor {
         })
         .detach();
         cx.notify();
+    }
+
+    /// Show a failure inside the panel (where the user is looking), or as the editor error when
+    /// the panel is closed.
+    fn panel_error(&mut self, message: &str) {
+        let message = message.strip_prefix("invalid params: ").unwrap_or(message);
+        match self.marker_panel.as_mut() {
+            Some(panel) => {
+                panel.error = Some(message.to_owned());
+                panel.notice = None;
+            }
+            None => self.error = Some(message.to_owned()),
+        }
     }
 
     fn beat_selection(&self) -> BeatSelection {
@@ -218,6 +241,9 @@ impl Editor {
         let Some(detection) = self.marker_panel.as_ref().and_then(|p| p.detection.clone()) else {
             return;
         };
+        if let Some(panel) = self.marker_panel.as_mut() {
+            panel.error = None;
+        }
         let options = BeatMarkerOptions {
             selection: self.beat_selection(),
             ..BeatMarkerOptions::default()
@@ -230,7 +256,7 @@ impl Editor {
                     panel.notice = Some(format!("Added {added} markers"));
                 }
             }
-            Err(error) => self.error = Some(error.to_string()),
+            Err(error) => self.panel_error(&error.to_string()),
         }
         cx.notify();
     }
@@ -241,15 +267,21 @@ impl Editor {
             return;
         };
         if clips.is_empty() {
-            self.error = Some("Select the clips to sync first".into());
+            self.panel_error("Select the clips to sync first");
             cx.notify();
             return;
         }
         if panel.source.needs_beats() && panel.detection.is_none() {
-            self.error = Some("Detect beats first, or sync to markers".into());
+            self.panel_error("Detect beats first, or sync to markers");
             cx.notify();
             return;
         }
+        if let Some(panel) = self.marker_panel.as_mut() {
+            panel.error = None;
+        }
+        let Some(panel) = self.marker_panel.as_ref() else {
+            return;
+        };
         let selection = self.beat_selection();
         let params = SyncCutsParams {
             clips,
@@ -266,7 +298,9 @@ impl Editor {
             .and_then(|d| select_beats(d, selection).ok())
             .map_or_default(|b| b.into_iter().map(|(_, t)| t).collect());
         let bpm = panel.detection.as_ref().map(|d| d.bpm);
-        match sync_cuts_command(&self.project, &params, &beats, bpm) {
+        self.source_limits
+            .probe_missing(&self.project, &self.assets);
+        match sync_cuts_command(&self.project, &params, &beats, bpm, &self.source_limits) {
             Ok((command, result)) => {
                 if self.try_execute(&command, cx)
                     && let Some(panel) = self.marker_panel.as_mut()
@@ -281,7 +315,7 @@ impl Editor {
                     });
                 }
             }
-            Err(error) => self.error = Some(error.to_string()),
+            Err(error) => self.panel_error(&error.to_string()),
         }
         cx.notify();
     }
@@ -296,12 +330,27 @@ impl Editor {
         let Some(marker) = self.project.marker(id).cloned() else {
             return;
         };
-        let name = cx.new(|cx| InputState::new(window, cx).default_value(marker.name.clone()));
-        let note = cx.new(|cx| InputState::new(window, cx).default_value(marker.note.clone()));
+        let name = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Name")
+                .default_value(marker.name.clone())
+        });
+        let note = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Note")
+                .default_value(marker.note.clone())
+        });
+        // Type straight away: focus the name field the first time the dialog renders (the
+        // dialog takes focus when it opens, so focusing earlier is overridden).
+        let focused = std::rc::Rc::new(std::cell::Cell::new(false));
         let color = cx.new(|_| marker.color);
         let editor = cx.entity();
         let rate = self.project.frame_rate();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
+            if !focused.replace(true) {
+                let focus = name.read(cx).focus_handle(cx);
+                window.focus(&focus, cx);
+            }
             let (name_save, note_save, color_save, editor_save) =
                 (name.clone(), note.clone(), color.clone(), editor.clone());
             let editor_delete = editor.clone();
@@ -399,7 +448,18 @@ impl Editor {
             .iter()
             .map(|marker| {
                 let time = match &self.gesture {
-                    Some(TimelineGesture::Marker(drag)) if drag.id == marker.id => drag.current,
+                    Some(TimelineGesture::Marker(drag)) if drag.members.contains(&marker.id) => {
+                        let shift = (drag.current.0 - drag.origin.0).max(
+                            -drag
+                                .members
+                                .iter()
+                                .filter_map(|id| self.project.marker(*id))
+                                .map(|m| m.time.0)
+                                .min()
+                                .unwrap_or(0),
+                        );
+                        Time(marker.time.0 + shift)
+                    }
                     _ => marker.time,
                 };
                 MarkerPaint {
@@ -407,6 +467,7 @@ impl Editor {
                     end: marker.duration.map(|d| Time(time.0.saturating_add(d.0))),
                     color: paint_color(marker.color),
                     name: marker.name.clone(),
+                    selected: self.marker_selection.contains(&marker.id),
                 }
             })
             .collect()
@@ -630,6 +691,7 @@ impl Editor {
             .gap_1();
         for (i, marker) in self.project.markers().iter().enumerate() {
             let (id, time) = (marker.id, marker.time);
+            let is_selected = self.marker_selection.contains(&id);
             let label = if marker.name.is_empty() {
                 timecode::format_timecode(marker.time, rate)
             } else {
@@ -644,6 +706,8 @@ impl Editor {
                     .flex()
                     .gap_1()
                     .items_center()
+                    .rounded(px(3.))
+                    .when(is_selected, |row| row.bg(theme.accent))
                     .child(
                         div()
                             .size(px(10.))
@@ -656,7 +720,11 @@ impl Editor {
                             .ghost()
                             .compact()
                             .label(label)
-                            .on_click(cx.listener(move |this, _, _, cx| this.seek_to(time, cx))),
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.clear_selection();
+                                this.marker_selection.insert(id);
+                                this.seek_to(time, cx);
+                            })),
                     )
                     .child(
                         Button::new(("marker-edit", i))
@@ -748,6 +816,26 @@ pub(super) fn paint_markers(
             Bounds::new(point(left, bounds.top()), size(px(1.5), px(RULER_H - 4.0))),
             marker.color,
         ));
+        if marker.selected {
+            // A light outline around the flag and a thicker line mark the selection.
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(left - px(1.0), bounds.top()),
+                    size(px(3.5), px(height)),
+                ),
+                style::hex(style::color::TEXT).opacity(0.45),
+            ));
+            window.paint_quad(
+                fill(
+                    Bounds::new(
+                        point(left - px(1.0), bounds.top() - px(1.0)),
+                        size(px(FLAG_W + 2.0), px(FLAG_H + 2.0)),
+                    ),
+                    style::hex(style::color::TEXT),
+                )
+                .corner_radii(px(3.0)),
+            );
+        }
         window.paint_quad(
             fill(
                 Bounds::new(point(left, bounds.top()), size(px(FLAG_W), px(FLAG_H))),

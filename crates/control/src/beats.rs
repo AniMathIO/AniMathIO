@@ -1,7 +1,7 @@
 //! Beat analysis and beat/marker sync. Analysis never mutates the project; every action
 //! builds one `Command::Batch` (a single undo step) from the analysed beat times.
 
-use crate::{ControlError, autocut::resolve_selection};
+use crate::{ControlError, SourceLimits, autocut::resolve_selection};
 use animathio_audio::{BeatParams, detect_beats, downbeat_indices};
 use animathio_core::{
     AssetId, Clip, ClipId, Command, FrameRate, Marker, MarkerColor, Project, Rounding,
@@ -397,6 +397,7 @@ pub fn sync_cuts_command(
     params: &SyncCutsParams,
     beats: &[Time],
     bpm: Option<f64>,
+    limits: &SourceLimits,
 ) -> Result<(Command, SyncCutsResult), ControlError> {
     if params.max_shift.0 < 0 || params.min_segment.0 < 0 {
         return Err(invalid("max_shift and min_segment must be nonnegative"));
@@ -432,6 +433,7 @@ pub fn sync_cuts_command(
             &reps,
             &targets,
             params.max_shift,
+            limits,
             &mut scratch,
             &mut commands,
             &mut result,
@@ -460,6 +462,7 @@ fn snap_cuts(
     reps: &[ClipId],
     targets: &[Time],
     max_shift: Time,
+    limits: &SourceLimits,
     scratch: &mut Project,
     commands: &mut Vec<Command>,
     result: &mut SyncCutsResult,
@@ -524,9 +527,17 @@ fn snap_cuts(
             }
         }
         let attempt = Command::Batch { commands: edit };
+        let touched: Vec<ClipId> = left.into_iter().chain(right).collect();
+        let snapshot = SourceLimits::snapshot(scratch, &touched);
         let outcome = match failure {
             Some(message) => Err(message),
-            None => attempt.apply(scratch).map_err(|e| e.0),
+            // An edit that would read past the end of the source media cannot fit: undo it
+            // on the scratch project and report it instead of emitting it.
+            None => attempt.apply(scratch).map_err(|e| e.0).and_then(|inverse| {
+                limits.verify(scratch, &snapshot).inspect_err(|_| {
+                    let _ = inverse.apply(scratch);
+                })
+            }),
         };
         match outcome {
             Ok(_) => {
@@ -702,6 +713,7 @@ pub fn apply_sync_cuts(
     history: &mut animathio_core::History,
     detection: Option<&BeatDetection>,
     params: &SyncCutsParams,
+    limits: &SourceLimits,
 ) -> Result<SyncCutsResult, ControlError> {
     let beats = match (params.source.needs_beats(), detection) {
         (true, Some(d)) => select_beats(d, params.selection)?
@@ -711,7 +723,8 @@ pub fn apply_sync_cuts(
         (true, None) => return Err(invalid("beat analysis is required for this source")),
         (false, _) => Vec::new(),
     };
-    let (command, result) = sync_cuts_command(project, params, &beats, detection.map(|d| d.bpm))?;
+    let (command, result) =
+        sync_cuts_command(project, params, &beats, detection.map(|d| d.bpm), limits)?;
     history.execute(project, &command)?;
     Ok(result)
 }

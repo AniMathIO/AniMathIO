@@ -166,6 +166,8 @@ impl Editor {
                 MenuItem::separator(),
                 MenuItem::action("Ripple all tracks", ToggleRippleScope)
                     .checked(self.ripple_scope == RippleScope::AllTracks),
+                MenuItem::action("Markers follow ripple", ToggleMarkerRipple)
+                    .checked(self.marker_ripple != animathio_core::MarkerRipple::Stay),
             ]),
             Menu::new("Clip").items([
                 MenuItem::action("Split at playhead", SplitClip).disabled(none_selected),

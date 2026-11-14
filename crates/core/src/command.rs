@@ -1,7 +1,8 @@
 use crate::{
     Animation, Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error,
-    FrameRate, Keyframe, Keyframes, Marker, MarkerId, Project, Target, Time, TimeRange, Track,
-    TrackId, Transform, Transition, TransitionId, invalid,
+    FrameRate, Keyframe, Keyframes, Marker, MarkerId, MarkerRipple, Project, Target, Time,
+    TimeRange, Track, TrackId, Transform, Transition, TransitionId, invalid,
+    ripple_marker_commands,
 };
 use serde::{Deserialize, Serialize};
 
@@ -329,6 +330,9 @@ pub enum Command {
         range: TimeRange,
         /// Close the gap by shifting later content left on every track.
         ripple: bool,
+        /// Whether markers follow a ripple (ignored without `ripple`).
+        #[serde(default)]
+        markers: MarkerRipple,
     },
     /// Ripple-remove a range on selected tracks. The selection must contain every
     /// linked companion's track; locked tracks are rejected atomically.
@@ -337,12 +341,20 @@ pub enum Command {
         range: TimeRange,
         /// Tracks to cut and ripple. Other tracks keep their positions.
         tracks: Vec<TrackId>,
+        /// Whether markers follow the ripple; `Auto` only when every track with content
+        /// after the cut is in `tracks`.
+        #[serde(default)]
+        markers: MarkerRipple,
     },
     /// Remove a clip and close the gap it leaves on its own track by shifting later
     /// clips on that track left by the clip's duration.
     RippleDelete {
         /// Clip identity.
         clip: ClipId,
+        /// Whether markers follow the ripple; `Auto` only when no other track has content
+        /// after the clip.
+        #[serde(default)]
+        markers: MarkerRipple,
     },
     /// Add a transition on the edit point between two adjacent clips of a track.
     AddTransition {
@@ -645,11 +657,22 @@ impl Command {
                 let commands = split_at_commands(project, times)?;
                 apply_generated(project, &commands)?
             }
-            Self::RemoveRange { range, ripple } => {
-                let commands = remove_range_commands(project, *range, *ripple, None)?;
+            Self::RemoveRange {
+                range,
+                ripple,
+                markers,
+            } => {
+                let mut commands = remove_range_commands(project, *range, *ripple, None)?;
+                if *ripple {
+                    commands.extend(marker_ripple_commands(project, *range, *markers, None));
+                }
                 apply_generated(project, &commands)?
             }
-            Self::RemoveRangeOnTracks { range, tracks } => {
+            Self::RemoveRangeOnTracks {
+                range,
+                tracks,
+                markers,
+            } => {
                 if tracks.is_empty() {
                     return Err(invalid("range selection has no tracks"));
                 }
@@ -675,11 +698,18 @@ impl Command {
                 }) {
                     return Err(invalid("range selection omits a linked companion track"));
                 }
-                let commands = remove_range_commands(project, *range, true, Some(tracks))?;
+                let mut commands = remove_range_commands(project, *range, true, Some(tracks))?;
+                commands.extend(marker_ripple_commands(
+                    project,
+                    *range,
+                    *markers,
+                    Some(tracks),
+                ));
                 apply_generated(project, &commands)?
             }
-            Self::RippleDelete { clip } => {
+            Self::RippleDelete { clip, markers } => {
                 let original = &project.tracks[clip_track_index(project, *clip)?].clips[clip];
+                let removed = original.range;
                 let mut ids = vec![*clip];
                 if let Some(group) = original.link_group {
                     ids.extend(
@@ -692,7 +722,9 @@ impl Command {
                     );
                 }
                 let mut commands = Vec::new();
+                let mut affected = Vec::new();
                 for id in ids {
+                    affected.push(project.tracks[clip_track_index(project, id)?].id);
                     commands.extend(ripple_delete_commands(project, id)?);
                 }
                 let mut moved: std::collections::BTreeSet<_> = commands
@@ -730,6 +762,12 @@ impl Command {
                         }
                     }
                 }
+                commands.extend(marker_ripple_commands(
+                    project,
+                    removed,
+                    *markers,
+                    Some(&affected),
+                ));
                 apply_generated(project, &commands)?
             }
             Self::AddTrack { track, index } => {
@@ -1753,6 +1791,21 @@ fn remove_range_commands(
         });
     }
     Ok(commands)
+}
+
+/// `UpdateMarker`s moving markers for a ripple that removed `range`. `affected` lists the
+/// rippled tracks (`None` = every track); see [`MarkerRipple`] for the rules.
+fn marker_ripple_commands(
+    project: &Project,
+    range: TimeRange,
+    mode: MarkerRipple,
+    affected: Option<&[TrackId]>,
+) -> Vec<Command> {
+    if mode.rides(project, range.start, affected) {
+        ripple_marker_commands(project, &[range])
+    } else {
+        Vec::new()
+    }
 }
 
 fn ripple_delete_commands(project: &Project, id: ClipId) -> Result<Vec<Command>, Error> {
