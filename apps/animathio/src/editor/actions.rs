@@ -194,11 +194,11 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
 /// Handlers live on the editor ancestor so menus and toolbars dispatch the
 /// same commands. Text entry always keeps its editing/navigation keys.
 pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
-    root.on_action(cx.listener(|this, _: &NewProject, _window, cx| {
-        this.new_project(cx);
+    root.on_action(cx.listener(|this, _: &NewProject, window, cx| {
+        this.replace_project(ReplaceProject::New, window, cx);
     }))
-    .on_action(cx.listener(|this, _: &OpenProject, _window, cx| {
-        this.open(cx);
+    .on_action(cx.listener(|this, _: &OpenProject, window, cx| {
+        this.replace_project(ReplaceProject::Open, window, cx);
     }))
     .on_action(cx.listener(|this, _: &SaveProject, _window, cx| {
         this.save(cx);
@@ -550,7 +550,9 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         this.ripple_delete_selection(cx);
     }))
     .on_action(cx.listener(|this, _: &Preferences, window, cx| this.open_preferences(window, cx)))
-    .on_action(cx.listener(|this, _: &ImportV1, _, cx| this.import_legacy(cx)))
+    .on_action(cx.listener(|this, _: &ImportV1, window, cx| {
+        this.replace_project(ReplaceProject::ImportV1, window, cx);
+    }))
     .on_action(cx.listener(|this, _: &ImportManim, window, cx| this.open_manim_import(window, cx)))
     .on_action(cx.listener(|this, _: &WriteOn, window, cx| this.open_write_on(window, cx)))
     .on_action(cx.listener(|this, _: &AutomaticCuts, _, cx| this.open_autocut(cx)))
@@ -579,7 +581,9 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     .on_action(cx.listener(|this, _: &GenerateSubtitles, window, cx| {
         this.open_subtitles_dialog(window, cx);
     }))
-    .on_action(cx.listener(|this, action: &OpenRecent, _, cx| this.open_path(&action.path, cx)))
+    .on_action(cx.listener(|this, action: &OpenRecent, window, cx| {
+        this.replace_project(ReplaceProject::Recent(action.path.clone()), window, cx);
+    }))
 }
 
 impl Editor {

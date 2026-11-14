@@ -270,7 +270,7 @@ impl Editor {
             self.assets.clone(),
             params,
             label,
-            self.path.clone(),
+            self.project_session,
             reply,
         )?;
         self.subtitle_job = Some(job);
@@ -291,7 +291,7 @@ impl Editor {
         let Some(result) = job.poll() else {
             return false;
         };
-        let same_project = job.project_path == self.path;
+        let same_project = job.project_session == self.project_session;
         let style = job.style.clone();
         let reply = job.reply.take();
         let outcome = result.and_then(|draft| {

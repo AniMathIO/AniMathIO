@@ -1,6 +1,6 @@
 //! User preferences, separate from the project and dock layout.
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -21,6 +21,26 @@ impl Default for Preferences {
     }
 }
 impl Preferences {
+    /// Where exports go by default: the configured folder, else the saved
+    /// project's folder, else the user's Videos (or home) folder. Never the
+    /// process working directory, which is `/` or `$HOME` from a launcher.
+    pub(crate) fn export_dir(&self, project: Option<&Path>) -> PathBuf {
+        if !self.export_folder.as_os_str().is_empty() {
+            return self.export_folder.clone();
+        }
+        if let Some(dir) = project
+            .and_then(Path::parent)
+            .filter(|dir| !dir.as_os_str().is_empty())
+        {
+            return dir.to_path_buf();
+        }
+        directories::UserDirs::new().map_or_else(PathBuf::new, |dirs| {
+            dirs.video_dir()
+                .unwrap_or_else(|| dirs.home_dir())
+                .to_path_buf()
+        })
+    }
+
     fn path() -> Option<PathBuf> {
         directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
             .map(|dirs| dirs.config_dir().join("preferences.json"))
@@ -46,6 +66,19 @@ impl Preferences {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exports_default_next_to_the_project_never_the_working_directory() {
+        let mut prefs = Preferences::default();
+        let project = Path::new("/projects/talk/talk.amio");
+        assert_eq!(prefs.export_dir(Some(project)), Path::new("/projects/talk"));
+        let unsaved = prefs.export_dir(None);
+        if directories::UserDirs::new().is_some() {
+            assert!(unsaved.is_absolute(), "{unsaved:?}");
+        }
+        prefs.export_folder = PathBuf::from("/renders");
+        assert_eq!(prefs.export_dir(Some(project)), Path::new("/renders"));
+    }
+
     #[test]
     fn preferences_round_trip_and_default_missing_fields() {
         let prefs: Preferences = serde_json::from_str("{}").unwrap();
