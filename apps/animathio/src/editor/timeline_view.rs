@@ -16,6 +16,21 @@ impl Editor {
         let layout = self.current_layout();
         if y < layout.ruler_height {
             self.selected_keyframe = None;
+            if let Some(id) = timeline::hit_marker(&layout, &self.project, x, y)
+                && let Some(marker) = self.project.marker(id)
+            {
+                if event.click_count >= 2 {
+                    self.open_marker_dialog(id, window, cx);
+                } else {
+                    self.gesture = Some(TimelineGesture::Marker(MarkerDrag {
+                        id,
+                        origin: marker.time,
+                        current: marker.time,
+                    }));
+                    cx.notify();
+                }
+                return;
+            }
             self.gesture = Some(TimelineGesture::Scrub);
             self.scrub_to(x, cx);
             return;
@@ -421,6 +436,17 @@ impl Editor {
                 cx.notify();
             }
             Some(TimelineGesture::Scrub) => self.scrub_to(x, cx),
+            Some(TimelineGesture::Marker(drag)) => {
+                let raw = timeline::x_to_time(&layout, x);
+                let snapped = if self.snapping {
+                    timeline::snap_marker(&layout, &self.project, drag.id, self.position, raw)
+                } else {
+                    None
+                };
+                drag.current = snapped.unwrap_or(raw);
+                self.snap_line = snapped;
+                cx.notify();
+            }
             Some(TimelineGesture::Overview) | None => {}
         }
     }
@@ -499,6 +525,28 @@ impl Editor {
                 }
             }
 
+            Some(TimelineGesture::Marker(drag)) => {
+                if drag.current == drag.origin {
+                    // A plain click on a marker parks the playhead on it.
+                    self.seek_to(drag.origin, cx);
+                } else if self
+                    .project
+                    .markers()
+                    .iter()
+                    .any(|m| m.id != drag.id && m.time == drag.current)
+                {
+                    self.error = Some("A marker already exists there".into());
+                } else {
+                    self.execute(
+                        &Command::MoveMarker {
+                            id: drag.id,
+                            time: drag.current,
+                        },
+                        cx,
+                    );
+                }
+                cx.notify();
+            }
             Some(TimelineGesture::Fade(fade)) => {
                 if let Some(command) = self
                     .find_clip(fade.clip_id)
@@ -849,6 +897,7 @@ impl Editor {
                         })
                         .collect()
                 }),
+            markers: self.marker_paints(),
             snap_line: self.snap_line,
             marquee: self.marquee_rect(),
             theme: cx.theme().clone(),

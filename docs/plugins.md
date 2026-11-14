@@ -521,10 +521,7 @@ formulas, not remaining resources. The query includes `ticks-per-second`,
 `max-shape-text-chars`, `max-shape-text-verbs`, `max-svg-input-bytes`,
 `max-svg-verbs`, `max-typeset-verbs`, `max-typeset-source-bytes`,
 `max-typeset-font-size-px`, `typeset-timeout-ms`, `max-log-message-bytes`,
-`max-log-entries`, `max-effects-per-plugin` (64: the most frame effects, and
-separately the most audio effects, one plugin may list; a longer listing is rejected at load).
-`max-effects-per-plugin` was added after the 1.0.0 freeze as a minor-compatible key, so a
-host older than that omits it: treat any missing key as "not reported", never as unlimited.
+`max-log-entries`.
 Limits may be lower in a custom host. Unknown keys must be ignored; a missing
 optional key does not authorize unbounded work. Fuel, memory and time limits
 remain enforced even if the guest never queries them.

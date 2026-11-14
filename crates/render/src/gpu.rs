@@ -176,7 +176,9 @@ impl GpuBackend {
                 Affine::IDENTITY,
                 &canvas,
             );
-            if clip.has_active_effects() {
+            if clip.effects.is_empty() {
+                self.draw_clip(transform, size, clip, pool, video)?;
+            } else {
                 // Effects run through the plugin processor on CPU pixels for now (WGSL
                 // ports are a follow-up): rasterize the clip alone, filter it, composite it.
                 let mut layer = self
@@ -186,8 +188,6 @@ impl GpuBackend {
                 let image = image_data(Arc::new(layer))?;
                 self.scene
                     .draw_image(&ImageBrush::new(image), Affine::IDENTITY);
-            } else {
-                self.draw_clip(transform, size, clip, pool, video)?;
             }
             self.scene.pop_layer();
         }

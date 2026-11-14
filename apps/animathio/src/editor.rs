@@ -10,8 +10,8 @@ use animathio_control::{
 };
 use animathio_core::{
     Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, Command, EffectId, FrameRate, History,
-    Interpolation, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange, Track,
-    TrackId, Transform, TransformProperty, evaluate,
+    Interpolation, MarkerId, Project, Rounding, Scene, TICKS_PER_SECOND, Target, Time, TimeRange,
+    Track, TrackId, Transform, TransformProperty, evaluate,
 };
 use animathio_plugin_api::PluginKind;
 use animathio_plugin_host::PluginHost;
@@ -46,11 +46,11 @@ mod dialogs;
 mod export_panel;
 mod fields;
 mod inspector_view;
+mod markers;
 mod media_pool;
 mod menus;
 mod playback_glue;
 mod project_io;
-mod reframe;
 mod start_screen;
 mod subtitles;
 mod support;
@@ -304,6 +304,21 @@ struct TrimDrag {
     ripple: bool,
 }
 
+/// Dragging a ruler marker; `current` is the (snapped) time under the pointer.
+struct MarkerDrag {
+    id: MarkerId,
+    origin: Time,
+    current: Time,
+}
+
+/// A marker as painted on the ruler (with any drag already applied).
+struct MarkerPaint {
+    time: Time,
+    end: Option<Time>,
+    color: Hsla,
+    name: String,
+}
+
 /// Dragging a fade handle: `current` is the fade length in ticks.
 struct FadeDrag {
     clip_id: ClipId,
@@ -319,6 +334,7 @@ enum TimelineGesture {
     Trim(TrimDrag),
     Fade(FadeDrag),
     Marquee(MarqueeDrag),
+    Marker(MarkerDrag),
 }
 
 /// A right-click context menu target on the timeline.
@@ -404,6 +420,7 @@ struct TimelineSnapshot {
     row_height: f32,
     marks: InOut,
     autocuts: Vec<(TimeRange, usize)>,
+    markers: Vec<MarkerPaint>,
     snap_line: Option<Time>,
     /// Rubber band in canvas coordinates: `(left, top, right, bottom)`.
     marquee: Option<(f32, f32, f32, f32)>,
@@ -465,8 +482,6 @@ pub(crate) struct Editor {
     history: History,
     assets: Arc<BTreeMap<AssetId, Vec<u8>>>,
     audio_generation: u64,
-    /// When a live parameter drag last handed the playback mixer a fresh project snapshot.
-    last_live_audio_sync: Option<Instant>,
     save_pending: bool,
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
@@ -512,7 +527,8 @@ pub(crate) struct Editor {
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
-    reframe_panel: Option<reframe::ReframePanel>,
+    /// The markers and beat-sync panel (see `editor/markers.rs`).
+    marker_panel: Option<markers::Panel>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
     last_export_tick: Instant,
@@ -596,7 +612,6 @@ impl Editor {
             history: History::default(),
             assets: Arc::new(assets),
             audio_generation: 0,
-            last_live_audio_sync: None,
             save_pending: false,
             pool,
             audio_ids,
@@ -636,7 +651,7 @@ impl Editor {
             subtitle_job: None,
             subtitle_panel_open: false,
             autocut_review: None,
-            reframe_panel: None,
+            marker_panel: None,
             pending_export: None,
             last_export_tick: Instant::now(),
             keyframe_drag: None,
@@ -723,10 +738,9 @@ impl Editor {
                             cx.notify();
                         }
                         this.autosave_tick(cx);
-                        // Background-job progress is redrawn at 4 Hz, not every frame.
+                        // Export progress is redrawn at 4 Hz, not every frame.
                         if (this.pump_export_queue()
-                            || (this.export_queue.is_busy()
-                                || this.reframe_panel.as_ref().is_some_and(|p| p.busy))
+                            || this.export_queue.is_busy()
                                 && this.last_export_tick.elapsed() >= Duration::from_millis(250))
                             && !this.is_start_screen()
                         {
@@ -837,13 +851,13 @@ impl Render for Editor {
         if let Some(panel) = self.export_queue_panel(cx) {
             root = root.child(panel);
         }
-        if let Some(panel) = self.reframe_view(cx) {
-            root = root.child(panel);
-        }
         if let Some(panel) = self.autocut_panel(cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.subtitle_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.marker_panel(cx) {
             root = root.child(panel);
         }
         if let Some(menu) = self.context_menu_dropdown(cx) {

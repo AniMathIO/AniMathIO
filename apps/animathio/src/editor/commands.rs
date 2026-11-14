@@ -80,6 +80,7 @@ impl Editor {
 
     pub(super) fn after_edit(&mut self, cx: &mut Context<Self>) {
         self.invalidate_autocut();
+        self.invalidate_beats();
         self.dirty = true;
         self.next_id = self.next_id.max(next_id(&self.project));
         self.prune_selection();

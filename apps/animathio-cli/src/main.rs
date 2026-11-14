@@ -1,7 +1,7 @@
 //! Headless project validation and deterministic PNG rendering.
 mod autocut;
+mod markers;
 mod mcp;
-mod reframe;
 mod transcribe;
 
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
@@ -27,20 +27,6 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Action {
-    /// List the bundled project templates.
-    Templates {
-        #[command(subcommand)]
-        action: TemplateAction,
-    },
-    /// Create a project from a bundled template.
-    New {
-        /// Bundled template id from templates list.
-        #[arg(long)]
-        template: String,
-        /// Destination .amio archive.
-        #[arg(short, long)]
-        output: PathBuf,
-    },
     /// Render one frame to PNG.
     Render {
         /// project.json (assets/<hash> alongside it), or a self-contained .amio.
@@ -133,10 +119,15 @@ enum Action {
         #[command(flatten)]
         args: autocut::AutocutArgs,
     },
-    /// Reframe video to portrait or square with offline subject tracking.
-    Reframe {
+    /// List, add or remove timeline markers.
+    Markers {
         #[command(flatten)]
-        args: reframe::ReframeArgs,
+        args: markers::MarkersArgs,
+    },
+    /// Detect tempo and beats offline; optionally add markers at the beats.
+    Beats {
+        #[command(flatten)]
+        args: markers::BeatsArgs,
     },
     /// List or download the local Whisper speech models.
     Models {
@@ -156,12 +147,6 @@ enum Action {
         project: Option<PathBuf>,
     },
 }
-#[derive(Subcommand)]
-enum TemplateAction {
-    /// Print template metadata and placeholder clip ids as JSON.
-    List,
-}
-
 #[derive(Args)]
 struct OutputSize {
     /// Overrides the project's output width.
@@ -212,22 +197,6 @@ fn main() -> ExitCode {
 #[allow(clippy::too_many_lines)]
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Action::Templates {
-            action: TemplateAction::List,
-        } => {
-            let manifests: Vec<_> = animathio_control::project_templates()?
-                .into_iter()
-                .map(|t| t.manifest)
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&manifests)?);
-        }
-        Action::New { template, output } => {
-            let template = animathio_control::project_templates()?
-                .into_iter()
-                .find(|t| t.manifest.id == template)
-                .ok_or("unknown template id")?;
-            save_amio(output, &template.project, &template.assets)?;
-        }
         Action::NewSample { output } => {
             let sample = sample::build()?;
             save_amio(output, &sample.project, &sample.assets)?;
@@ -355,7 +324,8 @@ fn run(cli: Cli) -> Result<()> {
         }
         Action::Transcribe { args } => transcribe::run(&args)?,
         Action::Autocut { args } => autocut::run(args)?,
-        Action::Reframe { args } => reframe::run(args)?,
+        Action::Markers { args } => markers::run_markers(args)?,
+        Action::Beats { args } => markers::run_beats(args)?,
         Action::Models { args } => transcribe::run_models(&args)?,
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

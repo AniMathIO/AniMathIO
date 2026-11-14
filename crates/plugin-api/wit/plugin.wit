@@ -248,7 +248,7 @@ interface host {
     /// max-audio-sample-rate, max-shape-text-chars, max-shape-text-verbs,
     /// max-svg-input-bytes, max-svg-verbs, max-typeset-verbs,
     /// max-typeset-source-bytes, max-typeset-font-size-px, typeset-timeout-ms,
-    /// max-log-message-bytes, max-log-entries, max-effects-per-plugin (added in 1.0.x).
+    /// max-log-message-bytes, max-log-entries.
     /// Keys and units are specified in docs/plugins.md; unknown keys are ignored.
     /// This reports policy, not remaining fuel or memory. Budgets reset per call.
     limits: func() -> list<tuple<string, u64>>;

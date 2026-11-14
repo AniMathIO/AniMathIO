@@ -107,9 +107,6 @@ const MAX_TYPESET_VERBS: usize = 200_000;
 const MAX_LOG_MESSAGE_BYTES: usize = 4 * 1024;
 /// Maximum retained log messages per store.
 const MAX_LOG_ENTRIES: usize = 1_000;
-/// Most effects one plugin may list (frame effects and audio effects are counted separately);
-/// longer listings are rejected at load.
-pub(crate) const MAX_EFFECTS_PER_PLUGIN: usize = 64;
 /// How often the epoch ticker advances the engine epoch.
 const EPOCH_TICK_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -2104,7 +2101,6 @@ impl SandboxLimits {
             ),
             ("max-log-message-bytes", MAX_LOG_MESSAGE_BYTES as u64),
             ("max-log-entries", MAX_LOG_ENTRIES as u64),
-            ("max-effects-per-plugin", MAX_EFFECTS_PER_PLUGIN as u64),
         ]
         .into_iter()
         .map(|(key, value)| (key.to_owned(), value))
@@ -2372,17 +2368,7 @@ mod abi_tests {
         let host = PluginHost::with_limits(cache.path(), limits).unwrap();
         let mut store = host.create_store(CapabilityGrants::default()).unwrap();
         let state = store.data_mut();
-        let reported = Host::limits(state);
-        assert!(reported.contains(&("max-audio-block-frames".into(), 123)));
-        // Keys are unique and the effect cap matches what load enforces.
-        assert!(reported.contains(&(
-            "max-effects-per-plugin".into(),
-            MAX_EFFECTS_PER_PLUGIN as u64
-        )));
-        let mut keys: Vec<_> = reported.iter().map(|(key, _)| key).collect();
-        keys.sort();
-        keys.dedup();
-        assert_eq!(keys.len(), reported.len());
+        assert!(Host::limits(state).contains(&("max-audio-block-frames".into(), 123)));
         let text = "a".repeat(MAX_SHAPE_TEXT_CHARS + 1);
         assert_eq!(
             Host::shape_text(state, text.clone(), 12.0)
