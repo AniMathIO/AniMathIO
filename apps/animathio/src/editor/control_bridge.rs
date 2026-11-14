@@ -512,6 +512,9 @@ impl Editor {
                     "subtitle generation is handled asynchronously".into(),
                 ));
             }
+            Call::ChaptersExport { params } => {
+                serde_json::to_value(animathio_control::export_chapters(&self.project, &params)?)?
+            }
             Call::SubtitlesExport { params } => {
                 serde_json::to_value(animathio_control::export_subtitles(&self.project, &params)?)?
             }

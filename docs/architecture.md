@@ -628,7 +628,30 @@ rendered off-thread and cached in editor session state by project canvas size.
   They change only through `Command::{AddMarker, RemoveMarker, MoveMarker, UpdateMarker}`
   (each returns its exact inverse, all work inside `Command::Batch`, and markers are never
   blocked by a locked track). **Schema 5** introduced the `markers` key (`format` migrates
-  4 → 5 without changes; a missing key means no markers). Ripple edits do not move markers.
+  4 → 5 without changes; a missing key means no markers).
+- **Ripple and markers.** `RemoveRange` (with `ripple`), `RemoveRangeOnTracks` and
+  `RippleDelete` carry a `markers: MarkerRipple` field (`auto`, `ride` or `stay`; absent =
+  `auto`, so older serialized commands keep working). When markers ride, the marker updates
+  are `UpdateMarker`s generated inside the same command, so one undo restores clips and
+  markers exactly. A marker at or after the end of the removed range moves left by its
+  length; a marker inside the range collapses onto the cut point (it is kept, never
+  deleted); a range marker that spans the cut shrinks by the removed length and one whose
+  end falls inside the range is clipped at the cut, becoming a point marker when nothing is
+  left. `auto` rides when no track outside the rippled set has content after the cut (so
+  always for `RemoveRange`, and for the all-track autocut), `stay` never does. The editor's
+  ripple delete and ripple trim (`ripple::delete_command` / `trim_command`) use the same
+  rule through `MarkerRipple::rides`, `ripple_marker_commands` and
+  `ripple_marker_insert_commands`; Timeline > "Markers follow ripple" switches `auto` to
+  `stay`.
+- **Source limits.** The core model is resource free and does not know how long a media asset
+  is, so it cannot refuse a clip that reads past its media. The control layer's
+  `SourceLimits` (probed durations) does: an edit may not push a video or audio clip's source
+  end (`source_offset + length`) further out than it was and past the end of its media (one
+  frame of slack). `HeadlessHandler` (CLI, MCP, socket) and the editor check every command
+  with `SourceLimits::guard` before running it, and `sync_cuts_command` checks every roll edit,
+  skipping and reporting the ones that cannot fit. Stills, generated clips and media whose
+  duration is unknown are unbounded; shortening, moving and splitting never extend a source.
+  New clips (`AddClip`) are not checked: importers place them with the probed duration.
 - **Beat detection** lives in `audio` (`detect_beats`, `downbeat_indices`): pure, offline
   and deterministic over mono samples, with no extra dependencies. Onset strength is a
   log-compressed spectral flux (a small radix-2 FFT), the tempo is the peak of an
@@ -646,8 +669,17 @@ rendered off-thread and cached in editor session state by project canvas size.
   the targets. Each builds one `Command::Batch`; edits that would overlap, collapse a clip or
   touch a locked track are skipped and reported. Edits are rounded to the frame grid unless
   `frame_align` is off.
+- **Chapters.** The control layer's `chapters` helper turns the markers into a chapter list
+  (a YouTube-style `M:SS Title` block, `WebVTT` chapters or FFmpeg `;FFMETADATA1`), shared by
+  the CLI (`markers chapters`, `export --chapters`), the control method `chapters.export` and
+  MCP `export_chapters`. The MP4 muxer (`filmcraft-isobmff`) has no chapter atom and patching
+  `moov` would shift every chunk offset, so chapters ship as sidecars; `ffmpeg -i v.mp4 -i
+  chapters.ffmeta -map_metadata 1 -codec copy out.mp4` embeds them without re-encoding.
 - **Editor.** The `markers` editor module owns the panel, the marker dialog and the ruler
   flags (painted by `support`); `timeline` makes markers snap targets and hit-tests them.
+  Markers are selected on the ruler (click, Shift/Ctrl-click toggles, drag moves the whole
+  selection); Delete removes, the arrow keys nudge by a frame (Shift: ten) and Ctrl+C /
+  Ctrl+V copy and paste them at the playhead. The pure plans live in `marker_edit`.
 
 Automatic cuts live in the control layer's `autocut` helper, shared by the editor,
 CLI and MCP. The legacy silence-trimming helper calls the same detector. Analysis

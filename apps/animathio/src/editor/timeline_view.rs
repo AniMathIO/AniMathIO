@@ -21,18 +21,37 @@ impl Editor {
             if let Some(id) = timeline::hit_marker(&layout, &self.project, x, y)
                 && let Some(marker) = self.project.marker(id)
             {
+                let origin = marker.time;
+                if event.modifiers.shift || event.modifiers.secondary(cx) {
+                    // Shift/Ctrl-click toggles membership without starting a drag.
+                    if self.marker_selection.is_empty() {
+                        // Fold a selected clip out of the way; markers and clips do not mix.
+                        self.clear_selection();
+                    }
+                    if !self.marker_selection.remove(&id) {
+                        self.marker_selection.insert(id);
+                    }
+                    cx.notify();
+                    return;
+                }
                 if event.click_count >= 2 {
                     self.open_marker_dialog(id, window, cx);
                 } else {
+                    if !self.marker_selection.contains(&id) {
+                        self.clear_selection();
+                        self.marker_selection.insert(id);
+                    }
                     self.gesture = Some(TimelineGesture::Marker(MarkerDrag {
                         id,
-                        origin: marker.time,
-                        current: marker.time,
+                        origin,
+                        current: origin,
+                        members: self.marker_selection.clone(),
                     }));
                     cx.notify();
                 }
                 return;
             }
+            self.marker_selection.clear();
             self.gesture = Some(TimelineGesture::Scrub);
             self.scrub_to(x, cx);
             return;
@@ -527,6 +546,7 @@ impl Editor {
                         trim.edge,
                         trim.current,
                         self.ripple_scope,
+                        self.marker_ripple,
                     )
                 } else {
                     editing::trim_command(
@@ -550,17 +570,15 @@ impl Editor {
                     .project
                     .markers()
                     .iter()
-                    .any(|m| m.id != drag.id && m.time == drag.current)
+                    .any(|m| !drag.members.contains(&m.id) && m.time == drag.current)
                 {
                     self.error = Some("A marker already exists there".into());
-                } else {
-                    self.execute(
-                        &Command::MoveMarker {
-                            id: drag.id,
-                            time: drag.current,
-                        },
-                        cx,
-                    );
+                } else if let Some(command) = crate::marker_edit::move_command(
+                    &self.project,
+                    &drag.members,
+                    drag.current.0 - drag.origin.0,
+                ) {
+                    self.execute(&command, cx);
                 }
                 cx.notify();
             }

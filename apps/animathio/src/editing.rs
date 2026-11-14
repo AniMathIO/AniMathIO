@@ -224,13 +224,16 @@ pub(crate) fn trim_command(
 pub(crate) fn ripple_delete_command(
     clip: Option<ClipId>,
     range: Option<TimeRange>,
+    markers: animathio_core::MarkerRipple,
 ) -> Option<Command> {
-    clip.map(|clip| Command::RippleDelete { clip }).or_else(|| {
-        range.map(|range| Command::RemoveRange {
-            range,
-            ripple: true,
+    clip.map(|clip| Command::RippleDelete { clip, markers })
+        .or_else(|| {
+            range.map(|range| Command::RemoveRange {
+                range,
+                ripple: true,
+                markers,
+            })
         })
-    })
 }
 
 /// Replace existing reveal animation with a deterministic two-key Write on preset.
@@ -299,17 +302,21 @@ mod tests {
     fn ripple_delete_uses_clip_or_explicit_range() {
         let range = TimeRange::new(Time(2), Time(4)).unwrap();
         assert_eq!(
-            ripple_delete_command(Some(ClipId(1)), Some(range)),
-            Some(Command::RippleDelete { clip: ClipId(1) })
-        );
-        assert_eq!(
-            ripple_delete_command(None, Some(range)),
-            Some(Command::RemoveRange {
-                range,
-                ripple: true
+            ripple_delete_command(Some(ClipId(1)), Some(range), Default::default()),
+            Some(Command::RippleDelete {
+                clip: ClipId(1),
+                markers: Default::default()
             })
         );
-        assert_eq!(ripple_delete_command(None, None), None);
+        assert_eq!(
+            ripple_delete_command(None, Some(range), Default::default()),
+            Some(Command::RemoveRange {
+                range,
+                ripple: true,
+                markers: Default::default(),
+            })
+        );
+        assert_eq!(ripple_delete_command(None, None, Default::default()), None);
     }
     #[test]
     fn write_on_replaces_keys_and_rejects_invalid_durations() {
@@ -501,7 +508,13 @@ mod tests {
             assert_eq!(project, original);
         }
         history
-            .execute(&mut project, &Command::RippleDelete { clip: ClipId(1) })
+            .execute(
+                &mut project,
+                &Command::RippleDelete {
+                    clip: ClipId(1),
+                    markers: Default::default(),
+                },
+            )
             .unwrap();
         assert_eq!(project.tracks()[0].clips()[&ClipId(2)].range.start, Time(0));
     }

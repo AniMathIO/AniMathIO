@@ -65,6 +65,10 @@ impl Editor {
         self.finish_color_edit(cx);
         let checked = self
             .check_effect_params(command)
+            .and_then(|()| {
+                self.source_limits
+                    .guard(&self.project, &self.assets, command)
+            })
             .map_err(animathio_core::Error);
         match checked.and_then(|()| self.history.execute(&mut self.project, command)) {
             Ok(()) => {
@@ -86,6 +90,7 @@ impl Editor {
         self.dirty = true;
         self.next_id = self.next_id.max(next_id(&self.project));
         self.prune_selection();
+        self.marker_selection = crate::marker_edit::existing(&self.project, &self.marker_selection);
         self.sync_audio(cx);
         let time = self.current_render_time();
         self.request_render(time);

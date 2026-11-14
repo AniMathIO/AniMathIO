@@ -184,3 +184,245 @@ fn palette_names_round_trip() {
     }
     assert_eq!(MarkerColor::parse("magenta"), None);
 }
+
+// --- ripple edits move markers --------------------------------------------------------
+
+fn two_track_project() -> Project {
+    let mut p = Project::default();
+    for (t, name) in [(1, "V"), (2, "A")] {
+        Command::AddTrack {
+            track: Track::new(TrackId(t), name),
+            index: (t - 1) as usize,
+        }
+        .apply(&mut p)
+        .unwrap();
+        Command::AddClip {
+            track: TrackId(t),
+            clip: Clip::new(
+                ClipId(t),
+                ClipKind::Plugin {
+                    plugin_id: "x".into(),
+                    params: serde_json::json!({}),
+                },
+                TimeRange::new(Time(0), Time(1000)).unwrap(),
+            ),
+        }
+        .apply(&mut p)
+        .unwrap();
+    }
+    for m in [
+        marker(1, 100),
+        marker(2, 300),
+        marker(3, 450),
+        marker(4, 700),
+    ] {
+        Command::AddMarker { marker: m }.apply(&mut p).unwrap();
+    }
+    let mut range_marker = marker(5, 250);
+    range_marker.duration = Some(Time(300)); // [250, 550) straddles the cut [300, 500)
+    Command::AddMarker {
+        marker: range_marker,
+    }
+    .apply(&mut p)
+    .unwrap();
+    p
+}
+fn cut(a: i64, b: i64) -> TimeRange {
+    TimeRange::new(Time(a), Time(b)).unwrap()
+}
+fn times(p: &Project) -> Vec<(u64, i64, Option<i64>)> {
+    let mut v: Vec<_> = p
+        .markers()
+        .iter()
+        .map(|m| (m.id.0, m.time.0, m.duration.map(|d| d.0)))
+        .collect();
+    v.sort_unstable();
+    v
+}
+fn exact_undo(project: &mut Project, command: &Command) -> Project {
+    let before = project.clone();
+    let mut history = History::default();
+    history.execute(project, command).unwrap();
+    let after = project.clone();
+    assert!(history.undo(project).unwrap());
+    assert_eq!(*project, before, "undo restores clips and markers exactly");
+    assert!(history.redo(project).unwrap());
+    assert_eq!(*project, after);
+    after
+}
+
+#[test]
+fn remove_range_ripple_moves_markers_and_undo_is_exact() {
+    let mut p = two_track_project();
+    let after = exact_undo(
+        &mut p,
+        &Command::RemoveRange {
+            range: cut(300, 500),
+            ripple: true,
+            markers: MarkerRipple::Auto,
+        },
+    );
+    assert_eq!(
+        times(&after),
+        [
+            (1, 100, None),      // before the cut: untouched
+            (2, 300, None),      // at the cut start: stays
+            (3, 300, None),      // inside the cut: collapsed onto it
+            (4, 500, None),      // after the cut: shifted by 200
+            (5, 250, Some(100)), // spanning range marker shrinks by 200 minus the clipped tail
+        ]
+    );
+}
+
+#[test]
+fn range_markers_are_clipped_and_collapse_to_points() {
+    let mut p = two_track_project();
+    let mut inside = marker(6, 320);
+    inside.duration = Some(Time(100)); // fully inside the cut
+    Command::AddMarker { marker: inside }.apply(&mut p).unwrap();
+    let mut crossing = marker(7, 400);
+    crossing.duration = Some(Time(300)); // [400, 700): starts inside, ends after
+    Command::AddMarker { marker: crossing }
+        .apply(&mut p)
+        .unwrap();
+    let after = exact_undo(
+        &mut p,
+        &Command::RemoveRange {
+            range: cut(300, 500),
+            ripple: true,
+            markers: MarkerRipple::Ride,
+        },
+    );
+    let by_id: std::collections::BTreeMap<_, _> = times(&after)
+        .into_iter()
+        .map(|(i, t, d)| (i, (t, d)))
+        .collect();
+    assert_eq!(by_id[&6], (300, None), "fully inside: a point at the cut");
+    assert_eq!(by_id[&7], (300, Some(200)), "start clamped, tail kept");
+}
+
+#[test]
+fn markers_stay_without_ripple_and_with_stay_and_when_other_tracks_have_content() {
+    let mut p = two_track_project();
+    let before = times(&p);
+    // No ripple: markers never move.
+    Command::RemoveRange {
+        range: cut(300, 500),
+        ripple: false,
+        markers: MarkerRipple::Ride,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(times(&p), before);
+    // Explicit Stay.
+    let mut p = two_track_project();
+    Command::RemoveRange {
+        range: cut(300, 500),
+        ripple: true,
+        markers: MarkerRipple::Stay,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(times(&p), before);
+    // Auto on one track while the other still has content after the cut: markers stay.
+    let mut p = two_track_project();
+    Command::RemoveRangeOnTracks {
+        range: cut(300, 500),
+        tracks: vec![TrackId(1)],
+        markers: MarkerRipple::Auto,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(times(&p), before);
+    // Ride overrides that.
+    let mut p = two_track_project();
+    Command::RemoveRangeOnTracks {
+        range: cut(300, 500),
+        tracks: vec![TrackId(1)],
+        markers: MarkerRipple::Ride,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(times(&p)[3], (4, 500, None));
+}
+
+#[test]
+fn ripple_delete_and_on_tracks_ride_when_all_tracks_are_affected() {
+    // Both tracks selected: Auto rides.
+    let mut p = two_track_project();
+    let after = exact_undo(
+        &mut p,
+        &Command::RemoveRangeOnTracks {
+            range: cut(300, 500),
+            tracks: vec![TrackId(1), TrackId(2)],
+            markers: MarkerRipple::Auto,
+        },
+    );
+    assert_eq!(times(&after)[3], (4, 500, None));
+
+    // RippleDelete of the only clip on a single-track project rides; with another track
+    // holding content after the clip it stays.
+    let mut single = Project::default();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "V"),
+        index: 0,
+    }
+    .apply(&mut single)
+    .unwrap();
+    for (id, a, b) in [(1, 0, 200), (2, 200, 600)] {
+        Command::AddClip {
+            track: TrackId(1),
+            clip: Clip::new(
+                ClipId(id),
+                ClipKind::Plugin {
+                    plugin_id: "x".into(),
+                    params: serde_json::json!({}),
+                },
+                cut(a, b),
+            ),
+        }
+        .apply(&mut single)
+        .unwrap();
+    }
+    Command::AddMarker {
+        marker: marker(1, 400),
+    }
+    .apply(&mut single)
+    .unwrap();
+    let after = exact_undo(
+        &mut single,
+        &Command::RippleDelete {
+            clip: ClipId(1),
+            markers: MarkerRipple::Auto,
+        },
+    );
+    assert_eq!(times(&after), [(1, 200, None)]);
+
+    let mut multi = two_track_project();
+    let before = times(&multi);
+    Command::RippleDelete {
+        clip: ClipId(1),
+        markers: MarkerRipple::Auto,
+    }
+    .apply(&mut multi)
+    .unwrap();
+    assert_eq!(
+        times(&multi),
+        before,
+        "track 2 still has content after the clip"
+    );
+}
+
+#[test]
+fn marker_ripple_serializes_with_a_default_for_old_commands() {
+    let old: Command =
+        serde_json::from_str(r#"{"RemoveRange":{"range":{"start":0,"end":10},"ripple":true}}"#)
+            .unwrap();
+    assert!(matches!(
+        old,
+        Command::RemoveRange {
+            markers: MarkerRipple::Auto,
+            ..
+        }
+    ));
+}
