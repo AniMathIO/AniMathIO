@@ -357,3 +357,7 @@ In the editor, Clip > Automatic cuts opens `apps/animathio/src/editor/autocut.rs
 worker, enabled ranges shade the affected timeline rows, and the panel offers sliders,
 per-range toggles, seek buttons, saved duration and Apply/Cancel. Edits invalidate the
 draft; Apply makes one undo entry. Cancel discards the draft and signals the worker.
+
+Project templates currently have a shared-library and CLI implementation. MCP template
+listing and creation are pending; use the CLI to create a project before opening it
+with the headless MCP server.
