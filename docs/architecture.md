@@ -81,7 +81,7 @@ Rules that keep the layers honest:
 
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
-`fields`, `audio_effects` (inspector audio-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
+`fields`, `audio_effects` (inspector audio-effect cards), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
@@ -205,7 +205,7 @@ Each rule exists because of a specific v1 failure, and each is enforced by a tes
 `SetTrackLocked`, `RenameTrack`, `MoveTrack`, `AddAsset`, `RemoveAsset`,
 `SetSettings`, `AddClip`, `RemoveClip`, `MoveClip`, `TrimClip`, `SplitClip`,
 `MergeClip`, `SetTransform`, `SetParam`, `AddEffect`, `RemoveEffect`,
-`SetEffectParam`, `SetEffectBypass`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
+`MoveEffect`, `SetEffectParam`, `SetEffectBypass`, `SetPluginParam`, `AddKeyframe`, `RemoveKeyframe`, `MoveKeyframe`,
 `AddTransition`, `RemoveTransition`, `SetTransitionDuration`, `AddMarker`, `RemoveMarker`,
 `MoveMarker`, `UpdateMarker`, `Batch`, `SplitAt`,
 `RemoveRange`, `RippleDelete`, plus the link-group variants `SetClipLink` and `RestoreClips`
@@ -475,6 +475,20 @@ effect keyframes, and reject unknown or out-of-range values. Undo/redo (`Exact`)
 so history can never block. A value that is already stored out of range (hand-edited or
 old project) is clamped to the declared range when the effect runs, with a warning, instead
 of failing every frame.
+
+The inspector's Effects section shows one editable card per effect (`editor/video_effects.rs`,
+built from the same card model as the audio-effect cards): a bypass switch, move up/down
+(`Command::MoveEffect`), remove (`RemoveEffect`, batched with `RemoveKeyframe` for a keyframed
+effect so one undo restores both), and for each declared parameter a slider over the plugin's
+`min..max`, a scrub label, typed entry, a reset-to-default button and a keyframe diamond.
+Edits are clamped to the declared range and go through `inspector::numeric_edit_command`: a
+keyframed parameter gets a `Target::Effect` keyframe at the playhead, otherwise `SetEffectParam`
+sets the base value. Slider and scrub drags preview live through `color_edit` (one undo step on
+release). The add buttons and the Effects library drop both use `add_effect_to_clip`. A card
+shows a warning when its plugin is not loaded or the last preview frame failed inside the
+clip's chain. Effect parameters are numeric in the plugin descriptor, so there are no colour,
+enum or bool controls yet. The timeline shows every keyframe of the selected clip, effect
+keyframes included.
 
 Rendering stays a pure function of the project. A backend rasterizes a clip with effects
 alone into a canvas-sized straight-alpha sRGB RGBA8 layer, then `render::effects` hands

@@ -16,6 +16,10 @@ pub(super) struct ParamRow {
     pub(super) step: f64,
     /// Stored value, else the plugin default, else 0 (before keyframe sampling).
     pub(super) value: f64,
+    /// The plugin's default, when it declares the parameter.
+    pub(super) default: Option<f64>,
+    /// The plugin's `(min, max)` UI range, when it declares the parameter.
+    pub(super) range: Option<(f64, f64)>,
 }
 
 /// What the inspector shows for one audio effect of a chain: title, bypass state, whether
@@ -49,6 +53,8 @@ pub(super) fn card_models(
                         label: p.label.clone(),
                         step: p.step,
                         value: instance.params.get(&p.id).copied().unwrap_or(p.default),
+                        default: Some(p.default),
+                        range: Some((p.min, p.max)),
                     })
                     .collect()
             });
@@ -59,6 +65,8 @@ pub(super) fn card_models(
                         label: name.clone(),
                         step: 0.01,
                         value: *value,
+                        default: None,
+                        range: None,
                     });
                 }
             }
@@ -349,6 +357,7 @@ impl Editor {
                 label,
                 step,
                 value,
+                ..
             } in model.params
             {
                 let value = match chain {

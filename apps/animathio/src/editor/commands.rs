@@ -189,6 +189,18 @@ impl Editor {
                 }
                 Err(_) => self.error = Some("invalid number".into()),
             },
+            InputTarget::VideoEffectParam { id, effect, name } => {
+                match buffer.trim().parse::<f64>() {
+                    Ok(value) => {
+                        if let Some(command) =
+                            self.video_effect_param_command(id, effect, &name, value)
+                        {
+                            self.execute(&command, cx);
+                        }
+                    }
+                    Err(_) => self.error = Some("invalid number".into()),
+                }
+            }
             InputTarget::PluginNumber { id, name } => {
                 let Ok(value) = buffer.trim().parse::<f64>() else {
                     self.error = Some("invalid number".into());
