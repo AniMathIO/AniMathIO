@@ -86,6 +86,11 @@ ANIMATHIO_PLUGIN_DIR=target/plugins scripts/virtual-display.sh --screenshot docs
 ```
 
 Don't use `spectacle`, `grim` or anything else that captures the user's session.
+The same goes for sound: the script exports `ANIMATHIO_AUDIO=none`, so the editor never
+opens the audio device and playback follows the wall clock, and it points PipeWire/Pulse
+clients at a server that doesn't exist. Never play audio on the maintainer's speakers:
+don't run the `play` example or the ignored device test unless asked, and use
+`ANIMATHIO_AUDIO=none` for any editor run outside the script.
 Vulkan (RADV) is available inside Xvfb. Benches there present through a software
 path, so report those numbers as "Xvfb" and don't compare them with
 native-compositor results.
