@@ -25,7 +25,7 @@ fi
 build_plugin() {
     local name="$1"
     echo ">> building plugin: ${name}"
-    CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only "${cargo_command[@]}" build \
+    CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-line-tables-only}" "${cargo_command[@]}" build \
         --manifest-path "plugins/${name}/Cargo.toml" \
         --target wasm32-wasip2 \
         --target-dir "$PWD/target" \
@@ -57,7 +57,7 @@ build_plugin import-manim
 
 # Compile the documented SDK example too. It is not a shipped plugin bundle, so
 # packaging still contains exactly the eight first-party plugins above.
-CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only "${cargo_command[@]}" build \
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-line-tables-only}" "${cargo_command[@]}" build \
     --manifest-path plugins/examples/hello/Cargo.toml \
     --target wasm32-wasip2 \
     --target-dir "$PWD/target" \
