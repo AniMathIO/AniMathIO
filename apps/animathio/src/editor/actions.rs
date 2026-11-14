@@ -40,7 +40,9 @@ actions!(
         PreviousMarker,
         NextMarker,
         ShowMarkers,
+        AutoReframe,
         NewProject,
+        SaveTemplate,
         OpenProject,
         SaveProject,
         ImportMedia,
@@ -195,7 +197,10 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
 /// Handlers live on the editor ancestor so menus and toolbars dispatch the
 /// same commands. Text entry always keeps its editing/navigation keys.
 pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
-    root.on_action(cx.listener(|this, _: &NewProject, window, cx| {
+    root.on_action(cx.listener(|_, _: &SaveTemplate, window, cx| {
+        Editor::save_template_dialog(window, cx);
+    }))
+    .on_action(cx.listener(|this, _: &NewProject, window, cx| {
         this.replace_project(ReplaceProject::New, window, cx);
     }))
     .on_action(cx.listener(|this, _: &OpenProject, window, cx| {
@@ -556,6 +561,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &ImportManim, window, cx| this.open_manim_import(window, cx)))
     .on_action(cx.listener(|this, _: &WriteOn, window, cx| this.open_write_on(window, cx)))
+    .on_action(cx.listener(|this, _: &AutoReframe, _, cx| this.open_reframe(cx)))
     .on_action(cx.listener(|this, _: &AutomaticCuts, _, cx| this.open_autocut(cx)))
     .on_action(cx.listener(|this, _: &AutoDuck, _, cx| this.open_duck(cx)))
     .on_action(cx.listener(|this, _: &AddMarker, window, cx| {

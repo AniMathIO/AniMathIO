@@ -42,6 +42,23 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::Mutex;
 
+#[derive(Deserialize, JsonSchema)]
+struct CreateFromTemplate {
+    /// Catalog identity from `list_templates`.
+    template: String,
+    /// New .amio destination; existing files are refused.
+    output: String,
+    /// Placeholder clip id to replacement text.
+    #[serde(default)]
+    text: std::collections::BTreeMap<String, String>,
+    /// Placeholder clip id to media file path.
+    #[serde(default)]
+    media: std::collections::BTreeMap<String, String>,
+    /// Crop to fill the box; false contains the entire source.
+    #[serde(default)]
+    cover: bool,
+}
+
 /// Shared control backend: a connected editor or a headless project.
 pub(crate) type Backend = Box<dyn ControlHandler + Send>;
 
@@ -448,6 +465,16 @@ pub(crate) struct ApplyAutocuts {
     /// Exact proposal object returned by `propose_autocuts`. Toggle cuts[].enabled
     /// for review; range start/end and `total_saved` are integer timeline ticks.
     proposal: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct AutoReframe {
+    /// Target aspect: 9:16 (default), 1:1 or 4:5.
+    aspect: Option<String>,
+    /// Tracking smoothness in 0..=1 (default 0.5).
+    smoothness: Option<f64>,
+    /// Video clip ids; omitted or empty selects all video clips.
+    clips: Option<Vec<u64>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1731,6 +1758,28 @@ impl McpServer {
     }
 
     #[tool(
+        description = "Auto reframe video clips to 9:16, 1:1 or 4:5 using deterministic offline motion/contrast tracking. Changes the canvas and replaces selected videos' position/scale animation as one undo step; preserves opacity and effects. Unrotated unlocked videos only. No downloads. Returns the number of clips. Other layers keep their normalized transforms. Can take seconds to minutes."
+    )]
+    async fn auto_reframe(
+        &self,
+        Parameters(p): Parameters<AutoReframe>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::ReframeParams {
+            aspect: p.aspect.unwrap_or_else(|| "9:16".into()),
+            smoothness: p.smoothness.unwrap_or(0.5),
+            clips: p
+                .clips
+                .unwrap_or_default()
+                .into_iter()
+                .map(ClipId)
+                .collect(),
+        };
+        let mut backend = self.backend.lock().await;
+        let count = backend.auto_reframe(params).map_err(mcp_error)?;
+        tool_text(json!({"clips":count}))
+    }
+
+    #[tool(
         description = "Propose automatic silence cuts and optional Whisper filler/repeat cuts without changing the project. Returns a revision-bound proposal with integer-tick ranges, heuristic confidence and enabled toggles. Review and pass the proposal to apply_autocuts. Selected tracks and every linked companion ripple together; locked companions cause an error."
     )]
     async fn propose_autocuts(
@@ -2121,6 +2170,109 @@ impl McpServer {
             })
             .map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))
+    }
+
+    #[tool(
+        description = "List bundled and user project templates with labelled placeholder clip identities."
+    )]
+    async fn list_templates(&self) -> Result<CallToolResult, McpError> {
+        let catalog = animathio_control::template_catalog().map_err(mcp_error)?;
+        tool_text(json!(
+            catalog
+                .into_iter()
+                .map(|t| {
+                    let placeholders: Vec<_> = t
+                        .manifest
+                        .placeholders
+                        .iter()
+                        .map(|p| {
+                            json!({
+                                "clip": p.clip,
+                                "label": p.label,
+                                "accepts_text": t.accepts_text(p.clip),
+                            })
+                        })
+                        .collect();
+                    let mut manifest = json!(t.manifest);
+                    manifest["placeholders"] = json!(placeholders);
+                    manifest
+                })
+                .collect::<Vec<_>>()
+        ))
+    }
+
+    #[tool(
+        description = "Create a new portable .amio project from a catalog template and text/media placeholder maps. Refuses existing destinations; opens the created project in the current backend."
+    )]
+    async fn create_from_template(
+        &self,
+        Parameters(p): Parameters<CreateFromTemplate>,
+    ) -> Result<CallToolResult, McpError> {
+        let template = animathio_control::template_catalog()
+            .map_err(mcp_error)?
+            .into_iter()
+            .find(|t| t.manifest.id == p.template)
+            .ok_or_else(|| invalid("unknown template"))?;
+        let parse = |id: String| {
+            id.parse::<u64>()
+                .map(ClipId)
+                .map_err(|_| invalid("placeholder id must be an integer"))
+        };
+        let text = p
+            .text
+            .into_iter()
+            .map(|(id, text)| parse(id).map(|id| (id, text)))
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let media = p
+            .media
+            .into_iter()
+            .map(|(id, path)| {
+                let id = parse(id)?;
+                // Same rule as add_media: an existing regular file, canonicalized.
+                let path = animathio_control::validate_existing_file(std::path::Path::new(&path))
+                    .map_err(mcp_error)?;
+                Ok((
+                    id,
+                    animathio_control::MediaFill {
+                        path,
+                        cover: p.cover,
+                    },
+                ))
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let fill = template.fill(&text, &media).map_err(mcp_error)?;
+        let mut project = template.project.clone();
+        fill.command
+            .apply(&mut project)
+            .map_err(|e| invalid(&e.to_string()))?;
+        let mut assets = template.assets.clone();
+        assets.extend(fill.assets);
+        let requested = PathBuf::from(p.output);
+        if !requested
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("amio"))
+        {
+            return Err(invalid("output must be a .amio file"));
+        }
+        // Same rule as the other writers: the nearest existing ancestor must be a
+        // directory and an existing target must be a regular file (refused below).
+        animathio_control::validate_output_file(&requested).map_err(mcp_error)?;
+        let path = requested;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| invalid(&e.to_string()))?;
+        if let Err(error) = animathio_format::write_amio(file, &project, &assets) {
+            let _ = std::fs::remove_file(&path);
+            return Err(invalid(&error.to_string()));
+        }
+        self.backend
+            .lock()
+            .await
+            .handle(Call::ProjectOpen { path: path.clone() })
+            .map_err(mcp_error)?;
+        tool_text(json!({"path": path}))
     }
 
     #[tool(

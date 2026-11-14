@@ -250,7 +250,7 @@ fn pool_gc_and_missing_assets_are_explicit() {
     assert!(pool.is_empty());
 }
 #[test]
-fn symphonia_decodes_supported_fixtures_and_reports_opus() {
+fn symphonia_decodes_supported_fixtures_including_opus() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     for extension in ["wav", "mp3", "flac", "aac", "m4a", "ogg"] {
         let source = SymphoniaSource::open(root.join(format!("tone.{extension}"))).unwrap();
@@ -262,10 +262,12 @@ fn symphonia_decodes_supported_fixtures_and_reports_opus() {
         let slice = source.decode(range(14700, 14700 * 11)).unwrap();
         assert_eq!(slice.samples(), &pcm.samples()[1..11]);
     }
-    assert!(matches!(
-        SymphoniaSource::open(root.join("tone.opus")),
-        Err(Error::Unsupported(_))
-    ));
+    // Opus is decoded by the pure-Rust `filmcraft-opus` decoder.
+    let opus = SymphoniaSource::open(root.join("tone.opus")).unwrap();
+    let pcm = opus.decode_all().unwrap();
+    assert_eq!((pcm.rate(), pcm.channels()), (48_000, 1));
+    assert!(pcm.frames() >= 3000);
+    assert!(pcm.samples().iter().any(|s| s.abs() > 0.01));
 }
 #[test]
 fn resampling_compensates_delay_and_preserves_duration_and_channel_mapping() {
@@ -496,13 +498,17 @@ fn unsupported_surround_rebuild_keeps_previous_mixer_usable() {
     let mut pool = AudioPool::default();
     let good = pool.prepare(48_000, 2).unwrap();
     let id = AssetId::of(b"surround");
-    pool.insert(id, &Pcm::new(48_000, 6, vec![0.0; 60]).unwrap())
+    // 5.1 folds down now; ten unnamed positions have no downmix rule and stay rejected.
+    pool.insert(id.clone(), &Pcm::new(48_000, 6, vec![0.0; 60]).unwrap())
+        .unwrap();
+    assert!(pool.prepare(48_000, 2).is_ok());
+    pool.insert(id, &Pcm::new(48_000, 10, vec![0.0; 100]).unwrap())
         .unwrap();
     let error = pool
         .prepare(48_000, 2)
         .err()
-        .expect("surround must be rejected");
-    assert!(error.to_string().contains("6-channel audio to 2-channel"));
+        .expect("unnamed layouts must be rejected");
+    assert!(error.to_string().contains("10-channel"));
     let range = TimeRange::new(Time(0), Time(100)).unwrap();
     assert!(good.mix(&Project::default(), range).is_ok());
 }
@@ -513,5 +519,6 @@ fn mp4_companion_decodes_audio_instead_of_default_video_track() {
         include_bytes!("../../media/tests/fixtures/sample.mp4").to_vec(),
     )
     .unwrap();
-    assert!(source.pcm().frames() > 0);
+    assert!(source.info().frames > 0);
+    assert!(source.decode_all().unwrap().frames() > 0);
 }

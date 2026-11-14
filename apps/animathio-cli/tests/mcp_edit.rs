@@ -101,6 +101,7 @@ fn describe_cut_remove_batch_and_preset() {
         "ripple_delete",
         "trim_silence",
         "auto_subtitles",
+        "auto_reframe",
         "export_subtitles",
         "import_subtitles",
         "add_title",
@@ -222,6 +223,14 @@ fn describe_cut_remove_batch_and_preset() {
         before
     );
     session.json_tool("redo", json!({}));
+    assert_eq!(
+        session.json_tool("get_project_state", json!({}))["project"],
+        imported
+    );
+
+    let count = session.json_tool("auto_reframe", json!({"aspect":"9:16", "smoothness":0.7}));
+    assert_eq!(count["clips"], 1);
+    session.json_tool("undo", json!({}));
     assert_eq!(
         session.json_tool("get_project_state", json!({}))["project"],
         imported

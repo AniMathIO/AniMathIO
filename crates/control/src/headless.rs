@@ -460,6 +460,12 @@ impl ControlHandler for HeadlessHandler {
                     &params,
                 )?)?
             }
+            Call::AutoReframe { params } => serde_json::to_value(crate::auto_reframe(
+                &mut self.project,
+                &mut self.history,
+                &self.assets,
+                &params,
+            )?)?,
             Call::SubtitlesGenerate { params } => serde_json::to_value(crate::generate_subtitles(
                 &mut self.project,
                 &mut self.history,

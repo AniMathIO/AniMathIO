@@ -17,6 +17,8 @@ AniMathIO headless CPU renderer
 Usage: animathio-cli <COMMAND>
 
 Commands:
+  templates     List the bundled project templates
+  new           Create a project from a bundled template
   render        Render one frame to PNG
   render-seq    Render [from, to) frame indices to `frame_000000.png`, etc
   export        Export an offline H.264 + AAC MP4
@@ -29,6 +31,7 @@ Commands:
   duck          Lower music under speech with gain keyframes, as one undoable edit
   markers       List, add or remove timeline markers
   beats         Detect tempo and beats offline; optionally add markers at the beats
+  reframe       Reframe video to portrait or square with offline subject tracking
   models        List or download the local Whisper speech models
   new-sample    Write a three-second animated image/text/shape demo archive
   mcp           Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
@@ -544,6 +547,90 @@ Options:
           Print help
 ```
 <!-- /help:autocut -->
+
+## `templates`
+
+`animathio-cli templates list` prints the five bundled template manifests as JSON,
+including editable clip ids. These are six-second title compositions with no media.
+
+<!-- help:templates -->
+```text
+List the bundled project templates
+
+Usage: animathio-cli templates <COMMAND>
+
+Commands:
+  list  Print template metadata and placeholder clip ids as JSON
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+<!-- /help:templates -->
+
+## `new`
+
+Create an independent project with `animathio-cli new --template quote -o quote.amio`.
+The ids are `math_explainer`, `vertical_short`, `interview`, `quote` and `equation`.
+
+<!-- help:new -->
+```text
+Create a project from a bundled template
+
+Usage: animathio-cli new --template <TEMPLATE> --output <OUTPUT>
+
+Options:
+      --template <TEMPLATE>  Bundled template id from templates list
+  -o, --output <OUTPUT>      Destination .amio archive
+  -h, --help                 Print help
+```
+<!-- /help:new -->
+
+### Portable template directories
+
+A `.amiotemplate` directory contains a normal project.amio file and a `template.json`
+manifest: id, name, description, aspect, category, optional thumbnail filename and
+placeholders (clip id plus optional label). The only accepted thumbnail filename is
+`thumbnail.png`. This keeps project schema versioning independent of templates.
+The shared control library loads and saves these directories (save refuses to overwrite).
+Saving currently supports templates without thumbnails. All placeholder ids must exist
+and be unique. Text fills return one undoable batch, preserving timing, transforms,
+effects and animation. Media replacement, user library discovery, rendered thumbnails,
+launcher cards, File menu and MCP tools are deferred.
+
+## `reframe`
+
+Offline subject-following crop for video clips, with no model downloads. Changes
+the canvas to 9:16 (1080×1920), 1:1 (1080×1080) or 4:5 (1080×1350), replaces video
+position/scale animation, and saves a new `.amio`. The input is preserved unless
+explicitly chosen as the output with `--overwrite`. Repeat `--clip` to scope to
+video ids; omitted selects all videos. Higher `--smoothness` follows more slowly.
+Other layers keep their normalized transforms. Rotated videos and locked tracks
+are rejected. See [tracking limitations](mcp.md#auto-reframe).
+
+```sh
+animathio-cli reframe landscape.amio -o vertical.amio --aspect 9:16 --smoothness 0.6
+animathio-cli reframe landscape.amio -o square.amio --aspect 1:1 --clip 2
+```
+
+<!-- help:reframe -->
+```text
+Reframe video to portrait or square with offline subject tracking
+
+Usage: animathio-cli reframe [OPTIONS] --output <OUTPUT> <PROJECT>
+
+Arguments:
+  <PROJECT>  Input .amio or project.json
+
+Options:
+  -o, --output <OUTPUT>          Output .amio archive (input is preserved)
+      --aspect <ASPECT>          Target aspect: 9:16, 1:1 or 4:5 [default: 9:16] [possible values: 9:16, 1:1, 4:5]
+      --smoothness <SMOOTHNESS>  Tracking smoothness, 0..=1; higher follows more slowly [default: 0.5]
+      --clip <CLIPS>             Reframe only these video clip ids; repeat for multiple clips
+      --overwrite                Replace an existing output archive
+  -h, --help                     Print help
+```
+<!-- /help:reframe -->
 
 ## `duck`
 

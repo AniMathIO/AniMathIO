@@ -29,6 +29,8 @@ pub use ducking::{
     ClipDuck, DuckKey, DuckParams, DuckProposal, DuckResult, apply_duck, detect_voice_samples,
     duck_command, duck_envelope, merge_voice, propose_duck,
 };
+mod reframe;
+pub use reframe::{ReframeDraft, ReframeParams, analyse_reframe, auto_reframe, reframe_command};
 mod client;
 mod edit;
 mod effects;
@@ -84,4 +86,10 @@ pub use method::{
 pub use path::{read_bounded, validate_existing_file, validate_output_file};
 pub use server::{
     ControlServer, MAX_REQUEST_BYTES, RunningServer, SocketSpec, default_socket_spec,
+};
+
+mod templates;
+pub use templates::{
+    MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, delete_user_template,
+    project_templates, save_user_template, template_catalog, template_library_dir,
 };

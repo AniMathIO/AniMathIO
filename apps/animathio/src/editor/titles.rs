@@ -6,6 +6,9 @@ use animathio_control::{TitleAddParams, title_preset_command, title_presets};
 #[derive(Default)]
 pub(super) struct TitleLibrary {
     size: (u32, u32),
+    pub(super) templates_started: bool,
+    pub(super) template_manifests: Vec<animathio_control::TemplateManifest>,
+    pub(super) templates: BTreeMap<String, Arc<RenderImage>>,
     thumbnails: BTreeMap<String, Option<Arc<RenderImage>>>,
 }
 

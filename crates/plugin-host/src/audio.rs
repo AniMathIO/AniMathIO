@@ -101,8 +101,11 @@ impl AudioRuntime {
         let listed = instance
             .list_audio_effects(&mut *store)
             .map_err(|e| e.to_string())?;
-        if listed.len() > 64 {
-            return Err("too many audio effects (maximum 64)".into());
+        if listed.len() > crate::MAX_EFFECTS_PER_PLUGIN {
+            return Err(format!(
+                "too many audio effects (maximum {})",
+                crate::MAX_EFFECTS_PER_PLUGIN
+            ));
         }
         let effects = listed
             .into_iter()

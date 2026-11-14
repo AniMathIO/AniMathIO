@@ -192,6 +192,15 @@ pub enum Command {
         /// Effect identity.
         effect: EffectId,
     },
+    /// Move a video effect to another position in the clip's chain.
+    MoveEffect {
+        /// Clip identity.
+        id: ClipId,
+        /// Effect identity.
+        effect: EffectId,
+        /// New index in the chain after the move.
+        index: usize,
+    },
     /// Set or remove an effect parameter.
     SetEffectParam {
         /// Clip identity.
@@ -202,6 +211,15 @@ pub enum Command {
         name: String,
         /// New value; `None` removes it (only if not animated).
         value: Option<f64>,
+    },
+    /// Bypass or re-enable a clip's video effect without removing it.
+    SetEffectBypass {
+        /// Clip identity.
+        id: ClipId,
+        /// Effect identity.
+        effect: EffectId,
+        /// New bypass state.
+        bypass: bool,
     },
     /// Insert an audio effect into a clip's or track's ordered audio-effect chain.
     AddAudioEffect {
@@ -442,7 +460,9 @@ impl Command {
             | Self::SetParam { id, .. }
             | Self::AddEffect { id, .. }
             | Self::RemoveEffect { id, .. }
+            | Self::MoveEffect { id, .. }
             | Self::SetEffectParam { id, .. }
+            | Self::SetEffectBypass { id, .. }
             | Self::SetPluginParam { id, .. }
             | Self::AddKeyframe { id, .. }
             | Self::RemoveKeyframe { id, .. }
@@ -1038,6 +1058,24 @@ impl Command {
                     effect: removed,
                 }
             }
+            Self::MoveEffect { id, effect, index } => {
+                let clip = clip_mut(project, *id)?;
+                let from = clip
+                    .effects
+                    .iter()
+                    .position(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("effect missing"))?;
+                if *index >= clip.effects.len() {
+                    return Err(invalid("effect index out of bounds"));
+                }
+                let moved = clip.effects.remove(from);
+                clip.effects.insert(*index, moved);
+                Self::MoveEffect {
+                    id: *id,
+                    effect: *effect,
+                    index: from,
+                }
+            }
             Self::SetEffectParam {
                 id,
                 effect,
@@ -1045,6 +1083,13 @@ impl Command {
                 value,
             } => {
                 let clip = clip_mut(project, *id)?;
+                if value.is_none()
+                    && clip.animations.iter().any(|animation| {
+                        matches!(&animation.target, Target::Effect { effect: target, param } if target == effect && param == name)
+                    })
+                {
+                    return Err(invalid("effect parameter is animated"));
+                }
                 let instance = clip
                     .effects
                     .iter_mut()
@@ -1060,6 +1105,20 @@ impl Command {
                     effect: *effect,
                     name: name.clone(),
                     value: previous,
+                }
+            }
+            Self::SetEffectBypass { id, effect, bypass } => {
+                let clip = clip_mut(project, *id)?;
+                let instance = clip
+                    .effects
+                    .iter_mut()
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("effect missing"))?;
+                let previous = std::mem::replace(&mut instance.bypass, *bypass);
+                Self::SetEffectBypass {
+                    id: *id,
+                    effect: *effect,
+                    bypass: previous,
                 }
             }
             Self::AddAudioEffect {

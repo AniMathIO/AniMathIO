@@ -12,11 +12,13 @@ impl Editor {
     pub(super) fn reset_project_session(&mut self) {
         self.project_session = self.project_session.wrapping_add(1);
         self.color_edit = None;
+        self.last_live_audio_sync = None;
         self.marks = InOut::default();
         self.shuttle = Shuttle::default();
         self.autocut_review = None;
         self.duck_review = None;
         self.marker_panel = None;
+        self.reframe_panel = None;
         self.track_rename = None;
         self.gesture = None;
         self.keyframe_drag = None;
@@ -288,8 +290,11 @@ impl Editor {
         }
         let (kind, duration) = if media_type.starts_with("audio/") {
             if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
-                let duration = frames_to_ticks(source.pcm().frames(), source.pcm().rate())
-                    .max(TICKS_PER_SECOND);
+                let duration = frames_to_ticks(
+                    usize::try_from(source.info().frames).unwrap_or(usize::MAX),
+                    source.info().rate,
+                )
+                .max(TICKS_PER_SECOND);
                 self.pool
                     .insert(id.clone(), &source)
                     .map_err(|e| e.to_string())?;

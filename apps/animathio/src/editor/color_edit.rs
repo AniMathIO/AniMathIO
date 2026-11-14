@@ -2,13 +2,16 @@
 
 use super::*;
 
+/// Minimum time between live audio snapshots while a parameter is being dragged.
+const LIVE_AUDIO_SYNC_INTERVAL: Duration = Duration::from_millis(30);
+
 pub(super) struct ColorEdit {
     inverse: Command,
     latest: Command,
 }
 
 impl ColorEdit {
-    fn preview(
+    pub(super) fn preview(
         project: &mut Project,
         command: Command,
         edit: &mut Option<Self>,
@@ -25,7 +28,7 @@ impl ColorEdit {
         Ok(())
     }
 
-    fn commit(
+    pub(super) fn commit(
         self,
         project: &mut Project,
         history: &mut History,
@@ -48,7 +51,16 @@ impl Editor {
         }
         match ColorEdit::preview(&mut self.project, command, &mut self.color_edit) {
             Ok(()) => {
-                self.sync_audio(cx);
+                // Live scrub: the mix worker picks the new value up while the pointer is
+                // still down, throttled so a fast drag does not clone the project on every
+                // mouse move. The release always commits and syncs the final value.
+                if self
+                    .last_live_audio_sync
+                    .is_none_or(|at| at.elapsed() >= LIVE_AUDIO_SYNC_INTERVAL)
+                {
+                    self.last_live_audio_sync = Some(Instant::now());
+                    self.sync_audio(cx);
+                }
                 self.request_render(self.current_render_time());
                 cx.notify();
             }

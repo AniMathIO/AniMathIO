@@ -53,13 +53,16 @@ mod media_pool;
 mod menus;
 mod playback_glue;
 mod project_io;
+mod reframe;
 mod start_screen;
 mod subtitles;
 mod support;
+mod templates;
 mod timeline_thumbnails;
 mod timeline_view;
 mod titles;
 mod transport;
+mod video_effects;
 mod viewer;
 mod workspace;
 
@@ -181,6 +184,12 @@ enum InputTarget {
         id: ClipId,
         field: Field,
     },
+    /// Numeric parameter of one of a clip's video effects.
+    VideoEffectParam {
+        id: ClipId,
+        effect: EffectId,
+        name: String,
+    },
     /// Numeric parameter of one of a clip's audio effects.
     AudioEffectParam {
         chain: AudioChain,
@@ -221,6 +230,7 @@ impl InputTarget {
                 | Self::PluginNumber { .. }
                 | Self::PluginPoint { .. }
                 | Self::AudioEffectParam { .. }
+                | Self::VideoEffectParam { .. }
         )
     }
 }
@@ -487,6 +497,8 @@ pub(crate) struct Editor {
     history: History,
     assets: Arc<BTreeMap<AssetId, Vec<u8>>>,
     audio_generation: u64,
+    /// When a live parameter drag last handed the playback mixer a fresh project snapshot.
+    last_live_audio_sync: Option<Instant>,
     save_pending: bool,
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
@@ -540,6 +552,7 @@ pub(crate) struct Editor {
     duck_review: Option<ducking::DuckReview>,
     /// The markers and beat-sync panel (see `editor/markers.rs`).
     marker_panel: Option<markers::Panel>,
+    reframe_panel: Option<reframe::ReframePanel>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
     last_export_tick: Instant,
@@ -623,6 +636,7 @@ impl Editor {
             history: History::default(),
             assets: Arc::new(assets),
             audio_generation: 0,
+            last_live_audio_sync: None,
             save_pending: false,
             pool,
             audio_ids,
@@ -666,6 +680,7 @@ impl Editor {
             autocut_review: None,
             duck_review: None,
             marker_panel: None,
+            reframe_panel: None,
             pending_export: None,
             last_export_tick: Instant::now(),
             keyframe_drag: None,
@@ -764,9 +779,10 @@ impl Editor {
                             cx.notify();
                         }
                         this.autosave_tick(cx);
-                        // Export progress is redrawn at 4 Hz, not every frame.
+                        // Background-job progress is redrawn at 4 Hz, not every frame.
                         if (this.pump_export_queue()
-                            || this.export_queue.is_busy()
+                            || (this.export_queue.is_busy()
+                                || this.reframe_panel.as_ref().is_some_and(|p| p.busy))
                                 && this.last_export_tick.elapsed() >= Duration::from_millis(250))
                             && !this.is_start_screen()
                         {
@@ -875,6 +891,9 @@ impl Render for Editor {
             .child(workspace);
         root = root.child(self.status_line(cx));
         if let Some(panel) = self.export_queue_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.reframe_view(cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.autocut_panel(cx) {
