@@ -831,7 +831,7 @@ impl Editor {
             frame_rate: self.project.frame_rate(),
             row_height: self.dock.track_height.pixels(),
             marks: self.marks,
-            autocuts: self
+            autocuts: [self
                 .autocut_review
                 .as_ref()
                 .and_then(|r| r.proposal.as_ref())
@@ -847,8 +847,12 @@ impl Editor {
                                 .filter(|(_, t)| p.tracks.contains(&t.id()))
                                 .map(move |(row, _)| (c.range, row))
                         })
-                        .collect()
-                }),
+                        .collect::<Vec<_>>()
+                })]
+            .into_iter()
+            .flatten()
+            .chain(self.duck_overlay())
+            .collect(),
             snap_line: self.snap_line,
             marquee: self.marquee_rect(),
             theme: cx.theme().clone(),

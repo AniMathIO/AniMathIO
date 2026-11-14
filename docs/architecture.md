@@ -380,7 +380,7 @@ DSP, and a port in `core` connects them.
   stereo, per second of audio on a shared development machine (debug profile, optimized
   dependencies; `cargo test -p animathio-plugin-host --features test-support --test
   audio_effects -- --ignored --nocapture bench_audio`): `gain` 1.3 ms, `highpass` 1.9 ms,
-  `eq3` 2.7 ms, `gate` 3.2 ms, `compressor` 3.7 ms, `voice_cleanup` 6.5 ms. Even a stack of
+  `eq3` 2.7 ms, `gate` 3.2 ms, `compressor` 3.7 ms, `voice_cleanup` 6.5 ms (`denoise`, added later, is the heaviest: one 512-point FFT pair per channel per 128 frames). Even a stack of
   every effect is well under 2 % of real time; the state warm-up adds about a third on top
   while a chain is played sequentially from a cold segment.
 
@@ -542,3 +542,14 @@ logic with explicit track scope and validates companion closure and locks. Rever
 ordered range commands are wrapped in one serializable batch for undo/redo.
 The editor's `autocut` module owns ephemeral review state, cancellable background
 analysis, sliders, per-cut toggles and timeline overlays.
+
+Auto-ducking (`crates/control/src/ducking.rs`) is control-layer analysis shared by the
+editor, CLI (`duck`) and MCP (`auto_duck`): voice activity from the autocut silence detector
+over the dry transcription mix, merged regions, then clip-local `gain` keyframes applied as
+one `Command::Batch` (see [Auto-ducking](mcp.md#auto-ducking)). The editor's `ducking` module owns
+the ephemeral review state (voice/music pickers, sliders, background analysis, timeline overlay of
+the ducked spans). The `denoise` audio effect is
+streaming spectral gating inside `org.animathio.audio-basic`; its noise profile is a
+per-bin minimum over ~1 s of smoothed power, so its memory is about as long as the mixer's
+state warm-up; whatever the warm-up leaves, the output stays a pure function of the project.
+It adds 512 frames of latency.

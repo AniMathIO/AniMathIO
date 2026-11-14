@@ -404,6 +404,14 @@ impl ControlHandler for HeadlessHandler {
                 &mut self.history,
                 &proposal,
             )?)?,
+            Call::ProposeDuck { params } => {
+                serde_json::to_value(crate::propose_duck(&self.project, &self.assets, &params)?)?
+            }
+            Call::ApplyDuck { proposal } => serde_json::to_value(crate::apply_duck(
+                &mut self.project,
+                &mut self.history,
+                &proposal,
+            )?)?,
             Call::TrimSilence { params } => serde_json::to_value(crate::trim_silence(
                 &mut self.project,
                 &mut self.history,

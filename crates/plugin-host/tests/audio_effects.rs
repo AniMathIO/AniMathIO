@@ -52,7 +52,7 @@ fn handle() -> impl AudioEffectProcessor {
 }
 
 #[test]
-fn host_lists_the_six_audio_effects_with_defaults() {
+fn host_lists_the_seven_audio_effects_with_defaults() {
     let host = test_support::host();
     let ids: Vec<_> = host
         .audio_effects()
@@ -68,7 +68,8 @@ fn host_lists_the_six_audio_effects_with_defaults() {
             "compressor",
             "gate",
             "highpass",
-            "voice_cleanup"
+            "voice_cleanup",
+            "denoise"
         ]
     );
     let compressor = host
@@ -177,7 +178,14 @@ fn state_carries_across_blocks_bit_exactly() {
         .zip(sine(6800.0, 0.4, 12_000, channels))
         .map(|(a, b)| a + b)
         .collect();
-    for id in ["eq3", "compressor", "gate", "highpass", "voice_cleanup"] {
+    for id in [
+        "eq3",
+        "compressor",
+        "gate",
+        "highpass",
+        "voice_cleanup",
+        "denoise",
+    ] {
         let fx = effect(id, &[]);
         let whole = handle.process(&fx, &block(&input, 2, 0), &[]).unwrap();
         let mut pieces = Vec::new();
@@ -335,6 +343,7 @@ fn bench_audio() {
         "gate",
         "highpass",
         "voice_cleanup",
+        "denoise",
     ] {
         let fx = effect(id, &[]);
         let run = || {

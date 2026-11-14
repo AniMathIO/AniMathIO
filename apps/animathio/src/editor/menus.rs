@@ -105,6 +105,7 @@ impl Editor {
                 MenuItem::action("Write on…", WriteOn),
                 MenuItem::action("Generate subtitles…", GenerateSubtitles),
                 MenuItem::action("Automatic cuts…", AutomaticCuts),
+                MenuItem::action("Auto duck…", AutoDuck),
             ]),
             Menu::new("Help").items([
                 MenuItem::action("Keyboard shortcuts…", KeyboardShortcuts),

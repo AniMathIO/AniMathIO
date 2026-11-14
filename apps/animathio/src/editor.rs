@@ -43,6 +43,7 @@ mod color_edit;
 mod commands;
 mod control_bridge;
 mod dialogs;
+mod ducking;
 mod export_panel;
 mod fields;
 mod inspector_view;
@@ -509,6 +510,7 @@ pub(crate) struct Editor {
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
+    duck_review: Option<ducking::DuckReview>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
     last_export_tick: Instant,
@@ -631,6 +633,7 @@ impl Editor {
             subtitle_job: None,
             subtitle_panel_open: false,
             autocut_review: None,
+            duck_review: None,
             pending_export: None,
             last_export_tick: Instant::now(),
             keyframe_drag: None,
@@ -831,6 +834,9 @@ impl Render for Editor {
             root = root.child(panel);
         }
         if let Some(panel) = self.autocut_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.duck_panel(cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.subtitle_panel(cx) {

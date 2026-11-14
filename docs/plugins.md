@@ -422,7 +422,7 @@ Projects reference an audio effect like a pixel effect (`EffectInstance { plugin
 params, bypass }`) on a clip's or a track's `audio_effects` chain; see
 [architecture.md](architecture.md#audio-effects) for the signal flow.
 
-First-party `org.animathio.audio-basic` provides (all processing in `f64`, block-size
+First-party `org.animathio.audio-basic` provides (arithmetic in `f64`, block-size
 independent, deterministic):
 
 | Effect id | Parameters (default) | Notes |
@@ -433,6 +433,7 @@ independent, deterministic):
 | `gate` | `threshold_db` (−50), `attack_ms` (2), `hold_ms` (50), `release_ms` (150), `range_db` (60) | Starts open; closes to `−range_db` below the threshold after the hold. |
 | `highpass` | `frequency` (80 Hz, 10…2000) | 2nd-order Butterworth, 12 dB/octave. |
 | `voice_cleanup` | `highpass_hz` (80), `gate_threshold_db` (−55), `deess_freq` (6.5 kHz), `deess_threshold_db` (−30), `deess_amount` (0.5) | Preset: high-pass, gentle 12 dB gate, then a split-band de-esser (Linkwitz-Riley crossover; only the band above `deess_freq` is attenuated). No spectral processing. |
+| `denoise` | `strength` (0.7, 0…1), `sensitivity_db` (6, 0…18), `smoothing` (0.6, 0…1) | Streaming spectral gating: 512-point STFT (hop 128, sqrt-Hann), noise profile learned continuously from the quietest frames (per-bin minimum of the smoothed power over the last ~1 s, no noise sample needed). A bin is attenuated by up to `40 dB × strength` while its power stays within `sensitivity_db` of that profile; the gain mask is smoothed across bins and in time (`smoothing` sets how slowly it closes) to avoid musical noise, and is shared by all channels. Latency is 512 frames: the signal is delayed by that much and the mixer's clip window cuts the last 512 frames of a clip. Up to 8 channels (state blob stays under 64 KiB). Silence stays exactly silent; `strength` 0 only delays. Needs about 125 ms of audio before it acts. |
 
 ## Building an `.amplugin`
 

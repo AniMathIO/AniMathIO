@@ -26,6 +26,7 @@ Commands:
   import-manim  Convert a Manim Community scene script to a `.amio` archive
   transcribe    Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
   autocut       Propose or apply silence and optional filler cuts as one ripple edit
+  duck          Lower music under speech with gain keyframes, as one undoable edit
   models        List or download the local Whisper speech models
   new-sample    Write a three-second animated image/text/shape demo archive
   mcp           Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
@@ -458,3 +459,49 @@ Options:
           Print help
 ```
 <!-- /help:autocut -->
+
+## `duck`
+
+Lower music under speech. Exactly one of `--dry-run` or `--apply` is required. The voice
+is given with `--voice-clip` and/or `--voice-track` (repeatable) and the music with one or
+more `--music-track`. Dry runs print the JSON proposal (voice regions, ducked spans and the
+per-clip gain keyframes in ticks) and leave the input untouched; `--apply` saves it
+atomically, or to `--output` (`--overwrite` replaces an existing archive). Clips that
+already carry gain keyframes are an error unless `--replace` is given. See
+[auto-ducking](mcp.md#auto-ducking) for how regions and ramps are built.
+
+```bash
+animathio-cli duck talk.amio --voice-track 1 --music-track 2 --dry-run
+animathio-cli duck talk.amio --voice-track 1 --music-track 2 --depth-db 15 --apply -o ducked.amio
+```
+
+<!-- help:duck -->
+```text
+Lower music under speech with gain keyframes, as one undoable edit
+
+Usage: animathio-cli duck [OPTIONS] --music-track <MUSIC_TRACKS> <PROJECT>
+
+Arguments:
+  <PROJECT>  Input project archive or project.json
+
+Options:
+      --voice-clip <VOICE_CLIPS>       Voice clip id; may be repeated (a video clip resolves its linked audio)
+      --voice-track <VOICE_TRACKS>     Voice track id; may be repeated
+      --music-track <MUSIC_TRACKS>     Music track id to duck; may be repeated, at least one is required
+      --depth-db <DEPTH_DB>            How far the music drops under speech, in dB [default: 12]
+      --attack <ATTACK>                Ramp down, finishing when the voice starts (seconds or Nticks) [default: 0.3]
+      --release <RELEASE>              Ramp up, starting when the voice ends (seconds or Nticks) [default: 0.5]
+      --min-gap <MIN_GAP>              Bridge voice gaps shorter than this (seconds or Nticks) [default: 0.4]
+      --threshold-db <THRESHOLD_DB>    Voice is absent below this dBFS level [default: -40]
+      --hysteresis-db <HYSTERESIS_DB>  Voice returns this many dB above the threshold [default: 3]
+      --from <FROM>                    Inclusive voice analysis start in seconds or Nticks (requires --to)
+      --to <TO>                        Exclusive voice analysis end in seconds or Nticks (requires --from)
+      --replace                        Overwrite existing gain keyframes on the music clips
+      --apply                          Apply the duck, saving atomically to the input unless --output is given
+      --dry-run                        Print the review proposal as JSON without saving changes
+  -o, --output <OUTPUT>                Save an edited archive here instead of changing the input
+      --overwrite                      Replace an existing output archive
+  -h, --help                           Print help
+```
+<!-- /help:duck -->
+

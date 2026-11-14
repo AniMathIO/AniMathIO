@@ -1,5 +1,6 @@
 //! Headless project validation and deterministic PNG rendering.
 mod autocut;
+mod duck;
 mod mcp;
 mod transcribe;
 
@@ -117,6 +118,11 @@ enum Action {
     Autocut {
         #[command(flatten)]
         args: autocut::AutocutArgs,
+    },
+    /// Lower music under speech with gain keyframes, as one undoable edit.
+    Duck {
+        #[command(flatten)]
+        args: duck::DuckArgs,
     },
     /// List or download the local Whisper speech models.
     Models {
@@ -313,6 +319,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Action::Transcribe { args } => transcribe::run(&args)?,
         Action::Autocut { args } => autocut::run(args)?,
+        Action::Duck { args } => duck::run(args)?,
         Action::Models { args } => transcribe::run_models(&args)?,
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

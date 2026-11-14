@@ -170,6 +170,20 @@ pub trait ControlHandler {
     ) -> Result<crate::TrimSilenceResult, ControlError> {
         from_value(self.handle(Call::ApplyAutocuts { proposal })?)
     }
+    /// Propose auto-ducking of music under speech without mutation.
+    fn propose_duck(
+        &mut self,
+        params: crate::DuckParams,
+    ) -> Result<crate::DuckProposal, ControlError> {
+        from_value(self.handle(Call::ProposeDuck { params })?)
+    }
+    /// Apply a reviewed duck proposal as one undo step.
+    fn apply_duck(
+        &mut self,
+        proposal: crate::DuckProposal,
+    ) -> Result<crate::DuckResult, ControlError> {
+        from_value(self.handle(Call::ApplyDuck { proposal })?)
+    }
     /// Detect silent audio and ripple-remove it, returning the removed ranges.
     fn trim_silence(
         &mut self,
