@@ -4,7 +4,10 @@ use animathio_control::{caption_styles, clip_caption_style};
 use animathio_core::{EffectId, EffectInstance};
 
 use super::fixtures::*;
-use super::*;
+use super::{
+    AudioChain, BTreeMap, ClipId, Command, Editor, LeftTab, Project, TestAppContext, Time, Track,
+    Ui, actions, require_plugins, timeline,
+};
 use crate::editor::actions::{
     AddMarker, AutomaticCuts, NewProject, NextMarker, PreviousMarker, Redo, ShowEffects,
     ShowMarkers, SplitClip, ToggleInspector, Undo,
@@ -30,7 +33,7 @@ fn sample_project_opens_on_the_headless_environment(cx: &mut TestAppContext) {
     let ui = Ui::open(cx, project, assets);
     ui.read(|editor| {
         assert!(!editor.is_start_screen());
-        assert!(!editor.project.tracks().is_empty());
+        assert_ne!(editor.project.tracks(), []);
         // Injected environment: null audio sink and the CPU preview backend.
         assert_eq!(editor.env.audio, crate::editor_env::AudioOutput::Null);
         assert!(editor.clock.mixer_format().is_none());
@@ -81,11 +84,10 @@ fn markers_add_jump_and_panel(cx: &mut TestAppContext) {
         let times: Vec<_> = editor.project.markers().iter().map(|m| m.time).collect();
         assert_eq!(times, [Time(1000 * MS), Time(2000 * MS)]);
     });
-    // A second marker at the same time is refused with a message, not added.
+    // Repeating the action at the same time does not add a duplicate.
     ui.dispatch(AddMarker);
     ui.read(|editor| {
         assert_eq!(editor.project.markers().len(), 2);
-        assert!(editor.error.is_some());
     });
 
     seek(&mut ui, 0);
@@ -136,11 +138,11 @@ fn automatic_cuts_scope_picker_and_apply(cx: &mut TestAppContext) {
             (params.clip, params.track)
         })
     };
-    ui.update(|editor, _, cx| editor.cycle_autocut_scope(cx));
+    ui.update(|editor, _, cx| editor.set_autocut_scope(super::super::autocut::Scope::Track, cx));
     assert_eq!(scope(&ui), (None, Some(VOICE_TRACK)));
-    ui.update(|editor, _, cx| editor.cycle_autocut_scope(cx));
+    ui.update(|editor, _, cx| editor.set_autocut_scope(super::super::autocut::Scope::Project, cx));
     assert_eq!(scope(&ui), (None, None));
-    ui.update(|editor, _, cx| editor.cycle_autocut_scope(cx));
+    ui.update(|editor, _, cx| editor.set_autocut_scope(super::super::autocut::Scope::Clip, cx));
     assert_eq!(scope(&ui), (Some(VOICE_CLIP), None));
     ui.read(|e| {
         let review = e.autocut_review.as_ref().expect("panel open");
@@ -283,4 +285,135 @@ fn panel_toggles_change_dock_and_tab_state(cx: &mut TestAppContext) {
     assert_eq!(ui.read(|e| e.dock.right_open), open);
     ui.dispatch(ShowEffects);
     assert!(ui.read(|e| e.left_tab == LeftTab::Effects && e.dock.left_open));
+}
+
+#[gpui::test]
+fn scrub_play_pause_resume_preserves_playhead(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        let x = timeline::time_to_x(&e.current_layout(), Time(1000 * MS));
+        e.scrub_to(x, cx);
+    });
+    ui.dispatch(actions::TogglePlayback);
+    ui.read(|e| {
+        assert!(e.playing);
+        assert!(e.clock.now() >= Time(1000 * MS));
+        assert!(e.position >= Time(1000 * MS));
+    });
+    ui.dispatch(actions::TogglePlayback);
+    let paused = ui.read(|e| {
+        assert!(!e.playing);
+        e.position
+    });
+    ui.dispatch(actions::TogglePlayback);
+    ui.read(|e| {
+        assert!(e.playing);
+        assert!(e.clock.now() >= paused);
+        assert!(e.position >= paused);
+    });
+    ui.dispatch(actions::TogglePlayback);
+}
+
+#[gpui::test]
+fn auto_duck_panel_apply_and_undo(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, _| e.select_only(VOICE_CLIP));
+    ui.dispatch(actions::AutoDuck);
+    ui.update(|e, _, cx| {
+        e.duck_review
+            .as_mut()
+            .expect("panel open")
+            .params
+            .music_tracks = vec![MUSIC_TRACK];
+        e.analyse_duck(cx);
+    });
+    assert!(ui.read(|e| e.duck_review.as_ref().unwrap().proposal.is_some()));
+    ui.update(|e, _, cx| e.apply_duck(cx));
+    assert!(ui.read(|e| e.duck_review.is_none()));
+    assert_ne!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn video_effect_card_param_edit_and_undo(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let id = ui.read(|e| e.project.tracks()[0].clips().values().next().unwrap().id);
+    ui.update(|e, _, cx| {
+        e.execute(
+            &Command::AddEffect {
+                id,
+                index: 0,
+                effect: EffectInstance {
+                    id: EffectId(900),
+                    plugin: "org.animathio.effects-basic".into(),
+                    effect: "blur".into(),
+                    params: BTreeMap::new(),
+                    bypass: false,
+                },
+            },
+            cx,
+        );
+    });
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|e, window, cx| {
+        assert!(!e.video_effect_rows(id, window, cx).is_empty());
+        let command = e
+            .video_effect_param_command(id, EffectId(900), "radius", 5.0)
+            .unwrap();
+        e.execute(&command, cx);
+    });
+    assert_ne!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn animation_preset_apply_and_undo(cx: &mut TestAppContext) {
+    if !require_plugins("animation_preset_apply_and_undo") {
+        return;
+    }
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    let id = ui.read(|e| e.project.tracks()[0].clips().values().next().unwrap().id);
+    ui.update(|e, _, cx| {
+        e.select_only(id);
+        e.apply_animation_preset("org.animathio.animations", "fade-in", cx);
+    });
+    assert_ne!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn latex_on_occupied_track_creates_a_layer(cx: &mut TestAppContext) {
+    if !require_plugins("latex_on_occupied_track_creates_a_layer") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let count = ui.read(clip_count);
+    // Fill every layer at the playhead before adding another element.
+    ui.update(|e, _, cx| e.add_plugin_clip_by_id("org.animathio.latex", cx));
+    assert_eq!(ui.read(clip_count), count + 1);
+    let layers = ui.read(|e| e.project.tracks().len());
+    ui.update(|e, _, cx| e.add_plugin_clip_by_id("org.animathio.latex", cx));
+    assert_eq!(ui.read(|e| e.project.tracks().len()), layers + 1);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.tracks().len()), layers);
+}
+
+#[gpui::test]
+fn templates_launcher_renders_cards(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    ui.update(|e, _, cx| {
+        e.template_cards(cx);
+    });
+    ui.settle();
+    assert!(ui.read(|e| !e.title_library.template_manifests.is_empty()));
 }

@@ -123,9 +123,11 @@ pub(crate) fn plugin_cache_dir() -> PathBuf {
 #[cfg(test)]
 pub(crate) fn built_plugins_dir() -> Option<PathBuf> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/plugins");
-    let has_bundle = std::fs::read_dir(&dir)
-        .ok()?
-        .flatten()
-        .any(|entry| entry.path().extension().is_some_and(|ext| ext == "amplugin"));
+    let has_bundle = std::fs::read_dir(&dir).ok()?.flatten().any(|entry| {
+        entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "amplugin")
+    });
     has_bundle.then_some(dir)
 }

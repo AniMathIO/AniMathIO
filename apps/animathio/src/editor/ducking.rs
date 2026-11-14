@@ -10,7 +10,7 @@ use gpui_component::{
 
 pub(super) struct DuckReview {
     identity: Arc<()>,
-    params: DuckParams,
+    pub(super) params: DuckParams,
     pub(super) proposal: Option<DuckProposal>,
     sliders: Vec<Entity<SliderState>>,
     _subscriptions: Vec<Subscription>,
@@ -104,7 +104,22 @@ impl Editor {
         self.analyse_duck(cx);
     }
 
-    fn analyse_duck(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn apply_duck(&mut self, cx: &mut Context<Self>) {
+        let proposal = self.duck_review.as_ref().and_then(|r| r.proposal.clone());
+        if let Some(p) = proposal {
+            match duck_command(&self.project, &p) {
+                Ok(command) => {
+                    if self.try_execute(&command, cx) {
+                        self.duck_review = None;
+                    }
+                }
+                Err(error) => self.error = Some(error.to_string()),
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn analyse_duck(&mut self, cx: &mut Context<Self>) {
         let Some(review) = self.duck_review.as_mut() else {
             return;
         };
@@ -415,19 +430,7 @@ impl Editor {
                         .label("Apply")
                         .disabled(!can_apply)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            let proposal =
-                                this.duck_review.as_ref().and_then(|r| r.proposal.clone());
-                            if let Some(p) = proposal {
-                                match duck_command(&this.project, &p) {
-                                    Ok(command) => {
-                                        if this.try_execute(&command, cx) {
-                                            this.duck_review = None;
-                                        }
-                                    }
-                                    Err(error) => this.error = Some(error.to_string()),
-                                }
-                            }
-                            cx.notify();
+                            this.apply_duck(cx);
                         })),
                 ),
         );

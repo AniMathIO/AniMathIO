@@ -13,7 +13,7 @@ use gpui_component::{
 /// What the review analyses: the selected clip, its track's mix, or the whole project
 /// (or the in/out range).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Scope {
+pub(super) enum Scope {
     Clip,
     Track,
     Project,
@@ -177,39 +177,11 @@ impl Editor {
         self.analyse_autocut(cx);
     }
 
-    /// Cycle the analysed audio: the selected clip, then its track's mix, then the project mix
-    /// (or the in/out range), and re-analyse.
-    pub(super) fn cycle_autocut_scope(&mut self, cx: &mut Context<Self>) {
-        let selected = self.selected.and_then(|id| self.find_clip(id));
-        let audio_id = selected.and_then(|c| {
-            if matches!(c.kind, animathio_core::ClipKind::Video(_)) {
-                self.project
-                    .tracks()
-                    .iter()
-                    .flat_map(|t| t.clips().values())
-                    .find(|a| {
-                        matches!(a.kind, animathio_core::ClipKind::Audio(_))
-                            && c.link_group.is_some()
-                            && a.link_group == c.link_group
-                    })
-                    .map(|a| a.id)
-            } else {
-                Some(c.id)
-            }
-        });
-        let track = audio_id.and_then(|id| {
-            self.project
-                .tracks()
-                .iter()
-                .find(|t| t.clips().contains_key(&id))
-                .map(Track::id)
-        });
-        if let Some(r) = self.autocut_review.as_mut() {
-            if r.params.clip.take().is_some() {
-                r.params.track = track;
-            } else if r.params.track.take().is_none() {
-                r.params.clip = self.selected;
-            }
+    pub(super) fn set_autocut_scope(&mut self, scope: Scope, cx: &mut Context<Self>) {
+        let track = self.selected_audio_track();
+        let selected = self.selected;
+        if let Some(review) = self.autocut_review.as_mut() {
+            scope.apply(&mut review.params, selected, track);
         }
         self.analyse_autocut(cx);
     }
@@ -351,12 +323,7 @@ impl Editor {
                     .selected(scope == current)
                     .label(scope.label())
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        let track = this.selected_audio_track();
-                        let selected = this.selected;
-                        if let Some(r) = this.autocut_review.as_mut() {
-                            scope.apply(&mut r.params, selected, track);
-                        }
-                        this.analyse_autocut(cx);
+                        this.set_autocut_scope(scope, cx);
                     })),
                 );
             }

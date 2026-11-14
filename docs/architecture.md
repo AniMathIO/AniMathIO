@@ -82,6 +82,12 @@ Rules that keep the layers honest:
 
 ## Desktop editor foundations
 
+`editor_env.rs` supplies production defaults and a headless test environment (monotonic
+playback clock, CPU preview, built plugins or no plugins, private settings/cache paths).
+`editor/ui_tests` mounts the real editor in gpui's test window and exercises actions and
+shared panel handlers, asserting project and view state without devices or pixel snapshots.
+
+
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `animations` (the inspector

@@ -64,9 +64,9 @@ mod timeline_thumbnails;
 mod timeline_view;
 mod titles;
 mod transport;
-mod video_effects;
 #[cfg(test)]
 mod ui_tests;
+mod video_effects;
 mod viewer;
 mod workspace;
 

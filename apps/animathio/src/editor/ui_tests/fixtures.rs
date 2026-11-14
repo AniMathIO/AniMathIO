@@ -110,7 +110,10 @@ pub(super) fn caption_command(project: &Project) -> Command {
     };
     subtitle_command(
         project,
-        &[cue(200, 1200, "Hello brave world"), cue(1500, 2500, "Plain cue")],
+        &[
+            cue(200, 1200, "Hello brave world"),
+            cue(1500, 2500, "Plain cue"),
+        ],
         &CaptionStyleParams::default(),
     )
     .expect("caption command")
