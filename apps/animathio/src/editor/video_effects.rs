@@ -119,7 +119,7 @@ impl Editor {
             let bypassed = model.bypassed;
             let warning = card_warning(&model, failed);
             let header = div()
-                .h(px(28.))
+                .h(gpui::rems(1.867))
                 .px_2()
                 .flex()
                 .flex_row()

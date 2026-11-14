@@ -495,6 +495,56 @@ impl Editor {
         }
     }
 
+    /// Ripple-trim the edit nearest the playhead to the playhead, Premiere's Q/W.
+    /// `anchor` (the context-menu clip) overrides the selection as the track to trim.
+    pub(super) fn ripple_trim_to_playhead(
+        &mut self,
+        anchor: Option<ClipId>,
+        side: ripple::TrimSide,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(command) = ripple::trim_to_playhead_command(
+            &self.project,
+            anchor.or(self.selected),
+            self.position,
+            side,
+            self.marker_ripple,
+        ) {
+            self.execute(&command, cx);
+        }
+    }
+
+    /// Apply the default transition (a 1 s fade in and out) to `ids`, or the whole
+    /// selection when `None`, as one undo step.
+    pub(super) fn apply_default_transition(
+        &mut self,
+        ids: Option<ClipId>,
+        kind: fades::TransitionKind,
+        cx: &mut Context<Self>,
+    ) {
+        let ids: BTreeSet<_> = match ids {
+            Some(id) => std::iter::once(id).collect(),
+            None => self.selected_ids(),
+        };
+        if let Some(command) = fades::default_transition_command(&self.project, &ids, kind) {
+            self.execute(&command, cx);
+        }
+    }
+
+    /// Context-menu anchors: ripple-trim on the clicked clip's track.
+    pub(super) fn ripple_trim_clip_previous(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.ripple_trim_to_playhead(Some(id), ripple::TrimSide::Previous, cx);
+    }
+
+    pub(super) fn ripple_trim_clip_next(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.ripple_trim_to_playhead(Some(id), ripple::TrimSide::Next, cx);
+    }
+
+    /// Context-menu default transition on the clicked clip, whatever its kind.
+    pub(super) fn default_transition_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.apply_default_transition(Some(id), fades::TransitionKind::Both, cx);
+    }
+
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
         self.finish_color_edit(cx);
         match self.history.undo(&mut self.project) {

@@ -25,9 +25,10 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
   saved separately from the project and applied when Save is pressed.
   `ANIMATHIO_UI_SCALE=150` overrides the saved percentage. Desktop default reads
   KDE forceFontDPI, Xresources Xft.dpi or GNOME text-scaling-factor, otherwise 100%.
-  GPUI output scaling still applies independently. Windows desktop text-scale
-  detection is deferred. Component rem spacing, panel rows and timeline track
-  heights follow UI scale; timeline time coordinates remain independent.
+  GPUI output scaling still applies independently. Windows reads the accessibility
+  text-size slider (`TextScaleFactor`); Linux reads KDE forceFontDPI, Xresources
+  Xft.dpi or GNOME text-scaling-factor. Component rem spacing, panel rows and
+  timeline track heights follow UI scale; timeline time coordinates remain independent.
 - **Spacing:** 4px grid. Panel padding 8–12. Control and panel row spacing follows the theme rem size.
 - **Motion:** 120–180ms ease-out for hover, selection, tab and panel changes, popovers
   and toasts (gpui `with_animation`). Nothing animates during playback except the

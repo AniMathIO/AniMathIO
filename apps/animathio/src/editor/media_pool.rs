@@ -768,7 +768,7 @@ impl Editor {
                                     .justify_center()
                                     .child(
                                         icons::icon(icon)
-                                            .size(px(26.))
+                                            .size(gpui::rems(1.733))
                                             .text_color(hex(color::CLIP_PLUGIN)),
                                     ),
                             )

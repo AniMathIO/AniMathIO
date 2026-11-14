@@ -376,8 +376,8 @@ impl Editor {
                     .child(
                         div()
                             .id(SharedString::from(format!("scrub-{key}")))
-                            .w(px(14.))
-                            .h(px(24.))
+                            .w(gpui::rems(0.933))
+                            .h(gpui::rems(1.6))
                             .flex()
                             .items_center()
                             .cursor_ew_resize()
@@ -923,7 +923,7 @@ impl Editor {
         _cx: &mut Context<Self>,
     ) -> Div {
         div()
-            .min_h(px(32.))
+            .min_h(gpui::rems(2.133))
             .flex()
             .flex_row()
             .items_center()
@@ -973,7 +973,7 @@ impl Editor {
     /// A `label ........ control` row without the keyframe column.
     pub(super) fn param_row_flush(label: impl IntoElement, control: impl IntoElement) -> Div {
         div()
-            .min_h(px(32.))
+            .min_h(gpui::rems(2.133))
             .flex()
             .flex_row()
             .items_center()
@@ -1331,13 +1331,13 @@ impl Editor {
         let muted = cx.theme().muted_foreground;
         let info = |label: &str, value: String| {
             div()
-                .h(px(24.))
+                .h(gpui::rems(1.6))
                 .px_2()
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(div().w(px(70.)).text_color(muted).child(label.to_owned()))
+                .child(div().w(gpui::rems(4.667)).text_color(muted).child(label.to_owned()))
                 .child(div().flex_1().min_w_0().truncate().child(value))
         };
         let header = div()

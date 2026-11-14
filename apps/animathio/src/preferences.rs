@@ -81,8 +81,47 @@ fn desktop_text_percent() -> f32 {
     *SCALE.get_or_init(detect_desktop_text_percent)
 }
 fn detect_desktop_text_percent() -> f32 {
+    windows_text_percent()
+        .or_else(unix_text_percent)
+        .unwrap_or(100.)
+}
+
+/// The Windows accessibility text-size slider (100–225%), stored as
+/// `TextScaleFactor` under `HKCU\Software\Microsoft\Accessibility`.
+#[cfg(windows)]
+fn windows_text_percent() -> Option<f32> {
+    let output = std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Accessibility",
+            "/v",
+            "TextScaleFactor",
+        ])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let raw = text
+        .lines()
+        .find_map(|line| line.split_whitespace().last())?;
+    let percent = if let Some(hex) = raw.strip_prefix("0x") {
+        i32::from_str_radix(hex, 16).ok()?
+    } else {
+        raw.parse::<i32>().ok()?
+    };
+    (90..=250).contains(&percent).then_some(percent as f32)
+}
+
+#[cfg(not(windows))]
+fn windows_text_percent() -> Option<f32> {
+    None
+}
+
+/// KDE `forceFontDPI`, `~/.Xresources` `Xft.dpi` or GNOME's `text-scaling-factor`,
+/// read straight from config files (no settings daemon).
+#[cfg(unix)]
+fn unix_text_percent() -> Option<f32> {
     let Some(home) = std::env::var_os("HOME") else {
-        return 100.;
+        return None;
     };
     let home = PathBuf::from(home);
     let config =
@@ -97,7 +136,7 @@ fn detect_desktop_text_percent() -> f32 {
                 .find_map(|line| line.trim().strip_prefix(key)?.trim().parse::<f32>().ok())
                 .filter(|dpi| dpi.is_finite() && *dpi > 0.)
         {
-            return dpi / 96. * 100.;
+            return Some(dpi / 96. * 100.);
         }
     }
     if std::env::var("XDG_CURRENT_DESKTOP")
@@ -119,9 +158,14 @@ fn detect_desktop_text_percent() -> f32 {
         && scale.is_finite()
         && scale > 0.
     {
-        return scale * 100.;
+        return Some(scale * 100.);
     }
-    100.
+    None
+}
+
+#[cfg(not(unix))]
+fn unix_text_percent() -> Option<f32> {
+    None
 }
 
 #[cfg(test)]

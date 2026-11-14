@@ -61,6 +61,24 @@ fn clip_menu_entries() -> Vec<ClipMenuEntry> {
             Editor::ripple_delete_clip,
         ),
         (
+            IconName::ArrowLeftToLine,
+            "Ripple trim previous to playhead",
+            Some(Box::new(RippleTrimPrevious)),
+            Editor::ripple_trim_clip_previous,
+        ),
+        (
+            IconName::ArrowRightToLine,
+            "Ripple trim next to playhead",
+            Some(Box::new(RippleTrimNext)),
+            Editor::ripple_trim_clip_next,
+        ),
+        (
+            IconName::Blend,
+            "Default transition (1 s fades)",
+            Some(Box::new(DefaultTransitions)),
+            Editor::default_transition_clip,
+        ),
+        (
             IconName::TrendingUp,
             "Fade in 1 s",
             None,
@@ -172,6 +190,12 @@ impl Editor {
             Menu::new("Clip").items([
                 MenuItem::action("Split at playhead", SplitClip).disabled(none_selected),
                 MenuItem::action("Link / unlink clips", UnlinkClips).disabled(none_selected),
+                MenuItem::action("Default video transition", DefaultVideoTransition)
+                    .disabled(none_selected),
+                MenuItem::action("Default audio transition", DefaultAudioTransition)
+                    .disabled(none_selected),
+                MenuItem::action("Ripple trim previous edit to playhead", RippleTrimPrevious),
+                MenuItem::action("Ripple trim next edit to playhead", RippleTrimNext),
                 MenuItem::action("Add effect", ShowEffects),
                 MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),
@@ -220,7 +244,7 @@ impl Editor {
                     .w_full()
                     .h_full()
                     .px_2()
-                    .child(img("brand.svg").size(px(30.)).flex_shrink_0())
+                    .child(img("brand.svg").size(gpui::rems(2.0)).flex_shrink_0())
                     .child(
                         div()
                             .flex_1()

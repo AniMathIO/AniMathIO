@@ -371,7 +371,7 @@ impl Editor {
                 .items_center()
                 .gap_1()
                 .px_2()
-                .h(px(22.))
+                .h(gpui::rems(1.467))
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(style::hex(style::color::PANEL))

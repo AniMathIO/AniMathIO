@@ -21,6 +21,8 @@ actions!(
         RippleTool,
         HandTool,
         RippleDelete,
+        RippleTrimPrevious,
+        RippleTrimNext,
         UnlinkClips,
         ToggleRippleScope,
         ToggleMarkerRipple,
@@ -66,6 +68,9 @@ actions!(
         GoToEnd,
         ToggleLoop,
         ToggleSnapping,
+        DefaultVideoTransition,
+        DefaultAudioTransition,
+        DefaultTransitions,
         ZoomIn,
         ZoomOut,
         ZoomToFit,
@@ -187,6 +192,14 @@ pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("secondary-k", Box::new(SplitClip), "Timeline"),
         ("secondary-shift-k", Box::new(SplitAllTracks), "Timeline"),
         ("secondary-l", Box::new(UnlinkClips), "Timeline"),
+        ("secondary-g", Box::new(UnlinkClips), "Timeline"),
+        ("q", Box::new(RippleTrimPrevious), "Timeline"),
+        ("q", Box::new(RippleTrimPrevious), "Viewer"),
+        ("w", Box::new(RippleTrimNext), "Timeline"),
+        ("w", Box::new(RippleTrimNext), "Viewer"),
+        ("secondary-d", Box::new(DefaultVideoTransition), "Timeline"),
+        ("secondary-shift-d", Box::new(DefaultAudioTransition), "Timeline"),
+        ("shift-d", Box::new(DefaultTransitions), "Timeline"),
         ("space", Box::new(TogglePlayback), "Viewer"),
         ("space", Box::new(TogglePlayback), "Timeline"),
         ("alt-left", Box::new(NudgeLeft), "Timeline"),
@@ -661,6 +674,41 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         this.ripple_delete_selection(cx);
+    }))
+    .on_action(cx.listener(|this, _: &RippleTrimPrevious, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.ripple_trim_to_playhead(None, ripple::TrimSide::Previous, cx);
+    }))
+    .on_action(cx.listener(|this, _: &RippleTrimNext, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.ripple_trim_to_playhead(None, ripple::TrimSide::Next, cx);
+    }))
+    .on_action(cx.listener(|this, _: &DefaultVideoTransition, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.apply_default_transition(None, fades::TransitionKind::Video, cx);
+    }))
+    .on_action(cx.listener(|this, _: &DefaultAudioTransition, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.apply_default_transition(None, fades::TransitionKind::Audio, cx);
+    }))
+    .on_action(cx.listener(|this, _: &DefaultTransitions, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.apply_default_transition(None, fades::TransitionKind::Both, cx);
     }))
     .on_action(cx.listener(|this, _: &Preferences, window, cx| this.open_preferences(window, cx)))
     .on_action(cx.listener(|this, _: &ImportV1, window, cx| {

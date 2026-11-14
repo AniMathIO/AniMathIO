@@ -57,10 +57,11 @@ pub(super) fn header_pill(
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     let tint_color = style::hex(tint);
+    let scale = style::ui_scale();
     div()
         .id(id)
-        .w(px(22.))
-        .h(px(20.))
+        .w(px(22. * scale))
+        .h(px(20. * scale))
         .flex_shrink_0()
         .flex()
         .items_center()

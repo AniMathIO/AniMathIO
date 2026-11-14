@@ -359,7 +359,7 @@ impl Editor {
                 let color = color.clone();
                 div()
                     .id(("marker-color", i))
-                    .size(px(20.))
+                    .size(gpui::rems(1.333))
                     .rounded_full()
                     .cursor_pointer()
                     .bg(paint_color(option))
@@ -714,7 +714,7 @@ impl Editor {
                     .when(is_selected, |row| row.bg(theme.accent))
                     .child(
                         div()
-                            .size(px(10.))
+                            .size(gpui::rems(0.667))
                             .flex_shrink_0()
                             .rounded_full()
                             .bg(paint_color(marker.color)),

@@ -263,6 +263,10 @@ splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later
 on the same track as one undo step. S toggles snapping and an engaged snap draws an
 accent line. Equals/minus zooms and backslash fits the timeline.
 Shift+Left/Right steps the playhead five frames; Ctrl/Cmd+Shift+K adds edits on all unlocked tracks.
+Q and W ripple-trim the previous/next edit to the playhead, Ctrl/Cmd+D applies the default
+transition (1 s fades) to the selection, Ctrl/Cmd+Shift+D to audio clips and Shift+D to both,
+and Ctrl/Cmd+G groups (links) a multi-selection. The full Premiere-style table lives in
+[docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md).
 Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
 tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
 waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
@@ -279,7 +283,11 @@ jobs one at a time with progress, ETA, cancel, show-in-folder/open and error tex
 announce completion or failure.
 File → Project settings edits resolution, rational fps and background. Preferences
 (Ctrl/Cmd+,) saves the preview renderer, autosave interval (0 disables), default export
-folder and density in the application config directory, separately from projects.
+folder, UI scale, density and reduced motion in the application config directory,
+separately from projects. Interface → UI scale defaults to the desktop's text scaling
+(KDE forceFontDPI/Xft.dpi, GNOME text-scaling-factor, Windows text-size slider), can be
+set to 80–200% in 10% steps and applies live; `ANIMATHIO_UI_SCALE=150` overrides it for
+a run.
 
 Drop OS media files on the pool to import assets, or on a timeline track to import
 and place them at that position. Multiple files are placed consecutively. The Plugins

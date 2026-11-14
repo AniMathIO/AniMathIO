@@ -1,77 +1,124 @@
 # Keyboard shortcuts
 
-The default uses Premiere Pro Windows/Linux shortcuts, with Ctrl mapped to Cmd
-on macOS. Based on [Adobe’s official default list](https://helpx.adobe.com/premiere-pro/using/keyboard-shortcuts.html).
-Help → Keyboard shortcuts (Ctrl+Alt+K) searches action names and key strings.
-Panel shortcuts pause while an input has focus. Menus and tooltips resolve hints
-from the same action bindings.
+AniMathIO 2.0 defaults to Adobe Premiere Pro's Windows/Linux shortcuts, with
+Ctrl mapped to Cmd (`secondary`) on macOS, following [Adobe's official default
+list](https://helpx.adobe.com/premiere-pro/using/keyboard-shortcuts.html).
+Help → Keyboard shortcuts (Ctrl+Alt+K) opens a searchable dialog over the same
+table. Panel shortcuts pause while a text input has focus; menu bar, context
+menus and tooltips resolve their hints from the same action bindings. Actions
+Premiere does not have keep a sensible non-conflicting key.
 
-| Action | Shortcut | Context |
-| --- | --- | --- |
-| Focus library / timeline / viewer / inspector / effects | `shift-1` / `shift-3` / `shift-4` / `shift-5` / `shift-7` | Editor |
-| ShuttleReverse | `j` | Timeline, Viewer |
-| ShuttleStop | `k` | Timeline, Viewer |
-| ShuttleForward | `l` | Timeline, Viewer |
-| PreviousEdit | `up` | Timeline, Viewer |
-| NextEdit | `down` | Timeline, Viewer |
-| GoToIn | `shift-i` | Timeline, Viewer |
-| GoToOut | `shift-o` | Timeline, Viewer |
-| MarkClip | `x` | Timeline |
-| MarkIn | `i` | Timeline, Viewer |
-| MarkOut | `o` | Timeline, Viewer |
-| ClearMarks | `Ctrl-shift-x` | Timeline, Viewer |
-| SelectTool | `v` | Timeline |
-| BladeTool | `c` | Timeline |
-| RippleTool | `b` | Timeline |
-| HandTool | `h` | Timeline |
-| RippleDelete | `shift-delete` | Timeline |
-| RippleDelete | `alt-backspace` | Timeline |
-| SelectAllClips | `Ctrl-a` | Timeline |
-| ClearSelection | `escape` | Timeline |
-| CopyClips | `Ctrl-c` | Timeline |
-| CutClips | `Ctrl-x` | Timeline |
-| PasteClips | `Ctrl-v` | Timeline |
-| DuplicateClips | `Ctrl-shift-/` | Timeline |
-| Preferences | `Ctrl-,` | Editor |
-| NewProject | `Ctrl-alt-n` | Editor |
-| OpenProject | `Ctrl-o` | Editor |
-| SaveProject | `Ctrl-s` | Editor |
-| ImportMedia | `Ctrl-i` | Editor |
-| ExportVideo | `Ctrl-m` | Editor |
-| Undo | `Ctrl-z` | Editor |
-| Redo | `Ctrl-shift-z` | Editor |
-| DeleteSelection | `delete` | Timeline |
-| SplitAllTracks | `Ctrl-shift-k` | Timeline |
-| SplitClip | `Ctrl-k` | Timeline |
-| UnlinkClips | `Ctrl-l` | Timeline |
-| TogglePlayback | `space` | Viewer, Timeline |
-| NudgeLeft / NudgeRight | `alt-left` / `alt-right` | Timeline |
-| PreviousFrame | `left` | Viewer, Timeline |
-| NextFrame | `right` | Viewer, Timeline |
-| BackFiveFrames | `shift-left` | Viewer, Timeline |
-| ForwardFiveFrames | `shift-right` | Viewer, Timeline |
-| GoToStart | `home` | Viewer, Timeline |
-| GoToEnd | `end` | Viewer, Timeline |
-| ToggleLoop | `alt-l` | Viewer, Timeline |
-| ToggleSnapping | `s` | Timeline |
-| AddMarker | `m` | Timeline, Viewer |
-| NextMarker | `shift-m` | Timeline, Viewer |
-| PreviousMarker | `Ctrl-shift-m` | Timeline, Viewer |
-| ZoomIn | `=` | Timeline |
-| ZoomOut | `-` | Timeline |
-| ZoomToFit | `\\` | Timeline |
-| LargerTracks | `Ctrl-alt-=` | Timeline |
-| SmallerTracks | `Ctrl-alt--` | Timeline |
-| FitViewer | `shift-f` | Viewer, Timeline |
-| KeyboardShortcuts | `Ctrl-alt-k` | Editor |
-| DeleteSelection | `backspace` | Timeline |
+## Tools (Timeline)
 
-Left/Right always step the playhead. Shift+Left/Right step five frames.
-Ctrl+L links selected clips, or unlinks the selected linked group.
-Alt+L is AniMathIO’s loop shortcut; Shift+F fits the viewer. Mark Clip uses
-the first clip under the playhead in track order. These marks are editor state.
+| Action | Shortcut |
+| --- | --- |
+| SelectTool | `v` |
+| BladeTool (razor) | `c` |
+| RippleTool (ripple edit) | `b` |
+| HandTool | `h` |
 
-Deferred: rolling/rate-stretch/slip/slide/zoom/track-select tools; ripple trim to playhead; default transition shortcuts; separate groups;
-paste attributes/insert; maximize panel; match frame; classic presets and
-user keymap files. Existing actions without a default shortcut remain available
-in menus and toolbars.
+## Edits
+
+| Action | Shortcut |
+| --- | --- |
+| SplitClip (Add Edit) | `Ctrl-k` |
+| SplitAllTracks (Add Edit to All Tracks) | `Ctrl-shift-k` |
+| RippleTrimPrevious (Q: ripple-trim previous edit to playhead) | `q` |
+| RippleTrimNext (W: ripple-trim next edit to playhead) | `w` |
+| RippleDelete | `shift-delete`, `alt-backspace` |
+
+Q/W act on the selected clip's track (the "targeted" track), else the track
+under the playhead: inside a clip the edge under the playhead ripple-trims; in a
+gap the segment between the playhead and the neighbouring edit closes, sliding
+later clips on that track left. Markers follow the ripple setting.
+
+## In / Out and markers
+
+| Action | Shortcut |
+| --- | --- |
+| MarkIn | `i` |
+| MarkOut | `o` |
+| GoToIn | `shift-i` |
+| GoToOut | `shift-o` |
+| MarkClip | `x` |
+| ClearMarks (Clear In and Out) | `Ctrl-shift-x` |
+| AddMarker | `m` |
+| NextMarker | `shift-m` |
+| PreviousMarker | `Ctrl-shift-m` |
+
+## Playback and navigation
+
+| Action | Shortcut |
+| --- | --- |
+| ShuttleReverse | `j` |
+| ShuttleStop | `k` |
+| ShuttleForward | `l` |
+| PreviousEdit | `up` |
+| NextEdit | `down` |
+| PreviousFrame | `left` |
+| NextFrame | `right` |
+| BackFiveFrames | `shift-left` |
+| ForwardFiveFrames | `shift-right` |
+| GoToStart | `home` |
+| GoToEnd | `end` |
+| TogglePlayback | `space` |
+| ToggleLoop | `alt-l` |
+
+## Zoom and panels
+
+| Action | Shortcut |
+| --- | --- |
+| ZoomIn (timeline) | `=` |
+| ZoomOut (timeline) | `-` |
+| ZoomToFit (timeline) | `\\` |
+| LargerTracks | `Ctrl-alt-=` |
+| SmallerTracks | `Ctrl-alt--` |
+| FocusLibrary (Premiere's Projects panel) | `shift-1` |
+| FocusTimeline | `shift-3` |
+| FocusViewer (Program Monitor) | `shift-4` |
+| FocusInspector (Effect Controls) | `shift-5` |
+| FocusEffects | `shift-7` |
+| FitViewer | `shift-f` |
+
+## Transitions, clips and selection
+
+| Action | Shortcut |
+| --- | --- |
+| DefaultVideoTransition (Ctrl+D family: 1 s fades, both edges) | `Ctrl-d` |
+| DefaultAudioTransition (audio crossfade) | `Ctrl-shift-d` |
+| DefaultTransitions (both kinds) | `shift-d` |
+| UnlinkClips (Link / Group: link or unlink the selection) | `Ctrl-l`, `Ctrl-g` |
+| ToggleSnapping | `s` |
+| SelectAllClips | `Ctrl-a` |
+| ClearSelection | `escape` |
+| CopyClips | `Ctrl-c` |
+| CutClips | `Ctrl-x` |
+| PasteClips | `Ctrl-v` |
+| DuplicateClips | `Ctrl-shift-/` |
+| DeleteSelection | `delete`, `backspace` |
+| NudgeLeft / NudgeRight | `alt-left` / `alt-right` |
+
+## Project, files and help
+
+| Action | Shortcut |
+| --- | --- |
+| NewProject | `Ctrl-alt-n` |
+| OpenProject | `Ctrl-o` |
+| SaveProject | `Ctrl-s` |
+| ImportMedia | `Ctrl-i` |
+| ExportVideo (Export Media) | `Ctrl-m` |
+| Preferences | `Ctrl-,` |
+| Undo | `Ctrl-z` |
+| Redo | `Ctrl-shift-z` |
+| KeyboardShortcuts | `Ctrl-alt-k` |
+
+Left/Right always step the playhead one frame; Shift+Left/Right step five.
+Alt+L keeps AniMathIO's loop shortcut (Premiere reuses Ctrl+L for Loop, which
+here is Link). Mark Clip sets in/out from the first clip under the playhead in
+track order; the marks are editor state.
+
+Deferred: rolling-edit, rate-stretch, slip, slide, zoom and track-select tools
+(we have no such tools yet); paste attributes and paste insert; lift/extract;
+maximize panel; match frame; a "classic AniMathIO" preset and user keymap
+files. Actions without a default shortcut stay available in menus, toolbars and
+the searchable shortcuts dialog.
