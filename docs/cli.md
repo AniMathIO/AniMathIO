@@ -269,7 +269,9 @@ whisper.cpp, built with `--features whisper` (needs cmake, a C++ compiler and li
 without it the command reports that this build has no engine. The Whisper model must be
 installed: pass `--download` to fetch a missing one (SHA-256 verified), or fetch it first
 with the `models` subcommand. With no `--srt`, `--vtt` or `--output`, the subtitles are
-printed as SRT.
+printed as SRT. `--style` picks the look of the caption clips added with `--output`:
+`classic` (default), `word-highlight`, `karaoke`, `pop`, `one-word` or `bold-outline`; the animated
+styles follow Whisper's per-word timings. `--position`, `--accent` and `--max-words` tune them.
 
 <!-- help:transcribe -->
 ```text
@@ -293,6 +295,10 @@ Options:
       --to <TO>                Project input only: exclusive end in decimal seconds or Nticks
       --max-chars <MAX_CHARS>  Longest subtitle line in characters
       --max-lines <MAX_LINES>  Most lines per subtitle
+      --style <STYLE>          Caption style for the clips added with `--output`: `classic` (default), `word-highlight`, `karaoke`, `pop`, `one-word` or `bold-outline` [default: classic]
+      --position <POSITION>    Caption placement: `top`, `middle` or `bottom` (style default when omitted)
+      --accent <ACCENT>        Accent colour of the active word, `#RRGGBB[AA]`
+      --max-words <MAX_WORDS>  Words per line for the caption style (0 fits the box width)
       --overwrite              Replace existing output files
   -h, --help                   Print help
 ```
@@ -302,6 +308,7 @@ Options:
 cargo build -p animathio-cli --features whisper
 animathio-cli transcribe talk.mp4 --download --srt talk.srt --vtt talk.vtt
 animathio-cli transcribe lesson.amio --language de --output lesson-subtitled.amio
+animathio-cli transcribe lesson.amio --style karaoke --position middle -o lesson-captions.amio
 ```
 
 ## `markers`

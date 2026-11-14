@@ -469,6 +469,71 @@ pub(crate) struct AutoSubtitles {
     pub(crate) max_chars_per_line: Option<usize>,
     /// Most lines per subtitle. Default 2.
     pub(crate) max_lines: Option<usize>,
+    /// Caption style: "classic" (default, white text on a translucent bar), "word-highlight"
+    /// (active word on an accent pill), "karaoke" (words fill with the accent colour),
+    /// "pop" (active word scales up), "one-word" (one big word at a time) or "bold-outline"
+    /// (big uppercase type with a thick outline, centred on 9:16). Word timings from the
+    /// recogniser drive the animation.
+    pub(crate) style: Option<String>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
+}
+
+/// Optional overrides of a caption style.
+#[derive(Deserialize, JsonSchema, Default)]
+pub(crate) struct CaptionLook {
+    /// Font size relative to the shorter canvas dimension (0.01-0.2; style default, about 0.04-0.06).
+    pub(crate) font_size: Option<f64>,
+    /// Text colour as "#RRGGBB" or "#RRGGBBAA". Default white.
+    pub(crate) color: Option<String>,
+    /// Colour of the active word (pill, fill or pop), "#RRGGBB[AA]". Default yellow.
+    pub(crate) accent: Option<String>,
+    /// Outline colour, "#RRGGBB[AA]". Default black.
+    pub(crate) outline: Option<String>,
+    /// "top", "middle" or "bottom" inside the safe area (style default: bottom; bold-outline
+    /// on a portrait canvas: middle).
+    pub(crate) position: Option<String>,
+    /// Words per line, 0 to fit the box width. Style default (bold-outline: 3).
+    pub(crate) max_words: Option<u32>,
+}
+
+impl CaptionLook {
+    fn style_params(
+        &self,
+        style: Option<&str>,
+    ) -> Result<animathio_control::CaptionStyleParams, McpError> {
+        let color = |text: &Option<String>| {
+            text.as_deref()
+                .map(animathio_control::parse_caption_color)
+                .transpose()
+                .map_err(mcp_error)
+        };
+        Ok(animathio_control::CaptionStyleParams {
+            style: style.unwrap_or("classic").to_owned(),
+            font_size: self.font_size,
+            color: color(&self.color)?,
+            accent: color(&self.accent)?,
+            outline: color(&self.outline)?,
+            position: self
+                .position
+                .as_deref()
+                .map(animathio_control::CaptionPosition::parse)
+                .transpose()
+                .map_err(mcp_error)?,
+            max_words: self.max_words,
+        })
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct SetCaptionStyle {
+    /// Style id: "classic", "word-highlight", "karaoke", "pop", "one-word" or "bold-outline".
+    pub(crate) style: String,
+    /// Numeric id of the track holding the captions; default: every track named "Subtitles*"
+    /// that has caption clips.
+    pub(crate) track: Option<u64>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -492,6 +557,10 @@ pub(crate) struct ImportSubtitles {
     /// Shift all cues by this many milliseconds (may be negative). Default 0.
     #[serde(default)]
     pub(crate) offset_ms: f64,
+    /// Caption style (see `auto_subtitles`); words are spread evenly over each cue.
+    pub(crate) style: Option<String>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -580,7 +649,7 @@ fn subtitle_result_json(result: &animathio_control::SubtitleResult) -> serde_jso
     json!({
         "language": result.language,
         "track": result.added.map(|a| a.track_id.0),
-        "background_track": result.added.map(|a| a.background_track_id.0),
+        "background_track": result.added.and_then(|a| a.background_track_id).map(|id| id.0),
         "first_clip": result.added.map(|a| a.first_clip.0),
         "cues": result.cues.iter().map(|c| json!({
             "from_ms": ticks_to_ms(c.start),
@@ -1839,7 +1908,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Generate subtitles (captions) for the project's audio with a fully local Whisper speech recogniser (no cloud). Mixes the audio of the project, or of one clip/track/range, transcribes it, splits the text into readable cues (max 2 lines, max_chars_per_line chars per line, 0.8-6 s each, no overlaps) and adds them as caption-bar text clips on a new \"Subtitles\" track with a background bar track, as one undo step. The model must be installed: if it is not, the call fails with instructions unless download_model is true (one-time 78-488 MB download, SHA-256 verified; ask the user first). Can take from seconds to minutes. Returns the language, the new track ids and the cues (with start/end in ms). Requires an app build with the whisper feature."
+        description = "Generate subtitles (captions) for the project's audio with a fully local Whisper speech recogniser (no cloud). Mixes the audio of the project, or of one clip/track/range, transcribes it, splits the text into readable cues (max 2 lines, max_chars_per_line chars per line, 0.8-6 s each, no overlaps) and adds them as caption text clips on a new \"Subtitles\" track (with a background bar track for the default \"classic\" style) as one undo step. Pass `style` for an animated CapCut-style caption (word-highlight, karaoke, pop, one-word, bold-outline); the recogniser's per-word timings drive the animation. The model must be installed: if it is not, the call fails with instructions unless download_model is true (one-time 78-488 MB download, SHA-256 verified; ask the user first). Can take from seconds to minutes. Returns the language, the new track ids and the cues (with start/end in ms). Requires an app build with the whisper feature."
     )]
     async fn auto_subtitles(
         &self,
@@ -1862,10 +1931,27 @@ impl McpServer {
                 max_lines: p.max_lines,
                 ..animathio_control::SubtitleSplit::default()
             },
+            style: p.look.style_params(p.style.as_deref())?,
         };
         let mut backend = self.backend.lock().await;
         let result = backend.subtitles_generate(params).map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))
+    }
+
+    #[tool(
+        description = "Restyle existing caption clips (from auto_subtitles or import_subtitles) as one undo step: style (classic, word-highlight, karaoke, pop, one-word, bold-outline), font_size, colours, position (top, middle, bottom, safe-area aware) and max_words per line. Applies to every caption on the track (default: all \"Subtitles*\" tracks); adds or removes the background bars as the style needs. Returns the style and the number of captions changed."
+    )]
+    async fn set_caption_style(
+        &self,
+        Parameters(p): Parameters<SetCaptionStyle>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::SubtitleStyleParams {
+            track: p.track.map(TrackId),
+            style: p.look.style_params(Some(&p.style))?,
+        };
+        let mut backend = self.backend.lock().await;
+        let result = backend.subtitles_style(params).map_err(mcp_error)?;
+        tool_text(json!({ "style": result.style, "captions": result.captions }))
     }
 
     #[tool(
@@ -1894,7 +1980,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Import an SRT or WebVTT file as caption clips on a new \"Subtitles\" track (same look as auto_subtitles), as one undo step."
+        description = "Import an SRT or WebVTT file as caption clips on a new \"Subtitles\" track (same look and `style` choices as auto_subtitles), as one undo step."
     )]
     async fn import_subtitles(
         &self,
@@ -1910,6 +1996,7 @@ impl McpServer {
             .subtitles_import(animathio_control::SubtitleImportParams {
                 path: PathBuf::from(p.path),
                 offset,
+                style: p.look.style_params(p.style.as_deref())?,
             })
             .map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))

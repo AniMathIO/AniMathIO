@@ -463,6 +463,11 @@ impl ControlHandler for HeadlessHandler {
             Call::SubtitlesExport { params } => {
                 serde_json::to_value(crate::export_subtitles(&self.project, &params)?)?
             }
+            Call::SubtitlesStyle { params } => serde_json::to_value(crate::apply_caption_style(
+                &mut self.project,
+                &mut self.history,
+                &params,
+            )?)?,
             Call::SubtitlesImport { params } => serde_json::to_value(crate::import_subtitles(
                 &mut self.project,
                 &mut self.history,

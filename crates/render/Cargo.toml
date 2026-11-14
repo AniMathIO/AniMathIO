@@ -27,6 +27,7 @@ gpu = ["dep:vello", "dep:pollster"]
 animathio-plugin-host = { path = "../plugin-host", features = ["test-support"] }
 animathio-format = { path = "../format" }
 proptest.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

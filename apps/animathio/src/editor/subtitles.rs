@@ -103,6 +103,7 @@ impl Editor {
         let editor = cx.entity();
         let engine = animathio_transcribe::engine_available();
         window.open_dialog(cx, move |dialog, _, cx| {
+            let look = editor.read(cx).caption_look.clone();
             let (editor, model, language, range) = (
                 editor.clone(),
                 model.clone(),
@@ -148,6 +149,26 @@ impl Editor {
                                 .child(Select::new(&language)),
                         )
                         .child(FormField::new().label("Audio").child(Select::new(&range))),
+                )
+                .child(
+                    div()
+                        .mt_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .child("Caption style"),
+                        )
+                        .child(caption_styles::caption_style_picker(
+                            &editor,
+                            "dialog-caption",
+                            &look.style,
+                            &look,
+                            None,
+                        )),
                 )
                 .footer(
                     div()
@@ -203,6 +224,7 @@ impl Editor {
             language: (language != "auto").then(|| language.to_owned()),
             // The dialog's Generate button is the explicit consent to download.
             download_model: true,
+            style: self.caption_look.clone(),
             ..SubtitleGenerateParams::default()
         };
         match range_choice {
@@ -270,6 +292,7 @@ impl Editor {
             return false;
         };
         let same_project = job.project_path == self.path;
+        let style = job.style.clone();
         let reply = job.reply.take();
         let outcome = result.and_then(|draft| {
             if !same_project {
@@ -284,7 +307,7 @@ impl Editor {
                     cues: Vec::new(),
                 });
             }
-            let (command, added) = subtitle_command(&self.project, &draft.cues)?;
+            let (command, added) = subtitle_command(&self.project, &draft.cues, &style)?;
             if !self.try_execute(&command, cx) {
                 return Err(ControlError::Other(
                     self.error

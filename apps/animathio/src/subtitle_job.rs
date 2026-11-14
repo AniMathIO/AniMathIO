@@ -34,6 +34,8 @@ pub(crate) enum State {
 
 pub(crate) struct SubtitleJob {
     pub(crate) label: String,
+    /// Caption style the finished cues are created with.
+    pub(crate) style: animathio_control::CaptionStyleParams,
     pub(crate) state: State,
     pub(crate) cancelling: bool,
     /// Project path when the job started; results are dropped if another project is open.
@@ -61,6 +63,7 @@ impl SubtitleJob {
         project_path: Option<std::path::PathBuf>,
         reply: Option<SyncSender<Result<Value, ControlError>>>,
     ) -> Result<Self, String> {
+        let style = params.style.clone();
         let cancel: Cancel = Arc::new(AtomicBool::new(false));
         let phase = Arc::new(Mutex::new(Phase::Preparing));
         let (tx, result) = channel();
@@ -90,6 +93,7 @@ impl SubtitleJob {
             .map_err(|e| e.to_string())?;
         Ok(Self {
             label,
+            style,
             state: State::Running,
             cancelling: false,
             project_path,

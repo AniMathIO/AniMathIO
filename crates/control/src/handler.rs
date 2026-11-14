@@ -231,6 +231,14 @@ pub trait ControlHandler {
         from_value(self.handle(Call::SubtitlesExport { params })?)
     }
 
+    /// Restyle the existing caption clips.
+    fn subtitles_style(
+        &mut self,
+        params: crate::SubtitleStyleParams,
+    ) -> Result<crate::SubtitleStyleResult, ControlError> {
+        from_value(self.handle(Call::SubtitlesStyle { params })?)
+    }
+
     /// Import an SRT or `WebVTT` file as subtitle clips.
     fn subtitles_import(
         &mut self,

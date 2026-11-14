@@ -34,6 +34,7 @@ mod headless;
 mod media_import;
 mod method;
 pub use media_import::prepare_media_import;
+mod captions;
 mod path;
 mod server;
 mod subtitles;
@@ -44,6 +45,11 @@ pub use title_presets::{
     title_presets,
 };
 
+pub use captions::{
+    CaptionPosition, CaptionStyleInfo, CaptionStyleParams, SubtitleStyleParams,
+    SubtitleStyleResult, apply_caption_style, caption_style_command, caption_styles,
+    clip_caption_style, parse_caption_color,
+};
 pub use subtitles::{
     ProgressFn, SUBTITLE_TRACK, SubtitleCueInfo, SubtitleDraft, SubtitleExportParams,
     SubtitleExportResult, SubtitleGenerateParams, SubtitleImportParams, SubtitleProgress,
