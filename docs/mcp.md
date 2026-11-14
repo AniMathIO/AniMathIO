@@ -157,6 +157,8 @@ clears its undo history.
 | `export_subtitles` | Return or write the subtitle track as SRT or WebVTT | `format` (`srt`/`vtt`), `track`, `path`, `overwrite` |
 | `import_subtitles` | Add an SRT or WebVTT file as caption clips on a new `Subtitles` track; words are spread evenly over each cue for the animated styles | `path`, `offset_ms`, `style` and the look options of `auto_subtitles` |
 | `set_caption_style` | Restyle existing captions (from `auto_subtitles`/`import_subtitles`) as one undo step; adds or removes the background bars as the style needs | `style` (required), `track`, `font_size`, `color`, `accent`, `outline`, `position`, `max_words` |
+| `list_templates` | List bundled and user project manifests and placeholders | — |
+| `create_from_template` | Create, save and open a project from a template, optionally filling text/media | `template`, `output`, optional `text`, `media`, `cover` |
 | `list_title_presets` | List title compositions and their editable fields | — |
 | `add_title` | Add animated linked title compositions, or legacy single text clips | `start_ms`, `duration_ms`; `preset` + `fields` (see below), or `text` + legacy `style`: `title` (default, centred), `lower_third` (lower left), `caption` (captions share one track); text is centred on its position |
 | `batch` | Apply several core `Command`s as one undo step | `ops`: serde externally-tagged commands with integer ticks (705600000 per second), e.g. `{"RemoveClip":{"id":3}}`, `{"SplitAt":{"times":[705600000]}}`, `{"RippleDelete":{"clip":4}}` |
@@ -400,3 +402,17 @@ In the editor, Clip > Automatic cuts opens `apps/animathio/src/editor/autocut.rs
 worker, enabled ranges shade the affected timeline rows, and the panel offers sliders,
 per-range toggles, seek buttons, saved duration and Apply/Cancel. Edits invalidate the
 draft; Apply makes one undo entry. Cancel discards the draft and signals the worker.
+
+`list_templates` returns bundled and user template manifests (`id`, `name`, `description`,
+`aspect`, `category`, `placeholders`); each placeholder has its `clip` id, `label` and
+`accepts_text` (true for text and LaTeX clips). `create_from_template` takes `template`
+(catalog id), `output` (new `.amio` path), optional `text` and `media` maps (decimal
+placeholder clip id to replacement text or local image/video path) and `cover` (default
+false: contain). It refuses existing destinations, unknown placeholders, audio files and a
+placeholder present in both maps, writes the project and opens it through the current
+control backend. Replacement swaps the clip's source in place, retaining its timing,
+transform, effects, animation and linked companions. The media is fitted to the
+placeholder's box through the clip's `media_fit` parameter (`cover` crops, `contain`
+letterboxes), honoured by both render backends. User templates live in the platform user
+data directory under `templates`, separate from the project schema; the editor's
+File > Save as template… writes them and the launcher lists them with a delete action.

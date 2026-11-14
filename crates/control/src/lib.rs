@@ -80,3 +80,9 @@ pub use path::{read_bounded, validate_existing_file, validate_output_file};
 pub use server::{
     ControlServer, MAX_REQUEST_BYTES, RunningServer, SocketSpec, default_socket_spec,
 };
+
+mod templates;
+pub use templates::{
+    MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, delete_user_template,
+    project_templates, save_user_template, template_catalog, template_library_dir,
+};

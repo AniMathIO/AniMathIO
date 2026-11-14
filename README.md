@@ -310,3 +310,11 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 [CLI reference](docs/cli.md#autocut) and [review rules](docs/mcp.md#automatic-cut-review).
 
 ![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
+
+The launcher lists five bundled project templates and saved user templates, with CPU
+thumbnail cards. Creating one opens Fill placeholders for text and picked media;
+media supports cover/contain and replacement is one undoable batch. File > Save as
+template stores the current project and selected placeholder clips in the user data
+library; user cards have Delete. The CLI keeps `templates list` and
+`new --template quote -o quote.amio`; MCP adds `list_templates` and
+`create_from_template`. Template card hover lifts use the shared surface tokens.

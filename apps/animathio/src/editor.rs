@@ -55,6 +55,7 @@ mod project_io;
 mod start_screen;
 mod subtitles;
 mod support;
+mod templates;
 mod timeline_thumbnails;
 mod timeline_view;
 mod titles;

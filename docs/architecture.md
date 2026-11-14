@@ -82,7 +82,7 @@ Rules that keep the layers honest:
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
-(export queue popover), `start_screen`, `clip_ops`, `commands`, `project_io`,
+(export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
 number scrubbing and the viewer's transform gizmo all preview through it, so one
@@ -122,7 +122,11 @@ on the export worker (`crates/export` honours the cancel flag through its progre
 callback and leaves no partial file), and the editor polls the queue to drive the Export
 queue popover and toasts. Control-protocol exports appear in the same queue.
 
-`start_screen` provides project presets, recents and importer entry points. Workflow
+`start_screen` provides project presets, recents and importer entry points.
+`templates` supplies launcher cards, the placeholder fill dialog and user-library save/delete.
+Template manifests stay outside the project schema; source replacements are ordinary
+undoable command batches. Media fitting uses the `media_fit` clip parameter in both
+rendering backends. Workflow
 dialogs use gpui-component forms; export works on an immutable snapshot, so selecting
 a delivery preset does not change the open project. `control::ExportPreset` is the
 shared table for editor, CLI and MCP. Preferences persist under the application

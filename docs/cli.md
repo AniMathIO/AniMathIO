@@ -17,6 +17,8 @@ AniMathIO headless CPU renderer
 Usage: animathio-cli <COMMAND>
 
 Commands:
+  templates     List the bundled project templates
+  new           Create a project from a bundled template
   render        Render one frame to PNG
   render-seq    Render [from, to) frame indices to `frame_000000.png`, etc
   export        Export an offline H.264 + AAC MP4
@@ -543,3 +545,53 @@ Options:
           Print help
 ```
 <!-- /help:autocut -->
+
+## `templates`
+
+`animathio-cli templates list` prints the five bundled template manifests as JSON,
+including editable clip ids. These are six-second title compositions with no media.
+
+<!-- help:templates -->
+```text
+List the bundled project templates
+
+Usage: animathio-cli templates <COMMAND>
+
+Commands:
+  list  Print template metadata and placeholder clip ids as JSON
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+<!-- /help:templates -->
+
+## `new`
+
+Create an independent project with `animathio-cli new --template quote -o quote.amio`.
+The ids are `math_explainer`, `vertical_short`, `interview`, `quote` and `equation`.
+
+<!-- help:new -->
+```text
+Create a project from a bundled template
+
+Usage: animathio-cli new --template <TEMPLATE> --output <OUTPUT>
+
+Options:
+      --template <TEMPLATE>  Bundled template id from templates list
+  -o, --output <OUTPUT>      Destination .amio archive
+  -h, --help                 Print help
+```
+<!-- /help:new -->
+
+### Portable template directories
+
+A `.amiotemplate` directory contains a normal project.amio file and a `template.json`
+manifest: id, name, description, aspect, category, optional thumbnail filename and
+placeholders (clip id plus optional label). The only accepted thumbnail filename is
+`thumbnail.png`. This keeps project schema versioning independent of templates.
+The shared control library loads and saves these directories (save refuses to overwrite).
+Saving currently supports templates without thumbnails. All placeholder ids must exist
+and be unique. Text fills return one undoable batch, preserving timing, transforms,
+effects and animation. Media replacement, user library discovery, rendered thumbnails,
+launcher cards, File menu and MCP tools are deferred.

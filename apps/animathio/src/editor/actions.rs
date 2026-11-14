@@ -40,6 +40,7 @@ actions!(
         NextMarker,
         ShowMarkers,
         NewProject,
+        SaveTemplate,
         OpenProject,
         SaveProject,
         ImportMedia,
@@ -194,7 +195,10 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
 /// Handlers live on the editor ancestor so menus and toolbars dispatch the
 /// same commands. Text entry always keeps its editing/navigation keys.
 pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
-    root.on_action(cx.listener(|this, _: &NewProject, window, cx| {
+    root.on_action(cx.listener(|_, _: &SaveTemplate, window, cx| {
+        Editor::save_template_dialog(window, cx);
+    }))
+    .on_action(cx.listener(|this, _: &NewProject, window, cx| {
         this.replace_project(ReplaceProject::New, window, cx);
     }))
     .on_action(cx.listener(|this, _: &OpenProject, window, cx| {
