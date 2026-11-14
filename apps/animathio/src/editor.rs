@@ -36,6 +36,7 @@ use crate::timecode;
 use crate::timeline::{self, TimelineLayout, TrimEdge};
 
 pub(crate) mod actions;
+mod animations;
 mod audio_effects;
 mod autocut;
 mod caption_styles;
@@ -592,6 +593,8 @@ pub(crate) struct Editor {
     safe_areas: bool,
     viewer_menu_open: bool,
     closed_sections: BTreeSet<String>,
+    /// Inspector window lengths for applying In / Out / Emphasis presets.
+    preset_durations: animations::PresetDurations,
     context_menu: Option<ContextMenu>,
     context_menu_pos: Option<Point<Pixels>>,
     pool_drag: Option<PoolDrag>,
@@ -723,6 +726,7 @@ impl Editor {
             safe_areas: false,
             viewer_menu_open: false,
             closed_sections: BTreeSet::new(),
+            preset_durations: animations::PresetDurations::default(),
             context_menu: None,
             context_menu_pos: None,
             pool_drag: None,

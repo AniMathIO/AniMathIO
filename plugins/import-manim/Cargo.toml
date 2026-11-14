@@ -1,0 +1,19 @@
+[package]
+name = "import-manim"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+animathio-core = { path = "../../crates/core" }
+animathio-import-manim = { path = "../../crates/import-manim" }
+serde_json = "1"
+wit-bindgen = "0.40.0"
+
+[profile.release]
+codegen-units = 1
+
+[workspace]

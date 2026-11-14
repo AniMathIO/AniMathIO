@@ -17,13 +17,13 @@ the render/audio/export data flow. The authority for these rules is
 | `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
 | `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
 | `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema, guest SDK and first-party clip authoring helpers (`sources`). |
-| `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, limits, log), ABI 1.0.0 plus an explicit 0.2.x adapter plugin scene resolution, and pixel-effect plugins (`PluginHost::effects`, `effect_processor`: instance-pre cached components, a fresh fuel/memory/epoch-limited store per call, frame-size caps). |
+| `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, limits, log, and `read-sibling` for importers), ABI 1.1.0 (1.0.0 components load unchanged) plus an explicit 0.2.x adapter, plugin scene resolution, pixel-effect plugins (`PluginHost::effects`, `effect_processor`: instance-pre cached components, a fresh fuel/memory/epoch-limited store per call, frame-size caps), animation presets (`PluginHost::animation_presets`, `animation_preset_command`) and importers (`PluginHost::importers`, `PluginHost::import`). |
 | `typeset` | Host-side math typesetting: Typst as a library plus MiTeX for LaTeX→Typst conversion, turned into vector path outlines plus a tight bbox. |
-| `import-v1` | One-way importer for v1 `.animathio` projects (deflated JSON + base64 media). |
-| `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with tree-sitter. |
+| `import-v1` | One-way importer for v1 `.animathio` projects (deflated JSON + base64 media). Still native (see "Importers" below). |
+| `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with a small pure-Rust Python parser (`pyparse`) whose node vocabulary follows tree-sitter-python. The app runs it only inside the `org.animathio.import-manim` importer plugin. |
 | `apps/animathio-cli` | Headless validation, PNG rendering, MP4 export, importers and the MCP sidecar. |
 | `apps/animathio` | The GPUI desktop editor: a thin view over the command-only core, plus an export worker and dialog. |
-| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `audio-basic`, `trap` (sandbox fixture), and `examples/hello`. |
+| `plugins/*` | Standalone first-party WebAssembly plugins: `shapes`, `text`, `latex`, `graph`, `effects-basic`, `audio-basic`, `animations` (animation presets), `import-manim` (Manim importer), `trap` (sandbox fixture), and `examples/hello`. |
 
 Video clips decode through `render::FrameSource` via the `media` crate's
 `MediaPool`, so real video frames appear in preview, the CLI and headless
@@ -40,7 +40,7 @@ through `Command`s.
 ```mermaid
 flowchart TD
     UI[apps/animathio · apps/animathio-cli] --> CTL[control]
-    CTL --> IMP[import-v1 / import-manim]
+    CTL --> IMP[import-v1]
     CTL --> RENDER[render]
     CTL --> AUDIO[audio]
     CTL --> EXPORT[export]
@@ -74,6 +74,9 @@ Rules that keep the layers honest:
   `control` and `plugin-host` all depend on `core` and never the reverse.
 - `control` sits above `format`/`render`/`export`/`import-v1` so the MCP sidecar
   can load, mutate, render, export and import headlessly without the editor.
+  Manim import and animation presets reach `control` only through `plugin-host`;
+  `import-manim` is compiled into the `plugins/import-manim` component, not linked
+  into the apps.
 - Third-party crates (FilmCraft, vello, GPUI) stay behind adapter boundaries;
   no third-party type leaks into `core`.
 
@@ -81,7 +84,8 @@ Rules that keep the layers honest:
 
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
-`fields`, `audio_effects` (inspector audio-effect cards), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
+`fields`, `audio_effects` (inspector audio-effect cards), `animations` (the inspector
+Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
@@ -436,6 +440,41 @@ including their variants.
 Every plugin inspector control has a keyframe diamond. Editing an animated
 parameter updates the key at the playhead or inserts one there, preserving an
 existing key's outgoing interpolation. Unanimated edits update base parameters.
+
+## Animation presets
+
+Presets (fade, slide, zoom, pop, spin, bounce, wipe, typewriter, breathe, shake,
+hop, flash) come from the `org.animathio.animations` plugin on the API 1.1
+`animation-preset-plugin` world; there is no preset table in the core or the apps.
+`PluginHost::animation_preset_command` places the window (in at the clip start, out
+at its end, emphasis centred), samples the clip's current values at the window's
+rest point, calls the plugin's `generate` once, validates the returned curves
+(known targets, in-window strictly increasing times, finite values, a key budget)
+and returns one `Command::Batch`: `RemoveKeyframe` for each existing key of an
+animated target inside the window, then `AddKeyframe` for every generated key. The
+result is ordinary keyframes, so rendering, export and saved projects never depend
+on the plugin, and one undo restores the previous keys exactly. Easings that core
+keyframes cannot interpolate natively (ease-in/out, back, bounce, elastic) are
+sampled by the plugin into linear segments. The typewriter presets keyframe the
+text plugin's `reveal` parameter (the fraction of characters shown). The control
+methods `animations.list`/`animations.apply`, the MCP tool `apply_animation_preset`,
+the CLI `animations` subcommand and the editor's inspector section all go through
+this one function (`animathio_control::animation_preset_command`).
+
+## Importers
+
+The Manim importer runs inside the `org.animathio.import-manim` plugin on the API
+1.1 `importer-plugin` world. `PluginHost::import` hands it the script bytes and,
+only when the caller grants a directory (the script's folder), bounded
+`read-sibling` reads for `ImageMobject` files. The plugin answers with a
+version-1 command document, `Project::rebuild_commands` of the imported project,
+which the host replays on an empty project through the validating
+`Command::apply`; every returned asset must hash to its id and be registered.
+`import.manim`, the MCP `import_manim_scene` tool, `animathio-cli import-manim` and
+the editor's Manim dialog all use `animathio_control::import_manim_with_plugin`.
+The v1 importer stays native for now: its embedded media inflates to as much as
+2 GiB, more than a wasm32 importer sandbox can hold, so moving it needs streamed
+asset hand-off first.
 
 ## Text and shape sources
 

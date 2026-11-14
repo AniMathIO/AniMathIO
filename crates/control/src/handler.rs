@@ -112,6 +112,19 @@ pub trait ControlHandler {
         from_value(self.handle(Call::TitlesAdd { params })?)
     }
 
+    /// List the presets provided by loaded animation-preset plugins.
+    fn animations_list(&mut self) -> Result<Vec<crate::AnimationPresetInfo>, ControlError> {
+        from_value(self.handle(Call::AnimationsList)?)
+    }
+
+    /// Apply an animation preset to a clip as one undo step.
+    fn animations_apply(
+        &mut self,
+        params: crate::AnimationApplyParams,
+    ) -> Result<crate::AnimationApplied, ControlError> {
+        from_value(self.handle(Call::AnimationsApply { params })?)
+    }
+
     /// List the filters provided by loaded effect plugins.
     fn effects_list(&mut self) -> Result<Vec<crate::EffectInfo>, ControlError> {
         from_value(self.handle(Call::EffectsList)?)

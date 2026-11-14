@@ -48,15 +48,48 @@ mod audio_world {
     });
 }
 
+/// Bindings for the animation-preset world (API 1.1); see [`effect_world`].
+mod preset_world {
+    wasmtime::component::bindgen!({
+        path: "../plugin-api/wit",
+        world: "animation-preset-plugin",
+        with: {
+            "animathio:plugin/types": crate::animathio::plugin::types,
+            "animathio:plugin/host": crate::animathio::plugin::host,
+        },
+    });
+}
+
+/// Bindings for the importer world (API 1.1), including its `import-files` host import.
+mod importer_world {
+    wasmtime::component::bindgen!({
+        path: "../plugin-api/wit",
+        world: "importer-plugin",
+        with: {
+            "animathio:plugin/types": crate::animathio::plugin::types,
+            "animathio:plugin/host": crate::animathio::plugin::host,
+        },
+    });
+}
+
 mod audio;
 mod compat;
 mod discovery;
 mod effect_params;
 mod effects;
+mod importers;
+mod presets;
 pub use audio::AudioEffectHandle;
 pub use discovery::{PluginDirectory, plugin_search_dirs};
 pub use effect_params::{mentions_effect_params, validate_effect_command};
 pub use effects::{EffectDescriptor, EffectHandle, EffectParam};
+pub use importers::{
+    ImportMessage, ImportRequest, ImportSeverity, ImportedAsset, ImportedProject,
+    ImporterDescriptor,
+};
+pub use presets::{
+    PresetDescriptor, PresetParam, PresetParamKind, PresetRole, clip_kind_id, preset_window,
+};
 
 use animathio::plugin::host::Host;
 use animathio::plugin::types as wit_types;
@@ -153,6 +186,29 @@ pub struct SandboxLimits {
     /// Epoch deadline ticks for audio effects (default: 200, a ~2 s backstop; a block is
     /// worth well under 100 ms of real-time audio, so a stalled call is far over budget).
     pub audio_epoch_deadline_ticks: u64,
+    /// Largest source an importer may receive, in bytes (default: 64 MiB).
+    pub max_import_source_bytes: usize,
+    /// Memory of one importer call (default: 1 GiB): the source, sibling files, the
+    /// decoded assets and the command document all live in the guest at once.
+    pub import_memory_bytes: usize,
+    /// Extra fuel per source byte for importers, added to `fuel_per_call`
+    /// (default: 20,000).
+    pub import_fuel_per_byte: u64,
+    /// Epoch deadline ticks for importers (default: 3,000, a ~30 s backstop).
+    pub import_epoch_deadline_ticks: u64,
+    /// Largest command document an importer may return, in bytes (default: 64 MiB).
+    pub max_import_output_bytes: usize,
+    /// Most commands an importer may return (default: 100,000).
+    pub max_import_commands: usize,
+    /// Largest single `read-sibling` file, in bytes (default: 64 MiB).
+    pub max_sibling_file_bytes: u64,
+    /// Total bytes all `read-sibling` calls of one import may return (default: 256 MiB).
+    pub max_sibling_total_bytes: u64,
+    /// Most `read-sibling` calls one import may make (default: 256).
+    pub max_sibling_files: usize,
+    /// Most keyframes one animation-preset call may return, over all curves
+    /// (default: 1,000).
+    pub max_preset_keys: usize,
 }
 
 impl Default for SandboxLimits {
@@ -171,6 +227,16 @@ impl Default for SandboxLimits {
             audio_memory_bytes: 256 * 1024 * 1024,
             audio_fuel_per_sample: 4096,
             audio_epoch_deadline_ticks: 200,
+            max_import_source_bytes: 64 * 1024 * 1024,
+            import_memory_bytes: 1024 * 1024 * 1024,
+            import_fuel_per_byte: 20_000,
+            import_epoch_deadline_ticks: 3_000,
+            max_import_output_bytes: 64 * 1024 * 1024,
+            max_import_commands: 100_000,
+            max_sibling_file_bytes: 64 * 1024 * 1024,
+            max_sibling_total_bytes: 256 * 1024 * 1024,
+            max_sibling_files: 256,
+            max_preset_keys: 1_000,
         }
     }
 }
@@ -243,6 +309,8 @@ pub struct HostState {
     limiter: StoreLimits,
     logs: Vec<String>,
     policy: SandboxLimits,
+    /// Directory and read budget granted to the running importer, if any.
+    import_files: Option<importers::SiblingGrant>,
 }
 
 impl WasiView for HostState {
@@ -615,6 +683,7 @@ fn build_store(
         limiter,
         logs: Vec::new(),
         policy,
+        import_files: None,
     };
     let mut store = Store::new(engine, state);
     let _ = store.set_fuel(budget.0);
@@ -640,6 +709,10 @@ pub struct PluginHost {
     effects: Arc<effects::EffectRuntime>,
     /// Registry and sandboxed, instance-pooled runner for audio-effect plugins.
     audio_effects: Arc<audio::AudioRuntime>,
+    /// Animation-preset plugins (API 1.1) by plugin id.
+    presets: BTreeMap<String, presets::PresetPlugin>,
+    /// Importer plugins (API 1.1) by plugin id.
+    importers: BTreeMap<String, importers::ImporterPlugin>,
     /// Held only so its `Drop` stops and joins the epoch ticker thread.
     _epoch_ticker: Arc<EpochTicker>,
     /// One message per plugin package that was found but could not be loaded.
@@ -667,6 +740,10 @@ impl PluginHost {
 
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
         SourcePlugin::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |s| s)?;
+        importer_world::animathio::plugin::import_files::add_to_linker::<
+            HostState,
+            HasSelf<HostState>,
+        >(&mut linker, |s| s)?;
         compat::add_to_linker(&mut linker)?;
 
         let font_data = default_font_bytes();
@@ -697,6 +774,8 @@ impl PluginHost {
             linker,
             effects,
             audio_effects,
+            presets: BTreeMap::new(),
+            importers: BTreeMap::new(),
             disk_cache,
             plugins: BTreeMap::new(),
             limits,
@@ -850,6 +929,32 @@ impl PluginHost {
             self.effects
                 .register(&package.manifest, &component, &mut store, legacy)
                 .map_err(|e| HostError::CompilationFailed(format!("effect plugin {id}: {e}")))?
+        } else if package
+            .manifest
+            .kinds
+            .contains(&PluginKind::AnimationPreset)
+        {
+            let (plugin, manifest) = presets::PresetPlugin::register(
+                &self.linker,
+                &package.manifest,
+                &component,
+                &mut store,
+            )
+            .map_err(|e| {
+                HostError::CompilationFailed(format!("animation-preset plugin {id}: {e}"))
+            })?;
+            self.presets.insert(id.clone(), plugin);
+            manifest
+        } else if package.manifest.kinds.contains(&PluginKind::Importer) {
+            let (plugin, manifest) = importers::ImporterPlugin::register(
+                &self.linker,
+                &package.manifest,
+                &component,
+                &mut store,
+            )
+            .map_err(|e| HostError::CompilationFailed(format!("importer plugin {id}: {e}")))?;
+            self.importers.insert(id.clone(), plugin);
+            manifest
         } else {
             let pre = compat::Pre::new(self.linker.instantiate_pre(&component)?, legacy);
             let instance = pre.instantiate(&mut store)?;
@@ -2105,6 +2210,25 @@ impl SandboxLimits {
             ("max-log-message-bytes", MAX_LOG_MESSAGE_BYTES as u64),
             ("max-log-entries", MAX_LOG_ENTRIES as u64),
             ("max-effects-per-plugin", MAX_EFFECTS_PER_PLUGIN as u64),
+            (
+                "max-import-source-bytes",
+                self.max_import_source_bytes as u64,
+            ),
+            ("import-memory-bytes", self.import_memory_bytes as u64),
+            ("import-fuel-per-byte", self.import_fuel_per_byte),
+            (
+                "import-epoch-deadline-ticks",
+                self.import_epoch_deadline_ticks,
+            ),
+            (
+                "max-import-output-bytes",
+                self.max_import_output_bytes as u64,
+            ),
+            ("max-import-commands", self.max_import_commands as u64),
+            ("max-sibling-file-bytes", self.max_sibling_file_bytes),
+            ("max-sibling-total-bytes", self.max_sibling_total_bytes),
+            ("max-sibling-files", self.max_sibling_files as u64),
+            ("max-preset-keys", self.max_preset_keys as u64),
         ]
         .into_iter()
         .map(|(key, value)| (key.to_owned(), value))
@@ -2123,7 +2247,14 @@ fn validate_kinds(manifest: &wit_types::Manifest, expected: &[&str]) -> Result<(
     }
     // Open wire strings allow advisory classifications. Known execution kinds
     // must match exactly, and unknown strings do not enable new execution paths.
-    let known = ["clip-source", "animation", "effect", "audio-effect"];
+    let known = [
+        "clip-source",
+        "animation",
+        "effect",
+        "audio-effect",
+        "animation-preset",
+        "importer",
+    ];
     if known
         .iter()
         .any(|kind| kinds.contains(kind) != expected.contains(kind))

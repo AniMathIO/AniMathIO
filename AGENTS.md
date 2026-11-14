@@ -121,6 +121,15 @@ effects migrate in `format` to plugin clips/effects on load. Video frames come f
 the fallback when no frame source is attached. Do not add runtime
 resources to `Project` or store evaluated animation state in the renderer.
 
+Plugin ABI 1.1.0 adds two worlds: `animation-preset-plugin` (`org.animathio.animations`;
+`PluginHost::animation_preset_command` turns a preset into one keyframe `Command::Batch`,
+shared by `animations.apply`, MCP `apply_animation_preset`, `animathio-cli animations` and
+the inspector) and `importer-plugin` (`org.animathio.import-manim`; `PluginHost::import`
+replays the plugin's version-1 command document and grants bounded `read-sibling` reads).
+`crates/import-manim` parses Python with its own pure-Rust `pyparse` (tree-sitter's C
+runtime cannot target `wasm32-wasip2` here) and is linked only into that plugin;
+`import-v1` stays native. Keep 1.0 components loading unchanged (`hello-1.0.0` fixture).
+
 Audio effects are `org.animathio.audio-basic` (build it with `scripts/build-plugins.sh`).
 Clips and tracks carry ordered `audio_effects` chains (`EffectInstance`, with a `bypass`
 flag) edited through `Command::{Add,Remove,Move}AudioEffect` /

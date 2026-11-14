@@ -82,6 +82,7 @@ fn import_image_scene(
     let options = ManimOptions {
         scene: None,
         script_dir: Some(dir.to_path_buf()),
+        files: None,
     };
     import_manim_with_options(source, &options).unwrap()
 }
@@ -385,6 +386,7 @@ class Second(Scene):
     let options = ManimOptions {
         scene: Some("Second".to_owned()),
         script_dir: None,
+        files: None,
     };
     let (project, _, report) = import_manim_with_options(source, &options).unwrap();
     assert!(report.is_empty(), "{:?}", report.warnings());
@@ -393,6 +395,7 @@ class Second(Scene):
     let missing = ManimOptions {
         scene: Some("Nope".to_owned()),
         script_dir: None,
+        files: None,
     };
     let error = import_manim_with_options(source, &missing).unwrap_err();
     assert!(matches!(

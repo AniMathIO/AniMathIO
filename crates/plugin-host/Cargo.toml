@@ -29,6 +29,7 @@ tempfile = "3"
 [dev-dependencies]
 animathio-core = { workspace = true }
 animathio-plugin-api = { path = "../plugin-api" }
+animathio-import-manim = { path = "../import-manim" }
 animathio-render = { path = "../render" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = { workspace = true }
@@ -51,4 +52,8 @@ required-features = ["test-support"]
 
 [[test]]
 name = "abi_conformance"
+required-features = ["test-support"]
+
+[[test]]
+name = "worlds_1_1"
 required-features = ["test-support"]

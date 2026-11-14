@@ -1,4 +1,4 @@
-package animathio:plugin@1.0.0;
+package animathio:plugin@1.1.0;
 
 /// Shared data types for vector graphics, parameter schemas and plugin manifests.
 interface types {
@@ -188,8 +188,8 @@ interface types {
     /// Map of parameter values passed to plugin invocations.
     type param-map = list<param-entry>;
 
-    /// Open classification: clip-source, effect or audio-effect.
-    /// The legacy animation kind has no 1.0 execution world.
+    /// Open classification: clip-source, effect, audio-effect, animation-preset
+    /// (1.1) or importer (1.1). The legacy animation kind has no execution world.
     /// Unknown strings are metadata, never permission to invoke an unknown world.
     type plugin-kind = string;
 
@@ -248,7 +248,10 @@ interface host {
     /// max-audio-sample-rate, max-shape-text-chars, max-shape-text-verbs,
     /// max-svg-input-bytes, max-svg-verbs, max-typeset-verbs,
     /// max-typeset-source-bytes, max-typeset-font-size-px, typeset-timeout-ms,
-    /// max-log-message-bytes, max-log-entries, max-effects-per-plugin (added in 1.0.x).
+    /// max-log-message-bytes, max-log-entries, max-effects-per-plugin (added in 1.0.x); since 1.1 also max-import-source-bytes,
+    /// import-memory-bytes, import-fuel-per-byte, import-epoch-deadline-ticks,
+    /// max-import-output-bytes, max-import-commands, max-sibling-file-bytes,
+    /// max-sibling-total-bytes, max-sibling-files, max-preset-keys.
     /// Keys and units are specified in docs/plugins.md; unknown keys are ignored.
     /// This reports policy, not remaining fuel or memory. Budgets reset per call.
     limits: func() -> list<tuple<string, u64>>;
@@ -343,6 +346,197 @@ interface audio-effects {
     /// nonempty blob the previous call returned. The call is a pure
     /// function of its arguments. Returns a diagnostic on invalid input.
     process-block: func(effect: string, block: audio-block, params: param-map, state: option<list<u8>>) -> result<block-output, diagnostic>;
+}
+
+/// Animation presets, added in API 1.1.0.
+///
+/// A preset plugin turns a preset choice into ordinary keyframe curves. The host
+/// converts the curves into one `Command::Batch` of keyframe edits, so rendering never
+/// calls the plugin and undo restores the previous keyframes exactly.
+interface animation-presets {
+    use types.{param-map, param-spec, diagnostic};
+
+    /// Where a preset sits in a clip's lifetime. The host places the window:
+    /// entrance at the clip start, exit at the clip end, emphasis centred on the clip.
+    enum preset-role {
+        entrance,
+        exit,
+        emphasis,
+    }
+
+    /// One preset offered by an animation-preset plugin.
+    record preset-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`).
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Window placement.
+        role: preset-role,
+        /// Clip kinds the preset applies to; empty means every visual clip. Kind ids:
+        /// `video`, `image`, `vector` and `plugin:<plugin-id>`.
+        applies-to: list<string>,
+        /// Default window length in ticks (positive).
+        default-duration-ticks: s64,
+        /// Preset options: number, enum-choice or bool kinds only.
+        params: list<param-spec>,
+    }
+
+    /// The clip a preset is generated for.
+    record clip-info {
+        /// Clip kind id, as in `applies-to`.
+        kind: string,
+        /// Visible clip length in ticks (positive).
+        duration-ticks: s64,
+        /// Length of one project frame in ticks (positive); a sampling hint.
+        frame-ticks: s64,
+        /// Current value of every animatable numeric target at the window's rest
+        /// point: the end of an entrance window, the start of an exit or emphasis
+        /// window. Keys are the curve target ids below.
+        rest: list<tuple<string, f64>>,
+    }
+
+    /// Interpolation toward the next key, matching core keyframes.
+    enum curve-interpolation {
+        hold,
+        linear,
+        ease-in-out,
+    }
+
+    /// One keyframe. `time-ticks` is relative to the window start, 0..=window.
+    record curve-key {
+        time-ticks: s64,
+        value: f64,
+        interpolation: curve-interpolation,
+    }
+
+    /// Keyframes for one target: `opacity`, `x`, `y`, `scale-x`, `scale-y`,
+    /// `rotation` (radians) or `param:<name>` for a numeric clip parameter.
+    record curve {
+        target: string,
+        keys: list<curve-key>,
+    }
+
+    /// List the presets this plugin provides.
+    list-presets: func() -> list<preset-descriptor>;
+
+    /// Generate the curves for `preset` over a window of `window-ticks` (positive,
+    /// at most the clip duration). Pure in its arguments. Returns a diagnostic on
+    /// invalid input, e.g. a preset that does not apply to the clip kind.
+    generate: func(preset: string, clip: clip-info, window-ticks: s64, params: param-map) -> result<list<curve>, diagnostic>;
+}
+
+/// Bounded reads of files next to an imported source, added in API 1.1.0.
+/// Only importer components import this interface.
+interface import-files {
+    use types.{diagnostic};
+
+    /// Read a file relative to the directory the host granted for this import.
+    /// `relative-path` uses `/` separators; absolute paths, `..` components and
+    /// paths that resolve (through symlinks) outside the directory are refused.
+    /// Per-file, total-byte and file-count caps apply per call; without a granted
+    /// directory every read fails with `invalid-input`.
+    read-sibling: func(relative-path: string) -> result<list<u8>, diagnostic>;
+}
+
+/// Project importers, added in API 1.1.0.
+///
+/// An importer turns source bytes into a versioned command document that the host
+/// validates and replays onto a fresh project, plus content-addressed asset bytes.
+interface importer {
+    use types.{param-map, param-spec, diagnostic};
+
+    /// One import format offered by an importer plugin.
+    record importer-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`).
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Lower-case file extensions without the dot, e.g. `py`.
+        extensions: list<string>,
+        /// Import options: string, number, enum-choice or bool kinds only.
+        params: list<param-spec>,
+    }
+
+    /// The source being imported.
+    record import-source {
+        /// File name hint without directories (may be empty).
+        file-name: string,
+        /// Raw source bytes.
+        bytes: list<u8>,
+    }
+
+    /// One asset referenced by the command document.
+    record imported-asset {
+        /// Lower-case hex BLAKE3 hash of `bytes`; the host recomputes it.
+        id: string,
+        /// Human-readable filename hint.
+        name: string,
+        /// Declared media type; decoders still probe the bytes.
+        media-type: string,
+        bytes: list<u8>,
+    }
+
+    /// Non-fatal message severity.
+    enum message-severity {
+        info,
+        warning,
+    }
+
+    /// One non-fatal observation; line and column are one-based, 0 when unknown.
+    record import-message {
+        severity: message-severity,
+        line: u32,
+        column: u32,
+        message: string,
+        snippet: string,
+    }
+
+    /// A successful import.
+    record import-output {
+        /// UTF-8 JSON `{"version": 1, "commands": [...]}`: AniMathIO core commands
+        /// in their control-protocol serialization, replayed in order on an empty
+        /// project. Every command is validated; any failure rejects the import.
+        commands: string,
+        assets: list<imported-asset>,
+        messages: list<import-message>,
+    }
+
+    /// List the formats this plugin imports.
+    list-importers: func() -> list<importer-descriptor>;
+
+    /// Import `source` with format `importer`. Pure apart from `read-sibling`.
+    run-import: func(importer: string, source: import-source, params: param-map) -> result<import-output, diagnostic>;
+}
+
+/// World for animation-preset plugins (`kinds = ["animation-preset"]`), API 1.1.0.
+world animation-preset-plugin {
+    import host;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The presets themselves.
+    export animation-presets;
+}
+
+/// World for importer plugins (`kinds = ["importer"]`), API 1.1.0.
+world importer-plugin {
+    import host;
+    import import-files;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The import formats themselves.
+    export importer;
 }
 
 /// World for audio-effect plugins (`kinds = ["audio-effect"]`): describe plus audio filters.

@@ -330,6 +330,22 @@ impl Editor {
             Call::EffectsList => {
                 serde_json::to_value(animathio_control::effect_infos(self.available_effects()))?
             }
+            Call::AnimationsList => serde_json::to_value(
+                animathio_control::animation_preset_infos(self.available_animation_presets()),
+            )?,
+            Call::AnimationsApply { params } => {
+                let (command, applied) = animathio_control::animation_preset_command(
+                    &self.project,
+                    self.plugin_host.as_ref(),
+                    &params,
+                )?;
+                self.finish_color_edit(cx);
+                self.history
+                    .execute(&mut self.project, &command)
+                    .map_err(|error| ControlError::Other(error.0))?;
+                self.after_edit(cx);
+                serde_json::to_value(applied)?
+            }
             Call::EffectsAdd { params } => {
                 let (command, added) = animathio_control::add_effect_command(
                     &self.project,
@@ -514,6 +530,7 @@ impl Editor {
                     &mut self.history,
                     Arc::make_mut(&mut self.assets),
                     &call,
+                    self.plugin_host.as_ref(),
                 )?;
                 if replace {
                     self.reset_project_session();

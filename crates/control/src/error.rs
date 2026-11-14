@@ -42,9 +42,6 @@ pub enum ControlError {
     /// v1 project import failure.
     #[error(transparent)]
     Import(#[from] animathio_import_v1::ImportError),
-    /// Manim scene import failure.
-    #[error(transparent)]
-    ImportManim(#[from] animathio_import_manim::ImportError),
     /// Plugin host failure.
     #[error(transparent)]
     Plugin(#[from] animathio_plugin_host::HostError),
@@ -79,7 +76,6 @@ impl ControlError {
             | Self::Model(_)
             | Self::Format(_)
             | Self::Import(_)
-            | Self::ImportManim(_)
             | Self::Plugin(_)
             | Self::Typeset(_)
             | Self::Render(_)

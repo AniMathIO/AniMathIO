@@ -102,6 +102,8 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
         "add_effect",
         "list_audio_effects",
         "add_audio_effect",
+        "list_animation_presets",
+        "apply_animation_preset",
     ] {
         assert!(
             names.contains(&expected),

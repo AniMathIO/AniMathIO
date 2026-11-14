@@ -1472,6 +1472,15 @@ impl Editor {
                 cx,
             ));
         }
+        if !matches!(clip.kind, ClipKind::Audio(_)) {
+            let rows = self.animation_rows(id, cx);
+            body = body.child(self.section(
+                "animations",
+                "Animations",
+                div().flex().flex_col().children(rows),
+                cx,
+            ));
+        }
         let transitions: Vec<_> = self
             .project
             .tracks()

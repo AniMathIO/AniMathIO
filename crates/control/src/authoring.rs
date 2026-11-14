@@ -9,13 +9,55 @@ use animathio_core::{
     AssetId, Clip, ClipId, ClipKind, Command, History, Interpolation, Keyframe, ParamValue,
     Project, Target, Time, TimeRange, Track, TrackId, Transform,
 };
-use animathio_import_manim::{ImportLimits as ManimLimits, ManimOptions, import_manim_with_limits};
+use animathio_plugin_host::{ImportRequest, ImportedAsset, PluginHost};
 use animathio_typeset::{MathMode, TypesetEngine};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 
 const LATEX_PLUGIN_ID: &str = "org.animathio.latex";
 const GRAPH_PLUGIN_ID: &str = "org.animathio.graph";
+/// First-party importer plugin that runs Manim scene import in the sandbox.
+pub const MANIM_IMPORT_PLUGIN_ID: &str = "org.animathio.import-manim";
+/// Importer id of the Manim format within [`MANIM_IMPORT_PLUGIN_ID`].
+pub const MANIM_IMPORTER_ID: &str = "manim";
+/// Largest Manim script read from disk (the plugin host caps sources too).
+const MAX_MANIM_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Import a Manim script through the sandboxed `org.animathio.import-manim` plugin.
+/// `sibling_dir` grants bounded reads of `ImageMobject` files below it.
+pub fn import_manim_with_plugin(
+    plugins: Option<&PluginHost>,
+    source: &str,
+    file_name: &str,
+    sibling_dir: Option<std::path::PathBuf>,
+    scene: Option<&str>,
+) -> Result<animathio_plugin_host::ImportedProject, ControlError> {
+    let host = plugins
+        .filter(|host| {
+            host.importers()
+                .iter()
+                .any(|i| i.plugin_id == MANIM_IMPORT_PLUGIN_ID && i.importer_id == MANIM_IMPORTER_ID)
+        })
+        .ok_or_else(|| {
+            ControlError::Unsupported(format!(
+                "Manim import needs the {MANIM_IMPORT_PLUGIN_ID} plugin; build it with scripts/build-plugins.sh"
+            ))
+        })?;
+    let mut params = BTreeMap::new();
+    if let Some(scene) = scene {
+        params.insert("scene".to_owned(), ParamValue::String(scene.to_owned()));
+    }
+    Ok(host.import(
+        MANIM_IMPORT_PLUGIN_ID,
+        MANIM_IMPORTER_ID,
+        ImportRequest {
+            file_name: file_name.to_owned(),
+            bytes: source.as_bytes().to_vec(),
+            sibling_dir,
+            params,
+        },
+    )?)
+}
 
 /// Apply `math.add`, `graph.add` or `import.manim` to shared editing state.
 /// A rejected call leaves project, assets and history unchanged. Successful
@@ -26,6 +68,7 @@ pub fn apply_authoring_call(
     history: &mut History,
     assets: &mut BTreeMap<AssetId, Vec<u8>>,
     call: &Call,
+    plugins: Option<&PluginHost>,
 ) -> Result<Value, ControlError> {
     let mut candidate = project.clone();
     let mut candidate_history = history.clone();
@@ -34,6 +77,7 @@ pub fn apply_authoring_call(
         project: &mut candidate,
         history: &mut candidate_history,
         assets: &mut candidate_assets,
+        plugins,
     };
     let result = match call {
         Call::MathAdd { params } => serde_json::to_value(session.math_add(params)?)?,
@@ -61,6 +105,7 @@ struct AuthoringSession<'a> {
     project: &'a mut Project,
     history: &'a mut History,
     assets: &'a mut BTreeMap<AssetId, Vec<u8>>,
+    plugins: Option<&'a PluginHost>,
 }
 
 impl AuthoringSession<'_> {
@@ -249,34 +294,40 @@ impl AuthoringSession<'_> {
         &mut self,
         params: &ImportManimParams,
     ) -> Result<ImportManimResult, ControlError> {
-        let (source, script_dir) = match (params.path.as_deref(), params.source.as_deref()) {
-            (Some(path), None) => {
-                let canonical = validate_existing_file(path)?;
-                let bytes = read_bounded(&canonical, ManimLimits::default().source_bytes)?;
-                let source = String::from_utf8(bytes).map_err(|_| {
-                    ControlError::InvalidPath(format!(
-                        "manim script is not valid UTF-8: {}",
-                        canonical.display()
-                    ))
-                })?;
-                let dir = params
-                    .script_dir
-                    .clone()
-                    .or_else(|| canonical.parent().map(Path::to_path_buf));
-                (source, dir)
-            }
-            (None, Some(source)) => (source.to_owned(), params.script_dir.clone()),
-            (Some(_), Some(_)) => {
-                return Err(ControlError::InvalidParams(
-                    "`path` and `source` are mutually exclusive".to_owned(),
-                ));
-            }
-            (None, None) => {
-                return Err(ControlError::InvalidParams(
-                    "either `path` or `source` is required".to_owned(),
-                ));
-            }
-        };
+        let (source, script_dir, file_name) =
+            match (params.path.as_deref(), params.source.as_deref()) {
+                (Some(path), None) => {
+                    let canonical = validate_existing_file(path)?;
+                    let bytes = read_bounded(&canonical, MAX_MANIM_SOURCE_BYTES)?;
+                    let source = String::from_utf8(bytes).map_err(|_| {
+                        ControlError::InvalidPath(format!(
+                            "manim script is not valid UTF-8: {}",
+                            canonical.display()
+                        ))
+                    })?;
+                    let dir = params
+                        .script_dir
+                        .clone()
+                        .or_else(|| canonical.parent().map(Path::to_path_buf));
+                    let name = canonical
+                        .file_name()
+                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                    (source, dir, name)
+                }
+                (None, Some(source)) => {
+                    (source.to_owned(), params.script_dir.clone(), String::new())
+                }
+                (Some(_), Some(_)) => {
+                    return Err(ControlError::InvalidParams(
+                        "`path` and `source` are mutually exclusive".to_owned(),
+                    ));
+                }
+                (None, None) => {
+                    return Err(ControlError::InvalidParams(
+                        "either `path` or `source` is required".to_owned(),
+                    ));
+                }
+            };
 
         let script_dir = script_dir
             .map(|dir| {
@@ -292,14 +343,17 @@ impl AuthoringSession<'_> {
                 Ok(canonical)
             })
             .transpose()?;
-        let options = ManimOptions {
-            scene: params.scene.clone(),
+        let imported = import_manim_with_plugin(
+            self.plugins,
+            &source,
+            &file_name,
             script_dir,
-        };
-        let (imported, imported_assets, report) =
-            import_manim_with_limits(&source, &options, &ManimLimits::default())?;
-        let warnings = report.warnings().iter().map(ToString::to_string).collect();
-        let infos = report.infos().iter().map(ToString::to_string).collect();
+            params.scene.as_deref(),
+        )?;
+        let warnings = imported.warnings();
+        let infos = imported.infos();
+        let imported_assets = imported.assets;
+        let imported = imported.project;
         let tracks = imported.tracks().len();
         let asset_count = imported_assets.len();
 
@@ -327,7 +381,7 @@ impl AuthoringSession<'_> {
     fn append_project(
         &mut self,
         imported: &Project,
-        imported_assets: Vec<animathio_import_manim::Asset>,
+        imported_assets: Vec<ImportedAsset>,
     ) -> Result<(), ControlError> {
         for asset in imported_assets {
             if !self.project.assets().contains_key(&asset.id) {

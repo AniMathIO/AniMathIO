@@ -118,6 +118,7 @@ impl Editor {
             "audio" => IconName::AudioWaveform,
             "effects" => IconName::Sparkles,
             "transition" => IconName::Waypoints,
+            "animations" => IconName::WandSparkles,
             _ => IconName::SlidersHorizontal,
         };
         let resettable = matches!(

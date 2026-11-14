@@ -2,7 +2,7 @@
 //! positioning, colouring and timing (numbers, vectors, colours, string literals).
 
 use crate::Rgba;
-use tree_sitter::Node;
+use crate::pyparse::Node;
 
 /// A resolved expression value, kept deliberately small.
 #[derive(Clone, Debug, PartialEq)]
