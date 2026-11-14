@@ -304,6 +304,15 @@ impl Editor {
                     .position(|track| track.id() == id);
                 let actions: Vec<(IconName, &str, bool, TrackMenuAction)> = vec![
                     (
+                        IconName::AudioWaveform,
+                        "Audio effects",
+                        true,
+                        Box::new(move |this, _, _| {
+                            this.clear_selection();
+                            this.audio_inspector_track = Some(id);
+                        }),
+                    ),
+                    (
                         IconName::Pencil,
                         "Rename",
                         true,

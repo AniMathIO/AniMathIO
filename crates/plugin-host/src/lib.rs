@@ -123,7 +123,7 @@ pub struct SandboxLimits {
     /// A low deadline races the epoch ticker and can spuriously trap fast
     /// calls such as `describe` during plugin loading.
     pub epoch_deadline_ticks: u64,
-    /// Largest frame, in pixels, a pixel effect may process (default: 16 Mpx, above
+    /// Largest frame, in pixels, a pixel effect may process (default: 32 Mpx, above
     /// 4K UHD). Larger frames are rejected before any plugin code runs.
     pub max_effect_pixels: usize,
     /// Ceiling on the memory of one pixel-effect call (default: 1 GiB). The limit
@@ -158,7 +158,7 @@ impl Default for SandboxLimits {
             max_table_elements: 50_000,
             fuel_per_call: 50_000_000,
             epoch_deadline_ticks: 100,
-            max_effect_pixels: 16 * 1024 * 1024,
+            max_effect_pixels: 32 * 1024 * 1024,
             effect_memory_bytes: 1024 * 1024 * 1024,
             effect_fuel_per_pixel: 4096,
             effect_epoch_deadline_ticks: 1000,
@@ -828,7 +828,7 @@ impl PluginHost {
 
         // Describe plugin to extract WIT manifest and parameter schema
         let mut store = self.create_store(CapabilityGrants::default())?;
-        let wit_manifest = if package.manifest.kinds.contains(&PluginKind::AudioEffect) {
+        let mut wit_manifest = if package.manifest.kinds.contains(&PluginKind::AudioEffect) {
             self.audio_effects
                 .register(&id, &component, &mut store)
                 .map_err(|e| {
@@ -843,6 +843,7 @@ impl PluginHost {
             instance.call_describe(&mut store)?
         };
 
+        bound_manifest(&mut wit_manifest);
         let inspector_schema = wit_manifest_to_inspector(&wit_manifest);
 
         self.plugins.insert(
@@ -1294,6 +1295,36 @@ fn wit_verb_to_core(v: wit_types::PathVerb) -> animathio_core::PathVerb {
             animathio_core::Point::new(to.x as f64, to.y as f64),
         ),
         wit_types::PathVerb::Close => animathio_core::PathVerb::Close,
+    }
+}
+
+// Bound guest-owned metadata before retaining it or constructing inspector widgets.
+fn bound_manifest(manifest: &mut wit_types::Manifest) {
+    manifest.name = truncate_utf8(&manifest.name, 256);
+    manifest.version = truncate_utf8(&manifest.version, 256);
+    manifest.description = truncate_utf8(&manifest.description, 256);
+    manifest.kinds.truncate(8);
+    manifest.params.truncate(32);
+    for param in &mut manifest.params {
+        param.id = truncate_utf8(&param.id, 64);
+        param.label = truncate_utf8(&param.label, 256);
+        match &mut param.kind {
+            wit_types::ParamKind::String(p) => p.default = truncate_utf8(&p.default, 256),
+            wit_types::ParamKind::EnumChoice(p) => {
+                p.options.truncate(64);
+                for option in &mut p.options {
+                    *option = truncate_utf8(option, 256);
+                }
+                p.default = truncate_utf8(&p.default, 256);
+            }
+            wit_types::ParamKind::AssetRef(p) => {
+                p.media_type = truncate_utf8(&p.media_type, 256);
+                if let Some(asset) = &mut p.default_asset {
+                    *asset = truncate_utf8(asset, 256);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1838,6 +1869,38 @@ mod tests {
         };
         let core_scene = wit_scene_to_core(wit_scene);
         assert!(core_scene.validate().is_err());
+    }
+
+    #[test]
+    fn generator_metadata_is_bounded_before_inspector_conversion() {
+        let param = wit_types::ParamSpec {
+            id: "p".into(),
+            label: "é".repeat(300),
+            kind: wit_types::ParamKind::EnumChoice(wit_types::EnumParam {
+                options: vec!["🙂".repeat(300); 100],
+                default: "🙂".repeat(300),
+            }),
+        };
+        let mut manifest = wit_types::Manifest {
+            name: "é".repeat(300),
+            version: "v".repeat(300),
+            description: "🙂".repeat(300),
+            kinds: vec![],
+            params: vec![param; 100],
+        };
+        bound_manifest(&mut manifest);
+        assert_eq!(manifest.params.len(), 32);
+        assert_eq!(manifest.name.len(), 256);
+        assert_eq!(manifest.description.len(), 256);
+        for param in manifest.params {
+            assert_eq!(param.label.len(), 256);
+            let wit_types::ParamKind::EnumChoice(choices) = param.kind else {
+                panic!("enum");
+            };
+            assert_eq!(choices.options.len(), 64);
+            assert!(choices.options.iter().all(|v| v.len() <= 256));
+            assert_eq!(choices.default.len(), 256);
+        }
     }
 
     #[test]
