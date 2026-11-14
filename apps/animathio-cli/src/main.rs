@@ -2,6 +2,7 @@
 mod autocut;
 mod markers;
 mod mcp;
+mod reframe;
 mod transcribe;
 
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
@@ -142,6 +143,11 @@ enum Action {
     Beats {
         #[command(flatten)]
         args: markers::BeatsArgs,
+    },
+    /// Reframe video to portrait or square with offline subject tracking.
+    Reframe {
+        #[command(flatten)]
+        args: reframe::ReframeArgs,
     },
     /// List or download the local Whisper speech models.
     Models {
@@ -362,6 +368,7 @@ fn run(cli: Cli) -> Result<()> {
         Action::Autocut { args } => autocut::run(args)?,
         Action::Markers { args } => markers::run_markers(args)?,
         Action::Beats { args } => markers::run_beats(args)?,
+        Action::Reframe { args } => reframe::run(args)?,
         Action::Models { args } => transcribe::run_models(&args)?,
         Action::Mcp { project } => run_mcp(project)?,
         Action::RenderSeq {

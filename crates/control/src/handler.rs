@@ -215,6 +215,10 @@ pub trait ControlHandler {
         from_value(self.handle(Call::TrimSilence { params })?)
     }
 
+    /// Reframe video clips as one undo step; returns clip count.
+    fn auto_reframe(&mut self, params: crate::ReframeParams) -> Result<usize, ControlError> {
+        from_value(self.handle(Call::AutoReframe { params })?)
+    }
     /// Transcribe audio and add subtitle clips as one undo step.
     fn subtitles_generate(
         &mut self,

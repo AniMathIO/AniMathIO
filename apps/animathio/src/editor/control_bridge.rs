@@ -15,6 +15,10 @@ impl Editor {
                 return;
             };
             self.finish_color_edit(cx);
+            if let Call::AutoReframe { params } = &call {
+                self.start_reframe(params.clone(), Some(reply), cx);
+                continue;
+            }
             if let Call::ProposeAutocuts { params } = &call {
                 let project = self.project.clone();
                 let assets = self.assets.clone();
@@ -442,6 +446,11 @@ impl Editor {
                 )?;
                 self.after_edit(cx);
                 serde_json::to_value(result)?
+            }
+            Call::AutoReframe { .. } => {
+                return Err(ControlError::Other(
+                    "auto reframe is handled asynchronously".into(),
+                ));
             }
             Call::SubtitlesGenerate { .. } => {
                 return Err(ControlError::Other(

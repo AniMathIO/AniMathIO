@@ -107,6 +107,7 @@ impl Editor {
                 MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),
                 MenuItem::action("Generate subtitles…", GenerateSubtitles),
+                MenuItem::action("Auto reframe…", AutoReframe),
                 MenuItem::action("Automatic cuts…", AutomaticCuts),
                 MenuItem::action("Add marker at playhead", AddMarker),
                 MenuItem::action("Markers and beat sync…", ShowMarkers),

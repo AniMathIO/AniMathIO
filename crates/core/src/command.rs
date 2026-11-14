@@ -203,6 +203,15 @@ pub enum Command {
         /// New value; `None` removes it (only if not animated).
         value: Option<f64>,
     },
+    /// Bypass or re-enable a clip's video effect without removing it.
+    SetEffectBypass {
+        /// Clip identity.
+        id: ClipId,
+        /// Effect identity.
+        effect: EffectId,
+        /// New bypass state.
+        bypass: bool,
+    },
     /// Insert an audio effect into a clip's or track's ordered audio-effect chain.
     AddAudioEffect {
         /// Chain to edit.
@@ -443,6 +452,7 @@ impl Command {
             | Self::AddEffect { id, .. }
             | Self::RemoveEffect { id, .. }
             | Self::SetEffectParam { id, .. }
+            | Self::SetEffectBypass { id, .. }
             | Self::SetPluginParam { id, .. }
             | Self::AddKeyframe { id, .. }
             | Self::RemoveKeyframe { id, .. }
@@ -1060,6 +1070,20 @@ impl Command {
                     effect: *effect,
                     name: name.clone(),
                     value: previous,
+                }
+            }
+            Self::SetEffectBypass { id, effect, bypass } => {
+                let clip = clip_mut(project, *id)?;
+                let instance = clip
+                    .effects
+                    .iter_mut()
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("effect missing"))?;
+                let previous = std::mem::replace(&mut instance.bypass, *bypass);
+                Self::SetEffectBypass {
+                    id: *id,
+                    effect: *effect,
+                    bypass: previous,
                 }
             }
             Self::AddAudioEffect {
