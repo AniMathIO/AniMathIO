@@ -287,8 +287,11 @@ impl Editor {
         }
         let (kind, duration) = if media_type.starts_with("audio/") {
             if let Ok(source) = SymphoniaSource::from_bytes(bytes.clone()) {
-                let duration = frames_to_ticks(source.pcm().frames(), source.pcm().rate())
-                    .max(TICKS_PER_SECOND);
+                let duration = frames_to_ticks(
+                    usize::try_from(source.info().frames).unwrap_or(usize::MAX),
+                    source.info().rate,
+                )
+                .max(TICKS_PER_SECOND);
                 self.pool
                     .insert(id.clone(), &source)
                     .map_err(|e| e.to_string())?;

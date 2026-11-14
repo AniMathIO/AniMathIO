@@ -11,7 +11,7 @@ the render/audio/export data flow. The authority for these rules is
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
 | `format` | Versioned `project.json` (schema version 5) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
-| `audio` | Engine-owned decoded PCM pools, immutable resampled mixer snapshots, and cpal/rtrb device playback. Also pure offline beat detection (`detect_beats`). No audio resources live in `Project`. |
+| `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, and cpal/rtrb device playback. No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
 | `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
@@ -332,9 +332,17 @@ flowchart LR
   is drawn without that effect and reported in `PreviewFrame::effect_failures`, so the
   editor keeps its warning badge/toast instead of a black frame, while export and tests
   use `render`, which fails with `Error::Effect`.
-- **Audio.** `AudioPool::prepare(rate, channels)` decodes/resamples outside playback;
-  `Mixer::mix(project, range)` produces immutable snapshots shared by preview and
-  export; `Player` consumes the ring buffer and updates the latency-corrected
+- **Audio.** Assets stream. `AudioPool::insert` opens a seekable `PcmReader`
+  (`SymphoniaSource` for files, `Pcm` for in-memory samples) and `AudioPool::prepare(rate,
+  channels)` only plans the output format. `Mixer::mix(project, range)`, shared by preview and
+  export, decodes, resamples and channel-maps fixed blocks on demand into an LRU cache with a byte
+  budget (`PrepareOptions`), so memory is independent of media length (a one-hour stereo
+  48 kHz asset mixes in a few megabytes) and the output is a pure function of the project and
+  sources: the FFT resampler's one-chunk overlap lets a block start one chunk early, giving
+  exactly the whole-asset result for any range or cache state. Decoding restarts per 2^21-frame
+  segment from a recorded packet after a quarter-second pre-roll, so it too is history independent.
+  Opus (Ogg, Matroska, MP4) is decoded by the pure-Rust FilmCraft Opus decoder (the `filmcraft_opus` crate). `ChannelMatrix` maps
+  layouts (ITU-R BS.775 fold-down to stereo, mono duplication, stereo mean). `Player` consumes the ring buffer and updates the latency-corrected
   master clock. The device callback only consumes the ring; `Player::now()` is
   quantized to callbacks and freezes on underflow. Clip and track audio-effect
   chains run inside `Mixer::mix` (see [Audio effects](#audio-effects)).
