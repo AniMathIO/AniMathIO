@@ -122,6 +122,11 @@ enum Action {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// List or apply animation presets from the loaded animation-preset plugins.
+    Animations {
+        #[command(subcommand)]
+        action: AnimationAction,
+    },
     /// Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips.
     Transcribe {
         #[command(flatten)]
@@ -150,6 +155,35 @@ enum Action {
         project: Option<PathBuf>,
     },
 }
+#[derive(Subcommand)]
+enum AnimationAction {
+    /// Print every preset with its role, default duration and options as JSON.
+    List,
+    /// Apply a preset to one clip as keyframes and write the project to a `.amio` archive.
+    Apply {
+        /// project.json (assets/<hash> alongside it), or a self-contained .amio.
+        project: PathBuf,
+        /// Clip id to animate.
+        #[arg(long)]
+        clip: u64,
+        /// Preset id from `animations list`, e.g. fade-in.
+        #[arg(long)]
+        preset: String,
+        /// Providing plugin; defaults to org.animathio.animations.
+        #[arg(long)]
+        plugin: Option<String>,
+        /// Window length in decimal seconds or Nticks; defaults to the preset's.
+        #[arg(long, value_parser = parse_time)]
+        duration: Option<Time>,
+        /// Option override `id=value` (numbers, true/false or a choice); repeatable.
+        #[arg(long = "option")]
+        options: Vec<String>,
+        /// Output `.amio` archive.
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+}
+
 #[derive(Subcommand)]
 enum TemplateAction {
     /// Print template metadata and placeholder clip ids as JSON.
@@ -258,7 +292,8 @@ fn run(cli: Cli) -> Result<()> {
             input,
             scene,
             output,
-        } => run_import_manim(&input, scene, &output)?,
+        } => run_import_manim(&input, scene.as_deref(), &output)?,
+        Action::Animations { action } => run_animations(action)?,
         Action::Render {
             project,
             frame,
@@ -398,20 +433,36 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn run_import_manim(input: &Path, scene: Option<String>, output: &Path) -> Result<()> {
+fn run_import_manim(input: &Path, scene: Option<&str>, output: &Path) -> Result<()> {
     let source = fs::read_to_string(input)?;
-    let options = animathio_import_manim::ManimOptions {
+    let host = plugin_host()?;
+    let file_name = input
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let sibling_dir = input
+        .parent()
+        .map(|dir| {
+            if dir.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                dir
+            }
+        })
+        .map(Path::to_path_buf);
+    let imported = animathio_control::import_manim_with_plugin(
+        Some(&host),
+        &source,
+        &file_name,
+        sibling_dir,
         scene,
-        script_dir: input.parent().map(Path::to_path_buf),
-    };
-    let (project, assets, report) =
-        animathio_import_manim::import_manim_with_options(&source, &options)?;
-    for warning in report.warnings() {
+    )?;
+    for warning in imported.warnings() {
         eprintln!("warning: {warning}");
     }
-    for info in report.infos() {
+    for info in imported.infos() {
         eprintln!("info: {info}");
     }
+    let (project, assets) = (imported.project, imported.assets);
     let asset_map: BTreeMap<AssetId, Vec<u8>> = assets
         .into_iter()
         .map(|asset| (asset.id, asset.bytes))
@@ -423,6 +474,63 @@ fn run_import_manim(input: &Path, scene: Option<String>, output: &Path) -> Resul
         asset_map.len(),
         output.display()
     );
+    Ok(())
+}
+
+fn run_animations(action: AnimationAction) -> Result<()> {
+    let host = plugin_host()?;
+    match action {
+        AnimationAction::List => {
+            let presets = animathio_control::animation_preset_infos(host.animation_presets());
+            println!("{}", serde_json::to_string_pretty(&presets)?);
+        }
+        AnimationAction::Apply {
+            project,
+            clip,
+            preset,
+            plugin,
+            duration,
+            options,
+            output,
+        } => {
+            let mut bundle = load(&project)?;
+            let options = options
+                .iter()
+                .map(|option| {
+                    let (id, value) = option
+                        .split_once('=')
+                        .ok_or_else(|| format!("option {option:?} is not id=value"))?;
+                    let value = match value {
+                        "true" => serde_json::Value::Bool(true),
+                        "false" => serde_json::Value::Bool(false),
+                        other => other
+                            .parse::<f64>()
+                            .ok()
+                            .and_then(serde_json::Number::from_f64)
+                            .map_or_else(|| other.into(), serde_json::Value::Number),
+                    };
+                    Ok((id.to_owned(), value))
+                })
+                .collect::<std::result::Result<BTreeMap<_, _>, String>>()?;
+            let params = animathio_control::AnimationApplyParams {
+                clip: animathio_core::ClipId(clip),
+                preset,
+                plugin,
+                duration,
+                options,
+            };
+            let (command, applied) =
+                animathio_control::animation_preset_command(&bundle.project, Some(&host), &params)?;
+            command.apply(&mut bundle.project)?;
+            save_amio(&output, &bundle.project, &bundle.assets)?;
+            println!(
+                "wrote {} keyframes on clip {} into {}",
+                applied.keyframes,
+                clip,
+                output.display()
+            );
+        }
+    }
     Ok(())
 }
 

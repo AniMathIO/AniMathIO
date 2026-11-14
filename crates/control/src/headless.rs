@@ -61,6 +61,14 @@ impl HeadlessHandler {
         }
     }
 
+    /// Use `host` for plugin clips, effects, presets and importers instead of
+    /// discovering plugins lazily (embedders and tests with prebuilt bundles).
+    #[must_use]
+    pub fn with_plugin_host(mut self, host: PluginHost) -> Self {
+        self.plugins = Some(host);
+        self
+    }
+
     /// Load a `.amio` archive or a `project.json` with adjacent assets, plus
     /// plugins from the shared trusted discovery locations.
     pub fn load(path: &Path) -> Result<Self, ControlError> {
@@ -358,6 +366,21 @@ impl ControlHandler for HeadlessHandler {
                 serde_json::to_value(self.audio_effects_add(&params)?)?
             }
             Call::EffectsAdd { params } => serde_json::to_value(self.effects_add(&params)?)?,
+            Call::AnimationsList => {
+                self.ensure_effect_plugins();
+                serde_json::to_value(crate::animation_preset_infos(
+                    self.plugins
+                        .as_ref()
+                        .map_or_default(PluginHost::animation_presets),
+                ))?
+            }
+            Call::AnimationsApply { params } => {
+                self.ensure_effect_plugins();
+                let (command, applied) =
+                    crate::animation_preset_command(&self.project, self.plugins.as_ref(), &params)?;
+                self.history.execute(&mut self.project, &command)?;
+                serde_json::to_value(applied)?
+            }
             Call::ProjectGet => serde_json::to_value(self.state())?,
             Call::ProjectOpen { path } => {
                 self.open(&path)?;
@@ -428,11 +451,15 @@ impl ControlHandler for HeadlessHandler {
             )?)?,
             call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
                 let replace = matches!(&call, Call::ImportManim { params } if params.replace);
+                if matches!(&call, Call::ImportManim { .. }) {
+                    self.ensure_effect_plugins();
+                }
                 let result = crate::apply_authoring_call(
                     &mut self.project,
                     &mut self.history,
                     &mut self.assets,
                     &call,
+                    self.plugins.as_ref(),
                 )?;
                 if replace {
                     self.path = None;

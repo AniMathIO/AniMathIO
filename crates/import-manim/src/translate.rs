@@ -1539,6 +1539,55 @@ fn resolve_image(path: &str, options: &ManimOptions) -> ImageResolution {
         }
     }
 
+    let extension = relative
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase);
+    let Some(extension) = extension else {
+        return Err(format!("image `{path}` has no file extension"));
+    };
+    if !ALLOWED_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        return Err(format!(
+            "image `{path}` has unsupported extension `.{extension}`"
+        ));
+    }
+    let name = relative
+        .file_name()
+        .map_or_else(|| "image".to_owned(), |n| n.to_string_lossy().into_owned());
+
+    let bytes = if let Some(files) = &options.files {
+        let normalized = relative
+            .components()
+            .filter_map(|component| match component {
+                Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        let bytes = files
+            .read(&normalized, MAX_IMAGE_BYTES)
+            .map_err(|error| format!("cannot read image `{path}`: {error}"))?;
+        if bytes.len() as u64 > MAX_IMAGE_BYTES {
+            return Err(format!(
+                "image `{path}` exceeds the {MAX_IMAGE_BYTES} byte size limit"
+            ));
+        }
+        bytes
+    } else {
+        read_from_script_dir(path, relative, options)?
+    };
+    verify_magic(&extension, &bytes)?;
+
+    let media_type = media_type_for(&extension);
+    Ok((name, media_type, bytes))
+}
+
+/// Native read of `relative` below the canonical script directory.
+fn read_from_script_dir(
+    path: &str,
+    relative: &Path,
+    options: &ManimOptions,
+) -> Result<Vec<u8>, String> {
     // Images are resolved relative to the script directory; without one the
     // importer cannot tell where the file is, so it refuses to guess.
     let Some(script_dir) = &options.script_dir else {
@@ -1552,19 +1601,6 @@ fn resolve_image(path: &str, options: &ManimOptions) -> ImageResolution {
     })?;
 
     let candidate = base.join(relative);
-
-    let extension = candidate
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::to_ascii_lowercase);
-    let Some(extension) = extension else {
-        return Err(format!("image `{path}` has no file extension"));
-    };
-    if !ALLOWED_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
-        return Err(format!(
-            "image `{path}` has unsupported extension `.{extension}`"
-        ));
-    }
 
     // Canonicalize so a symlink pointing outside the script directory is
     // refused rather than followed.
@@ -1589,15 +1625,7 @@ fn resolve_image(path: &str, options: &ManimOptions) -> ImageResolution {
         ));
     }
 
-    let bytes = std::fs::read(&candidate)
-        .map_err(|error| format!("cannot read image `{path}`: {error}"))?;
-    verify_magic(&extension, &bytes)?;
-
-    let media_type = media_type_for(&extension);
-    let name = candidate
-        .file_name()
-        .map_or_else(|| "image".to_owned(), |n| n.to_string_lossy().into_owned());
-    Ok((name, media_type, bytes))
+    std::fs::read(&candidate).map_err(|error| format!("cannot read image `{path}`: {error}"))
 }
 
 fn verify_magic(extension: &str, bytes: &[u8]) -> Result<(), String> {

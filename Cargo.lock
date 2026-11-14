@@ -256,7 +256,6 @@ dependencies = [
  "animathio-core",
  "animathio-export",
  "animathio-format",
- "animathio-import-manim",
  "animathio-import-v1",
  "animathio-media",
  "animathio-plugin-api",
@@ -283,7 +282,6 @@ dependencies = [
  "animathio-core",
  "animathio-export",
  "animathio-format",
- "animathio-import-manim",
  "animathio-import-v1",
  "animathio-media",
  "animathio-plugin-api",
@@ -356,8 +354,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
- "tree-sitter",
- "tree-sitter-python",
 ]
 
 [[package]]
@@ -416,6 +412,7 @@ name = "animathio-plugin-host"
 version = "2.0.0"
 dependencies = [
  "animathio-core",
+ "animathio-import-manim",
  "animathio-plugin-api",
  "animathio-render",
  "animathio-typeset",
@@ -8856,12 +8853,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d08889ec5408683408db66ad89e0e1f93dff55c73a4ccc71c427d5b277ee47e6"
 
 [[package]]
-name = "streaming-iterator"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
-
-[[package]]
 name = "strength_reduce"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9776,36 +9767,6 @@ checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
 dependencies = [
  "num-integer",
  "strength_reduce",
-]
-
-[[package]]
-name = "tree-sitter"
-version = "0.25.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78f873475d258561b06f1c595d93308a7ed124d9977cb26b148c2084a4a3cc87"
-dependencies = [
- "cc",
- "regex",
- "regex-syntax 0.8.11",
- "serde_json",
- "streaming-iterator",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-language"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0af592be68c579aa78a16846bd19422978c3c52e438523d45ff5d1bff1f9d4a"
-
-[[package]]
-name = "tree-sitter-python"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bf85fd39652e740bf60f46f4cda9492c3a9ad75880575bf14960f775cb74a1c"
-dependencies = [
- "cc",
- "tree-sitter-language",
 ]
 
 [[package]]

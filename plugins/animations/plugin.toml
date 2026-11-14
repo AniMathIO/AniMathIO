@@ -1,0 +1,7 @@
+api_version = "1.1.0"
+id = "org.animathio.animations"
+name = "Animations"
+version = "1.0.0"
+description = "Entrance, exit and emphasis presets: fade, slide, zoom, pop, spin, bounce, wipe, typewriter, breathe, shake and flash"
+kinds = ["animation-preset"]
+capabilities = []

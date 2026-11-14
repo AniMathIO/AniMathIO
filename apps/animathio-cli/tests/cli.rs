@@ -340,6 +340,58 @@ class Second(Scene):
         bundle.project.duration(),
         animathio_core::Time(animathio_core::TICKS_PER_SECOND * 3)
     );
+    apply_animation_presets(dir.path(), &output);
+}
+
+/// Apply a preset to the first clip of an imported archive through the CLI.
+fn apply_animation_presets(dir: &Path, output: &Path) {
+    let bundle = read_amio(File::open(output).unwrap(), Limits::default()).unwrap();
+    let clip = *bundle.project.tracks()[0].clips().keys().next().unwrap();
+    let listed = cli(&["animations", "list"]);
+    assert!(listed.status.success());
+    let presets: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert!(
+        presets
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["preset"] == "typewriter-in")
+    );
+    let animated = dir.join("animated.amio");
+    ok(&[
+        "animations",
+        "apply",
+        path(output),
+        "--clip",
+        &clip.0.to_string(),
+        "--preset",
+        "slide-in",
+        "--duration",
+        "0.5",
+        "--option",
+        "direction=bottom",
+        "--option",
+        "fade=true",
+        "-o",
+        path(&animated),
+    ]);
+    let after = read_amio(File::open(&animated).unwrap(), Limits::default()).unwrap();
+    let clip = &after.project.tracks()[0].clips()[&clip];
+    assert!(clip.animations.iter().any(
+        |a| a.target == animathio_core::Target::Transform(animathio_core::TransformProperty::Y)
+    ));
+    let failed = cli(&[
+        "animations",
+        "apply",
+        path(output),
+        "--clip",
+        "999",
+        "--preset",
+        "fade-in",
+        "-o",
+        path(&animated),
+    ]);
+    assert!(!failed.status.success());
 }
 
 #[test]

@@ -332,6 +332,15 @@ pub enum Call {
         /// Import parameters.
         params: ImportManimParams,
     },
+    /// List the presets provided by loaded animation-preset plugins.
+    #[serde(rename = "animations.list")]
+    AnimationsList,
+    /// Apply an animation preset to a clip as one undoable batch of keyframes.
+    #[serde(rename = "animations.apply")]
+    AnimationsApply {
+        /// Clip, preset, optional window length and option overrides.
+        params: crate::AnimationApplyParams,
+    },
     /// List the effects provided by loaded effect plugins.
     #[serde(rename = "effects.list")]
     EffectsList,

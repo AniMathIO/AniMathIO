@@ -26,6 +26,7 @@ Commands:
   import-media  Import media into a new project, including linked companion audio
   import-v1     Convert a v1 `.animathio` project to a `.amio` archive
   import-manim  Convert a Manim Community scene script to a `.amio` archive
+  animations    List or apply animation presets from the loaded animation-preset plugins
   transcribe    Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
   autocut       Propose or apply silence and optional filler cuts as one ripple edit
   models        List or download the local Whisper speech models
@@ -259,6 +260,40 @@ Options:
 ```bash
 animathio-cli import-manim scene.py -o imported.amio
 animathio-cli import-manim scene.py --scene MyScene -o imported.amio
+```
+
+The import runs inside the sandboxed `org.animathio.import-manim` importer plugin (build
+it with `scripts/build-plugins.sh`); `ImageMobject` files are read only from the script's
+folder.
+
+## `animations`
+
+List or apply animation presets from the loaded animation-preset plugins
+(`org.animathio.animations`). `apply` writes the preset as ordinary keyframes on one clip
+and saves the project as a `.amio` archive; in presets sit at the clip start, out presets
+at its end and emphasis presets in its middle (the whole clip by default).
+
+<!-- help:animations -->
+```text
+List or apply animation presets from the loaded animation-preset plugins
+
+Usage: animathio-cli animations <COMMAND>
+
+Commands:
+  list   Print every preset with its role, default duration and options as JSON
+  apply  Apply a preset to one clip as keyframes and write the project to a `.amio` archive
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+<!-- /help:animations -->
+
+```bash
+animathio-cli animations list
+animathio-cli animations apply project.amio --clip 3 --preset fade-in -o animated.amio
+animathio-cli animations apply project.amio --clip 3 --preset slide-out --duration 0.75 \
+    --option direction=left --option fade=true -o animated.amio
 ```
 
 ## `transcribe`

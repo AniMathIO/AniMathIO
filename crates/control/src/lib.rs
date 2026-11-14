@@ -10,6 +10,7 @@
 //! socket; clients must send it with every request and it is compared in
 //! constant time.
 
+mod animations;
 mod authoring;
 mod autocut;
 pub use autocut::{
@@ -44,7 +45,13 @@ pub use subtitles::{
     generate_subtitles, import_subtitles, subtitle_command, track_cues, transcribe_project,
 };
 
-pub use authoring::apply_authoring_call;
+pub use animations::{
+    ANIMATIONS_PLUGIN_ID, AnimationApplied, AnimationApplyParams, AnimationOptionInfo,
+    AnimationPresetInfo, animation_preset_command, animation_preset_infos,
+};
+pub use authoring::{
+    MANIM_IMPORT_PLUGIN_ID, MANIM_IMPORTER_ID, apply_authoring_call, import_manim_with_plugin,
+};
 pub use client::ControlClient;
 pub use edit::{
     TitleStyle, TrimSilenceParams, TrimSilenceResult, content_end, describe_timeline,

@@ -1,4 +1,4 @@
-api_version = "1.0.0"
+api_version = "1.1.0"
 id = "org.animathio.effects-basic"
 name = "Basic Effects"
 version = "1.0.0"

@@ -7,7 +7,10 @@ is compiled to `wasm32-wasip2` and packaged as an `.amplugin` — a zip containi
 
 A plugin is a pure function of `(params, time)` returning vector scenes — or, for an
 *effect* plugin, a pure function of `(pixels, params, time)` returning pixels, or for an
-*audio-effect* plugin, a pure function of `(PCM block, params, state)` returning PCM. It never
+*audio-effect* plugin, a pure function of `(PCM block, params, state)` returning PCM. An
+*animation-preset* plugin turns a preset choice into keyframe curves once, when the preset
+is applied, and an *importer* plugin turns source bytes into a command document the host
+validates and replays. A plugin never
 touches files, sockets, the GPU or a font engine directly. Everything it needs is
 provided by **host imports**.
 
@@ -16,7 +19,7 @@ provided by **host imports**.
 The contract is `crates/plugin-api/wit/plugin.wit`:
 
 ```wit
-package animathio:plugin@1.0.0;
+package animathio:plugin@1.1.0;
 
 interface types { /* shared vector + schema types, see below */ }
 
@@ -52,6 +55,24 @@ world audio-effect-plugin {
     export describe: func() -> manifest;
     export audio-effects;
 }
+
+// API 1.1: animation presets (see "Animation-preset plugins" below).
+world animation-preset-plugin {
+    import host;
+    use types.{manifest};
+    export describe: func() -> manifest;
+    export animation-presets;
+}
+
+// API 1.1: importers, which also import bounded sibling-file reads
+// (see "Importer plugins" below).
+world importer-plugin {
+    import host;
+    import import-files;
+    use types.{manifest};
+    export describe: func() -> manifest;
+    export importer;
+}
 ```
 
 A clip-source component implements the two exports of `world source-plugin`.
@@ -61,16 +82,26 @@ curve hooks, without making them part of the frozen 1.0 contract.
 
 ### API versions and compatibility policy
 
-The frozen contract is `animathio:plugin@1.0.0`. ABI semver is independent of the
+The current contract is `animathio:plugin@1.1.0`: the frozen 1.0 contract plus two
+new worlds (`animation-preset-plugin`, `importer-plugin`) and one new interface that only
+the importer world imports (`import-files`). 1.1 changes no existing record, enum,
+variant, function or world, so every 1.0 component loads and runs unchanged (the
+checked-in frozen `hello-1.0.0` fixture and the 0.2.x fixtures are tested against this
+host). ABI semver is independent of the
 application's 2.0 version and each plugin's own version. The Rust SDK crate keeps
 its workspace version (2.0.0); `API_VERSION` identifies the component ABI. Its
 host-side kind and error enums are non-exhaustive so SDK callers handle future
 host classifications/errors with a fallback. Package `api_version` is
 an exact stable semantic version naming the **minimum host ABI required**, not a
-Cargo-style range. This host supports `1.0.0` and explicitly adapts legacy
+Cargo-style range. This host supports `1.0.0` and `1.1.0` and explicitly adapts legacy
 `0.2.0`, `0.2.1`, `0.2.2`. It rejects malformed versions, prereleases, build
 metadata, unknown majors and requirements newer than its implemented ABI before
 compiling the component. Merely changing `plugin.toml` cannot upgrade a component.
+A 1.x component imports and exports interfaces at the minor its WIT came from; the
+host's linker satisfies `@1.0.0` imports with its `@1.1.0` definitions (Wasmtime
+semver matching) and looks up exports at every implemented 1.x minor, newest first.
+The `animation-preset` and `importer` kinds require `api_version = "1.1.0"` and, like
+`effect`/`audio-effect`, must be a package's only kind.
 The host checks the selected world's canonical types and versioned exports;
 for 1.x packages, known execution kinds, the plugin version and the parameter
 schema returned by `describe` must also agree with the package and be well formed;
@@ -100,8 +131,9 @@ them, only to the typed export checks.
   1.0 hello fixture also guards this contract against future accidental breaks.
 
 WIT `plugin-kind` is now a **string**, with execution IDs `clip-source`,
-`effect`, `audio-effect`. The old `animation` package kind is accepted only for
-0.2.x; no animation execution world is implemented in 1.0. Adding a string value
+`effect`, `audio-effect` and, since 1.1, `animation-preset` and `importer`. The old
+`animation` package kind is accepted only for 0.2.x; it never had an execution world
+(1.1 adds `animation-preset`, which generates ordinary keyframes instead). Adding a string value
 does not change canonical types.
 Unknown strings returned by `describe` are advisory classifications and grant no
 execution capability. Unknown execution kinds in `plugin.toml` are rejected with
@@ -109,13 +141,13 @@ a diagnostic; the host cannot run worlds it does not implement. This avoids
 repeating the closed-enum failure found in #211. The 0.2 adapter maps that old
 world's `effect` report to `audio-effect` only for an audio-effect package.
 
-There is **no importer WIT world** in this release. The v1 and Manim importers are
-native crates behind the command/control API. Their Rust functions and JSON
-project serialization are not part of the frozen component ABI. A future importer
-world must define versioned command/project exchange and resource bounds before
-it can be offered as a new minor ABI feature. Raster generators and animation
-execution likewise need separate future worlds; the frozen source world returns
-vector scenes only.
+The importer world's exchange format is a **versioned command document**
+(`{"version": 1, "commands": [...]}`, core `Command`s in their control-protocol JSON).
+Version 1 is tied to this host's command serialization; a host that changes it must
+accept or reject versions explicitly. The v1 importer is still a native crate behind
+the control API (its embedded media can inflate to 2 GiB, beyond a wasm32 importer
+sandbox); the Manim importer runs as the `org.animathio.import-manim` plugin. Raster
+generators need a separate future world; the source world returns vector scenes only.
 
 ### Upgrading a 0.2 component
 
@@ -130,7 +162,8 @@ To build a new 1.0 component:
    string code, a fallback message and empty metadata when no details are needed.
 3. Return string kind IDs from `describe`, including the real `audio-effect` kind,
    and initialize its `metadata` field (an empty list is fine).
-4. Set package `api_version = "1.0.0"`; keep the plugin's own version consistent
+4. Set package `api_version = "1.1.0"` (or `"1.0.0"` for binaries built against the
+   frozen 1.0 WIT); keep the plugin's own version consistent
    between package and `describe`. Preserve existing parameter IDs, units and
    enum values when retaining compatibility with saved projects.
 5. Rebuild for `wasm32-wasip2` and package the new binary with its matching manifest.
@@ -144,6 +177,7 @@ To build a new 1.0 component:
 | `svg-to-paths` | `(svg_xml) -> result<list<path>, diagnostic>` | Parse an SVG XML string into vector paths. |
 | `log` | `(message)` | Host logging for diagnostics. |
 | `limits` | `() -> list<tuple<string, u64>>` | Configured sandbox policy and tick frequency; unique keys, unknown keys ignored. |
+| `read-sibling` | `(relative-path) -> result<list<u8>, diagnostic>` | Importer world only (`import-files` interface): bounded read of a file below the directory the caller granted for this import. |
 
 `typeset-result` is `{ paths: list<path>, bbox: bbox }`; `math-mode` is `latex` or
 `typst`; `bbox` is `{ min-x, min-y, max-x, max-y }` (f32).
@@ -313,12 +347,12 @@ let t = time_ticks as f64 / TICKS_PER_SECOND;
 The manifest stored at the archive root of an `.amplugin`:
 
 ```toml
-api_version = "1.0.0"          # minimum host ABI, not a version range
+api_version = "1.1.0"          # minimum host ABI, not a version range
 id = "com.example.hello"       # reverse-domain; [a-zA-Z0-9._-]
 name = "Hello"
 version = "0.1.0"
 description = "Minimal example plugin: a filled circle"
-kinds = ["clip-source"]        # "clip-source" | "effect" | "animation" | "audio-effect"; an effect or audio-effect plugin declares only that one kind
+kinds = ["clip-source"]        # "clip-source" | "effect" | "audio-effect" | "animation-preset" | "importer"; all but clip-source must be the only kind
 capabilities = []              # requested host grants; empty = sandbox only
 ```
 
@@ -372,7 +406,7 @@ builtin implementation by `crates/plugin-host/tests/effects.rs` and by the rende
 ## Audio-effect plugins
 
 An audio-effect plugin is a filter library for sound. It declares
-`kinds = ["audio-effect"]` with `api_version = "1.0.0"`, implements the
+`kinds = ["audio-effect"]` with `api_version = "1.0.0"` or later, implements the
 `audio-effect-plugin` world and is built like any other plugin
 (`wit_bindgen::generate!({ path: ..., world: "audio-effect-plugin" })`). Its exports:
 
@@ -433,6 +467,109 @@ independent, deterministic):
 | `gate` | `threshold_db` (−50), `attack_ms` (2), `hold_ms` (50), `release_ms` (150), `range_db` (60) | Starts open; closes to `−range_db` below the threshold after the hold. |
 | `highpass` | `frequency` (80 Hz, 10…2000) | 2nd-order Butterworth, 12 dB/octave. |
 | `voice_cleanup` | `highpass_hz` (80), `gate_threshold_db` (−55), `deess_freq` (6.5 kHz), `deess_threshold_db` (−30), `deess_amount` (0.5) | Preset: high-pass, gentle 12 dB gate, then a split-band de-esser (Linkwitz-Riley crossover; only the band above `deess_freq` is attenuated). No spectral processing. |
+
+## Animation-preset plugins
+
+An animation-preset plugin (API 1.1) declares `kinds = ["animation-preset"]` with
+`api_version = "1.1.0"` and implements the `animation-preset-plugin` world
+(`wit_bindgen::generate!({ path: ..., world: "animation-preset-plugin" })`):
+
+```wit
+interface animation-presets {
+    use types.{param-map, param-spec, diagnostic};
+    enum preset-role { entrance, exit, emphasis }
+    record preset-descriptor { id: string, name: string, description: string, role: preset-role,
+                               applies-to: list<string>, default-duration-ticks: s64,
+                               params: list<param-spec> }
+    record clip-info { kind: string, duration-ticks: s64, frame-ticks: s64,
+                       rest: list<tuple<string, f64>> }
+    enum curve-interpolation { hold, linear, ease-in-out }
+    record curve-key { time-ticks: s64, value: f64, interpolation: curve-interpolation }
+    record curve { target: string, keys: list<curve-key> }
+    list-presets: func() -> list<preset-descriptor>;
+    generate: func(preset: string, clip: clip-info, window-ticks: s64, params: param-map)
+        -> result<list<curve>, diagnostic>;
+}
+```
+
+- `list-presets` advertises each preset: a stable `id` (`[a-z0-9_-]`), a role, the clip
+  kinds it fits (`video`, `image`, `vector`, `plugin:<plugin-id>`; empty means every
+  visual clip, never audio), a positive default window and typed options (`number`,
+  `enum-choice` or `bool` only). The host validates the whole list strictly at load.
+- The host places the window: `entrance` at the clip start, `exit` at its end,
+  `emphasis` centred; the window is clamped to the clip, so a very long default (the
+  first-party emphasis presets use one hour) means "the whole clip".
+- `generate` receives the clip's kind, length, frame length and **rest values**: the
+  current value of every animatable target where the animation must end up (the end of
+  an entrance window, the start of an exit or emphasis window), already sampled from
+  existing keyframes. Targets are `opacity`, `x`, `y`, `scale-x`, `scale-y`,
+  `rotation` (radians) and `param:<name>` for numeric clip parameters (for plugin clips
+  also the numeric defaults of the clip plugin's schema).
+- It returns curves with window-relative key times (`0..=window-ticks`, strictly
+  increasing per curve), finite values and core interpolations. Easings that core
+  keyframes cannot express are the plugin's job to sample into linear segments. The host
+  caps the total key count (`max_preset_keys`) and the curve count (16), clamps opacity to
+  `[0, 1]`, rejects unknown targets and duplicate curves, and turns the result into one
+  `Command::Batch`: it removes each animated target's existing keys inside the window,
+  then adds the generated ones. Nothing about the preset is stored in the project.
+- `generate` runs once per application under the default per-call budget; it must be a
+  pure function of its arguments.
+
+First-party `org.animathio.animations` provides these presets (ids in parentheses,
+options after the colon):
+
+| Role | Presets |
+| --- | --- |
+| In / Out | fade (fade-in, fade-out: easing); slide (slide-in, slide-out: direction, distance, fade, easing); zoom (zoom-in, zoom-out: scale, fade, easing); pop (pop-in, pop-out: intensity overshoot); spin (spin-in, spin-out: turns, rotation, easing); bounce (bounce-in, bounce-out: from); wipe (wipe-in, wipe-out: direction, easing; an edge-anchored stretch reveal, not a mask); typewriter (typewriter-in, typewriter-out: text clips only, keyframes the text plugin's `reveal`) |
+| Emphasis | breathe (v1's breathe: intensity, period), shake, spin, hop and flash (intensity, period; spin: turns, rotation, easing) |
+
+Exits mirror their entrance in time. Easing choices are linear, ease-in, ease-out,
+ease-in-out, back, bounce and elastic.
+
+## Importer plugins
+
+An importer plugin (API 1.1) declares `kinds = ["importer"]` with `api_version = "1.1.0"`
+and implements the `importer-plugin` world, which additionally imports `import-files`:
+
+```wit
+interface importer {
+    use types.{param-map, param-spec, diagnostic};
+    record importer-descriptor { id: string, name: string, description: string,
+                                 extensions: list<string>, params: list<param-spec> }
+    record import-source { file-name: string, bytes: list<u8> }
+    record imported-asset { id: string, name: string, media-type: string, bytes: list<u8> }
+    enum message-severity { info, warning }
+    record import-message { severity: message-severity, line: u32, column: u32,
+                            message: string, snippet: string }
+    record import-output { commands: string, assets: list<imported-asset>,
+                           messages: list<import-message> }
+    list-importers: func() -> list<importer-descriptor>;
+    run-import: func(importer: string, source: import-source, params: param-map)
+        -> result<import-output, diagnostic>;
+}
+```
+
+- `list-importers` names each format with lower-case extensions and options (`string`,
+  `number`, `enum-choice` or `bool`). The host fills missing options with their
+  defaults and rejects unknown or out-of-range ones before the plugin runs.
+- `run-import` gets the source bytes (at most `max_import_source_bytes`) and a file-name
+  hint. Files next to the source are reachable only through `read-sibling`, and only
+  when the caller granted a directory (the editor, CLI and control API grant the
+  script's folder); paths are relative, `/`-separated, without `..`, and symlinks
+  resolving outside the directory are refused. Each call has file-size, total-byte and
+  file-count budgets.
+- `commands` is a UTF-8 JSON document `{"version": 1, "commands": [...]}` of core
+  `Command`s (`Project::rebuild_commands` produces one from a project). The host replays
+  it on an empty project through the validating `Command::apply`; any failing command,
+  an unknown version or field, more than `max_import_commands` commands or more than
+  `max_import_output_bytes` bytes rejects the whole import. Every returned asset's `id`
+  must be the lower-case hex BLAKE3 of its bytes and be registered by an `AddAsset`, and
+  every registered asset needs bytes.
+- `messages` are non-fatal notes shown to the user (`line:column: message (snippet)`).
+
+First-party `org.animathio.import-manim` (format id `manim`, extension `py`, option
+`scene`) runs the `import-manim` crate, the same code the native tests exercise, so
+the plugin path produces the same project as the crate.
 
 ## Building an `.amplugin`
 
@@ -512,6 +649,20 @@ the effect is skipped: preview passes the audio through that effect unprocessed 
 a warning toast, while export fails with an error naming the effect
 (`audio effect <plugin>/<effect>: ...`) rather than writing unprocessed audio.
 
+Importer calls (API 1.1) use their own budget (`SandboxLimits`):
+
+| Limit | Default |
+| --- | --- |
+| Source size | 64 MiB (`max_import_source_bytes`); larger sources are rejected before any plugin code runs |
+| Memory | 1 GiB (`import_memory_bytes`), committed only as the guest grows |
+| Fuel | 100 × `fuel_per_call` + 20,000 per source byte (`import_fuel_per_byte`) |
+| Epoch deadline | 3,000 ticks → ~30 s backstop (`import_epoch_deadline_ticks`) |
+| Command document | 64 MiB (`max_import_output_bytes`) and 100,000 commands (`max_import_commands`) |
+| `read-sibling` | 64 MiB per file (`max_sibling_file_bytes`), 256 MiB in total (`max_sibling_total_bytes`), 256 files (`max_sibling_files`) per import |
+
+Animation-preset `generate` calls use the default per-call budget and may return at most
+1,000 keys in total (`max_preset_keys`).
+
 Guests can call `host::limits()` to read configured policy. Keys match the
 `SandboxLimits` fields below with underscores replaced by hyphens; memory values
 are bytes, fuel is Wasmtime instruction fuel, and epoch deadlines are ticker
@@ -521,7 +672,10 @@ formulas, not remaining resources. The query includes `ticks-per-second`,
 `max-shape-text-chars`, `max-shape-text-verbs`, `max-svg-input-bytes`,
 `max-svg-verbs`, `max-typeset-verbs`, `max-typeset-source-bytes`,
 `max-typeset-font-size-px`, `typeset-timeout-ms`, `max-log-message-bytes`,
-`max-log-entries`.
+`max-log-entries`, and since 1.1 `max-import-source-bytes`, `import-memory-bytes`,
+`import-fuel-per-byte`, `import-epoch-deadline-ticks`, `max-import-output-bytes`,
+`max-import-commands`, `max-sibling-file-bytes`, `max-sibling-total-bytes`,
+`max-sibling-files` and `max-preset-keys`.
 Limits may be lower in a custom host. Unknown keys must be ignored; a missing
 optional key does not authorize unbounded work. Fuel, memory and time limits
 remain enforced even if the guest never queries them.
@@ -571,7 +725,7 @@ wit-bindgen = "0.40.0"
 **`plugins/examples/hello/plugin.toml`**
 
 ```toml
-api_version = "1.0.0"
+api_version = "1.1.0"
 id = "com.example.hello"
 name = "Hello"
 version = "1.0.0"
@@ -775,7 +929,9 @@ Notes for real plugins:
 ## First-party text and shapes
 
 `org.animathio.text` accepts `text`, `font_size`, `color`, `align` (`left`, `center`,
-`right`) and `units` (`pixels` or `normalized`). Pixel mode retains centered outline
+`right`), `units` (`pixels` or `normalized`) and `reveal` (0–1, default 1: the fraction
+of characters shown, keyframed by the typewriter presets; the visible prefix is laid
+out on its own, so left alignment keeps characters in place while they appear). Pixel mode retains centered outline
 layout. Normalized mode produces a generic text run with embedded-font shaping,
 wrapping and line alignment; font size is a fraction of canvas height. The laid-out
 text block (widest line by line stack) is centred on the clip's transform position like
@@ -799,7 +955,9 @@ scale with it. Normalized shapes remain static unless their parameters are keyfr
 `[{"MoveTo":[0,0]},{"QuadTo":[[0.5,1],[1,0]]},"Close"]`.
 `CurveTo` carries three points (two controls and endpoint).
 
-All first-party components and the example target ABI 1.0.0 and have plugin version
-1.0.0. The explicit 0.2.x adapter retains older binaries; 0.1 packages are rejected.
+All first-party components and the example are built against ABI 1.1.0 and declare
+`api_version = "1.1.0"`; their plugin versions are 1.0.0 except `org.animathio.text`
+1.1.0 (the `reveal` parameter). The frozen 1.0 fixture and the explicit 0.2.x adapter
+retain older binaries; 0.1 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.

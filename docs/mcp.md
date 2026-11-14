@@ -61,6 +61,8 @@ gets a JSON-RPC error instead of a result.
 | `graph.add` | `{ params: { x_min?, x_max?, y_min?, y_max?, items?, show_grid?, show_axes?, show_labels?, color?, x?, y?, start?, duration?, draw_duration? } }` | `{ track_id, clip_id }` |
 | `titles.list` | — | Bundled title presets and editable fields |
 | `titles.add` | `{params: {preset, fields?, range: {start, end}}}` | `{track_id, clip_id}`; linked plugin composition, one undo step |
+| `animations.list` | — | `[AnimationPresetInfo]` (plugin, preset, name, description, role `in`/`out`/`emphasis`, applies_to, default_duration in ticks, options with id/label/kind/default/min/max/options) from loaded animation-preset plugins |
+| `animations.apply` | `{ params: { clip, preset, plugin?, duration?, options? } }` | `{ clip, keyframes }`; applies the preset as one undoable `Batch` of keyframes (`plugin` defaults to `org.animathio.animations`, `duration` in ticks to the preset's, clamped to the clip); unknown presets, unfitting clips and invalid options are rejected |
 | `effects.list` | — | `[EffectInfo]` (plugin, effect, name, description, params with id/label/min/max/default) from loaded effect plugins |
 | `effects.add` | `{ params: { clip, plugin, effect, params?, index? } }` | `{ clip, effect_id }`; unspecified params use the plugin defaults; unknown or out-of-range params are rejected |
 | `audio_effects.list` | — | `[EffectInfo]` (same shape as `effects.list`) from loaded audio-effect plugins |
@@ -68,7 +70,7 @@ gets a JSON-RPC error instead of a result.
 | `timeline.propose_autocuts` | `{ params: { silence_db?, hysteresis_db?, metric?, min_silence?, keep_short_pauses?, padding_before?, padding_after?, clip?, track?, range?, all_unlocked_tracks?, fillers?, language?, filler_words?, model?, download_model? } }` | snapshot-bound proposal `{ revision, tracks, cuts: [{ range: { start, end }, reason, confidence, enabled }], total_saved }`; all times are ticks; no mutation |
 | `timeline.apply_autocuts` | `{ proposal }` | removed ranges and total removed ticks; one undoable ripple batch; rejects stale project revisions, invalid/overlapping ranges, locked tracks and missing companion tracks |
 | `timeline.trim_silence` | `{ params: { threshold_db?, min_silence?, padding?, track? } }` | removed ranges; detects silent audio (RMS in 10 ms windows) and ripple-removes it from every track as one undo step; `min_silence` and `padding` are ticks |
-| `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
+| `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }`; runs in the sandboxed `org.animathio.import-manim` plugin, which must be loaded |
 | `subtitles.generate` | `{ params: { model?, language?, clip?, track?, range?, download_model?, split? } }` | `{ language, added?: { track_id, background_track_id, first_clip, cues }, cues: [{ start, end, text }] }`; transcribes the project's audio (or one clip, track or `range`) locally with Whisper and adds caption clips on a new `Subtitles` track as one undo step. `model` is `tiny`, `base` (default) or `small`; a missing model is an error unless `download_model` is true. The editor answers when the job finishes (it can take minutes) |
 | `subtitles.export` | `{ params: { format?, output?, track?, overwrite? } }` | `{ format, track, cues, text?, path? }`; renders a subtitle track (default: the first track named `Subtitles` with text clips) as `srt` or `vtt`, returning the text or writing `output` (a `.vtt` extension selects WebVTT) |
 | `subtitles.import` | `{ params: { path, offset? } }` | same shape as `subtitles.generate`; adds the cues of an SRT or WebVTT file as caption clips (one undo step); `offset` is signed ticks |
@@ -118,6 +120,8 @@ clears its undo history.
 | `remove_element` | Remove a clip by id | |
 | `set_canvas` | Canvas width/height, background color, duration | `background_color`: `#RRGGBB`/`#RRGGBBAA`; `max_time_ms`: duration in ms |
 | `set_param` | Set/change a clip's named numeric parameter | |
+| `list_animation_presets` | List animation presets provided by loaded animation-preset plugins | plugin id, preset id, name, role (`in`, `out`, `emphasis`), clip kinds, default duration (ticks) and options; first-party `org.animathio.animations` offers fade, slide, zoom, pop, spin, bounce, wipe and typewriter in/out plus `breathe`, `shake`, `spin`, `hop` and `flash` |
+| `apply_animation_preset` | Apply a preset to a clip as ordinary keyframes (one undo step) | `id` (clip), `preset`, optional `plugin`, `duration_ms`, `options` (by option id); returns the keyframe count |
 | `list_effects` | List effects provided by loaded effect plugins | plugin id, effect id, name, description and numeric parameters (id, min, max, default); nothing is hard-coded, so installing an effect plugin adds entries |
 | `add_effect` | Add a plugin effect to a clip (one undo step) | `id` (clip), `plugin`, `effect`, optional `params` overrides; returns the effect id; rejects ids not in `list_effects` |
 | `list_audio_effects` | List audio effects provided by loaded audio-effect plugins | same shape as `list_effects` (plugin id, effect id, name, description, numeric parameters in dB/Hz/ms with min/max/default); first-party `org.animathio.audio-basic` offers `gain`, `eq3`, `compressor`, `gate`, `highpass` and `voice_cleanup` |
@@ -164,7 +168,19 @@ commands in undo history.
 resets playback. The returned report contains track/asset counts and `warnings`
 and `infos` arrays. File input uses the canonical script parent for relative
 assets unless `script_dir` is provided; inline input should provide `script_dir`
-when it references relative assets. Source size is limited by the importer.
+when it references relative assets. The import runs inside the
+`org.animathio.import-manim` importer plugin (API 1.1), which reads image files only
+below that directory through the bounded `read-sibling` host import; the call fails
+with a hint to run `scripts/build-plugins.sh` when the plugin is not loaded. Source
+size is limited by the importer and the host (`max_import_source_bytes`).
+
+`apply_animation_preset` (control method `animations.apply`) asks the preset plugin
+for keyframe curves once and applies them as a single `Batch`; the project stores only
+ordinary keyframes, so rendering never needs the plugin and `undo` restores the
+previous keys exactly. In presets occupy the start of the clip, out presets its end
+and emphasis presets the middle (the whole clip by default); existing keys of the
+animated properties inside that window are replaced. `add_animation` is the v1-parity
+tool (fadeIn/fadeOut/slideIn/slideOut) and does not use plugins.
 
 `cut_at`, `remove_range`, `trim_silence` and `batch` are built on the core commands
 `SplitAt`, `RemoveRange`, `RippleDelete` and `Batch`; `Batch` applies its commands in

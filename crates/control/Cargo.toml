@@ -17,7 +17,6 @@ animathio-media = { path = "../media" }
 animathio-export = { path = "../export" }
 animathio-core.workspace = true
 animathio-format = { path = "../format" }
-animathio-import-manim = { path = "../import-manim" }
 animathio-import-v1 = { path = "../import-v1" }
 animathio-plugin-host = { path = "../plugin-host" }
 animathio-render = { path = "../render" }

@@ -164,7 +164,7 @@ impl Guest for TextPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "text".to_string(),
-            version: "1.0.0".to_string(),
+            version: "1.1.0".to_string(),
             description: "Host-shaped text with size, colour and alignment".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -227,6 +227,16 @@ impl Guest for TextPlugin {
                     }),
                 },
                 ParamSpec {
+                    id: "reveal".to_string(),
+                    label: "Reveal".to_string(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 1.0,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
                     id: "align".to_string(),
                     label: "Alignment".to_string(),
                     kind: ParamKind::EnumChoice(EnumParam {
@@ -247,7 +257,10 @@ impl Guest for TextPlugin {
         _time_ticks: i64,
         size: Size,
     ) -> Result<Scene, Diagnostic> {
-        let text = get_string(&params, "text", "AniMathIO");
+        let text = revealed(
+            &get_string(&params, "text", "AniMathIO"),
+            get_number(&params, "reveal", 1.0),
+        );
         let font_size = get_number(&params, "font_size", 48.0) as f32;
         let color = get_color(
             &params,
@@ -319,6 +332,16 @@ impl Guest for TextPlugin {
             elements,
         })
     }
+}
+
+/// The first `reveal` fraction of the characters (typewriter presets keyframe it).
+fn revealed(text: &str, reveal: f64) -> String {
+    if !(reveal < 1.0) {
+        return text.to_owned();
+    }
+    let count = text.chars().count() as f64;
+    let shown = (reveal.max(0.0) * count + 1e-9).floor() as usize;
+    text.chars().take(shown).collect()
 }
 
 export!(TextPlugin);

@@ -1627,3 +1627,85 @@ impl History {
         }
     }
 }
+
+impl Project {
+    /// Commands that rebuild this project when replayed in order on
+    /// `Project::new(FrameRate::default())`: the settings, every asset, then every
+    /// layer with its clips, transitions and flags. Importers use this as their
+    /// versioned exchange format, so the host can validate each step.
+    #[must_use]
+    pub fn rebuild_commands(&self) -> Vec<Command> {
+        let mut commands = vec![Command::SetSettings {
+            width: self.width,
+            height: self.height,
+            frame_rate: self.frame_rate,
+            background: self.background,
+            duration: self.duration,
+        }];
+        commands.extend(self.assets.iter().map(|(id, asset)| Command::AddAsset {
+            id: id.clone(),
+            asset: asset.clone(),
+        }));
+        commands.extend(
+            self.tracks
+                .iter()
+                .enumerate()
+                .map(|(index, track)| Command::AddTrack {
+                    track: track.clone(),
+                    index,
+                }),
+        );
+        commands
+    }
+}
+
+#[cfg(test)]
+mod rebuild_tests {
+    use super::*;
+
+    #[test]
+    fn rebuild_commands_replay_to_an_equal_project() {
+        let mut project = Project::new(FrameRate::new(24, 1).unwrap());
+        let asset = AssetId::of(b"png");
+        let commands = [
+            Command::SetSettings {
+                width: 640,
+                height: 360,
+                frame_rate: FrameRate::new(24, 1).unwrap(),
+                background: [1, 2, 3, 255],
+                duration: Time(0),
+            },
+            Command::AddAsset {
+                id: asset.clone(),
+                asset: Asset {
+                    name: "a.png".into(),
+                    media_type: "image/png".into(),
+                },
+            },
+            Command::AddTrack {
+                track: Track::new(TrackId(4), "Layer"),
+                index: 0,
+            },
+            Command::AddClip {
+                track: TrackId(4),
+                clip: Clip::new(
+                    ClipId(9),
+                    ClipKind::Image(asset),
+                    TimeRange::new(Time(0), Time(100)).unwrap(),
+                ),
+            },
+            Command::SetTrackMuted {
+                id: TrackId(4),
+                muted: true,
+            },
+        ];
+        for command in &commands {
+            command.apply(&mut project).unwrap();
+        }
+        let mut rebuilt = Project::new(FrameRate::default());
+        for command in project.rebuild_commands() {
+            command.apply(&mut rebuilt).unwrap();
+        }
+        assert_eq!(rebuilt, project);
+    }
+}

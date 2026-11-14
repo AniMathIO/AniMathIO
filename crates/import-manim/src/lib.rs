@@ -1,7 +1,7 @@
 //! One-way importer for Manim Community scene scripts (`.py`).
 //!
-//! Parses a supported subset of Manim scenes with tree-sitter + tree-sitter-python
-//! (not regex) and rebuilds a v2 [`animathio_core::Project`] exclusively through
+//! Parses a supported subset of Manim scenes with a small pure-Rust Python parser
+//! (not regex; see `pyparse`) and rebuilds a v2 [`animathio_core::Project`] exclusively through
 //! [`animathio_core::Command`]s. Unsupported Python constructs are reported as
 //! warnings, never errors: the importer degrades gracefully rather than failing a
 //! whole script because of one construct it does not understand.
@@ -18,10 +18,12 @@
 
 mod ast;
 mod eval;
+mod pyparse;
 mod translate;
 
 use animathio_core::{AssetId, Project};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Straight-alpha sRGB colour used throughout the importer.
 pub(crate) type Rgba = [u8; 4];
@@ -58,12 +60,32 @@ impl Default for ImportLimits {
 }
 
 /// Options controlling Manim import.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ManimOptions {
     /// Import only this scene class; by default the first `Scene` subclass is used.
     pub scene: Option<String>,
     /// Directory used to resolve `ImageMobject` relative paths (the script's folder).
     pub script_dir: Option<PathBuf>,
+    /// Reader for `ImageMobject` files; takes precedence over `script_dir`. The
+    /// importer plugin routes reads through the host's bounded `read-sibling` import.
+    pub files: Option<Arc<dyn SiblingFiles>>,
+}
+
+impl std::fmt::Debug for ManimOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ManimOptions")
+            .field("scene", &self.scene)
+            .field("script_dir", &self.script_dir)
+            .field("files", &self.files.is_some())
+            .finish()
+    }
+}
+
+/// Source of files referenced by a scene, relative to the script's directory.
+pub trait SiblingFiles: Send + Sync {
+    /// Read `relative` (already validated: relative, `/`-separated, no `..`),
+    /// refusing files larger than `max_bytes`.
+    fn read(&self, relative: &str, max_bytes: u64) -> Result<Vec<u8>, String>;
 }
 
 /// A non-fatal observation with a source location and the offending snippet.
