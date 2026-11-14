@@ -193,7 +193,8 @@ pub fn download_to(
     }
     verify_file(&part, info)?;
     // Persist before the rename so a crash can never leave a truncated final file.
-    File::open(&part)?.sync_all()?;
+    // (Windows `FlushFileBuffers` needs a handle with write access.)
+    fs::OpenOptions::new().write(true).open(&part)?.sync_all()?;
     fs::rename(&part, &target)?;
     Ok(target)
 }
