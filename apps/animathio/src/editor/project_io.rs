@@ -12,10 +12,12 @@ impl Editor {
     pub(super) fn reset_project_session(&mut self) {
         self.project_session = self.project_session.wrapping_add(1);
         self.color_edit = None;
+        self.last_live_audio_sync = None;
         self.marks = InOut::default();
         self.shuttle = Shuttle::default();
         self.autocut_review = None;
         self.marker_panel = None;
+        self.reframe_panel = None;
         self.track_rename = None;
         self.gesture = None;
         self.keyframe_drag = None;
