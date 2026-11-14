@@ -313,6 +313,10 @@ pub fn render(scene: &Scene, ctx: &mut RenderCtx, size: Size) -> Result<Frame, E
         .render(scene, &mut ctx.resources, ctx.video.as_mut(), size)
 }
 
+/// Extra single-clip renders [`render_preview`] may spend per frame finding which effects
+/// of failing clips still work.
+const MAX_EFFECT_PROBES: usize = 8;
+
 /// A preview frame plus the effects that had to be skipped to produce it.
 #[derive(Debug)]
 pub struct PreviewFrame {
@@ -344,6 +348,9 @@ pub fn render_preview(
     }
     let mut repaired = scene.clone();
     let mut effect_failures = Vec::new();
+    // Every probe re-runs plugin code (each call is bounded by the sandbox limits), so a
+    // failing frame gets a fixed budget instead of work proportional to chain length.
+    let mut probes_left = MAX_EFFECT_PROBES;
     for clip in &mut repaired.clips {
         if clip.effects.is_empty() {
             continue;
@@ -357,6 +364,11 @@ pub fn render_preview(
         let mut probe = clip.clone();
         probe.effects.clear();
         for instance in std::mem::take(&mut clip.effects) {
+            // Out of budget: the remaining effects of this and later clips are skipped.
+            if probes_left == 0 {
+                break;
+            }
+            probes_left -= 1;
             probe.effects.push(instance);
             if matches!(render(&alone(&probe), ctx, size), Err(Error::Effect(_))) {
                 probe.effects.pop();
