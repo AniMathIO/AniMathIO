@@ -635,8 +635,12 @@ impl<'s> Parser<'s> {
                 "class" => return self.class_definition().map(|id| vec![id]),
                 "def" => return self.function_definition().map(|id| vec![id]),
                 "async" => {
+                    // `async async ...` would otherwise recurse once per token.
                     self.bump();
-                    return self.statement_inner();
+                    self.descend()?;
+                    let result = self.statement_inner();
+                    self.depth -= 1;
+                    return result;
                 }
                 "if" => {
                     return self
@@ -1802,6 +1806,7 @@ mod tests {
             format!("x = {}1\ny = 2\n", "1 if c else ".repeat(100_000)),
             format!("x = {}1\ny = 2\n", "lambda: ".repeat(100_000)),
             format!("x = {}1\ny = 2\n", "a := ".repeat(100_000)),
+            format!("{}x = 1\ny = 2\n", "async ".repeat(100_000)),
         ] {
             let tree = parse(&source);
             let root = tree.root_node();
