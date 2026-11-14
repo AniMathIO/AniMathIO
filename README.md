@@ -1,6 +1,6 @@
 # AniMathIO 2.0
 
-> **Pre-release, rewrite in progress.** This is the `v2` branch: a from-scratch **Rust** rewrite of AniMathIO, an editor for Manim-like math animation videos. The plugin component ABI is frozen at 1.0.0; the file format and CLI may change until 2.0 ships.
+> **Pre-release, rewrite in progress.** This is the `v2` branch: a from-scratch **Rust** rewrite of AniMathIO, an editor for Manim-like math animation videos. The plugin component ABI is 1.1.0 (1.0.0 frozen and still loaded unchanged); the file format and CLI may change until 2.0 ships.
 
 The full plan, architecture and roadmap live in **[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)**. Read it before proposing structure.
 
@@ -28,12 +28,12 @@ Editor and headless engine prototype. What works today:
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding (streaming; Opus included), mixing, playback (cpal) | ✅ `audio` |
-| Plugin system (wasmtime Component Model) | ✅ ABI 1.0.0 frozen; first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
+| Plugin system (wasmtime Component Model) | ✅ ABI 1.1.0 (1.0.0 frozen, plus animation-preset and importer worlds); first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
 | Auto-reframe to portrait/square (offline subject tracking) | ✅ editor, CLI and MCP |
 | Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
-| v1 and Manim importers | ✅ `import-v1`, `import-manim` |
+| v1 and Manim importers | ✅ `import-v1` (native), Manim via the sandboxed `org.animathio.import-manim` plugin |
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
 | Media decoding / video export | ✅ native decoding and offline H.264/AAC MP4 export |
 
@@ -41,6 +41,13 @@ Text, shapes and the eight clip effects (grayscale, sepia, invert, saturate, bri
 contrast, blur, opacity) use the bundled WASM components end to end, including CLI renders
 and exports. Build them with `scripts/build-plugins.sh`; schema-1 and schema-2 projects
 migrate automatically to plugin clips and plugin effects when loaded.
+
+Animation presets are plugins too: `org.animathio.animations` offers fade, slide, zoom,
+pop, spin, bounce, wipe and typewriter in/out presets plus breathe, shake, spin, hop and
+flash emphasis. Pick them in the inspector's **Animations** section (In / Out / Emphasis,
+with a duration stepper) or the Effects library, through the `apply_animation_preset` MCP
+tool or `animathio-cli animations apply`. A preset becomes ordinary keyframes in one undo
+step, so projects render and export without the plugin.
 
 Audio effects are plugins too: `org.animathio.audio-basic` provides gain/trim, a 3-band EQ,
 compressor, noise gate, high-pass filter and a voice-cleanup preset (high-pass + gentle gate +
@@ -307,6 +314,17 @@ Convert a Manim Community scene script to a `.amio` archive:
 ```bash
 ./target/debug/animathio-cli import-manim scene.py -o imported.amio
 ./target/debug/animathio-cli import-manim scene.py --scene MyScene -o imported.amio
+```
+
+The Manim importer runs inside the `org.animathio.import-manim` plugin, so build the
+plugins first; it reads `ImageMobject` files only from the script's folder.
+
+Apply an animation preset to a clip from the command line:
+
+```bash
+./target/debug/animathio-cli animations list
+./target/debug/animathio-cli animations apply imported.amio --clip 1 --preset slide-in \
+    --duration 0.75 --option direction=top -o animated.amio
 ```
 
 Both importers rebuild the project exclusively through `Command`s and print

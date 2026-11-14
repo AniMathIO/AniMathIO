@@ -158,13 +158,20 @@ if [[ -n "$cli" ]]; then
     [[ "$want" == "$have" ]] || fail "docs/cli.md '$marker' block differs from 'animathio-cli ${sub/cli/} --help' (run scripts/check-docs.sh --fix-cli)"
   done
 
-  # Every `--flag` on an `animathio-cli <sub>` command line must exist for that subcommand.
+  # Every `--flag` on an `animathio-cli <sub> [<nested>]` command line must exist for that
+  # (nested) subcommand.
   for f in "${DOCS[@]}"; do
     grep -nE 'animathio-cli +[a-z][a-z0-9-]*.* --[a-z]' "$f" | while IFS= read -r hit; do
       line="${hit%%:*}" text="${hit#*:}"
       sub=$(sed -E 's/.*animathio-cli +([a-z][a-z0-9-]*).*/\1/' <<<"$text")
       grep -qx -- "$sub" <<<"$subcommands" || continue
       help=$("$cli" "$sub" --help)
+      # A nested subcommand (`animathio-cli animations apply --clip ...`) owns its flags.
+      nested=$(sed -nE 's/.*animathio-cli +[a-z][a-z0-9-]* +([a-z][a-z0-9-]*).*/\1/p' <<<"$text")
+      if [[ -n "$nested" ]] &&
+        awk '/^Commands:/{on=1; next} on && /^$/{on=0} on{print $1}' <<<"$help" | grep -qx -- "$nested"; then
+        help=$("$cli" "$sub" "$nested" --help)
+      fi
       for flag in $(sed -E 's/.*animathio-cli +[a-z][a-z0-9-]*//' <<<"$text" | grep -oE -- '--[a-z][a-z0-9-]*'); do
         grep -q -- "$flag" <<<"$help" || echo "$f:$line: 'animathio-cli $sub' has no $flag flag"
       done

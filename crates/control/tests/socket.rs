@@ -19,7 +19,10 @@ fn authoring_methods_round_trip_over_the_authenticated_socket() {
     let dir = private_dir();
     let spec = spec(dir.path());
     let server = ControlServer::bind(spec.clone()).unwrap();
-    let mut running = server.spawn(HeadlessHandler::new()).unwrap();
+    // Manim import runs in the importer plugin, so use the test-built bundles.
+    let handler =
+        HeadlessHandler::new().with_plugin_host(animathio_plugin_host::test_support::host());
+    let mut running = server.spawn(handler).unwrap();
     let mut client = ControlClient::connect(&spec).unwrap();
     for (method, params) in [
         ("math.add", serde_json::json!({"latex":"x^2"})),

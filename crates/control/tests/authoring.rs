@@ -14,6 +14,79 @@ fn invoke(
     )
 }
 
+/// A handler on the first-party plugins built for this test process.
+fn plugin_handler() -> HeadlessHandler {
+    HeadlessHandler::new().with_plugin_host(animathio_plugin_host::test_support::host())
+}
+
+#[test]
+fn manim_import_needs_the_importer_plugin() {
+    let cache = tempfile::tempdir().unwrap();
+    let host = animathio_plugin_host::PluginHost::new(cache.path()).unwrap();
+    let mut handler = HeadlessHandler::new().with_plugin_host(host);
+    let error = invoke(
+        &mut handler,
+        "import.manim",
+        &json!({"source":"class S(Scene):\n    def construct(self):\n        self.wait(1)\n"}),
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("org.animathio.import-manim"),
+        "{error}"
+    );
+}
+
+#[test]
+fn animation_presets_apply_as_one_undo_step() {
+    let mut handler = plugin_handler();
+    let presets = handler.animations_list().unwrap();
+    assert!(
+        presets
+            .iter()
+            .any(|p| p.preset == "fade-in" && p.role == "in")
+    );
+    assert!(
+        presets
+            .iter()
+            .any(|p| p.preset == "breathe" && p.role == "emphasis")
+    );
+    let added = invoke(&mut handler, "graph.add", &json!({})).unwrap();
+    let clip: animathio_core::ClipId = serde_json::from_value(added["clip_id"].clone()).unwrap();
+    let before = handler.project().clone();
+    let applied = handler
+        .animations_apply(animathio_control::AnimationApplyParams {
+            clip,
+            preset: "slide-in".into(),
+            plugin: None,
+            duration: Some(Time(TICKS_PER_SECOND)),
+            options: [
+                ("direction".to_owned(), json!("top")),
+                ("fade".to_owned(), json!(true)),
+            ]
+            .into_iter()
+            .collect(),
+        })
+        .unwrap();
+    assert!(applied.keyframes >= 4);
+    assert_ne!(handler.project(), &before);
+    assert!(handler.history_undo().unwrap());
+    assert_eq!(handler.project(), &before);
+    for (preset, options) in [
+        ("nope", json!({})),
+        ("slide-in", json!({"direction":"diagonal"})),
+        ("typewriter-in", json!({})),
+    ] {
+        let result = handler.handle(
+            serde_json::from_value(json!({"method":"animations.apply","params":{"params":{
+                "clip": clip, "preset": preset, "options": options
+            }}}))
+            .unwrap(),
+        );
+        assert!(result.is_err(), "{preset}");
+        assert_eq!(handler.project(), &before);
+    }
+}
+
 #[test]
 fn plugin_parameters_timing_and_clip_local_animations_match_plugins() {
     let mut handler = HeadlessHandler::new();
@@ -78,7 +151,7 @@ fn manim_paths_and_script_directories_follow_filesystem_rules() {
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("scene.py");
     std::fs::write(&script, "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        c = Circle()\n        self.add(c)\n        self.wait(1)\n").unwrap();
-    let mut handler = HeadlessHandler::new();
+    let mut handler = plugin_handler();
     let report = invoke(&mut handler, "import.manim", &json!({"path":script})).unwrap();
     assert_eq!(report["tracks"], 1);
     let before = handler.project().clone();
@@ -104,7 +177,7 @@ fn replacing_with_manim_resets_session_and_embeds_relative_assets() {
     let png = b"\x89PNG\r\n\x1a\nembedded image";
     std::fs::write(dir.path().join("image.png"), png).unwrap();
     let source = "from manim import *\nclass Demo(Scene):\n    def construct(self):\n        img = ImageMobject(\"image.png\")\n        self.add(img)\n        self.wait(1)\n";
-    let mut handler = HeadlessHandler::new();
+    let mut handler = plugin_handler();
     invoke(&mut handler, "graph.add", &json!({})).unwrap();
     handler
         .project_save(Some(dir.path().join("old.amio")))

@@ -41,12 +41,18 @@ pub enum PluginKind {
     /// Audio filter exported through the `audio-effect-plugin` world (`audio-effects`).
     /// Like `effect`, an audio-effect plugin declares exactly this kind.
     AudioEffect,
+    /// Keyframe preset generator exported through the `animation-preset-plugin` world
+    /// (API 1.1.0). An animation-preset plugin declares exactly this kind.
+    AnimationPreset,
+    /// Project importer exported through the `importer-plugin` world (API 1.1.0).
+    /// An importer plugin declares exactly this kind.
+    Importer,
 }
 
 /// Plugin manifest stored as `plugin.toml` inside `.amplugin` packages.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifestToml {
-    /// Minimum ABI version required by the component. Stable 1.0.0 and the
+    /// Minimum ABI version required by the component. Stable 1.0.0 and 1.1.0 and the
     /// explicitly supported legacy releases 0.2.0, 0.2.1 and 0.2.2 are accepted.
     pub api_version: String,
     /// Reverse-domain plugin identifier, e.g. "org.animathio.shapes".
@@ -89,7 +95,10 @@ impl PluginManifestToml {
             .map_err(|_| ManifestError::UnsupportedApiVersion(self.api_version.clone()))?;
         if !api.pre.is_empty()
             || !api.build.is_empty()
-            || !matches!((api.major, api.minor, api.patch), (0, 2, 0..=2) | (1, 0, 0))
+            || !matches!(
+                (api.major, api.minor, api.patch),
+                (0, 2, 0..=2) | (1, 0 | 1, 0)
+            )
         {
             return Err(ManifestError::UnsupportedApiVersion(
                 self.api_version.clone(),
@@ -127,7 +136,7 @@ impl PluginManifestToml {
         }
         if api.major == 1 && self.kinds.contains(&PluginKind::Animation) {
             return Err(ManifestError::InvalidKinds(
-                "animation execution has no 1.0 world; use native keyframes".into(),
+                "the legacy animation kind has no 1.x world; use animation-preset".into(),
             ));
         }
         if self.kinds.contains(&PluginKind::Effect) {
@@ -155,6 +164,26 @@ impl PluginManifestToml {
                 ));
             }
         }
+        for (kind, world) in [
+            (PluginKind::AnimationPreset, "animation-preset-plugin"),
+            (PluginKind::Importer, "importer-plugin"),
+        ] {
+            if !self.kinds.contains(&kind) {
+                continue;
+            }
+            if self.kinds.len() != 1 {
+                return Err(ManifestError::InvalidKinds(format!(
+                    "a {} plugin implements only the {world} world",
+                    kind.as_str()
+                )));
+            }
+            if (api.major, api.minor) < (1, 1) {
+                return Err(ManifestError::UnsupportedApiVersion(format!(
+                    "{} plugins require api_version 1.1.0",
+                    kind.as_str()
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -168,6 +197,8 @@ impl PluginKind {
             Self::Effect => "effect",
             Self::Animation => "animation",
             Self::AudioEffect => "audio-effect",
+            Self::AnimationPreset => "animation-preset",
+            Self::Importer => "importer",
         }
     }
 }

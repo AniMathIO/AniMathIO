@@ -66,8 +66,14 @@ where they matter.
 
 - **WebM export.** Video clips import as ordinary video clips and export to H.264 + AAC
   MP4 like any other project; WebM output is not implemented.
-- **Manim import** is a separate importer (`crates/import-manim`), used via
-  `animathio-cli import-manim`.
+- **Manim import** is a separate importer (`crates/import-manim`), run inside the
+  `org.animathio.import-manim` plugin and used via `animathio-cli import-manim`, the
+  editor's **Import Manim scene…** dialog or the MCP `import_manim_scene` tool.
+- **v1's Animations panel** (fade, slide, breathe, Mafs reveal) maps to the
+  `org.animathio.animations` presets in the inspector's Animations section: `fade-in`,
+  `fade-out`, `slide-in`, `slide-out`, `breathe` and `zoom-in`/`zoom-out` (reveal). v1's
+  clip-path slide and per-character slide have no preset; `typewriter-in` reveals text
+  one character at a time instead.
 - **Round-tripping.** Import is one-way; there is no v2 → v1 export.
 
 ## Verifying an import

@@ -1,10 +1,11 @@
-//! tree-sitter parse of a Manim scene into a small, owned intermediate
-//! representation. Expression fragments are evaluated here via [`crate::eval`];
-//! no tree-sitter types escape this module.
+//! Parse of a Manim scene (via [`crate::pyparse`], a tree-sitter-python-shaped
+//! syntax tree) into a small, owned intermediate representation. Expression
+//! fragments are evaluated here via [`crate::eval`]; no syntax-tree types escape
+//! this module.
 
 use crate::eval::{self, Value};
+use crate::pyparse::{self, Node};
 use crate::{Rgba, Warning};
-use tree_sitter::Node;
 
 /// The default Manim mobject colour.
 const WHITE: Rgba = [255, 255, 255, 255];
@@ -223,14 +224,7 @@ pub(crate) fn parse(
     requested: Option<&str>,
 ) -> Result<(Scene, Vec<Warning>), ParseError> {
     let mut warnings = Vec::new();
-    let mut parser = tree_sitter::Parser::new();
-    let language: tree_sitter::Language = tree_sitter_python::LANGUAGE.into();
-    if parser.set_language(&language).is_err() {
-        return Err(ParseError::NoScene);
-    }
-    let Some(tree) = parser.parse(source, None) else {
-        return Err(ParseError::NoScene);
-    };
+    let tree = pyparse::parse(source);
     let root = tree.root_node();
     collect_errors(&root, source, &mut warnings);
 
@@ -266,7 +260,7 @@ fn collect_errors(node: &Node<'_>, source: &str, warnings: &mut Vec<Warning>) {
 fn excessive_depth<'tree>(node: &Node<'tree>) -> Option<Node<'tree>> {
     let mut pending = vec![(*node, 0)];
     while let Some((node, depth)) = pending.pop() {
-        if depth > 64 {
+        if depth > 64 || node.kind() == pyparse::TOO_DEEP {
             return Some(node);
         }
         let mut cursor = node.walk();
@@ -365,7 +359,7 @@ fn walk_block(block: &Node<'_>, source: &str, out: &mut Vec<Stmt>, warnings: &mu
 
 fn parse_statement(node: &Node<'_>, source: &str) -> Option<Stmt> {
     let (line, column, snippet) = position(node, source);
-    // tree-sitter-python wraps simple statements in an `expression_statement`;
+    // The tree (like tree-sitter-python) wraps simple statements in an `expression_statement`;
     // unwrap to the statement proper before dispatching.
     let mut inner = *node;
     while inner.kind() == "expression_statement" {

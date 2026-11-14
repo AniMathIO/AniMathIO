@@ -81,7 +81,7 @@ impl Pre {
 /// All calls use Wasmtime's checked canonical ABI with automatic post-return cleanup.
 /// The common payload records retain the exact 0.2.x structural layouts.
 pub(crate) struct Bindings {
-    instance: Instance,
+    pub(crate) instance: Instance,
     legacy: bool,
 }
 
@@ -163,17 +163,29 @@ impl Bindings {
         Ok(Ok(scene))
     }
 
-    fn export(
+    pub(crate) fn export(
         &self,
         store: &mut Store<HostState>,
         interface: &str,
         function: &str,
     ) -> wasmtime::Result<wasmtime::component::ComponentExportIndex> {
-        let version = if self.legacy { "0.2.2" } else { "1.0.0" };
-        let name = format!("animathio:plugin/{interface}@{version}");
-        let parent = self
-            .instance
-            .get_export_index(&mut *store, None, &name)
+        // A 1.x component exports interfaces at the minor it was built against;
+        // try every implemented 1.x minor, newest first.
+        let versions: &[&str] = if self.legacy {
+            &["0.2.2"]
+        } else {
+            &["1.1.0", "1.0.0"]
+        };
+        let name = format!("animathio:plugin/{interface}@{}", versions[0]);
+        let parent = versions
+            .iter()
+            .find_map(|version| {
+                self.instance.get_export_index(
+                    &mut *store,
+                    None,
+                    &format!("animathio:plugin/{interface}@{version}"),
+                )
+            })
             .ok_or_else(|| wasmtime::Error::msg(format!("missing interface {name}")))?;
         self.instance
             .get_export_index(store, Some(&parent), function)

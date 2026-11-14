@@ -20,6 +20,8 @@ fn packages() -> &'static (tempfile::TempDir, Vec<PluginPackage>) {
             "latex",
             "effects-basic",
             "audio-basic",
+            "animations",
+            "import-manim",
             "examples/hello",
         ] {
             let mut command = if cfg!(target_os = "linux") {
@@ -69,7 +71,7 @@ pub fn packages_for_tests() -> &'static [PluginPackage] {
     &packages().1
 }
 
-/// A host with the first-party text, shapes, LaTeX and effects plugins, built once per test process.
+/// A host with the first-party text, shapes, LaTeX, effects, animations and importer plugins, built once per test process.
 pub fn host() -> PluginHost {
     let (cache, packages) = packages();
     let mut host = PluginHost::new(cache.path()).unwrap();

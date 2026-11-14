@@ -788,7 +788,8 @@ impl Editor {
             LeftTab::Effects => {
                 let effects = self.available_effects();
                 let audio_effects = self.available_audio_effects();
-                if effects.is_empty() && audio_effects.is_empty() {
+                let animations = self.animation_library_rows(cx);
+                if effects.is_empty() && audio_effects.is_empty() && animations.is_empty() {
                     body = body.child(empty_state("No effect plugins loaded", cx));
                 }
                 let group = |label: &'static str| {
@@ -847,6 +848,7 @@ impl Editor {
                             ),
                     );
                 }
+                body = body.children(animations);
             }
         }
         div()

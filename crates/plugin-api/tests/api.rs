@@ -228,7 +228,7 @@ fn rejects_the_incompatible_previous_component_abi() {
 #[test]
 fn abi_negotiation_is_strict_and_rejects_future_requirements() {
     let mut manifest = PluginManifestToml::parse(MINIMAL_MANIFEST).unwrap();
-    for api in ["0.2.0", "0.2.1", "0.2.2", "1.0.0"] {
+    for api in ["0.2.0", "0.2.1", "0.2.2", "1.0.0", "1.1.0"] {
         manifest.api_version = api.into();
         assert!(manifest.validate().is_ok(), "{api}");
     }
@@ -240,7 +240,8 @@ fn abi_negotiation_is_strict_and_rejects_future_requirements() {
         "0.3.0",
         "1",
         "1.0.1",
-        "1.1.0",
+        "1.1.1",
+        "1.2.0",
         "2.0.0",
         "1.0.0-rc.1",
         "1.0.0+local",
@@ -257,6 +258,18 @@ fn abi_negotiation_is_strict_and_rejects_future_requirements() {
         manifest.kinds = vec![kind];
         assert!(manifest.validate().is_ok());
     }
+    // The 1.1 worlds are rejected for a 1.0 requirement and must stand alone.
+    for kind in [PluginKind::AnimationPreset, PluginKind::Importer] {
+        manifest.api_version = "1.0.0".into();
+        manifest.kinds = vec![kind];
+        assert!(manifest.validate().is_err(), "{kind:?} needs 1.1.0");
+        manifest.api_version = "1.1.0".into();
+        assert!(manifest.validate().is_ok());
+        manifest.kinds = vec![kind, PluginKind::ClipSource];
+        assert!(manifest.validate().is_err());
+    }
+    manifest.kinds = vec![PluginKind::Animation];
+    assert!(manifest.validate().is_err());
     manifest.kinds = vec![PluginKind::ClipSource, PluginKind::ClipSource];
     assert!(manifest.validate().is_err());
     manifest.kinds = vec![PluginKind::ClipSource];

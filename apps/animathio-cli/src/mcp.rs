@@ -14,7 +14,8 @@
 //! connects to a running editor's control socket. The tool surface covers
 //! v1's 13 tools, adapted to v2 [`animathio_core::Command`]s, plus
 //! `render_frame`, `undo`/`redo`, `set_param`, `add_keyframe`, `import_v1`, and the
-//! plugin-driven `list_effects`/`add_effect` and `list_audio_effects`/`add_audio_effect`.
+//! plugin-driven `list_effects`/`add_effect`, `list_audio_effects`/`add_audio_effect` and
+//! `list_animation_presets`/`apply_animation_preset`.
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -269,6 +270,21 @@ pub(crate) struct AddEffect {
     pub(crate) effect: String,
     /// Parameter overrides by parameter id; other parameters keep their defaults.
     pub(crate) params: Option<std::collections::BTreeMap<String, f64>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ApplyAnimationPreset {
+    /// Clip id.
+    pub(crate) id: String,
+    /// Preset id from `list_animation_presets`, e.g. `fade-in`, `slide-out` or `breathe`.
+    pub(crate) preset: String,
+    /// Providing plugin; defaults to `org.animathio.animations`.
+    pub(crate) plugin: Option<String>,
+    /// Window length in milliseconds; defaults to the preset's (entrance/exit 500 ms,
+    /// emphasis the whole clip), clamped to the clip.
+    pub(crate) duration_ms: Option<f64>,
+    /// Option overrides by option id (numbers, booleans or choice strings).
+    pub(crate) options: Option<std::collections::BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1440,6 +1456,37 @@ impl McpServer {
             })
             .map_err(mcp_error)?;
         tool_text(json!({"clip_id": added.clip.0, "effect_id": added.effect_id.0}))
+    }
+
+    #[tool(
+        description = "List the animation presets provided by loaded animation-preset plugins: plugin id, preset id, name, role (in, out or emphasis), the clip kinds it applies to, default duration in ticks and its options. Pass the preset id to apply_animation_preset."
+    )]
+    async fn list_animation_presets(&self) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let presets = backend.animations_list().map_err(mcp_error)?;
+        tool_text(json!({"presets": presets}))
+    }
+
+    #[tool(
+        description = "Apply an animation preset (e.g. fade-in, slide-in, zoom-out, pop-in, spin-in, bounce-in, wipe-in, typewriter-in for text, breathe, shake, hop, flash) to a clip as ordinary keyframes in one undo step. In presets sit at the clip start, out presets at its end, emphasis presets centred (whole clip by default). Keys of the animated properties inside the window are replaced. Returns the number of keyframes written."
+    )]
+    async fn apply_animation_preset(
+        &self,
+        Parameters(p): Parameters<ApplyAnimationPreset>,
+    ) -> Result<CallToolResult, McpError> {
+        let clip = parse_clip_id(&p.id)?;
+        let duration = p.duration_ms.map(ms_to_ticks).transpose()?;
+        let mut backend = self.backend.lock().await;
+        let applied = backend
+            .animations_apply(animathio_control::AnimationApplyParams {
+                clip,
+                preset: p.preset,
+                plugin: p.plugin,
+                duration,
+                options: p.options.unwrap_or_default(),
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({"clip_id": applied.clip.0, "keyframes": applied.keyframes}))
     }
 
     #[tool(
