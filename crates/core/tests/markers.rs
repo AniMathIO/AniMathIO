@@ -192,7 +192,7 @@ fn two_track_project() -> Project {
     for (t, name) in [(1, "V"), (2, "A")] {
         Command::AddTrack {
             track: Track::new(TrackId(t), name),
-            index: (t - 1) as usize,
+            index: usize::try_from(t - 1).unwrap(),
         }
         .apply(&mut p)
         .unwrap();

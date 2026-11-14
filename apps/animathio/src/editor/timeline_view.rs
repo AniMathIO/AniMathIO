@@ -34,6 +34,7 @@ impl Editor {
                     cx.notify();
                     return;
                 }
+                self.seek_to(origin, cx);
                 if event.click_count >= 2 {
                     self.open_marker_dialog(id, window, cx);
                 } else {

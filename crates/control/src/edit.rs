@@ -78,7 +78,7 @@ pub fn trim_silence(
             .map(|range| Command::RemoveRange {
                 range: *range,
                 ripple: true,
-                markers: Default::default(),
+                markers: animathio_core::MarkerRipple::default(),
             })
             .collect();
         history.execute(project, &Command::Batch { commands })?;

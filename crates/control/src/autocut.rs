@@ -539,7 +539,7 @@ pub fn autocut_command(
             .map(|range| Command::RemoveRangeOnTracks {
                 range,
                 tracks: proposal.tracks.clone(),
-                markers: Default::default(),
+                markers: animathio_core::MarkerRipple::default(),
             })
             .collect(),
     })

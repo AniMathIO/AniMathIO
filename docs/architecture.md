@@ -646,8 +646,7 @@ rendered off-thread and cached in editor session state by project canvas size.
 - **Source limits.** The core model is resource free and does not know how long a media asset
   is, so it cannot refuse a clip that reads past its media. The control layer's
   `SourceLimits` (probed durations) does: an edit may not push a video or audio clip's source
-  end (`source_offset + length`) further out than it was and past the end of its media (one
-  frame of slack). `HeadlessHandler` (CLI, MCP, socket) and the editor check every command
+  end (`source_offset + length`) further out than it was and past the end of its media. `HeadlessHandler` (CLI, MCP, socket) and the editor check every command
   with `SourceLimits::guard` before running it, and `sync_cuts_command` checks every roll edit,
   skipping and reporting the ones that cannot fit. Stills, generated clips and media whose
   duration is unknown are unbounded; shortening, moving and splitting never extend a source.
@@ -672,7 +671,7 @@ rendered off-thread and cached in editor session state by project canvas size.
 - **Chapters.** The control layer's `chapters` helper turns the markers into a chapter list
   (a YouTube-style `M:SS Title` block, `WebVTT` chapters or FFmpeg `;FFMETADATA1`), shared by
   the CLI (`markers chapters`, `export --chapters`), the control method `chapters.export` and
-  MCP `export_chapters`. The MP4 muxer (`filmcraft-isobmff`) has no chapter atom and patching
+  MCP `export_chapters`. The MP4 muxer (the media backend) has no chapter atom and patching
   `moov` would shift every chunk offset, so chapters ship as sidecars; `ffmpeg -i v.mp4 -i
   chapters.ffmeta -map_metadata 1 -codec copy out.mp4` embeds them without re-encoding.
 - **Editor.** The `markers` editor module owns the panel, the marker dialog and the ruler

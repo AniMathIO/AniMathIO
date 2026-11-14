@@ -233,7 +233,7 @@ fn batch_edit_commands_keep_transitions_valid_and_atomic() {
     let remove = Command::RemoveRange {
         range: TimeRange::new(Time(0), Time(100)).unwrap(),
         ripple: true,
-        markers: Default::default(),
+        markers: animathio_core::MarkerRipple::default(),
     };
     assert!(remove.apply(&mut project).is_err());
     assert_eq!(project, before);
@@ -247,7 +247,7 @@ fn batch_edit_commands_keep_transitions_valid_and_atomic() {
             },
             Command::RippleDelete {
                 clip: ClipId(3),
-                markers: Default::default(),
+                markers: animathio_core::MarkerRipple::default(),
             },
         ],
     };

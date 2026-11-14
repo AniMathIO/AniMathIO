@@ -157,7 +157,7 @@ fn remove_range_without_ripple_leaves_a_gap() {
     let command = Command::RemoveRange {
         range: range(80, 160),
         ripple: false,
-        markers: Default::default(),
+        markers: animathio_core::MarkerRipple::default(),
     };
     round_trip(&mut project, &command);
     assert_eq!(spans(&project, 0), vec![(1, 0, 80, 0), (2, 160, 200, 10)]);
@@ -173,7 +173,7 @@ fn remove_range_with_ripple_closes_the_gap_everywhere() {
     let command = Command::RemoveRange {
         range: range(80, 160),
         ripple: true,
-        markers: Default::default(),
+        markers: animathio_core::MarkerRipple::default(),
     };
     round_trip(&mut project, &command);
     assert_eq!(spans(&project, 0), vec![(1, 0, 80, 0), (2, 80, 120, 10)]);
@@ -184,7 +184,7 @@ fn remove_range_with_ripple_closes_the_gap_everywhere() {
     Command::RemoveRange {
         range: range(0, 100),
         ripple: true,
-        markers: Default::default(),
+        markers: animathio_core::MarkerRipple::default(),
     }
     .apply(&mut project)
     .unwrap();
@@ -209,7 +209,7 @@ fn remove_range_with_ripple_shrinks_explicit_duration() {
         &Command::RemoveRange {
             range: range(80, 160),
             ripple: true,
-            markers: Default::default(),
+            markers: animathio_core::MarkerRipple::default(),
         },
     );
     assert_eq!(project.duration(), Time(220));
@@ -222,7 +222,7 @@ fn ripple_delete_closes_the_gap_on_its_track_only() {
         &mut project,
         &Command::RippleDelete {
             clip: ClipId(1),
-            markers: Default::default(),
+            markers: animathio_core::MarkerRipple::default(),
         },
     );
     assert_eq!(spans(&project, 0), vec![(2, 50, 100, 0)]);
@@ -230,7 +230,7 @@ fn ripple_delete_closes_the_gap_on_its_track_only() {
     assert!(
         Command::RippleDelete {
             clip: ClipId(42),
-            markers: Default::default()
+            markers: animathio_core::MarkerRipple::default()
         }
         .apply(&mut project)
         .is_err()
@@ -271,6 +271,7 @@ fn remove_range_keeps_keyframes_of_the_kept_tail_in_place() {
     let gap = Command::RemoveRange {
         range: range(20, 40),
         ripple: false,
+        markers: animathio_core::MarkerRipple::default(),
     };
     round_trip(&mut project, &gap);
     let tail = project.tracks()[0]
@@ -290,6 +291,7 @@ fn remove_range_keeps_keyframes_of_the_kept_tail_in_place() {
     let ripple = Command::RemoveRange {
         range: range(20, 40),
         ripple: true,
+        markers: animathio_core::MarkerRipple::default(),
     };
     round_trip(&mut project, &ripple);
     let tail = project.tracks()[0]
@@ -309,6 +311,7 @@ fn remove_range_keeps_keyframes_of_the_kept_tail_in_place() {
     let head = Command::RemoveRange {
         range: range(0, 30),
         ripple: false,
+        markers: animathio_core::MarkerRipple::default(),
     };
     round_trip(&mut project, &head);
     assert_eq!(spans(&project, 0)[0], (1, 30, 100, 30));
@@ -332,6 +335,7 @@ fn remove_range_keeps_split_tails_linked_to_each_other() {
         &Command::RemoveRange {
             range: range(60, 80),
             ripple: false,
+            markers: animathio_core::MarkerRipple::default(),
         },
     );
     let group_of = |track: usize, start: i64| {

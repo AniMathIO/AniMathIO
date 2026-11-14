@@ -1,23 +1,23 @@
-//! Chapter lists from timeline markers: a YouTube-style description block, `WebVTT`
-//! chapters, or an FFmpeg metadata file. The MP4 muxer has no chapter support, so chapters
+//! Chapter lists from timeline markers: a `YouTube`-style description block, `WebVTT`
+//! chapters, or an `FFmpeg` metadata file. The MP4 muxer has no chapter support, so chapters
 //! ship as sidecars; `ffmpeg -i video.mp4 -i chapters.ffmeta -map_metadata 1 -codec copy
 //! out.mp4` embeds the `ffmetadata` form without re-encoding.
 
 use crate::ControlError;
 use animathio_core::{Marker, Project, TICKS_PER_SECOND, Time};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{fmt::Write as _, path::PathBuf};
 
 /// Sidecar chapter formats.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChapterFormat {
-    /// One `M:SS Title` line per chapter, ready for a YouTube description.
+    /// One `M:SS Title` line per chapter, ready for a `YouTube` description.
     #[default]
     Youtube,
     /// `WebVTT` chapter cues (`<track kind="chapters">`).
     Vtt,
-    /// FFmpeg `;FFMETADATA1` chapter metadata.
+    /// `FFmpeg` `;FFMETADATA1` chapter metadata.
     Ffmetadata,
 }
 impl ChapterFormat {
@@ -65,10 +65,10 @@ pub struct ChaptersExportParams {
     /// Replace an existing output file.
     pub overwrite: bool,
     /// Title of the synthetic first chapter added when the first marker is after 0:00
-    /// (YouTube requires a chapter at 0:00). Empty disables it.
+    /// (`YouTube` requires a chapter at 0:00). Empty disables it.
     pub intro_title: String,
     /// Shortest allowed chapter in ticks; markers closer than this to the previous
-    /// chapter are merged into it (default 10 s, YouTube's minimum). Zero keeps all.
+    /// chapter are merged into it (default 10 s, `YouTube`'s minimum). Zero keeps all.
     pub min_length: Time,
     /// Timeline position that becomes 0:00 (an export's `from`); earlier markers are dropped.
     pub start: Time,
@@ -163,8 +163,12 @@ pub fn chapters(project: &Project, params: &ChaptersExportParams) -> Vec<Chapter
     out
 }
 
+fn millis(time: Time) -> i64 {
+    i64::try_from(i128::from(time.0.max(0)) * 1000 / i128::from(TICKS_PER_SECOND))
+        .unwrap_or(i64::MAX)
+}
 fn split(time: Time) -> (i64, i64, i64, i64) {
-    let ms = time.0.max(0) * 1000 / TICKS_PER_SECOND;
+    let ms = millis(time);
     (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
 }
 fn youtube_stamp(time: Time) -> String {
@@ -197,38 +201,36 @@ pub fn format_chapters(chapters: &[Chapter], format: ChapterFormat) -> String {
     match format {
         ChapterFormat::Youtube => {
             for chapter in chapters {
-                out.push_str(&format!(
-                    "{} {}\n",
-                    youtube_stamp(chapter.start),
-                    chapter.title
-                ));
+                let _ = writeln!(out, "{} {}", youtube_stamp(chapter.start), chapter.title);
             }
         }
         ChapterFormat::Vtt => {
             out.push_str("WEBVTT\n");
             for (i, chapter) in chapters.iter().enumerate() {
                 // A cue needs a positive length; a zero-length final chapter gets 1 ms.
-                let end = chapter
-                    .end
-                    .max(Time(chapter.start.0 + TICKS_PER_SECOND / 1000));
-                out.push_str(&format!(
-                    "\nchapter-{}\n{} --> {}\n{}\n",
+                let end = chapter.end.max(Time(
+                    chapter.start.0.saturating_add(TICKS_PER_SECOND / 1000),
+                ));
+                let _ = writeln!(
+                    out,
+                    "\nchapter-{}\n{} --> {}\n{}",
                     i + 1,
                     vtt_stamp(chapter.start),
                     vtt_stamp(end),
                     chapter.title.replace("-->", "->")
-                ));
+                );
             }
         }
         ChapterFormat::Ffmetadata => {
             out.push_str(";FFMETADATA1\n");
             for chapter in chapters {
-                let start = chapter.start.0.max(0) * 1000 / TICKS_PER_SECOND;
-                let end = (chapter.end.0.max(0) * 1000 / TICKS_PER_SECOND).max(start + 1);
-                out.push_str(&format!(
-                    "\n[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle={}\n",
+                let start = millis(chapter.start);
+                let end = millis(chapter.end).max(start + 1);
+                let _ = writeln!(
+                    out,
+                    "\n[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle={}",
                     ffmeta_escape(&chapter.title)
-                ));
+                );
             }
         }
     }
