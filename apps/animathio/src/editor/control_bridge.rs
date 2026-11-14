@@ -36,6 +36,23 @@ impl Editor {
                 .detach();
                 continue;
             }
+            if let Call::ProposeDuck { params } = &call {
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                let params = params.clone();
+                cx.spawn(async move |_, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            Ok::<_, ControlError>(serde_json::to_value(
+                                animathio_control::propose_duck(&project, &assets, &params)?,
+                            )?)
+                        })
+                        .await;
+                    let _ = reply.send(result);
+                })
+                .detach();
+                continue;
+            }
             if let Call::BeatsDetect { params } = &call {
                 let project = self.project.clone();
                 let assets = self.assets.clone();
@@ -429,6 +446,17 @@ impl Editor {
                     &mut self.history,
                     &proposal,
                 )?;
+                self.after_edit(cx);
+                serde_json::to_value(result)?
+            }
+            Call::ProposeDuck { .. } => {
+                return Err(ControlError::Other(
+                    "duck analysis is handled asynchronously".into(),
+                ));
+            }
+            Call::ApplyDuck { proposal } => {
+                let result =
+                    animathio_control::apply_duck(&mut self.project, &mut self.history, &proposal)?;
                 self.after_edit(cx);
                 serde_json::to_value(result)?
             }

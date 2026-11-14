@@ -14,7 +14,7 @@ use std::{
 };
 
 const RATE: i64 = 16_000;
-const SAMPLE_TICKS: i64 = TICKS_PER_SECOND / RATE;
+pub(crate) const SAMPLE_TICKS: i64 = TICKS_PER_SECOND / RATE;
 const WINDOW: usize = 160;
 const MAX_CUTS: usize = 1000;
 
@@ -129,7 +129,7 @@ pub struct AutocutProposal {
 fn invalid(message: &str) -> ControlError {
     ControlError::InvalidParams(message.into())
 }
-fn revision(project: &Project) -> Result<String, ControlError> {
+pub(crate) fn revision(project: &Project) -> Result<String, ControlError> {
     Ok(AssetId::of(&serde_json::to_vec(project)?)
         .as_str()
         .to_owned())
@@ -301,7 +301,10 @@ fn merge_cuts(mut cuts: Vec<Autocut>) -> Vec<Autocut> {
     merged
 }
 
-fn selection(project: &Project, params: &AutocutParams) -> Result<Selection, ControlError> {
+pub(crate) fn selection(
+    project: &Project,
+    params: &AutocutParams,
+) -> Result<Selection, ControlError> {
     resolve_selection(project, params.clip, params.track, params.range)
 }
 

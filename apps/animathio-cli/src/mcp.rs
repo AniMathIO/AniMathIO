@@ -444,6 +444,39 @@ pub(crate) struct ProposeAutocuts {
     download_model: bool,
 }
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct AutoDuck {
+    /// Voice clip ids (a video clip resolves its linked audio).
+    #[serde(default)]
+    voice_clips: Vec<u64>,
+    /// Voice track ids (their mixed audio).
+    #[serde(default)]
+    voice_tracks: Vec<u64>,
+    /// Music track ids; every audio clip on them gets gain keyframes.
+    music_tracks: Vec<u64>,
+    /// How far the music drops under speech, in dB (default 12).
+    depth_db: Option<f64>,
+    /// Ramp down finishing when the voice starts, in milliseconds (default 300).
+    attack_ms: Option<f64>,
+    /// Ramp up starting when the voice ends, in milliseconds (default 500).
+    release_ms: Option<f64>,
+    /// Bridge voice gaps shorter than this, in milliseconds (default 400).
+    min_gap_ms: Option<f64>,
+    /// Voice is absent below this dBFS level (default -40).
+    threshold_db: Option<f64>,
+    /// Voice returns this many dB above the threshold (default 3).
+    hysteresis_db: Option<f64>,
+    /// Inclusive start of the voice analysis range in milliseconds (requires `to_ms`).
+    from_ms: Option<f64>,
+    /// Exclusive end of the voice analysis range in milliseconds (requires `from_ms`).
+    to_ms: Option<f64>,
+    /// Overwrite existing gain keyframes on the music clips (default false).
+    #[serde(default)]
+    replace_existing: bool,
+    /// Only analyse and return the proposal; do not edit the project.
+    #[serde(default)]
+    dry_run: bool,
+}
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct ApplyAutocuts {
     /// Exact proposal object returned by `propose_autocuts`. Toggle cuts[].enabled
     /// for review; range start/end and `total_saved` are integer timeline ticks.
@@ -1836,6 +1869,44 @@ impl McpServer {
             .await
             .propose_autocuts(params)
             .map_err(mcp_error)?;
+        tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
+    }
+
+    #[tool(
+        description = "Auto-duck music under speech. Detects voice activity in the voice clips/tracks (silence detector with hysteresis on the dry mix), bridges short gaps, and writes linear gain keyframes on every audio clip of the music tracks: the music ramps down over attack_ms finishing as the voice starts, holds depth_db below its own gain, and ramps up over release_ms after the voice ends. One undo step. With dry_run=true only the proposal is returned (voice and ducked ranges in ticks, per-clip keyframes). Clips that already have gain keyframes are an error unless replace_existing is true."
+    )]
+    async fn auto_duck(
+        &self,
+        Parameters(p): Parameters<AutoDuck>,
+    ) -> Result<CallToolResult, McpError> {
+        let range = match (p.from_ms, p.to_ms) {
+            (None, None) => None,
+            (Some(s), Some(e)) => Some(
+                TimeRange::new(ms_to_ticks(s)?, ms_to_ticks(e)?)
+                    .map_err(|e| invalid(&e.to_string()))?,
+            ),
+            _ => return Err(invalid("give both from_ms and to_ms")),
+        };
+        let defaults = animathio_control::DuckParams::default();
+        let params = animathio_control::DuckParams {
+            voice_clips: p.voice_clips.into_iter().map(ClipId).collect(),
+            voice_tracks: p.voice_tracks.into_iter().map(TrackId).collect(),
+            music_tracks: p.music_tracks.into_iter().map(TrackId).collect(),
+            depth_db: p.depth_db.unwrap_or(defaults.depth_db),
+            attack: p.attack_ms.map_or(Ok(defaults.attack), ms_to_ticks)?,
+            release: p.release_ms.map_or(Ok(defaults.release), ms_to_ticks)?,
+            min_gap: p.min_gap_ms.map_or(Ok(defaults.min_gap), ms_to_ticks)?,
+            threshold_db: p.threshold_db.unwrap_or(defaults.threshold_db),
+            hysteresis_db: p.hysteresis_db.unwrap_or(defaults.hysteresis_db),
+            range,
+            replace_existing: p.replace_existing,
+        };
+        let mut backend = self.backend.lock().await;
+        let proposal = backend.propose_duck(params).map_err(mcp_error)?;
+        if p.dry_run {
+            return tool_text(serde_json::to_value(proposal).map_err(|e| invalid(&e.to_string()))?);
+        }
+        let result = backend.apply_duck(proposal).map_err(mcp_error)?;
         tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
     }
 

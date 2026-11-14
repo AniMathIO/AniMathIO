@@ -109,6 +109,7 @@ impl Editor {
                 MenuItem::action("Generate subtitles…", GenerateSubtitles),
                 MenuItem::action("Auto reframe…", AutoReframe),
                 MenuItem::action("Automatic cuts…", AutomaticCuts),
+                MenuItem::action("Auto duck…", AutoDuck),
                 MenuItem::action("Add marker at playhead", AddMarker),
                 MenuItem::action("Markers and beat sync…", ShowMarkers),
             ]),

@@ -25,6 +25,11 @@ pub use autocut::{
     autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
     propose_autocuts_cancellable,
 };
+mod ducking;
+pub use ducking::{
+    ClipDuck, DuckKey, DuckParams, DuckProposal, DuckResult, apply_duck, detect_voice_samples,
+    duck_command, duck_envelope, merge_voice, propose_duck,
+};
 mod reframe;
 pub use reframe::{ReframeDraft, ReframeParams, analyse_reframe, auto_reframe, reframe_command};
 mod client;

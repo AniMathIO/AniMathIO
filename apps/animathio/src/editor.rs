@@ -45,6 +45,7 @@ mod color_edit;
 mod commands;
 mod control_bridge;
 mod dialogs;
+mod ducking;
 mod export_panel;
 mod fields;
 mod inspector_view;
@@ -549,6 +550,7 @@ pub(crate) struct Editor {
     caption_look: animathio_control::CaptionStyleParams,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
+    duck_review: Option<ducking::DuckReview>,
     /// The markers and beat-sync panel (see `editor/markers.rs`).
     marker_panel: Option<markers::Panel>,
     reframe_panel: Option<reframe::ReframePanel>,
@@ -679,6 +681,7 @@ impl Editor {
             caption_look: animathio_control::CaptionStyleParams::default(),
             subtitle_panel_open: false,
             autocut_review: None,
+            duck_review: None,
             marker_panel: None,
             reframe_panel: None,
             pending_export: None,
@@ -898,6 +901,9 @@ impl Render for Editor {
             root = root.child(panel);
         }
         if let Some(panel) = self.autocut_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.duck_panel(cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.subtitle_panel(cx) {

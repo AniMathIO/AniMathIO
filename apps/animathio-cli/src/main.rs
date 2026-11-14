@@ -1,5 +1,6 @@
 //! Headless project validation and deterministic PNG rendering.
 mod autocut;
+mod duck;
 mod markers;
 mod mcp;
 mod reframe;
@@ -138,6 +139,11 @@ enum Action {
     Autocut {
         #[command(flatten)]
         args: autocut::AutocutArgs,
+    },
+    /// Lower music under speech with gain keyframes, as one undoable edit.
+    Duck {
+        #[command(flatten)]
+        args: duck::DuckArgs,
     },
     /// List, add or remove timeline markers.
     Markers {
@@ -401,6 +407,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Action::Transcribe { args } => transcribe::run(&args)?,
         Action::Autocut { args } => autocut::run(args)?,
+        Action::Duck { args } => duck::run(args)?,
         Action::Markers { args } => markers::run_markers(args)?,
         Action::Beats { args } => markers::run_beats(args)?,
         Action::Reframe { args } => reframe::run(args)?,

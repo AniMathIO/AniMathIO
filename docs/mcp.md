@@ -69,6 +69,8 @@ gets a JSON-RPC error instead of a result.
 | `audio_effects.add` | `{ params: { clip? \| track?, plugin, effect, params?, index? } }` | `{ chain, effect_id }` where `chain` is `{ "Clip": id }` or `{ "Track": id }`; give exactly one of `clip` and `track`; unspecified params use the plugin defaults; unknown or out-of-range params are rejected |
 | `timeline.propose_autocuts` | `{ params: { silence_db?, hysteresis_db?, metric?, min_silence?, keep_short_pauses?, padding_before?, padding_after?, clip?, track?, range?, all_unlocked_tracks?, fillers?, language?, filler_words?, model?, download_model? } }` | snapshot-bound proposal `{ revision, tracks, cuts: [{ range: { start, end }, reason, confidence, enabled }], total_saved }`; all times are ticks; no mutation |
 | `timeline.apply_autocuts` | `{ proposal }` | removed ranges and total removed ticks; one undoable ripple batch; rejects stale project revisions, invalid/overlapping ranges, locked tracks and missing companion tracks |
+| `timeline.propose_duck` | `{ params: { voice_clips?, voice_tracks?, music_tracks, depth_db?, attack?, release?, min_gap?, threshold_db?, hysteresis_db?, range?, replace_existing? } }` | snapshot-bound proposal `{ revision, voice, ducked, clips: [{ clip, track, keys: [{ time, gain }] }], replace_existing }`; times are ticks (key times clip-local); no mutation |
+| `timeline.apply_duck` | `{ proposal }` | `{ clips, keyframes, ducked }`; writes the proposal's gain keyframes as one undoable batch; rejects stale project revisions |
 | `timeline.trim_silence` | `{ params: { threshold_db?, min_silence?, padding?, track? } }` | removed ranges; detects silent audio (RMS in 10 ms windows) and ripple-removes it from every track as one undo step; `min_silence` and `padding` are ticks |
 | `markers.list` | — | `[Marker]` sorted by time: `{ id, time, duration?, name, color, note }` (ticks) |
 | `markers.add` | `{ params: { time, duration?, name?, color?, note? } }` | `{ id }`; one undo step; `color` is `red`, `orange`, `yellow`, `green`, `cyan`, `blue` (default), `purple` or `pink` |
@@ -134,7 +136,7 @@ clears its undo history.
 | `apply_animation_preset` | Apply a preset to a clip as ordinary keyframes (one undo step) | `id` (clip), `preset`, optional `plugin`, `duration_ms`, `options` (by option id); returns the keyframe count |
 | `list_effects` | List effects provided by loaded effect plugins | plugin id, effect id, name, description and numeric parameters (id, min, max, default); nothing is hard-coded, so installing an effect plugin adds entries |
 | `add_effect` | Add a plugin effect to a clip (one undo step) | `id` (clip), `plugin`, `effect`, optional `params` overrides; returns the effect id; rejects ids not in `list_effects` |
-| `list_audio_effects` | List audio effects provided by loaded audio-effect plugins | same shape as `list_effects` (plugin id, effect id, name, description, numeric parameters in dB/Hz/ms with min/max/default); first-party `org.animathio.audio-basic` offers `gain`, `eq3`, `compressor`, `gate`, `highpass` and `voice_cleanup` |
+| `list_audio_effects` | List audio effects provided by loaded audio-effect plugins | same shape as `list_effects` (plugin id, effect id, name, description, numeric parameters in dB/Hz/ms with min/max/default); first-party `org.animathio.audio-basic` offers `gain`, `eq3`, `compressor`, `gate`, `highpass`, `voice_cleanup` and `denoise` |
 | `add_audio_effect` | Add an audio effect to a clip's own chain (`id`) or a track's chain (`track`) (one undo step) | exactly one of `id` (clip) and `track`; `plugin`, `effect`, optional `params` overrides and `index`; returns `{chain, effect_id}`. Clip chains run on the clip's signal right after its `gain`; track chains run on the summed track before its gain. Rejects ids not in `list_audio_effects` |
 | `add_keyframe` | Add a keyframe to a clip | target: `x`, `y`, `scale_x`, `scale_y`, `rotation`, `opacity` or a param name |
 | `undo` / `redo` | Undo / redo the last edit | |
@@ -152,6 +154,7 @@ clears its undo history.
 | `remove_range` | Cut a section out of every track | `from_ms`, `to_ms`, `ripple` (default true: later content shifts left and an explicit canvas duration shrinks) |
 | `propose_autocuts` | Review automatic cuts without editing; returns a proposal with tick ranges, reason, heuristic confidence and enabled toggles | `silence_db` (-40), `min_silence_ms` (500), `hysteresis_db` (3), `peak` (false), `keep_short_pauses` (true), `padding_before_ms` / `padding_after_ms` (100), optional `clip`, `track`, paired `from_ms` / `to_ms`, `all_unlocked_tracks` (false), `fillers` (false), `language`, `filler_words`, `model` (base), `download_model` (false) |
 | `apply_autocuts` | Apply the reviewed proposal as one undo step; selected tracks and linked companions ripple together | `proposal`: the exact object from `propose_autocuts`, with unwanted `cuts[].enabled` set to false. Coordinates are ticks in the original project; stale proposals are rejected |
+| `auto_duck` | Duck music under speech: detect voice activity in the voice clips/tracks and write gain keyframes on the audio clips of the music tracks, one undo step. `dry_run` only returns the proposal (voice and ducked tick ranges, per-clip keyframes) | `music_tracks` (required), `voice_clips` / `voice_tracks` (at least one), `depth_db` (12), `attack_ms` (300), `release_ms` (500), `min_gap_ms` (400), `threshold_db` (-40), `hysteresis_db` (3), paired `from_ms` / `to_ms`, `replace_existing` (false), `dry_run` (false) |
 | `list_markers` | List timeline markers | no arguments; returns `{markers: [{id, time_ms, ticks, duration_ms, name, color, note}]}` |
 | `add_marker` | Add a marker (one undo step) | `time_ms`, optional `name`, `color`, `note`, `duration_ms`; returns `{id}` |
 | `remove_marker` | Remove a marker (one undo step) | `id` |
@@ -464,3 +467,26 @@ can need manual correction; scene cuts are located only at sampled times. Skin-t
 priors, subject selection, rotated-video support and layout adaptation for titles
 are deferred. The editor menu provides aspect buttons, a smoothness slider,
 progress and cancellation; the CLI writes a separate archive by default.
+
+## Auto-ducking
+
+`timeline.propose_duck` / `timeline.apply_duck` (MCP `auto_duck`, CLI `animathio-cli duck`,
+editor Clip > Auto duck…) lower music under speech without touching the audio. The voice
+source is a set of clips (a video clip resolves its linked audio) and/or tracks. Voice
+activity comes from the autocut silence detector (10 ms RMS windows on the dry project mix,
+entry threshold `threshold_db`, release `hysteresis_db` above it) inverted over the
+analysed span. Voice regions closer than the larger of `min_gap` and `attack + release` are
+bridged into one dip, because the music could not recover in between.
+
+Each region becomes a linear `gain` curve on every audio clip of the music tracks:
+1 → `10^(-depth_db/20)` over `attack`, finishing when the voice starts (the analysis is
+offline, so the music is already down on the first word), held through the voice, back to 1
+over `release` starting when the voice ends. Keys are written in clip-local ticks and
+multiply the clip's own base `gain` parameter (a base `gain` of 1 is added first where the
+clip has none, because only existing parameters can be animated); clips the curve never
+touches get nothing.
+A clip that already has gain keyframes is an error unless `replace_existing` is set, in
+which case those keys are removed first. Apply is a single `Command::Batch` of
+`AddKeyframe` / `RemoveKeyframe` (nested in chunks when it exceeds the core's 1024-edit
+limit), so undo restores the project exactly; a stale proposal (project revision changed) is
+rejected. The editor panel shades the ducked spans on the music track rows before Apply.

@@ -183,6 +183,20 @@ pub trait ControlHandler {
     ) -> Result<crate::TrimSilenceResult, ControlError> {
         from_value(self.handle(Call::ApplyAutocuts { proposal })?)
     }
+    /// Propose auto-ducking of music under speech without mutation.
+    fn propose_duck(
+        &mut self,
+        params: crate::DuckParams,
+    ) -> Result<crate::DuckProposal, ControlError> {
+        from_value(self.handle(Call::ProposeDuck { params })?)
+    }
+    /// Apply a reviewed duck proposal as one undo step.
+    fn apply_duck(
+        &mut self,
+        proposal: crate::DuckProposal,
+    ) -> Result<crate::DuckResult, ControlError> {
+        from_value(self.handle(Call::ApplyDuck { proposal })?)
+    }
     /// List the project's timeline markers.
     fn markers_list(&mut self) -> Result<Vec<animathio_core::Marker>, ControlError> {
         from_value(self.handle(Call::MarkersList)?)

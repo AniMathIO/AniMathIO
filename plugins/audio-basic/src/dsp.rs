@@ -6,6 +6,8 @@
 //! channel count) that the host hands back with the next contiguous block, so processing a
 //! signal in blocks of any size is bit-identical to processing it in one go.
 
+mod denoise;
+
 use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
 /// Highest channel count the plugin accepts (matches the mixer).
@@ -55,7 +57,7 @@ const fn p(
 }
 
 /// Every effect of the plugin, in menu order.
-pub const EFFECTS: [EffectDef; 6] = [
+pub const EFFECTS: [EffectDef; 7] = [
     EffectDef {
         id: "gain",
         name: "Gain / Trim",
@@ -139,6 +141,17 @@ pub const EFFECTS: [EffectDef; 6] = [
             p("deess_amount", "De-ess amount", 0.0, 1.0, 0.5, 0.01),
         ],
     },
+    EffectDef {
+        id: "denoise",
+        name: "Denoise",
+        description:
+            "Spectral-gating noise reduction; the noise profile is learned from the quietest frames",
+        params: &[
+            p("strength", "Strength", 0.0, 1.0, 0.7, 0.01),
+            p("sensitivity_db", "Sensitivity (dB)", 0.0, 18.0, 6.0, 0.1),
+            p("smoothing", "Smoothing", 0.0, 1.0, 0.6, 0.01),
+        ],
+    },
 ];
 
 /// Parameter values resolved against an effect's declaration.
@@ -199,6 +212,14 @@ impl Writer {
     fn f64(&mut self, value: f64) {
         self.0.extend_from_slice(&value.to_le_bytes());
     }
+    fn u32(&mut self, value: u32) {
+        self.0.extend_from_slice(&value.to_le_bytes());
+    }
+    fn f32s<'a>(&mut self, values: impl IntoIterator<Item = &'a f32>) {
+        for value in values {
+            self.0.extend_from_slice(&value.to_le_bytes());
+        }
+    }
 }
 
 struct Reader<'a>(&'a [u8]);
@@ -226,6 +247,29 @@ impl<'a> Reader<'a> {
         } else {
             Err("effect state holds a non-finite value".to_owned())
         }
+    }
+    fn u32(&mut self) -> Result<u32, String> {
+        let (head, tail) = self
+            .0
+            .split_first_chunk::<4>()
+            .ok_or_else(|| "effect state is truncated".to_owned())?;
+        self.0 = tail;
+        Ok(u32::from_le_bytes(*head))
+    }
+    fn f32s_into(&mut self, out: &mut [f32]) -> Result<(), String> {
+        for slot in out {
+            let (head, tail) = self
+                .0
+                .split_first_chunk::<4>()
+                .ok_or_else(|| "effect state is truncated".to_owned())?;
+            self.0 = tail;
+            let value = f32::from_le_bytes(*head);
+            if !value.is_finite() {
+                return Err("effect state holds a non-finite value".to_owned());
+            }
+            *slot = value;
+        }
+        Ok(())
     }
     fn finish(self) -> Result<(), String> {
         if self.0.is_empty() {
@@ -746,6 +790,13 @@ fn build(effect: &Resolved<'_>, rate: f64, channels: usize) -> Box<dyn Processor
             threshold_db: v("deess_threshold_db"),
             amount: v("deess_amount"),
         }),
+        "denoise" => denoise::new(
+            v("strength"),
+            v("sensitivity_db"),
+            v("smoothing"),
+            rate,
+            channels,
+        ),
         other => unreachable!("effect {other} is in EFFECTS"),
     }
 }
@@ -772,6 +823,12 @@ pub fn process(
     }
     if sample_rate == 0 || samples.len() % channels != 0 {
         return Err("block must hold whole frames at a nonzero sample rate".to_owned());
+    }
+    if effect == "denoise" && channels > denoise::MAX_DENOISE_CHANNELS {
+        return Err(format!(
+            "denoise supports up to {} channels",
+            denoise::MAX_DENOISE_CHANNELS
+        ));
     }
     let resolved = resolve(def, params)?;
     let mut processor = build(&resolved, f64::from(sample_rate), channels);
@@ -1012,5 +1069,119 @@ mod tests {
         let mut one = vec![0.001_f32];
         process("gain", &loud, RATE, 1, &mut one, None).unwrap();
         assert!((db(f64::from(one[0]) / 0.001) - 24.0).abs() < 1e-4);
+    }
+    /// Deterministic uniform noise in `[-amplitude, amplitude]`.
+    fn noise(amplitude: f64, frames: usize, seed: u64) -> Vec<f32> {
+        let mut state = seed;
+        (0..frames)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                ((state >> 11) as f64 / (1_u64 << 53) as f64 * 2.0 - 1.0) as f32 * amplitude as f32
+            })
+            .collect()
+    }
+
+    /// Mean power of `signal - reference`, skipping the first `skip` frames.
+    fn error_power(signal: &[f32], reference: &[f32], skip: usize) -> f64 {
+        signal[skip..]
+            .iter()
+            .zip(&reference[skip..])
+            .map(|(a, b)| (f64::from(*a) - f64::from(*b)).powi(2))
+            .sum::<f64>()
+            / (signal.len() - skip) as f64
+    }
+
+    /// "Speech": bursts of a harmonic tone separated by pauses, so the tracker sees noise-only
+    /// frames.
+    fn bursts(frames: usize) -> Vec<f32> {
+        (0..frames)
+            .map(|n| {
+                let t = n as f64 / f64::from(RATE);
+                let on = (t * 2.0).fract() < 0.6;
+                let tone = (2.0 * PI * 220.0 * t).sin() + 0.5 * (2.0 * PI * 660.0 * t).sin();
+                if on {
+                    (0.2 * tone) as f32
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn denoise_improves_snr_on_tone_bursts_in_noise() {
+        let frames = 6 * RATE as usize;
+        let clean = bursts(frames);
+        let mixed: Vec<f32> = clean
+            .iter()
+            .zip(noise(0.03, frames, 7))
+            .map(|(a, b)| a + b)
+            .collect();
+        let out = run("denoise", &[], &mixed, 1);
+        // The effect delays the signal by 512 frames.
+        let delayed: Vec<f32> = std::iter::repeat_n(0.0, 512)
+            .chain(clean.iter().copied())
+            .take(frames)
+            .collect();
+        let skip = RATE as usize;
+        let before = error_power(&mixed, &clean, skip);
+        let after = error_power(&out, &delayed, skip);
+        let signal = error_power(&clean, &vec![0.0; frames], skip);
+        let improvement = db(before / after);
+        assert!(
+            improvement > 10.0,
+            "SNR {:.1} dB -> {:.1} dB",
+            db(signal / before),
+            db(signal / after)
+        );
+        // The speech is not eaten: its level stays within 2 dB where the tone plays.
+        let on: Vec<usize> = (skip..frames - 512)
+            .filter(|n| (*n as f64 / f64::from(RATE) * 2.0).fract() < 0.6)
+            .collect();
+        let power = |x: &[f32], shift: usize| {
+            on.iter()
+                .map(|n| f64::from(x[n + shift]).powi(2))
+                .sum::<f64>()
+                / on.len() as f64
+        };
+        let kept = db(power(&out, 512) / power(&clean, 0));
+        assert!(kept.abs() < 2.0, "speech level changed by {kept:.2} dB");
+    }
+
+    #[test]
+    fn denoise_keeps_silence_silent_and_strength_zero_is_transparent() {
+        let silence = vec![0.0_f32; 20_000 * 2];
+        let out = run("denoise", &[], &silence, 2);
+        assert!(out.iter().all(|x| *x == 0.0));
+        let input = sine(500.0, 0.3, 24_000, 2);
+        let out = run("denoise", &[("strength", 0.0)], &input, 2);
+        let delay = 512 * 2;
+        let worst = out[delay + 8000..]
+            .iter()
+            .zip(&input[8000..])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(worst < 1e-4, "{worst}");
+    }
+
+    #[test]
+    fn denoise_state_is_bounded_and_channels_are_limited() {
+        let input = noise(0.05, 4096 * 8, 3);
+        let mut block = input.clone();
+        let state = process("denoise", &[], RATE, 8, &mut block, None)
+            .unwrap()
+            .unwrap();
+        assert!(state.len() < 64 * 1024, "{} bytes", state.len());
+        let mut block = vec![0.0; 9 * 256];
+        assert!(process("denoise", &[], RATE, 9, &mut block, None).is_err());
+        // A state from another channel count or a corrupt one is rejected.
+        let mut block = vec![0.0; 2 * 256];
+        assert!(process("denoise", &[], RATE, 2, &mut block, Some(&state)).is_err());
+        let mut broken = state.clone();
+        broken.truncate(broken.len() - 4);
+        let mut block = vec![0.0; 8 * 256];
+        assert!(process("denoise", &[], RATE, 8, &mut block, Some(&broken)).is_err());
     }
 }

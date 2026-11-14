@@ -377,6 +377,18 @@ pub enum Call {
         /// Snapshot-bound proposal with per-cut toggles.
         proposal: crate::AutocutProposal,
     },
+    /// Propose music ducking under speech without editing the project.
+    #[serde(rename = "timeline.propose_duck")]
+    ProposeDuck {
+        /// Voice and music selection, depth and ramps.
+        params: crate::DuckParams,
+    },
+    /// Apply a reviewed duck proposal as one undoable batch of gain keyframes.
+    #[serde(rename = "timeline.apply_duck")]
+    ApplyDuck {
+        /// Snapshot-bound proposal.
+        proposal: crate::DuckProposal,
+    },
     /// List the project's timeline markers.
     #[serde(rename = "markers.list")]
     MarkersList,

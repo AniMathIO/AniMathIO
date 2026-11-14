@@ -50,8 +50,8 @@ tool or `animathio-cli animations apply`. A preset becomes ordinary keyframes in
 step, so projects render and export without the plugin.
 
 Audio effects are plugins too: `org.animathio.audio-basic` provides gain/trim, a 3-band EQ,
-compressor, noise gate, high-pass filter and a voice-cleanup preset (high-pass + gentle gate +
-de-esser). Clips and tracks carry ordered, undoable audio-effect chains that run in the shared
+compressor, noise gate, high-pass filter, a voice-cleanup preset (high-pass + gentle gate +
+de-esser) and `denoise` (spectral gating that learns the noise from the quietest frames). Clips and tracks carry ordered, undoable audio-effect chains that run in the shared
 mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
 Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools. Open a track header’s
 **Audio effects** context-menu entry to edit its chain with the same controls. Clip audio-effect
@@ -360,6 +360,11 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 [CLI reference](docs/cli.md#autocut) and [review rules](docs/mcp.md#automatic-cut-review).
 
 ![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
+
+Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto duck…,
+`animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks,
+tune depth and attack/release, and review the ducked spans on the timeline first; see the
+[CLI reference](docs/cli.md#duck) and [rules](docs/mcp.md#auto-ducking).
 
 The launcher lists five bundled project templates and saved user templates, with CPU
 thumbnail cards. Creating one opens Fill placeholders for text and picked media;

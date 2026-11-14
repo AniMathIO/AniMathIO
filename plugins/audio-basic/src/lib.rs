@@ -1,7 +1,8 @@
-//! First-party `audio-basic` plugin: six deterministic audio effects.
+//! First-party `audio-basic` plugin: seven deterministic audio effects.
 //!
 //! `gain` (trim in dB), `eq3` (low shelf, mid peak, high shelf), `compressor`, `gate`,
-//! `highpass` and the `voice_cleanup` preset (high-pass + gentle gate + split-band de-esser).
+//! `highpass`, the `voice_cleanup` preset (high-pass + gentle gate + split-band de-esser) and
+//! `denoise` (streaming spectral gating).
 //! All DSP lives in [`dsp`], which has no dependency on the plugin ABI and is unit-tested
 //! natively; this file only adapts it to the `audio-effect-plugin` world.
 
@@ -28,8 +29,9 @@ mod bindings {
         fn describe() -> Manifest {
             Manifest {
                 name: "Basic Audio Effects".to_owned(),
-                version: "1.0.0".to_owned(),
-                description: "Gain, EQ, compressor, gate, high-pass and voice cleanup".to_owned(),
+                version: "1.1.0".to_owned(),
+                description: "Gain, EQ, compressor, gate, high-pass, voice cleanup and denoise"
+                    .to_owned(),
                 kinds: vec!["audio-effect".into()],
                 metadata: vec![],
                 params: Vec::new(),
