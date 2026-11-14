@@ -286,3 +286,74 @@ fn edited_multiline_text_stays_in_its_safe_box() {
         );
     }
 }
+
+/// Plain `add_title` text (no preset) is centred on its clip position: the ink
+/// sits around the transform position instead of hanging from the canvas origin.
+#[test]
+fn default_add_title_is_centred_with_goldens() {
+    let mut host = animathio_plugin_host::test_support::host();
+    let mut ctx = animathio_render::RenderCtx::default();
+    for (format, name) in [
+        (ExportPreset::Youtube1080p, "16x9"),
+        (ExportPreset::ShortsVertical, "9x16"),
+    ] {
+        let mut project = Project::default();
+        format
+            .command(&project)
+            .unwrap()
+            .apply(&mut project)
+            .unwrap();
+        let range =
+            TimeRange::new(Time(5 * TICKS_PER_SECOND), Time(10 * TICKS_PER_SECOND)).unwrap();
+        let (command, _, _) = animathio_control::title_command(
+            &project,
+            "AniMathIO Title",
+            range,
+            animathio_control::TitleStyle::Title,
+        )
+        .unwrap();
+        command.apply(&mut project).unwrap();
+        let (w, h) = format.resolution();
+        let size = (w / 6, h / 6);
+        let scene = host.resolve(&evaluate(&project, Time(6 * TICKS_PER_SECOND)), size);
+        let frame = animathio_render::render(&scene, &mut ctx, size).unwrap();
+        let bg = project.background();
+        let (mut min_x, mut max_x, mut min_y, mut max_y) = (u32::MAX, 0, u32::MAX, 0);
+        for (index, pixel) in frame.pixels.as_chunks::<4>().0.iter().enumerate() {
+            if pixel[..3] != bg[..3] {
+                let x = u32::try_from(index).unwrap() % size.0;
+                let y = u32::try_from(index).unwrap() / size.0;
+                (min_x, max_x) = (min_x.min(x), max_x.max(x));
+                (min_y, max_y) = (min_y.min(y), max_y.max(y));
+            }
+        }
+        assert!(max_x > min_x, "{name}: no ink");
+        // Fully on canvas and centred (title preset centre is 0.5, 0.5) within a few percent.
+        assert!(
+            min_x > 0 && max_x + 1 < size.0 && min_y > 0 && max_y + 1 < size.1,
+            "{name}"
+        );
+        let cx = f64::from(min_x + max_x) / 2.0 / f64::from(size.0);
+        let cy = f64::from(min_y + max_y) / 2.0 / f64::from(size.1);
+        assert!((cx - 0.5).abs() < 0.03, "{name}: ink centre x {cx}");
+        assert!((cy - 0.5).abs() < 0.04, "{name}: ink centre y {cy}");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+        let path = root
+            .join("golden")
+            .join(format!("title-default-{name}.png"));
+        if std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1") {
+            frame.save_png(&path).unwrap();
+        }
+        let expected = image_pixels(&path);
+        assert_eq!(frame.pixels.len(), expected.len());
+        assert!(
+            frame
+                .pixels
+                .iter()
+                .zip(expected)
+                .all(|(a, b)| a.abs_diff(b) <= 2),
+            "golden changed: {}",
+            path.display()
+        );
+    }
+}

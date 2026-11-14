@@ -486,7 +486,10 @@ Notes for real plugins:
 `org.animathio.text` accepts `text`, `font_size`, `color`, `align` (`left`, `center`,
 `right`) and `units` (`pixels` or `normalized`). Pixel mode retains centered outline
 layout. Normalized mode produces a generic text run with embedded-font shaping,
-wrapping and line alignment; font size is a fraction of canvas height. Migrated
+wrapping and line alignment; font size is a fraction of canvas height. The laid-out
+text block (widest line by line stack) is centred on the clip's transform position like
+other clips, `align` only decides how lines sit relative to each other inside the block
+(a normalized `text-run`'s `x`/`y` are an extra offset from that centre). Migrated
 builtin text uses normalized units and left alignment. Optional `fit_width` and `fit_height` (0 by default) select a fitted title box,
 expressed as fractions of the full canvas. In that mode the plugin emits normalized
 glyph outlines sized for a clip with the matching width/height scale, centres explicit

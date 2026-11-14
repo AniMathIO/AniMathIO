@@ -393,12 +393,14 @@ pub enum TitleStyle {
 }
 
 impl TitleStyle {
-    /// `(track name, x, y, font size as a fraction of canvas height)`.
-    fn preset(self) -> (&'static str, f64, f64, f64) {
+    /// `(track name, centre x, centre y, font size as a fraction of canvas height,
+    /// line alignment)`. Plain text is centred on the clip position, so x/y are the
+    /// middle of the text block in canvas fractions.
+    fn preset(self) -> (&'static str, f64, f64, f64, &'static str) {
         match self {
-            Self::Title => ("Titles", 0.5, 0.45, 0.1),
-            Self::LowerThird => ("Lower thirds", 0.35, 0.8, 0.055),
-            Self::Caption => ("Captions", 0.5, 0.9, 0.045),
+            Self::Title => ("Titles", 0.5, 0.5, 0.1, "center"),
+            Self::LowerThird => ("Lower thirds", 0.3, 0.82, 0.055, "left"),
+            Self::Caption => ("Captions", 0.5, 0.9, 0.045, "center"),
         }
     }
 }
@@ -417,7 +419,7 @@ pub fn title_command(
             "title text is empty".to_owned(),
         ));
     }
-    let (name, x, y, font_size) = style.preset();
+    let (name, x, y, font_size, align) = style.preset();
     let max_track = project.tracks().iter().map(|t| t.id().0).max();
     let max_clip = project
         .tracks()
@@ -430,11 +432,11 @@ pub fn title_command(
         .map_or(Some(1), |m| m.checked_add(1))
         .ok_or_else(|| ControlError::InvalidParams("identity overflow".to_owned()))?;
     let clip_id = ClipId(next);
-    let mut clip = Clip::new(
-        clip_id,
-        animathio_plugin_api::sources::text(text.to_owned(), font_size, [255; 4]),
-        range,
-    );
+    let mut kind = animathio_plugin_api::sources::text(text.to_owned(), font_size, [255; 4]);
+    if let ClipKind::Plugin { params, .. } = &mut kind {
+        params["align"] = serde_json::json!(align);
+    }
+    let mut clip = Clip::new(clip_id, kind, range);
     clip.transform = Transform {
         x,
         y,

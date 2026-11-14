@@ -140,8 +140,8 @@ pub fn build() -> Result<Sample, Error> {
                 [240, 245, 255, 255],
             ),
             Transform {
-                x: 0.6,
-                y: 0.58,
+                x: 0.5,
+                y: 0.14,
                 ..Transform::default()
             },
             TransformProperty::Opacity,

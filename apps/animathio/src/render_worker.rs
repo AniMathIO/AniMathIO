@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use animathio_core::{AssetId, Scene};
-use animathio_render::{BackendKind, RenderCtx, preview_backend, render};
+use animathio_render::{BackendKind, RenderCtx, preview_backend, render_preview};
 use gpui::RenderImage;
 
 /// One immutable frame job; plugin resolution and rasterization run on the worker.
@@ -18,6 +18,9 @@ pub(crate) struct RenderRequest {
 pub(crate) struct RenderResult {
     pub(crate) generation: u64,
     pub(crate) failed_effect_clips: std::collections::BTreeSet<animathio_core::ClipId>,
+    /// First effect failure of this frame. The frame itself still rendered, with the
+    /// failing effects passed through, so the preview never goes black over a missing plugin.
+    pub(crate) effect_error: Option<String>,
     pub(crate) image: Result<Arc<RenderImage>, String>,
 }
 
@@ -114,53 +117,46 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
             if let Some(host) = &mut host {
                 request.scene = host.resolve(&request.scene, request.size);
             }
-            let image = render_image(&mut ctx, &request);
-            let failed_effect_clips = if image.is_err() {
-                request
-                    .scene
-                    .clips
-                    .iter()
-                    .filter(|clip| !clip.effects.is_empty())
-                    .filter(|clip| {
-                        matches!(
-                            render(
-                                &Scene {
-                                    clips: vec![(*clip).clone()],
-                                },
-                                &mut ctx,
-                                request.size,
-                            ),
-                            Err(animathio_render::Error::Effect(_))
-                        )
-                    })
-                    .map(|clip| clip.id)
-                    .collect()
-            } else {
-                std::collections::BTreeSet::default()
-            };
+            let (image, effect_failures) = render_image(&mut ctx, &request);
+            let failed_effect_clips = effect_failures.iter().map(|(id, _)| *id).collect();
+            let effect_error = effect_failures.into_iter().next().map(|(_, error)| error);
             let _ = tx.send(RenderResult {
                 failed_effect_clips,
                 generation: request.generation,
+                effect_error,
                 image,
             });
         }
     }
 }
 
-fn render_image(ctx: &mut RenderCtx, request: &RenderRequest) -> Result<Arc<RenderImage>, String> {
-    let frame = match render(&request.scene, ctx, request.size) {
-        Ok(frame) => frame,
+type EffectFailures = Vec<(animathio_core::ClipId, String)>;
+
+fn render_image(
+    ctx: &mut RenderCtx,
+    request: &RenderRequest,
+) -> (Result<Arc<RenderImage>, String>, EffectFailures) {
+    let preview = match render_preview(&request.scene, ctx, request.size) {
+        Ok(preview) => preview,
         Err(animathio_render::Error::Gpu(error)) => {
             // A GPU failure mid-session (device lost, size limit): fall back to CPU.
             eprintln!("preview renderer: GPU failed ({error}); using CPU");
             ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
-            render(&request.scene, ctx, request.size).map_err(|e| e.to_string())?
+            match render_preview(&request.scene, ctx, request.size) {
+                Ok(preview) => preview,
+                Err(error) => return (Err(error.to_string()), Vec::new()),
+            }
         }
         Err(error) => {
             eprintln!("preview render failed: {error}");
-            return Err(error.to_string());
+            return (Err(error.to_string()), Vec::new());
         }
     };
+    let failures = preview.effect_failures;
+    (to_image(preview.frame), failures)
+}
+
+fn to_image(frame: animathio_render::Frame) -> Result<Arc<RenderImage>, String> {
     let mut pixels = frame.pixels;
     // GPUI's RenderImage path expects BGRA bytes despite image::RgbaImage's name.
     for pixel in pixels.as_chunks_mut::<4>().0 {
