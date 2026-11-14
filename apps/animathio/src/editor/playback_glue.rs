@@ -50,23 +50,32 @@ impl Editor {
                     }
                 }
                 self.failed_effect_clips = result.failed_effect_clips;
+                // A failing effect is passed through in the frame, but the warning badge
+                // and a one-time toast stay.
+                if let Some(error) = result.effect_error {
+                    if self.effect_warning.as_ref() != Some(&error) {
+                        self.notices.push(crate::style::Toast::warning(format!(
+                            "Clip effect unavailable: {error}"
+                        )));
+                    }
+                    self.effect_warning = Some(error);
+                    changed = true;
+                }
                 let image = match result.image {
                     Ok(image) => {
-                        self.effect_warning = None;
+                        if self.failed_effect_clips.is_empty() {
+                            self.effect_warning = None;
+                        }
                         image
                     }
                     Err(error) => {
                         if self.effect_warning.as_ref() != Some(&error) {
-                            let what = if self.failed_effect_clips.is_empty() {
-                                "Preview failed"
-                            } else {
-                                "Clip effect unavailable"
-                            };
-                            self.notices
-                                .push(crate::style::Toast::warning(format!("{what}: {error}")));
+                            self.notices.push(crate::style::Toast::warning(format!(
+                                "Preview failed: {error}"
+                            )));
                         }
                         self.effect_warning = Some(error);
-                        // Redraw so the warning badges and the toast appear.
+                        // Redraw so the toast appears.
                         changed = true;
                         continue;
                     }

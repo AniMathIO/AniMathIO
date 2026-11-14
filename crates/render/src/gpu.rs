@@ -289,7 +289,7 @@ impl GpuBackend {
                 VectorElement::TextRun(text) => {
                     if scene.coordinate_space == animathio_core::CoordinateSpace::Normalized {
                         let font_size = relative_text_pixel_size(text.font_size, size)?;
-                        let runs = self.cpu.shape_aligned(
+                        let runs = self.cpu.shape_centered(
                             &text.text,
                             font_size as f32,
                             size,

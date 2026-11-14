@@ -315,7 +315,11 @@ flowchart LR
   `preview_backend(BackendKind::Gpu)` finds an adapter, and falls back to CPU with the
   reason otherwise or when a GPU render fails. Clips with effects are rasterized, run
   through the effect plugins (the same `EffectProcessor` path as the CPU backend) and
-  composited by the GPU backend as an image.
+  composited by the GPU backend as an image. `render_preview` is the preview-only
+  entry point: a clip whose effect cannot run (missing plugin, rejected parameters)
+  is drawn without that effect and reported in `PreviewFrame::effect_failures`, so the
+  editor keeps its warning badge/toast instead of a black frame, while export and tests
+  use `render`, which fails with `Error::Effect`.
 - **Audio.** `AudioPool::prepare(rate, channels)` decodes/resamples outside playback;
   `Mixer::mix(project, range)` produces immutable snapshots shared by preview and
   export; `Player` consumes the ring buffer and updates the latency-corrected
@@ -424,7 +428,9 @@ resolve evaluated scenes through the same plugin host as preview.
 The generic vector interchange supports `Canvas` pixel coordinates and `Normalized`
 unit-square coordinates. Normalized paths, strokes and text scale with the clip;
 normalized text font size is relative to canvas height and is laid out with the
-embedded font, wrapping and alignment shared by CPU and GPU. A renderer sees only
+embedded font, wrapping and alignment shared by CPU and GPU. The laid-out text block
+is centred on the clip position (media-style anchoring), so a text clip at the default
+transform sits in the middle of the canvas. A renderer sees only
 resolved vector drawing instructions, never text/shapes plugin IDs.
 
 Schema 2 writes plugin clips. `format` migrates schema-1 builtin text, rectangles,

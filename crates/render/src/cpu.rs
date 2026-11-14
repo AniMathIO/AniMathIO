@@ -136,6 +136,13 @@ pub(crate) struct ShapedRun {
     pub(crate) glyphs: Vec<(u32, f32, f32)>,
 }
 
+/// Horizontal extent and height, in pixels, of a laid-out text block.
+struct TextBlock {
+    min_x: f32,
+    max_x: f32,
+    height: f32,
+}
+
 /// Convert a normalized drawing font size into pixels.
 pub(crate) fn relative_text_pixel_size(font_size: f64, size: Size) -> Result<f64, Error> {
     let font_size = font_size * f64::from(size.1);
@@ -488,6 +495,40 @@ impl CpuBackend {
         size: Size,
         align: animathio_core::TextAlignment,
     ) -> Result<Vec<ShapedRun>, Error> {
+        Ok(self.layout_text(text, font_size, size, align)?.0)
+    }
+
+    /// Shape `text` like [`Self::shape_aligned`], then shift every glyph so the centre of
+    /// the laid-out block (widest line by line stack height) sits at the centre of the
+    /// canvas-sized clip box. Alignment still decides how lines sit relative to each
+    /// other. This makes the clip transform position the middle of the text, like it
+    /// does for media, shapes and graphs.
+    pub(crate) fn shape_centered(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        size: Size,
+        align: animathio_core::TextAlignment,
+    ) -> Result<Vec<ShapedRun>, Error> {
+        let (mut runs, block) = self.layout_text(text, font_size, size, align)?;
+        #[allow(clippy::cast_precision_loss)] // Canvas sizes are far below 2^24.
+        let (half_width, half_height) = (size.0 as f32 / 2.0, size.1 as f32 / 2.0);
+        let dx = half_width - f32::midpoint(block.min_x, block.max_x);
+        let dy = half_height - block.height / 2.0;
+        for glyph in runs.iter_mut().flat_map(|run| run.glyphs.iter_mut()) {
+            glyph.1 += dx;
+            glyph.2 += dy;
+        }
+        Ok(runs)
+    }
+
+    fn layout_text(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        size: Size,
+        align: animathio_core::TextAlignment,
+    ) -> Result<(Vec<ShapedRun>, TextBlock), Error> {
         let mut builder = self
             .layout
             .ranged_builder(&mut self.fonts, text, 1.0, false);
@@ -504,7 +545,17 @@ impl CpuBackend {
             AlignmentOptions::default(),
         );
         let mut runs = Vec::new();
+        let mut block = TextBlock {
+            min_x: f32::MAX,
+            max_x: f32::MIN,
+            height: layout.height(),
+        };
         for line in layout.lines() {
+            let metrics = line.metrics();
+            block.min_x = block.min_x.min(metrics.offset);
+            block.max_x = block
+                .max_x
+                .max(metrics.offset + metrics.advance - metrics.hanging_advance);
             for item in line.items() {
                 if let PositionedLayoutItem::GlyphRun(run) = item {
                     runs.push(ShapedRun {
@@ -515,7 +566,11 @@ impl CpuBackend {
                 }
             }
         }
-        Ok(runs)
+        if block.max_x < block.min_x {
+            block.min_x = 0.0;
+            block.max_x = 0.0;
+        }
+        Ok((runs, block))
     }
 
     fn fill_runs(
@@ -555,6 +610,7 @@ impl CpuBackend {
                 color: CoreColor::rgba(fill[0], fill[1], fill[2], fill[3]),
                 align: animathio_core::TextAlignment::Left,
             },
+            false,
         )
     }
 
@@ -565,9 +621,14 @@ impl CpuBackend {
         resources: &mut Resources,
         size: Size,
         text: &TextElement,
+        centered: bool,
     ) -> Result<(), Error> {
         let font_size = relative_text_pixel_size(text.font_size, size)?;
-        let runs = self.shape_aligned(&text.text, font_size as f32, size, text.align)?;
+        let runs = if centered {
+            self.shape_centered(&text.text, font_size as f32, size, text.align)?
+        } else {
+            self.shape_aligned(&text.text, font_size as f32, size, text.align)?
+        };
         let unit = *ctx.transform();
         ctx.set_transform(
             unit * Affine::scale_non_uniform(1.0 / f64::from(size.0), 1.0 / f64::from(size.1)),
@@ -600,7 +661,7 @@ impl CpuBackend {
                     if scene.coordinate_space == animathio_core::CoordinateSpace::Normalized {
                         let t = *ctx.transform();
                         ctx.set_transform(t * Affine::translate((text.x, text.y)));
-                        self.normalized_text(ctx, resources, size, text)?;
+                        self.normalized_text(ctx, resources, size, text, true)?;
                         ctx.set_transform(t);
                     } else {
                         self.vector_text(ctx, resources, size, text)?;

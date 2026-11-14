@@ -313,6 +313,83 @@ pub fn render(scene: &Scene, ctx: &mut RenderCtx, size: Size) -> Result<Frame, E
         .render(scene, &mut ctx.resources, ctx.video.as_mut(), size)
 }
 
+/// Extra single-clip renders [`render_preview`] may spend per frame finding which effects
+/// of failing clips still work.
+const MAX_EFFECT_PROBES: usize = 8;
+
+/// A preview frame plus the effects that had to be skipped to produce it.
+#[derive(Debug)]
+pub struct PreviewFrame {
+    /// The rendered canvas, with failing effects passed through.
+    pub frame: Frame,
+    /// Clips whose effect chain failed, with the first error of each.
+    pub effect_failures: Vec<(animathio_core::ClipId, String)>,
+}
+
+/// Preview-only variant of [`render`]: an effect that cannot run (plugin not loaded,
+/// rejected parameters, sandbox violation) is passed through instead of failing the
+/// whole frame, and is reported in [`PreviewFrame::effect_failures`] so the editor can
+/// warn. Each clip keeps the effects that still work. Export and tests keep using
+/// [`render`], which fails with [`Error::Effect`].
+pub fn render_preview(
+    scene: &Scene,
+    ctx: &mut RenderCtx,
+    size: Size,
+) -> Result<PreviewFrame, Error> {
+    match render(scene, ctx, size) {
+        Ok(frame) => {
+            return Ok(PreviewFrame {
+                frame,
+                effect_failures: Vec::new(),
+            });
+        }
+        Err(Error::Effect(_)) => {}
+        Err(error) => return Err(error),
+    }
+    let mut repaired = scene.clone();
+    let mut effect_failures = Vec::new();
+    // Every probe re-runs plugin code (each call is bounded by the sandbox limits), so a
+    // failing frame gets a fixed budget instead of work proportional to chain length.
+    let mut probes_left = MAX_EFFECT_PROBES;
+    for clip in &mut repaired.clips {
+        if clip.effects.is_empty() {
+            continue;
+        }
+        let alone = |clip: &animathio_core::SceneClip| Scene {
+            clips: vec![clip.clone()],
+        };
+        let Err(Error::Effect(first)) = render(&alone(clip), ctx, size) else {
+            continue;
+        };
+        let mut probe = clip.clone();
+        probe.effects.clear();
+        for instance in std::mem::take(&mut clip.effects) {
+            // Out of budget: the remaining effects of this and later clips are skipped.
+            if probes_left == 0 {
+                break;
+            }
+            probes_left -= 1;
+            probe.effects.push(instance);
+            if matches!(render(&alone(&probe), ctx, size), Err(Error::Effect(_))) {
+                probe.effects.pop();
+            }
+        }
+        clip.effects = probe.effects;
+        effect_failures.push((clip.id, first));
+    }
+    if effect_failures.is_empty() {
+        // The failure came from somewhere other than a single clip's chain.
+        return render(scene, ctx, size).map(|frame| PreviewFrame {
+            frame,
+            effect_failures,
+        });
+    }
+    render(&repaired, ctx, size).map(|frame| PreviewFrame {
+        frame,
+        effect_failures,
+    })
+}
+
 /// Which backend renders frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendKind {
