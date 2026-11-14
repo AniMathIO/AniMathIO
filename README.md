@@ -31,6 +31,7 @@ Editor and headless engine prototype. What works today:
 | Plugin system (wasmtime Component Model) | ✅ ABI 1.0.0 frozen; first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
+| Auto-reframe to portrait/square (offline subject tracking) | ✅ editor, CLI and MCP |
 | Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
 | v1 and Manim importers | ✅ `import-v1`, `import-manim` |
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
@@ -52,6 +53,18 @@ parameters have keyframe controls, and parameter drags update playback live.
 Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
 the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
 and 256-byte display strings.
+
+## Auto-reframe
+
+**Clip, Auto reframe…** follows motion and visual contrast in selected video clips
+(or all videos when none are selected). Choose 9:16, 1:1 or 4:5 and tracking
+smoothness, then Reframe. Progress and Cancel run alongside the editor. No models
+or downloads are needed. The canvas changes in place; video position/scale keys
+are replaced in one undo step. Other layers retain their normalized transforms.
+CLI: `animathio-cli reframe landscape.amio -o vertical.amio --aspect 9:16`.
+MCP `auto_reframe` provides the same operation. See [limitations](docs/mcp.md#auto-reframe).
+
+![Auto-reframe settings and vertical video preview](docs/screenshots/editor-auto-reframe.png)
 
 ## Automatic subtitles
 

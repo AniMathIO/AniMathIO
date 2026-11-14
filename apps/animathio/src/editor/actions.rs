@@ -35,6 +35,7 @@ actions!(
         WriteOn,
         GenerateSubtitles,
         AutomaticCuts,
+        AutoReframe,
         NewProject,
         OpenProject,
         SaveProject,
@@ -543,6 +544,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     .on_action(cx.listener(|this, _: &ImportV1, _, cx| this.import_legacy(cx)))
     .on_action(cx.listener(|this, _: &ImportManim, window, cx| this.open_manim_import(window, cx)))
     .on_action(cx.listener(|this, _: &WriteOn, window, cx| this.open_write_on(window, cx)))
+    .on_action(cx.listener(|this, _: &AutoReframe, _, cx| this.open_reframe(cx)))
     .on_action(cx.listener(|this, _: &AutomaticCuts, _, cx| this.open_autocut(cx)))
     .on_action(cx.listener(|this, _: &GenerateSubtitles, window, cx| {
         this.open_subtitles_dialog(window, cx);

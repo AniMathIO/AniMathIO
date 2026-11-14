@@ -69,6 +69,7 @@ gets a JSON-RPC error instead of a result.
 | `timeline.apply_autocuts` | `{ proposal }` | removed ranges and total removed ticks; one undoable ripple batch; rejects stale project revisions, invalid/overlapping ranges, locked tracks and missing companion tracks |
 | `timeline.trim_silence` | `{ params: { threshold_db?, min_silence?, padding?, track? } }` | removed ranges; detects silent audio (RMS in 10 ms windows) and ripple-removes it from every track as one undo step; `min_silence` and `padding` are ticks |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }` |
+| `video.reframe` | `{ params: { aspect?, smoothness?, clips? } }` | video clip count; one undo batch; editor replies after its cancellable worker completes |
 | `subtitles.generate` | `{ params: { model?, language?, clip?, track?, range?, download_model?, split? } }` | `{ language, added?: { track_id, background_track_id, first_clip, cues }, cues: [{ start, end, text }] }`; transcribes the project's audio (or one clip, track or `range`) locally with Whisper and adds caption clips on a new `Subtitles` track as one undo step. `model` is `tiny`, `base` (default) or `small`; a missing model is an error unless `download_model` is true. The editor answers when the job finishes (it can take minutes) |
 | `subtitles.export` | `{ params: { format?, output?, track?, overwrite? } }` | `{ format, track, cues, text?, path? }`; renders a subtitle track (default: the first track named `Subtitles` with text clips) as `srt` or `vtt`, returning the text or writing `output` (a `.vtt` extension selects WebVTT) |
 | `subtitles.import` | `{ params: { path, offset? } }` | same shape as `subtitles.generate`; adds the cues of an SRT or WebVTT file as caption clips (one undo step); `offset` is signed ticks |
@@ -139,6 +140,7 @@ clears its undo history.
 | `propose_autocuts` | Review automatic cuts without editing; returns a proposal with tick ranges, reason, heuristic confidence and enabled toggles | `silence_db` (-40), `min_silence_ms` (500), `hysteresis_db` (3), `peak` (false), `keep_short_pauses` (true), `padding_before_ms` / `padding_after_ms` (100), optional `clip`, `track`, paired `from_ms` / `to_ms`, `all_unlocked_tracks` (false), `fillers` (false), `language`, `filler_words`, `model` (base), `download_model` (false) |
 | `apply_autocuts` | Apply the reviewed proposal as one undo step; selected tracks and linked companions ripple together | `proposal`: the exact object from `propose_autocuts`, with unwanted `cuts[].enabled` set to false. Coordinates are ticks in the original project; stale proposals are rejected |
 | `trim_silence` | Remove pauses detected in the audio, ripple-closing the gaps, in one undo step | `threshold_db` (-40), `min_silence_ms` (400), `padding_ms` (100), optional audio `track` id |
+| `auto_reframe` | `aspect?`, `smoothness?`, `clips?` | Subject-following portrait/square video; changes canvas and position/scale animation as one undo step; returns `{clips}` |
 | `auto_subtitles` | Fully local automatic subtitles: transcribe the project's audio (or one `clip`/`track`, or `from_ms`..`to_ms`) with Whisper and add caption-bar clips on a new `Subtitles` track, one undo step | `model` (`tiny`/`base`/`small`, default `base`), `language` (ISO 639-1, omit to detect), `download_model` (false; set only with the user's consent: one-time 78-488 MB download, SHA-256 verified), `max_chars_per_line` (42), `max_lines` (2). Returns the language, track ids and the cues in ms. Needs a build with the `whisper` feature; blocks until done |
 | `export_subtitles` | Return or write the subtitle track as SRT or WebVTT | `format` (`srt`/`vtt`), `track`, `path`, `overwrite` |
 | `import_subtitles` | Add an SRT or WebVTT file as caption clips on a new `Subtitles` track | `path`, `offset_ms` |
@@ -361,3 +363,33 @@ draft; Apply makes one undo entry. Cancel discards the draft and signals the wor
 Project templates currently have a shared-library and CLI implementation. MCP template
 listing and creation are pending; use the CLI to create a project before opening it
 with the headless MCP server.
+
+## Auto-reframe
+
+`auto_reframe` / `video.reframe` share offline deterministic motion, contrast and
+edge-energy tracking. `aspect` is `9:16` (default, 1080×1920), `1:1` (1080×1080) or
+`4:5` (1080×1350); `smoothness` is 0..=1 (default 0.5, higher follows more slowly).
+`clips` is a list of video ids, empty or omitted for all videos. Selected tracks
+must be unlocked and videos unrotated (including rotation animation).
+
+Analysis samples four frames per second and computes saliency at 96×54. A dead
+zone and rate-limited follow reduce jitter; frame-difference spikes reset tracking
+at scene cuts. Time-aware path simplification preserves both sides of detected
+cuts and limits each clip to 256 centre points (512 position keys plus two constant
+fill-scale keys). Analysis is
+bounded to 20000 decoded samples per call and rejects clips with more scene cuts
+than the key budget permits. Decode currently produces full-size frames before
+thumbnailing. Cancellation is checked between decodes. A project edit during the
+editor worker discards the draft. No project mutation occurs until completion.
+
+Application changes the current canvas, preserves source aspect while filling it,
+and replaces the targeted videos' position/scale curves; opacity, effects, timing,
+audio and other layers' normalized transforms remain. Undo restores the complete
+prior project in one step. Save explicitly after MCP use to retain changes.
+
+This is a visual-saliency heuristic, without face identity or semantic subject
+recognition. Multiple subjects, busy backgrounds, camera motion and short shots
+can need manual correction; scene cuts are located only at sampled times. Skin-tone
+priors, subject selection, rotated-video support and layout adaptation for titles
+are deferred. The editor menu provides aspect buttons, a smoothness slider,
+progress and cancellation; the CLI writes a separate archive by default.
