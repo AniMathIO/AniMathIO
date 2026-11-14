@@ -562,8 +562,11 @@ impl<'s> Parser<'s> {
     fn statement(&mut self) -> Vec<usize> {
         let start_pos = self.pos;
         let start = self.tok().start;
-        self.depth = 0;
-        match self.statement_inner() {
+        // Nesting counts across statements: a block inside a block is deeper.
+        let saved = self.depth;
+        let result = self.statement_inner();
+        self.depth = saved;
+        match result {
             Ok(ids) => ids,
             Err(fail) => {
                 self.pos = start_pos;
@@ -787,12 +790,14 @@ impl<'s> Parser<'s> {
     fn assignment(&mut self, left: usize) -> Parsed {
         let (start, _) = self.span(left);
         self.expect_op("=")?;
+        self.descend()?;
         let first = self.expression_list()?;
         let right = if self.at_op("=") {
             self.assignment(first)?
         } else {
             first
         };
+        self.depth -= 1;
         let (_, end) = self.span(right);
         Ok(self.node(
             "assignment",
@@ -948,6 +953,13 @@ impl<'s> Parser<'s> {
     }
 
     fn block(&mut self) -> Parsed {
+        self.descend()?;
+        let block = self.block_inner();
+        self.depth -= 1;
+        block
+    }
+
+    fn block_inner(&mut self) -> Parsed {
         let start = self.tok().start;
         if self.tok().kind != Tok::Newline {
             // `if x: pass` — simple statements on the header line.
@@ -981,11 +993,7 @@ impl<'s> Parser<'s> {
                     let id = self.recover(t.start, Fail::Syntax);
                     children.push((None, id));
                 }
-                _ => {
-                    let saved = self.depth;
-                    children.extend(self.statement().into_iter().map(|id| (None, id)));
-                    self.depth = saved;
-                }
+                _ => children.extend(self.statement().into_iter().map(|id| (None, id))),
             }
         }
         let end = children.last().map_or(start, |(_, id)| self.nodes[*id].end);
@@ -1037,8 +1045,10 @@ impl<'s> Parser<'s> {
         }
         let body = self.disjunction()?;
         if self.at_op(":=") {
+            self.descend()?;
             self.bump();
             let value = self.expression()?;
+            self.depth -= 1;
             let (start, _) = self.span(body);
             let (_, end) = self.span(value);
             return Ok(self.node(
@@ -1052,12 +1062,14 @@ impl<'s> Parser<'s> {
             // A conditional expression; inside a comprehension `if` is a filter,
             // which the caller handles, so only take it when `else` follows.
             let saved = (self.pos, self.depth);
+            self.descend()?;
             self.bump();
             if let Ok(condition) = self.disjunction()
                 && self.at_keyword("else")
             {
                 self.bump();
                 let alternative = self.expression()?;
+                self.depth -= 1;
                 let (start, _) = self.span(body);
                 let (_, end) = self.span(alternative);
                 return Ok(self.node(
@@ -1082,7 +1094,9 @@ impl<'s> Parser<'s> {
             self.bump();
         }
         self.bump();
+        self.descend()?;
         let body = self.expression()?;
+        self.depth -= 1;
         let (_, end) = self.span(body);
         Ok(self.node("lambda", start, end, vec![(Some("body"), body)]))
     }
@@ -1781,6 +1795,39 @@ mod tests {
         assert_eq!(
             parse(&source).root_node().named_child(0).unwrap().kind(),
             TOO_DEEP
+        );
+        // Every recursive production is bounded, not just brackets and operators.
+        for source in [
+            format!("{}1\ny = 2\n", "a = ".repeat(100_000)),
+            format!("x = {}1\ny = 2\n", "1 if c else ".repeat(100_000)),
+            format!("x = {}1\ny = 2\n", "lambda: ".repeat(100_000)),
+            format!("x = {}1\ny = 2\n", "a := ".repeat(100_000)),
+        ] {
+            let tree = parse(&source);
+            let root = tree.root_node();
+            assert_eq!(root.named_child(0).unwrap().kind(), TOO_DEEP);
+            assert_eq!(root.named_child(1).unwrap().kind(), "expression_statement");
+        }
+        // Deeply nested blocks become a too-deep statement inside the outer blocks.
+        let mut source = String::new();
+        for level in 0..3_000 {
+            source.push_str(&" ".repeat(level));
+            source.push_str("if x:\n");
+        }
+        source.push_str(&" ".repeat(3_000));
+        source.push_str("pass\ny = 2\n");
+        let tree = parse(&source);
+        let mut pending = vec![tree.root_node()];
+        let mut found = false;
+        while let Some(node) = pending.pop() {
+            found |= node.kind() == TOO_DEEP;
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+        }
+        assert!(found);
+        assert_eq!(
+            tree.root_node().named_child(1).unwrap().kind(),
+            "expression_statement"
         );
     }
 }
