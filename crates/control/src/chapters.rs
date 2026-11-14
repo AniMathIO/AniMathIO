@@ -262,10 +262,9 @@ pub fn export_chapters(
             if target.exists() && !params.overwrite {
                 return Err(ControlError::AlreadyExists(target));
             }
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&target, &text)?;
+            let mut output = animathio_export::AtomicOutput::create(&target, params.overwrite)?;
+            output.write_all(text.as_bytes())?;
+            output.commit()?;
             Some(target.display().to_string())
         }
     };

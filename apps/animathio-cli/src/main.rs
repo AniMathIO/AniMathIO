@@ -398,6 +398,11 @@ fn run(cli: Cli) -> Result<()> {
         } => {
             let mut bundle = load(&project)?;
             if let Some(path) = &chapters {
+                if animathio_control::validate_output_file(path)?
+                    == animathio_control::validate_output_file(&output)?
+                {
+                    return Err("video and chapters must use different output files".into());
+                }
                 // Fail before the long render when the sidecar cannot be written.
                 let list = animathio_control::chapters(
                     &bundle.project,

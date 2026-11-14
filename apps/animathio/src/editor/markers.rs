@@ -721,7 +721,7 @@ impl Editor {
                             .compact()
                             .label(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.clear_selection();
+                                this.clear_selection(cx);
                                 this.marker_selection.insert(id);
                                 this.seek_to(time, cx);
                             })),

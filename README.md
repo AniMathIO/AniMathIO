@@ -375,7 +375,7 @@ them there, each as one undo step. The same actions are `animathio-cli markers` 
 FFmpeg chapter lists. See the [CLI reference](docs/cli.md#beats) and
 [MCP reference](docs/mcp.md#markers-and-beat-sync).
 
-![Timeline markers with two selected on the ruler and the Markers and beats panel](docs/screenshots/editor-markers.png)
+![Timeline marker edited through the dialog and the Markers and beats panel](docs/screenshots/editor-markers.png)
 
 Automatic cuts for recordings are available through Clip > Automatic cuts,
 `animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence

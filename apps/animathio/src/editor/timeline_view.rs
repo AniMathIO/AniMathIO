@@ -26,7 +26,7 @@ impl Editor {
                     // Shift/Ctrl-click toggles membership without starting a drag.
                     if self.marker_selection.is_empty() {
                         // Fold a selected clip out of the way; markers and clips do not mix.
-                        self.clear_selection();
+                        self.clear_selection(cx);
                     }
                     if !self.marker_selection.remove(&id) {
                         self.marker_selection.insert(id);
@@ -39,7 +39,7 @@ impl Editor {
                     self.open_marker_dialog(id, window, cx);
                 } else {
                     if !self.marker_selection.contains(&id) {
-                        self.clear_selection();
+                        self.clear_selection(cx);
                         self.marker_selection.insert(id);
                     }
                     self.gesture = Some(TimelineGesture::Marker(MarkerDrag {

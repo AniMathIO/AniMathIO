@@ -148,7 +148,7 @@ impl Editor {
             if let Some((command, created)) = markers.paste(&self.project, self.position)
                 && self.try_execute(&command, cx)
             {
-                self.clear_selection();
+                self.clear_selection(cx);
                 self.marker_selection = created.into_iter().collect();
                 cx.notify();
             }

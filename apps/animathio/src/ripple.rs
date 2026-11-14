@@ -188,8 +188,7 @@ pub(crate) fn trim_command(
     }
     let marker_commands = if new < old {
         TimeRange::new(Time(from.0 - (old - new)), from)
-            .map(|gap| ripple_marker_commands(project, &[gap]))
-            .unwrap_or_default()
+            .map_or_default(|gap| ripple_marker_commands(project, &[gap]))
     } else {
         ripple_marker_insert_commands(project, from, new - old)
     };
