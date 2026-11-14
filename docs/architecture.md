@@ -380,7 +380,7 @@ DSP, and a port in `core` connects them.
   stereo, per second of audio on a shared development machine (debug profile, optimized
   dependencies; `cargo test -p animathio-plugin-host --features test-support --test
   audio_effects -- --ignored --nocapture bench_audio`): `gain` 1.3 ms, `highpass` 1.9 ms,
-  `eq3` 2.7 ms, `gate` 3.2 ms, `compressor` 3.7 ms, `voice_cleanup` 6.5 ms (`denoise`, added later, is the heaviest: one 512-point FFT pair per channel per 128 frames). Even a stack of
+  `eq3` 2.7 ms, `gate` 3.2 ms, `compressor` 3.7 ms, `voice_cleanup` 6.5 ms (`denoise`, added later, is not in this table; it runs one 512-point FFT pair per channel per 128 frames and is included in the `bench_audio` run). Even a stack of
   every effect is well under 2 % of real time; the state warm-up adds about a third on top
   while a chain is played sequentially from a cold segment.
 

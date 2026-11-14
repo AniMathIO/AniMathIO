@@ -50,10 +50,17 @@ fn all_frame_filters_are_bit_identical_across_abi_versions() {
 fn all_audio_filters_preserve_samples_and_state_across_abi_versions() {
     let (_cache, old) = legacy(include_bytes!("fixtures/audio-basic-0.2.2.amplugin"));
     let new = test_support::host();
-    assert_eq!(old.audio_effects(), new.audio_effects());
+    // Effects added after the legacy fixture (e.g. `denoise`) are not in it.
+    let legacy_effects = old.audio_effects();
+    let shared: Vec<_> = new
+        .audio_effects()
+        .into_iter()
+        .filter(|e| legacy_effects.iter().any(|o| o.effect_id == e.effect_id))
+        .collect();
+    assert_eq!(legacy_effects, shared);
     let old_handle = old.audio_effect_processor();
     let new_handle = new.audio_effect_processor();
-    for desc in new.audio_effects() {
+    for desc in shared {
         let mut effect = desc.instance(EffectId(1));
         // Exercise the EQ too: its default is intentionally an exact identity.
         if desc.effect_id == "eq3" {
