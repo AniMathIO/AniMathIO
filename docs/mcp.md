@@ -158,6 +158,7 @@ clears its undo history.
 | `import_subtitles` | Add an SRT or WebVTT file as caption clips on a new `Subtitles` track; words are spread evenly over each cue for the animated styles | `path`, `offset_ms`, `style` and the look options of `auto_subtitles` |
 | `set_caption_style` | Restyle existing captions (from `auto_subtitles`/`import_subtitles`) as one undo step; adds or removes the background bars as the style needs | `style` (required), `track`, `font_size`, `color`, `accent`, `outline`, `position`, `max_words` |
 | `list_templates` | List bundled and user project manifests and placeholders | — |
+| `create_from_template` | Create, save and open a project from a template, optionally filling text/media | `template`, `output`, optional `text`, `media`, `cover` |
 | `list_title_presets` | List title compositions and their editable fields | — |
 | `add_title` | Add animated linked title compositions, or legacy single text clips | `start_ms`, `duration_ms`; `preset` + `fields` (see below), or `text` + legacy `style`: `title` (default, centred), `lower_third` (lower left), `caption` (captions share one track); text is centred on its position |
 | `batch` | Apply several core `Command`s as one undo step | `ops`: serde externally-tagged commands with integer ticks (705600000 per second), e.g. `{"RemoveClip":{"id":3}}`, `{"SplitAt":{"times":[705600000]}}`, `{"RippleDelete":{"clip":4}}` |
