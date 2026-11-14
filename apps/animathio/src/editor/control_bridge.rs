@@ -389,6 +389,15 @@ impl Editor {
             Call::SubtitlesExport { params } => {
                 serde_json::to_value(animathio_control::export_subtitles(&self.project, &params)?)?
             }
+            Call::SubtitlesStyle { params } => {
+                let result = animathio_control::apply_caption_style(
+                    &mut self.project,
+                    &mut self.history,
+                    &params,
+                )?;
+                self.after_edit(cx);
+                serde_json::to_value(result)?
+            }
             Call::SubtitlesImport { params } => {
                 let result = animathio_control::import_subtitles(
                     &mut self.project,

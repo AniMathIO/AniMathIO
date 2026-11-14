@@ -38,6 +38,7 @@ use crate::timeline::{self, TimelineLayout, TrimEdge};
 pub(crate) mod actions;
 mod audio_effects;
 mod autocut;
+mod caption_styles;
 mod clip_ops;
 mod color_edit;
 mod commands;
@@ -507,6 +508,8 @@ pub(crate) struct Editor {
     export_queue_open: bool,
     /// The automatic-subtitle job, running or finished (see `editor/subtitles.rs`).
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
+    /// Remembered caption look: used for new subtitles and by the caption inspector.
+    caption_look: animathio_control::CaptionStyleParams,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
@@ -629,6 +632,7 @@ impl Editor {
             export_queue: crate::export_queue::ExportQueue::default(),
             export_queue_open: false,
             subtitle_job: None,
+            caption_look: animathio_control::CaptionStyleParams::default(),
             subtitle_panel_open: false,
             autocut_review: None,
             pending_export: None,

@@ -527,6 +527,19 @@ rendered off-thread and cached in editor session state by project canvas size.
   `control::subtitle_command` builds one `Command::Batch` with two new tracks, `Subtitles`
   (text) over `Subtitles background` (bars), one linked pair per cue using the **Caption
   bar** title preset, so undo removes everything in one step.
+- **Caption styles:** `control::captions` holds the bundled styles (`classic`,
+  `"word-highlight"`, `karaoke`, `pop`, `"one-word"`, `"bold-outline"`). A style is a set of
+  `org.animathio.text` clip parameters (`caption_style`, `words`, `accent`, `outline`,
+  `outline_width`, `max_words`, `font_size`, `color`, fit box) plus a safe-area placement,
+  so the format schema is untouched. `Cue::words` carries Whisper's per-word timings
+  (SRT/WebVTT imports spread the words evenly over the cue) and `subtitle_command` stores them
+  clip-relative in the `words` parameter. The text plugin renders the active word, pill, fill
+  or pop scale as a pure function of the clip's source time, so preview and export agree
+  (golden frames in `crates/render/tests/captions.rs`). `Call::SubtitlesStyle`
+  (`subtitles.style`, `set_caption_style`) and the editor's caption picker restyle existing
+  captions through one `Command::Batch` of `SetPluginParam`/`SetTransform` and bar add/remove
+  commands. The editor's `caption_styles` module is the shared picker (Generate dialog and the
+  caption inspector section).
 - **Threading:** the whole job is blocking and CPU-bound. The editor runs it on a worker
   thread (the app's `subtitle_job` module, with the `subtitles` editor module for the dialog,
   popover and control calls) with a progress phase and a cancel flag

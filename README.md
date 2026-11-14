@@ -62,6 +62,14 @@ a status-bar popover like the export queue. `animathio-cli transcribe talk.mp4 -
 talk.srt`, the `auto_subtitles` / `export_subtitles` / `import_subtitles` MCP tools and SRT
 or WebVTT import and export work the same way.
 
+Captions can be animated CapCut-style from Whisper's per-word timings: **Classic bar**,
+**Word highlight**, **Karaoke fill**, **Pop**, **One word at a time** and **Bold outline**
+(big type with a thick outline, centred for 9:16). Pick one in the Generate dialog, or in the
+inspector of a selected caption (it restyles every caption on the track as one undo step; font
+size, colours, top/middle/bottom position and words per line included). On the command line
+use `transcribe lesson.amio --style karaoke -o out.amio`; over MCP pass `style` to
+`auto_subtitles` or call `set_caption_style` on existing captions.
+
 ![Generated subtitles on a Subtitles track with the progress popover](docs/screenshots/subtitles.png)
 
 The speech engine is whisper.cpp, built only with `--features whisper` on `animathio`

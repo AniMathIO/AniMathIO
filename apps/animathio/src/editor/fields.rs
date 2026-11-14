@@ -1373,6 +1373,9 @@ impl Editor {
         if let Some(rows) = title_fields {
             body = body.child(rows);
         }
+        if let Some(section) = self.caption_style_section(id, cx) {
+            body = body.child(section);
+        }
         let opacity = inspector::sampled_numeric(
             &clip,
             &Target::Transform(TransformProperty::Opacity),

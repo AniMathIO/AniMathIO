@@ -381,6 +381,13 @@ pub enum Call {
         /// Format, track and optional output path.
         params: crate::SubtitleExportParams,
     },
+    /// Restyle the existing caption clips (style, colours, placement, words per line) as one
+    /// undo step.
+    #[serde(rename = "subtitles.style")]
+    SubtitlesStyle {
+        /// Style choice with optional overrides.
+        params: crate::SubtitleStyleParams,
+    },
     /// Add the cues of an SRT or `WebVTT` file as caption clips, as one undo step.
     #[serde(rename = "subtitles.import")]
     SubtitlesImport {
