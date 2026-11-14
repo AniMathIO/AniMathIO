@@ -197,8 +197,8 @@ The title bar provides File/Edit/View/Playback/Tools/Clip/Help menus, project st
 socket badge and Export. Drag panel dividers to resize; View toggles panel visibility.
 The layout and S/M/L timeline track heights persist between sessions.
 
-Use Ctrl (Cmd on macOS) with N/O/S/I/M for New/Open/Save/Import/Export and Z or
-Shift+Z for Undo/Redo. In the timeline, Ctrl/Cmd+B splits the selected clips at the
+Ctrl+Alt+N creates a project (Cmd+Alt+N on macOS). Use Ctrl/Cmd with O/S/I/M
+for Open/Save/Import/Export and Z or Shift+Z for Undo/Redo. In the timeline, Ctrl/Cmd+K splits the selected clips at the
 playhead and Delete removes the selection; Shift+Delete ripple-deletes it (or the in/out
 range across all tracks when no clip is selected). Space, Left/Right, Up/Down
 and Home/End control playback, frame stepping, edit-point stepping and project bounds.
@@ -213,18 +213,17 @@ rubber band over empty track space (Shift/Ctrl extends the selection) selects ev
 clip it touches. Ctrl/Cmd+A selects all, Esc clears (and first cancels a drag, menu or
 rename). The inspector shows the clip count, kinds, tracks and time span, and its
 Transform fields (plus Gain for all-audio selections) edit every selected clip at once.
-Dragging, nudging (Left/Right = 1 frame, Shift+Left/Right = 10 frames while the timeline
-has a selection; without one they move the playhead), deleting and splitting act on the
+Dragging, nudging (Alt+Left/Right = 1 frame), deleting and splitting act on the
 whole selection as one undo step. Ctrl/Cmd+C/X copy/cut, Ctrl/Cmd+V pastes at the playhead
 on the original tracks (a missing, locked or occupied track gets a new one, so a paste
-never overwrites), and Ctrl/Cmd+D duplicates the selection right after itself. The clip
+never overwrites), and Ctrl/Cmd+Shift+/ duplicates the selection right after itself. The clip
 JSON is also written to the system clipboard, so it can be pasted into another project
 window.
 
 **Context menus.** Right-clicking a clip, track header or keyframe opens a menu whose items
 show their real keyboard shortcut (the same bindings as the menu bar and Help > Keyboard
 shortcuts), for example Cut, Copy, Duplicate, Split, Delete, Ripple delete and Unlink
-(Ctrl/Cmd+Alt+L).
+(Ctrl/Cmd+L also links unlinked selected clips).
 
 **Adding elements.** Text, shapes, LaTeX and graphs from the library (click a card, or drag
 it onto the timeline) are overlays: they land on the dropped row or the first free track above
@@ -254,15 +253,16 @@ Drag a track header onto another to reorder, or use the header's right-click men
 
 **Ripple.** The toolbar link button (Tools → Ripple all tracks) switches ripple edits
 between "this track only" (default) and "all tracks". With all tracks, ripple delete and
-Ripple trim (T, or Ctrl+edge-drag) slide later clips on every unlocked track, never into
+Ripple trim (B, or Ctrl+edge-drag) slide later clips on every unlocked track, never into
 a neighbouring clip; locked tracks stay put.
 
-I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Alt+X clears them. The ruler highlights
-the range; looping uses it and export defaults to it. Select (A), Blade (B), Ripple
-trim (T) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
+I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Ctrl/Cmd+Shift+X clears them. The ruler highlights
+the range; looping uses it and export defaults to it. Select (V), Blade (C), Ripple
+trim (B) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
 splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later clips
-on the same track as one undo step. N toggles snapping and an engaged snap draws an
-accent line. Ctrl/Cmd+plus/minus zooms and Shift+Z fits the timeline.
+on the same track as one undo step. S toggles snapping and an engaged snap draws an
+accent line. Equals/minus zooms and backslash fits the timeline.
+Shift+Left/Right steps the playhead five frames; Ctrl/Cmd+Shift+K adds edits on all unlocked tracks.
 Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
 tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
 waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
@@ -401,3 +401,5 @@ library; user cards have Delete. The CLI keeps `templates list` and
 The launcher, editor title bar and application icons use the restored original
 AniMathIO logo, preserved in `apps/animathio/assets/brand.svg`. UI actions keep
 the violet-to-cyan accent. See [the design guide](docs/design.md).
+
+[Keyboard shortcuts](docs/keyboard-shortcuts.md) — Premiere Pro defaults.

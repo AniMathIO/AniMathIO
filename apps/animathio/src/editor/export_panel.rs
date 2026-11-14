@@ -244,7 +244,7 @@ impl Editor {
             )
             .child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.muted_foreground)
                     .child(detail),
             );
@@ -259,7 +259,7 @@ impl Editor {
         if let JobState::Failed(error) = &job.state {
             row = row.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.danger)
                     .child(error.clone()),
             );

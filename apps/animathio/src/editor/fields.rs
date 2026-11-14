@@ -699,7 +699,7 @@ impl Editor {
             .child(ColorPicker::new(&field.state))
             .child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(cx.theme().muted_foreground)
                     .child(hex),
             )
@@ -935,7 +935,7 @@ impl Editor {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(label),
             )
@@ -984,7 +984,7 @@ impl Editor {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(label),
             )
@@ -1462,7 +1462,7 @@ impl Editor {
             .border_l_1()
             .border_color(cx.theme().sidebar_border)
             .text_color(hex(color::TEXT))
-            .text_size(px(12.));
+            .text_size(crate::style::type_size::SM);
         let Some(id) = self.selected else {
             if let Some(track) = self.audio_inspector_track
                 && let Some(model) = self.project.tracks().iter().find(|t| t.id() == track)
@@ -1624,7 +1624,7 @@ impl Editor {
                 rows.push(
                     div()
                         .px_3()
-                        .text_size(px(11.))
+                        .text_size(crate::style::type_size::XS)
                         .text_color(hex(color::TEXT_MUTED))
                         .child("Drop an effect from the media pool"),
                 );
@@ -1654,7 +1654,7 @@ impl Editor {
             .map(|t| {
                 div()
                     .px_3()
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(format!(
                         "{:?} / {}",
@@ -1666,7 +1666,7 @@ impl Editor {
         let transition_content = if transitions.is_empty() {
             div()
                 .px_3()
-                .text_size(px(11.))
+                .text_size(crate::style::type_size::XS)
                 .text_color(hex(color::TEXT_MUTED))
                 .child("No transition on this clip")
         } else {

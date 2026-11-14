@@ -103,7 +103,7 @@ impl Editor {
                     .bg(style::hexa(color::BG, 0.8))
                     .border_1()
                     .border_color(hex(color::BORDER))
-                    .text_size(px(10.))
+                    .text_size(crate::style::type_size::XS)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(manifest.aspect.clone()),
             );
@@ -135,13 +135,13 @@ impl Editor {
                 .child(
                     div()
                         .mt_2()
-                        .text_size(px(13.))
+                        .text_size(crate::style::type_size::SM)
                         .font_weight(FontWeight::MEDIUM)
                         .child(manifest.name),
                 )
                 .child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(crate::style::type_size::XS)
                         .text_color(hex(color::TEXT_SECONDARY))
                         .child(manifest.category),
                 )
@@ -174,7 +174,11 @@ impl Editor {
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_size(px(16.)).child("Templates"))
+            .child(
+                div()
+                    .text_size(crate::style::type_size::LG)
+                    .child("Templates"),
+            )
             .child(cards)
     }
 
@@ -295,7 +299,7 @@ impl Editor {
                     })
                     .child(
                         div()
-                            .text_size(px(13.))
+                            .text_size(crate::style::type_size::SM)
                             .font_weight(FontWeight::MEDIUM)
                             .child(label.clone()),
                     );
@@ -370,7 +374,7 @@ impl Editor {
                         );
                     row = row.child(controls).child(
                         div()
-                            .text_size(px(11.))
+                            .text_size(crate::style::type_size::XS)
                             .text_color(style::hex(style::color::TEXT_SECONDARY))
                             .child(
                                 fill.path
@@ -395,7 +399,7 @@ impl Editor {
                 .child(
                     div()
                         .mb_3()
-                        .text_size(px(12.))
+                        .text_size(crate::style::type_size::SM)
                         .text_color(style::hex(style::color::TEXT_SECONDARY))
                         .child(
                             "Type text, or pick/drop an image or video. Media keeps the \

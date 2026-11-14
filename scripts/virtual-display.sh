@@ -21,7 +21,7 @@ for n in $(seq 90 120); do
 done
 : "${disp:?no free X display}"
 
-Xvfb "$disp" -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+Xvfb "$disp" -screen 0 "${ANIMATHIO_XVFB_SCREEN:-1920x1080x24}" -nolisten tcp >/dev/null 2>&1 &
 xvfb=$!
 trap 'kill "$xvfb" 2>/dev/null || true' EXIT
 for _ in $(seq 50); do [[ -e "/tmp/.X11-unix/X${disp#:}" ]] && break; sleep 0.1; done

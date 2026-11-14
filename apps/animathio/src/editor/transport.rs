@@ -247,21 +247,21 @@ impl Editor {
                 window.focus(&handle, cx);
             }
             div()
-                .w(px(176.))
+                .w(gpui::rems(11.733))
                 .font_family(mono.clone())
                 .child(gpui_component::input::Input::new(&state))
                 .into_any_element()
         } else {
             div()
                 .id("timecode-display")
-                .h(px(36.))
+                .h(gpui::rems(2.4))
                 .px_2()
                 .flex()
                 .items_center()
                 .rounded(px(style::radius::CONTROL))
                 .cursor_text()
                 .font_family(mono.clone())
-                .text_size(px(22.))
+                .text_size(crate::style::type_size::LG)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(hex(color::TEXT))
                 .hover(|this| this.bg(hexa(color::HOVER, 0.7)))
@@ -288,7 +288,7 @@ impl Editor {
         let speed_active = self.playing && speed != "1x";
         let muted = self.viewer_state.volume == 0.;
         div()
-            .h(px(60.))
+            .h(gpui::rems(4.0))
             .w_full()
             .flex_shrink_0()
             .flex()
@@ -329,8 +329,8 @@ impl Editor {
                         div().px_1().child(
                             style::primary_button("play", cx)
                                 .rounded_full()
-                                .w(px(42.))
-                                .h(px(42.))
+                                .w(gpui::rems(2.8))
+                                .h(gpui::rems(2.8))
                                 .shadow_md()
                                 .icon(
                                     icons::icon(if self.playing {
@@ -372,8 +372,8 @@ impl Editor {
                     .child(
                         div()
                             .id("shuttle-speed")
-                            .min_w(px(34.))
-                            .h(px(22.))
+                            .min_w(gpui::rems(2.267))
+                            .h(gpui::rems(1.467))
                             .px_2()
                             .flex()
                             .items_center()
@@ -384,7 +384,7 @@ impl Editor {
                             } else {
                                 hex(color::RAISED)
                             })
-                            .text_size(px(11.))
+                            .text_size(crate::style::type_size::XS)
                             .font_family(mono.clone())
                             .text_color(if speed_active {
                                 hex(color::ACCENT)
@@ -408,7 +408,7 @@ impl Editor {
                     .child(
                         div()
                             .font_family(mono)
-                            .text_size(px(12.))
+                            .text_size(crate::style::type_size::SM)
                             .text_color(hex(color::TEXT_MUTED))
                             .child(duration),
                     )
@@ -431,7 +431,7 @@ impl Editor {
                         )
                         .selected(muted),
                     )
-                    .child(div().w(px(84.)).child(volume)),
+                    .child(div().w(gpui::rems(5.6)).child(volume)),
             )
     }
 }

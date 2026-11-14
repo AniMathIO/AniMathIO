@@ -539,12 +539,16 @@ impl Editor {
                 ),
         );
         if panel.busy {
-            root = root.child(div().text_xs().child("Analysing audio..."));
+            root = root.child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .child("Analysing audio..."),
+            );
         }
         if let Some(error) = &panel.error {
             root = root.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.danger)
                     .child(error.clone()),
             );
@@ -552,13 +556,13 @@ impl Editor {
         if let Some(notice) = &panel.notice {
             root = root.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.muted_foreground)
                     .child(notice.clone()),
             );
         }
         if let Some(d) = detected {
-            root = root.child(div().text_xs().child(format!(
+            root = root.child(div().text_size(crate::style::type_size::XS).child(format!(
                 "{:.1} BPM, {} beats, {:.0}% confidence",
                 d.bpm,
                 d.beats.len(),
@@ -572,7 +576,7 @@ impl Editor {
             .flex_wrap()
             .gap_1()
             .items_center()
-            .child(div().text_xs().child("Beats:"));
+            .child(div().text_size(crate::style::type_size::XS).child("Beats:"));
         for n in [1_u32, 2, 4] {
             subset = subset.child(
                 Button::new(("beats-every", n as usize))
@@ -751,7 +755,7 @@ impl Editor {
         root = root
             .child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .child(format!("{} markers", self.project.markers().len())),
             )
             .child(list)
@@ -802,8 +806,8 @@ pub(super) fn paint_markers(
             let right = bounds.origin.x + px(end_x.clamp(-1.0, layout.width));
             window.paint_quad(fill(
                 Bounds::from_corners(
-                    point(left, bounds.top() + px(RULER_H - 5.0)),
-                    point(right.max(left + px(2.0)), bounds.top() + px(RULER_H)),
+                    point(left, bounds.top() + px(ruler_height() - 5.0)),
+                    point(right.max(left + px(2.0)), bounds.top() + px(ruler_height())),
                 ),
                 marker.color.opacity(0.55),
             ));
@@ -813,7 +817,10 @@ pub(super) fn paint_markers(
             marker.color.opacity(0.35),
         ));
         window.paint_quad(fill(
-            Bounds::new(point(left, bounds.top()), size(px(1.5), px(RULER_H - 4.0))),
+            Bounds::new(
+                point(left, bounds.top()),
+                size(px(1.5), px(ruler_height() - 4.0)),
+            ),
             marker.color,
         ));
         if marker.selected {

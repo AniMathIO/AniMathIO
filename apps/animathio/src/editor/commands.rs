@@ -7,7 +7,7 @@ impl Editor {
         let width = f32::from(self.timeline_bounds.size.width).max(1.0);
         TimelineLayout::zoomed(
             width,
-            RULER_H,
+            ruler_height(),
             self.dock.track_height.pixels(),
             timeline::timeline_span(&self.project),
             self.timeline_zoom,

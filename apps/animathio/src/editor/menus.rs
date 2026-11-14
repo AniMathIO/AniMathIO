@@ -50,7 +50,7 @@ fn clip_menu_entries() -> Vec<ClipMenuEntry> {
         ),
         (
             IconName::Scissors,
-            "Unlink",
+            "Link / unlink",
             Some(Box::new(UnlinkClips)),
             Editor::unlink_clip,
         ),
@@ -171,7 +171,7 @@ impl Editor {
             ]),
             Menu::new("Clip").items([
                 MenuItem::action("Split at playhead", SplitClip).disabled(none_selected),
-                MenuItem::action("Unlink clips", UnlinkClips).disabled(none_selected),
+                MenuItem::action("Link / unlink clips", UnlinkClips).disabled(none_selected),
                 MenuItem::action("Add effect", ShowEffects),
                 MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),
@@ -205,7 +205,7 @@ impl Editor {
         );
         let close_view = cx.entity().downgrade();
         TitleBar::new()
-            .h(px(46.))
+            .h(gpui::rems(3.067))
             .on_close_window(move |_, window, cx| {
                 let _ = close_view.update(cx, |this, cx| {
                     this.replace_project(ReplaceProject::CloseWindow, window, cx);
@@ -224,7 +224,7 @@ impl Editor {
                     .child(
                         div()
                             .flex_1()
-                            .min_w(px(430.))
+                            .min_w(gpui::rems(28.667))
                             .h_full()
                             .child(self.app_menu.clone()),
                     )
@@ -239,7 +239,7 @@ impl Editor {
                                 .items_center()
                                 .justify_center()
                                 .gap_2()
-                                .text_size(px(12.))
+                                .text_size(crate::style::type_size::SM)
                                 .text_color(style::hex(color::TEXT_SECONDARY))
                                 .when(self.dirty, |title| {
                                     title.child(
@@ -264,7 +264,7 @@ impl Editor {
                             .bg(style::hex(color::RAISED))
                             .border_1()
                             .border_color(style::hex(color::BORDER))
-                            .text_size(px(11.))
+                            .text_size(crate::style::type_size::XS)
                             .text_color(style::hex(color::TEXT_SECONDARY))
                             .child(div().size(px(5.)).rounded_full().bg(style::hex(
                                 if self.control.as_ref().is_some_and(|c| c.server.is_some()) {
@@ -333,18 +333,18 @@ impl Editor {
             ContextMenu::Keyframe(_) => 6,
         };
         let viewport = window.viewport_size();
-        let height = rows as f32 * 26.0 + 16.0;
+        let height = (rows as f32 * 30.0 + 16.0) * style::ui_scale();
         let top = f32::from(pos.y)
             .min(f32::from(viewport.height) - height)
             .max(8.0);
         let left = f32::from(pos.x)
-            .min(f32::from(viewport.width) - 248.0)
+            .min(f32::from(viewport.width) - 248.0 * style::ui_scale())
             .max(8.0);
         let mut menu = div()
             .absolute()
             .left(px(left))
             .top(px(top))
-            .w(px(240.))
+            .w(gpui::rems(16.0))
             .bg(cx.theme().popover)
             .border_1()
             .border_color(cx.theme().border)
@@ -504,7 +504,7 @@ impl Editor {
                 .items_center()
                 .gap_2()
                 .px_2()
-                .h(px(22.))
+                .h(gpui::rems(1.467))
                 .rounded(px(style::radius::CONTROL))
                 .bg(style::hex(color::PANEL))
                 .text_color(style::hex(color::TEXT_SECONDARY))
@@ -521,7 +521,7 @@ impl Editor {
             "Save to enable autosave".to_owned()
         };
         StatusBar::new()
-            .h(px(34.))
+            .h(gpui::rems(2.267))
             .flex_shrink_0()
             .px_3()
             .left(chip(IconName::Monitor, format!("{width} x {height}")))

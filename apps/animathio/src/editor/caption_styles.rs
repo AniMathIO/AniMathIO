@@ -92,7 +92,7 @@ pub(super) fn caption_style_picker(
     let position = look.position.unwrap_or(CaptionPosition::Bottom);
     let label = |text: &str| {
         div()
-            .text_size(px(11.))
+            .text_size(crate::style::type_size::XS)
             .text_color(hex(color::TEXT_SECONDARY))
             .child(text.to_owned())
     };
@@ -146,7 +146,7 @@ pub(super) fn caption_style_picker(
                 div()
                     .min_w(px(44.))
                     .text_center()
-                    .text_size(px(12.))
+                    .text_size(crate::style::type_size::SM)
                     .child(value),
             )
             .child(choose(format!("{prefix}-{id}-up"), "+".into(), false, up))
@@ -187,7 +187,7 @@ pub(super) fn caption_style_picker(
         .child(styles)
         .child(
             div()
-                .text_size(px(11.))
+                .text_size(crate::style::type_size::XS)
                 .text_color(hex(color::TEXT_SECONDARY))
                 .child(info.description),
         )

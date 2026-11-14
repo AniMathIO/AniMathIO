@@ -19,9 +19,16 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
   `RAISED`, a 3px solid band on the left edge, a 1px lighter top highlight, rounded
   radius 6, label in `TEXT`. Selected clips get a 2px `ACCENT` outline plus glow.
 - **Type:** UI text in Inter (fall back to the system sans), timecode and numbers in
-  JetBrains Mono (both OFL; embed them if practical). Sizes: 11 (meta), 12 (body),
-  13 (panel titles, semibold), 20+ (start-screen hero).
-- **Spacing:** 4px grid. Panel padding 8–12. Controls 26px tall (compact 22).
+  JetBrains Mono (bundled OFL fonts). Named rem sizes: xs 12 px, sm 14 px,
+  base 15 px, lg 20 px at compact 100%; comfortable uses a 16 px base.
+  Preferences → Interface: UI scale offers desktop default or 80–200% in 10% steps,
+  saved separately from the project and applied when Save is pressed.
+  `ANIMATHIO_UI_SCALE=150` overrides the saved percentage. Desktop default reads
+  KDE forceFontDPI, Xresources Xft.dpi or GNOME text-scaling-factor, otherwise 100%.
+  GPUI output scaling still applies independently. Windows desktop text-scale
+  detection is deferred. Component rem spacing, panel rows and timeline track
+  heights follow UI scale; timeline time coordinates remain independent.
+- **Spacing:** 4px grid. Panel padding 8–12. Control and panel row spacing follows the theme rem size.
 - **Motion:** 120–180ms ease-out for hover, selection, tab and panel changes, popovers
   and toasts (gpui `with_animation`). Nothing animates during playback except the
   playhead and meters. Respect a "Reduce motion" preference if one exists.
@@ -109,3 +116,5 @@ The Titles tab uses CPU-rendered preset cards cached by canvas size. Double-clic
 adds at the playhead; dragging uses timeline snapping. The inspector presents all
 linked composition text fields before the usual clip properties. Preset data lives
 in `crates/control/presets/titles.json`; applying a composition is one command batch.
+
+See [Keyboard shortcuts](keyboard-shortcuts.md) for the Premiere default keymap.

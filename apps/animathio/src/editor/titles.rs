@@ -122,7 +122,7 @@ impl Editor {
             div()
                 .w_full()
                 .p_2()
-                .text_size(px(11.))
+                .text_size(crate::style::type_size::XS)
                 .text_color(hex(color::TEXT_SECONDARY))
                 .child("Double-click to add at playhead, or drag to timeline"),
         );
@@ -175,7 +175,12 @@ impl Editor {
                         }
                     }))
                     .child(preview)
-                    .child(div().p_2().text_size(px(11.)).child(preset.name.clone()))
+                    .child(
+                        div()
+                            .p_2()
+                            .text_size(crate::style::type_size::XS)
+                            .child(preset.name.clone()),
+                    )
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                         this.pool_drag = None;
                         if event.click_count() == 2 {
@@ -269,7 +274,7 @@ impl Editor {
             rows = rows
                 .child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(crate::style::type_size::XS)
                         .text_color(hex(color::TEXT_SECONDARY))
                         .child(label),
                 )

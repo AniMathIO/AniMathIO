@@ -145,7 +145,7 @@ impl Editor {
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(px(12.))
+                        .text_size(crate::style::type_size::SM)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(hex(if bypassed {
                             color::TEXT_MUTED
@@ -237,7 +237,7 @@ impl Editor {
                 card = card.child(
                     div()
                         .px_2()
-                        .text_size(px(11.))
+                        .text_size(crate::style::type_size::XS)
                         .text_color(hex(color::WARNING))
                         .child(text),
                 );
@@ -308,7 +308,7 @@ impl Editor {
         rows.push(if available.is_empty() {
             div()
                 .px_3()
-                .text_size(px(11.))
+                .text_size(crate::style::type_size::XS)
                 .text_color(hex(color::TEXT_MUTED))
                 .child("No effect plugins loaded")
         } else {

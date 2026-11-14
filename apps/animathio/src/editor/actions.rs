@@ -12,6 +12,7 @@ actions!(
         NextEdit,
         GoToIn,
         GoToOut,
+        MarkClip,
         MarkIn,
         MarkOut,
         ClearMarks,
@@ -29,8 +30,8 @@ actions!(
         CutClips,
         PasteClips,
         DuplicateClips,
-        BackTenFrames,
-        ForwardTenFrames,
+        BackFiveFrames,
+        ForwardFiveFrames,
         Preferences,
         ImportV1,
         ImportManim,
@@ -55,7 +56,10 @@ actions!(
         Redo,
         DeleteSelection,
         SplitClip,
+        SplitAllTracks,
         TogglePlayback,
+        NudgeLeft,
+        NudgeRight,
         PreviousFrame,
         NextFrame,
         GoToStart,
@@ -67,6 +71,11 @@ actions!(
         ZoomToFit,
         LargerTracks,
         SmallerTracks,
+        FocusLibrary,
+        FocusTimeline,
+        FocusViewer,
+        FocusInspector,
+        FocusEffects,
         ToggleMediaPool,
         ToggleInspector,
         ToggleTimeline,
@@ -109,6 +118,15 @@ fn binding_context(action: &dyn Action, panel: &str) -> KeyBindingContextPredica
         || action.partial_eq(&Undo)
         || action.partial_eq(&Redo)
         || action.partial_eq(&KeyboardShortcuts)
+        || [
+            &FocusLibrary as &dyn Action,
+            &FocusTimeline,
+            &FocusViewer,
+            &FocusInspector,
+            &FocusEffects,
+        ]
+        .iter()
+        .any(|focus| action.partial_eq(*focus))
     {
         format!("{panel} && !Input")
     } else {
@@ -119,6 +137,11 @@ fn binding_context(action: &dyn Action, panel: &str) -> KeyBindingContextPredica
 
 pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
     vec![
+        ("shift-1", Box::new(FocusLibrary), "Editor"),
+        ("shift-3", Box::new(FocusTimeline), "Editor"),
+        ("shift-4", Box::new(FocusViewer), "Editor"),
+        ("shift-5", Box::new(FocusInspector), "Editor"),
+        ("shift-7", Box::new(FocusEffects), "Editor"),
         ("j", Box::new(ShuttleReverse), "Timeline"),
         ("j", Box::new(ShuttleReverse), "Viewer"),
         ("k", Box::new(ShuttleStop), "Timeline"),
@@ -133,26 +156,27 @@ pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("shift-i", Box::new(GoToIn), "Viewer"),
         ("shift-o", Box::new(GoToOut), "Timeline"),
         ("shift-o", Box::new(GoToOut), "Viewer"),
+        ("x", Box::new(MarkClip), "Timeline"),
         ("i", Box::new(MarkIn), "Timeline"),
         ("i", Box::new(MarkIn), "Viewer"),
         ("o", Box::new(MarkOut), "Timeline"),
         ("o", Box::new(MarkOut), "Viewer"),
-        ("alt-x", Box::new(ClearMarks), "Timeline"),
-        ("alt-x", Box::new(ClearMarks), "Viewer"),
-        ("a", Box::new(SelectTool), "Timeline"),
-        ("b", Box::new(BladeTool), "Timeline"),
-        ("t", Box::new(RippleTool), "Timeline"),
+        ("secondary-shift-x", Box::new(ClearMarks), "Timeline"),
+        ("secondary-shift-x", Box::new(ClearMarks), "Viewer"),
+        ("v", Box::new(SelectTool), "Timeline"),
+        ("c", Box::new(BladeTool), "Timeline"),
+        ("b", Box::new(RippleTool), "Timeline"),
         ("h", Box::new(HandTool), "Timeline"),
         ("shift-delete", Box::new(RippleDelete), "Timeline"),
-        ("shift-backspace", Box::new(RippleDelete), "Timeline"),
+        ("alt-backspace", Box::new(RippleDelete), "Timeline"),
         ("secondary-a", Box::new(SelectAllClips), "Timeline"),
         ("escape", Box::new(ClearSelection), "Timeline"),
         ("secondary-c", Box::new(CopyClips), "Timeline"),
         ("secondary-x", Box::new(CutClips), "Timeline"),
         ("secondary-v", Box::new(PasteClips), "Timeline"),
-        ("secondary-d", Box::new(DuplicateClips), "Timeline"),
+        ("secondary-shift-/", Box::new(DuplicateClips), "Timeline"),
         ("secondary-,", Box::new(Preferences), "Editor"),
-        ("secondary-n", Box::new(NewProject), "Editor"),
+        ("secondary-alt-n", Box::new(NewProject), "Editor"),
         ("secondary-o", Box::new(OpenProject), "Editor"),
         ("secondary-s", Box::new(SaveProject), "Editor"),
         ("secondary-i", Box::new(ImportMedia), "Editor"),
@@ -160,39 +184,42 @@ pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("secondary-z", Box::new(Undo), "Editor"),
         ("secondary-shift-z", Box::new(Redo), "Editor"),
         ("delete", Box::new(DeleteSelection), "Timeline"),
-        ("secondary-b", Box::new(SplitClip), "Timeline"),
-        ("secondary-alt-l", Box::new(UnlinkClips), "Timeline"),
+        ("secondary-k", Box::new(SplitClip), "Timeline"),
+        ("secondary-shift-k", Box::new(SplitAllTracks), "Timeline"),
+        ("secondary-l", Box::new(UnlinkClips), "Timeline"),
         ("space", Box::new(TogglePlayback), "Viewer"),
         ("space", Box::new(TogglePlayback), "Timeline"),
+        ("alt-left", Box::new(NudgeLeft), "Timeline"),
+        ("alt-right", Box::new(NudgeRight), "Timeline"),
         ("left", Box::new(PreviousFrame), "Viewer"),
         ("left", Box::new(PreviousFrame), "Timeline"),
         ("right", Box::new(NextFrame), "Viewer"),
         ("right", Box::new(NextFrame), "Timeline"),
-        ("shift-left", Box::new(BackTenFrames), "Viewer"),
-        ("shift-left", Box::new(BackTenFrames), "Timeline"),
-        ("shift-right", Box::new(ForwardTenFrames), "Viewer"),
-        ("shift-right", Box::new(ForwardTenFrames), "Timeline"),
+        ("shift-left", Box::new(BackFiveFrames), "Viewer"),
+        ("shift-left", Box::new(BackFiveFrames), "Timeline"),
+        ("shift-right", Box::new(ForwardFiveFrames), "Viewer"),
+        ("shift-right", Box::new(ForwardFiveFrames), "Timeline"),
         ("home", Box::new(GoToStart), "Viewer"),
         ("home", Box::new(GoToStart), "Timeline"),
         ("end", Box::new(GoToEnd), "Viewer"),
         ("end", Box::new(GoToEnd), "Timeline"),
-        ("secondary-l", Box::new(ToggleLoop), "Viewer"),
-        ("secondary-l", Box::new(ToggleLoop), "Timeline"),
-        ("n", Box::new(ToggleSnapping), "Timeline"),
+        ("alt-l", Box::new(ToggleLoop), "Viewer"),
+        ("alt-l", Box::new(ToggleLoop), "Timeline"),
+        ("s", Box::new(ToggleSnapping), "Timeline"),
         ("m", Box::new(AddMarker), "Timeline"),
         ("m", Box::new(AddMarker), "Viewer"),
         ("shift-m", Box::new(NextMarker), "Timeline"),
         ("shift-m", Box::new(NextMarker), "Viewer"),
         ("secondary-shift-m", Box::new(PreviousMarker), "Timeline"),
         ("secondary-shift-m", Box::new(PreviousMarker), "Viewer"),
-        ("secondary-=", Box::new(ZoomIn), "Timeline"),
-        ("secondary--", Box::new(ZoomOut), "Timeline"),
-        ("shift-z", Box::new(ZoomToFit), "Timeline"),
+        ("=", Box::new(ZoomIn), "Timeline"),
+        ("-", Box::new(ZoomOut), "Timeline"),
+        ("\\", Box::new(ZoomToFit), "Timeline"),
         ("secondary-alt-=", Box::new(LargerTracks), "Timeline"),
         ("secondary-alt--", Box::new(SmallerTracks), "Timeline"),
         ("shift-f", Box::new(FitViewer), "Viewer"),
         ("shift-f", Box::new(FitViewer), "Timeline"),
-        ("shift-/", Box::new(KeyboardShortcuts), "Editor"),
+        ("secondary-alt-k", Box::new(KeyboardShortcuts), "Editor"),
         ("backspace", Box::new(DeleteSelection), "Timeline"),
     ]
 }
@@ -246,6 +273,24 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         }
         this.delete_selected(cx);
     }))
+    .on_action(cx.listener(|this, _: &SplitAllTracks, _, cx| {
+        let targets: Vec<_> = this
+            .project
+            .tracks()
+            .iter()
+            .filter(|track| !track.is_locked())
+            .flat_map(|track| track.clips().values())
+            .filter(|clip| clip.range.start < this.position && this.position < clip.range.end)
+            .map(|clip| clip.id)
+            .collect();
+        let targets = selection::one_per_link_group(&this.project, &targets);
+        let (commands, next) =
+            selection::split_commands(&this.project, &targets, this.position, this.next_id);
+        this.next_id = next;
+        if let Some(command) = selection::batch(commands) {
+            this.execute(&command, cx);
+        }
+    }))
     .on_action(cx.listener(|this, _: &SplitClip, window, cx| {
         if this.fields.any_focused(window, cx) {
             cx.propagate();
@@ -260,12 +305,15 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         }
         this.toggle_play(cx);
     }))
+    .on_action(cx.listener(|this, _: &NudgeLeft, _, cx| {
+        this.nudge_selection(-1, cx);
+    }))
+    .on_action(cx.listener(|this, _: &NudgeRight, _, cx| {
+        this.nudge_selection(1, cx);
+    }))
     .on_action(cx.listener(|this, _: &PreviousFrame, window, cx| {
         if this.fields.any_focused(window, cx) {
             cx.propagate();
-            return;
-        }
-        if this.timeline_focused(window, cx) && this.nudge_selection(-1, cx) {
             return;
         }
         this.step_frame(-1, cx);
@@ -275,30 +323,21 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             cx.propagate();
             return;
         }
-        if this.timeline_focused(window, cx) && this.nudge_selection(1, cx) {
-            return;
-        }
         this.step_frame(1, cx);
     }))
-    .on_action(cx.listener(|this, _: &BackTenFrames, window, cx| {
+    .on_action(cx.listener(|this, _: &BackFiveFrames, window, cx| {
         if this.fields.any_focused(window, cx) {
             cx.propagate();
             return;
         }
-        if this.timeline_focused(window, cx) && this.nudge_selection(-10, cx) {
-            return;
-        }
-        this.step_frame(-10, cx);
+        this.step_frame(-5, cx);
     }))
-    .on_action(cx.listener(|this, _: &ForwardTenFrames, window, cx| {
+    .on_action(cx.listener(|this, _: &ForwardFiveFrames, window, cx| {
         if this.fields.any_focused(window, cx) {
             cx.propagate();
             return;
         }
-        if this.timeline_focused(window, cx) && this.nudge_selection(10, cx) {
-            return;
-        }
-        this.step_frame(10, cx);
+        this.step_frame(5, cx);
     }))
     .on_action(cx.listener(|this, _: &SelectAllClips, window, cx| {
         if this.fields.any_focused(window, cx) {
@@ -411,6 +450,29 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         }
         this.set_track_height(this.dock.track_height.smaller(), cx);
     }))
+    .on_action(cx.listener(|this, _: &FocusLibrary, window, cx| {
+        this.dock.left_open = true;
+        this.select_left_tab(LeftTab::Assets, cx);
+        window.focus(&this.panel_focus[3], cx);
+    }))
+    .on_action(cx.listener(|this, _: &FocusEffects, window, cx| {
+        this.dock.left_open = true;
+        this.select_left_tab(LeftTab::Effects, cx);
+        window.focus(&this.panel_focus[3], cx);
+    }))
+    .on_action(cx.listener(|this, _: &FocusTimeline, window, cx| {
+        this.dock.bottom_open = true;
+        window.focus(&this.panel_focus[0], cx);
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &FocusViewer, window, cx| {
+        window.focus(&this.panel_focus[1], cx);
+    }))
+    .on_action(cx.listener(|this, _: &FocusInspector, window, cx| {
+        this.dock.right_open = true;
+        window.focus(&this.panel_focus[2], cx);
+        cx.notify();
+    }))
     .on_action(cx.listener(|this, _: &ToggleMediaPool, _window, cx| {
         this.toggle_panel(PanelSide::Left, cx);
     }))
@@ -494,6 +556,19 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             this.seek_to(time, cx);
         }
     }))
+    .on_action(cx.listener(|this, _: &MarkClip, _, cx| {
+        if let Some(clip) = this
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .find(|clip| clip.range.start <= this.position && this.position < clip.range.end)
+        {
+            this.marks.set_in(clip.range.start);
+            this.marks.set_out(clip.range.end);
+            cx.notify();
+        }
+    }))
     .on_action(cx.listener(|this, _: &MarkIn, window, cx| {
         if this.fields.any_focused(window, cx) {
             cx.propagate();
@@ -560,7 +635,24 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         if let Some(id) = this.selected {
-            this.unlink_clip(id, cx);
+            if this
+                .find_clip(id)
+                .is_some_and(|clip| clip.link_group.is_some())
+            {
+                this.unlink_clip(id, cx);
+            } else {
+                let ids = this.selected_ids();
+                if ids.len() > 1 {
+                    let commands = ids
+                        .into_iter()
+                        .map(|id| Command::SetClipLink {
+                            id,
+                            group: this.selected,
+                        })
+                        .collect();
+                    this.execute(&Command::Batch { commands }, cx);
+                }
+            }
         }
     }))
     .on_action(cx.listener(|this, _: &RippleDelete, window, cx| {
@@ -612,39 +704,59 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
 impl Editor {
     fn show_shortcuts(window: &mut Window, cx: &mut Context<Self>) {
         use gpui_component::{WindowExt, kbd::Kbd};
+        let search = cx.new(|cx| {
+            gpui_component::input::InputState::new(window, cx).placeholder("Search actions or keys")
+        });
+        cx.subscribe(
+            &search,
+            |_, _, _: &gpui_component::input::InputEvent, cx| cx.notify(),
+        )
+        .detach();
         let mut seen = BTreeSet::new();
         let rows: Vec<_> = keymap()
             .into_iter()
-            .filter_map(|(_, action, context)| {
+            .filter_map(|(keys, action, context)| {
                 let name = action
                     .name()
                     .rsplit("::")
                     .next()
                     .unwrap_or(action.name())
                     .to_owned();
-                seen.insert(name.clone()).then_some((name, action, context))
+                seen.insert(name.clone())
+                    .then_some((name, keys, action, context))
             })
             .collect();
-        window.open_dialog(cx, move |dialog, window, _cx| {
-            dialog.title("Keyboard shortcuts").child(
-                div()
-                    .id("shortcut-list")
-                    .max_h(px(500.))
-                    .overflow_y_scroll()
-                    .children(rows.iter().map(|(label, action, context)| {
-                        div()
-                            .flex()
-                            .justify_between()
-                            .py_1()
-                            .gap_4()
-                            .child(label.clone())
-                            .children(Kbd::binding_for_action(
-                                action.as_ref(),
-                                Some(context),
-                                window,
-                            ))
-                    })),
-            )
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let query = search.read(cx).value().to_lowercase();
+            dialog
+                .title("Keyboard shortcuts")
+                .child(gpui_component::input::Input::new(&search))
+                .child(
+                    div()
+                        .id("shortcut-list")
+                        .max_h(px(500.))
+                        .overflow_y_scroll()
+                        .children(
+                            rows.iter()
+                                .filter(|(label, keys, _, _)| {
+                                    label.to_lowercase().contains(&query.replace(' ', ""))
+                                        || keys.contains(&query)
+                                })
+                                .map(|(label, _, action, context)| {
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .py_1()
+                                        .gap_4()
+                                        .child(label.clone())
+                                        .children(Kbd::binding_for_action(
+                                            action.as_ref(),
+                                            Some(context),
+                                            window,
+                                        ))
+                                }),
+                        ),
+                )
         });
     }
 
@@ -689,6 +801,24 @@ mod tests {
             let mut typing = contexts.to_vec();
             typing.push(KeyContext::parse("Input").unwrap());
             assert!(predicate.depth_of(&typing).is_none());
+        }
+    }
+
+    #[core::prelude::v1::test]
+    fn bindings_do_not_conflict_in_the_same_context() {
+        for os in [
+            OperatingSystem::Mac,
+            OperatingSystem::Linux,
+            OperatingSystem::Windows,
+        ] {
+            let mut seen = BTreeSet::new();
+            for (keys, _, context) in keymap() {
+                let key = Keystroke::parse_with_os(keys, os).unwrap();
+                assert!(
+                    seen.insert((format!("{key:?}"), context)),
+                    "duplicate {keys} in {context}"
+                );
+            }
         }
     }
 

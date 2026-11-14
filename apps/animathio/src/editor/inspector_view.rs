@@ -134,7 +134,7 @@ impl Editor {
             .bg(hex(color::RAISED))
             .child(
                 div()
-                    .h(px(34.))
+                    .h(gpui::rems(2.267))
                     .pl_2()
                     .pr_1()
                     .flex()
@@ -157,7 +157,7 @@ impl Editor {
                             )
                             .child(
                                 div()
-                                    .text_size(px(12.))
+                                    .text_size(crate::style::type_size::SM)
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(title.to_owned()),
                             )

@@ -516,7 +516,7 @@ impl Editor {
                             ))
                             .child(
                                 div()
-                                    .text_size(px(11.))
+                                    .text_size(crate::style::type_size::XS)
                                     .text_color(hex(color::TEXT_SECONDARY))
                                     .child("Drop video, images or audio here"),
                             )
@@ -620,7 +620,7 @@ impl Editor {
                                 .px_1()
                                 .rounded(px(3.))
                                 .bg(hex(color::RAISED))
-                                .text_size(px(9.))
+                                .text_size(crate::style::type_size::XS)
                                 .text_color(hex(tint))
                                 .child(asset_kind_label(&asset.media_type)),
                         )
@@ -632,7 +632,7 @@ impl Editor {
                                     .right(px(4.))
                                     .px_1()
                                     .bg(hex(color::RAISED))
-                                    .text_size(px(10.))
+                                    .text_size(crate::style::type_size::XS)
                                     .child(timecode::format_timecode(
                                         duration,
                                         self.project.frame_rate(),
@@ -660,13 +660,13 @@ impl Editor {
                         .cursor_pointer()
                         .when(self.media_view.list, Styled::w_full)
                         .when(!self.media_view.list, |s| {
-                            s.flex_1().min_w(px(104.)).max_w(px(176.))
+                            s.flex_1().min_w(gpui::rems(6.933)).max_w(px(176.))
                         })
                         .child(preview)
                         .child(
                             div()
                                 .p_2()
-                                .text_size(px(11.))
+                                .text_size(crate::style::type_size::XS)
                                 .child(
                                     div()
                                         .truncate()
@@ -676,7 +676,7 @@ impl Editor {
                                 .child(
                                     div()
                                         .truncate()
-                                        .text_size(px(10.))
+                                        .text_size(crate::style::type_size::XS)
                                         .text_color(hex(color::TEXT_SECONDARY))
                                         .child(detail),
                                 ),
@@ -750,7 +750,7 @@ impl Editor {
                         div()
                             .id(SharedString::from(format!("plugin-{id}")))
                             .flex_1()
-                            .min_w(px(104.))
+                            .min_w(gpui::rems(6.933))
                             .max_w(px(176.))
                             .rounded(px(6.))
                             .overflow_hidden()
@@ -761,7 +761,7 @@ impl Editor {
                             .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
                             .child(
                                 div()
-                                    .h(px(64.))
+                                    .h(gpui::rems(4.267))
                                     .bg(hex(color::BG))
                                     .flex()
                                     .items_center()
@@ -775,7 +775,7 @@ impl Editor {
                             .child(
                                 div()
                                     .p_2()
-                                    .text_size(px(11.))
+                                    .text_size(crate::style::type_size::XS)
                                     .truncate()
                                     .text_color(hex(color::TEXT))
                                     .child(name),
@@ -806,7 +806,7 @@ impl Editor {
                         .px_2()
                         .pt_2()
                         .pb_1()
-                        .text_size(px(11.))
+                        .text_size(crate::style::type_size::XS)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(hex(color::TEXT_MUTED))
                         .child(label)

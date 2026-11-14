@@ -600,7 +600,7 @@ impl Editor {
                 div()
                     .flex_1()
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(format!(
                         "{} x {}  {:.0}%",
@@ -682,7 +682,7 @@ impl Editor {
                     .bg(hexa(color::RAISED, 0.95))
                     .border_1()
                     .border_color(hex(color::BORDER))
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(format!(

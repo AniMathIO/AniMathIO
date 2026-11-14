@@ -8,6 +8,7 @@ pub(crate) struct Preferences {
     pub(crate) autosave_seconds: u64,
     pub(crate) export_folder: PathBuf,
     pub(crate) compact: bool,
+    pub(crate) ui_scale: Option<u16>,
     pub(crate) reduce_motion: bool,
 }
 impl Default for Preferences {
@@ -16,6 +17,7 @@ impl Default for Preferences {
             autosave_seconds: 60,
             export_folder: PathBuf::new(),
             compact: true,
+            ui_scale: None,
             reduce_motion: false,
         }
     }
@@ -41,6 +43,16 @@ impl Preferences {
         })
     }
 
+    pub(crate) fn effective_scale(&self) -> f32 {
+        let percent = std::env::var("ANIMATHIO_UI_SCALE")
+            .ok()
+            .and_then(|s| s.trim_end_matches('%').parse::<f32>().ok())
+            .filter(|n| n.is_finite())
+            .or(self.ui_scale.map(f32::from))
+            .unwrap_or_else(desktop_text_percent);
+        percent.clamp(80., 200.) / 100.
+    }
+
     fn path() -> Option<PathBuf> {
         directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
             .map(|dirs| dirs.config_dir().join("preferences.json"))
@@ -63,6 +75,55 @@ impl Preferences {
             .map_err(|e| e.to_string())
     }
 }
+/// Read local desktop configuration without spawning a settings service.
+fn desktop_text_percent() -> f32 {
+    static SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(detect_desktop_text_percent)
+}
+fn detect_desktop_text_percent() -> f32 {
+    let Some(home) = std::env::var_os("HOME") else {
+        return 100.;
+    };
+    let home = PathBuf::from(home);
+    let config =
+        std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| home.join(".config"), PathBuf::from);
+    for (path, key) in [
+        (config.join("kcmfonts"), "forceFontDPI="),
+        (home.join(".Xresources"), "Xft.dpi:"),
+    ] {
+        if let Ok(text) = std::fs::read_to_string(path)
+            && let Some(dpi) = text
+                .lines()
+                .find_map(|line| line.trim().strip_prefix(key)?.trim().parse::<f32>().ok())
+                .filter(|dpi| dpi.is_finite() && *dpi > 0.)
+        {
+            return dpi / 96. * 100.;
+        }
+    }
+    if std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_lowercase()
+        .contains("gnome")
+        && let Ok(output) = std::process::Command::new("timeout")
+            .args([
+                "1",
+                "gsettings",
+                "get",
+                "org.gnome.desktop.interface",
+                "text-scaling-factor",
+            ])
+            .output()
+        && let Ok(scale) = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<f32>()
+        && scale.is_finite()
+        && scale > 0.
+    {
+        return scale * 100.;
+    }
+    100.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +138,20 @@ mod tests {
         }
         prefs.export_folder = PathBuf::from("/renders");
         assert_eq!(prefs.export_dir(Some(project)), Path::new("/renders"));
+    }
+
+    #[test]
+    fn scale_defaults_and_saved_choice_are_backwards_compatible() {
+        let old: Preferences = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.ui_scale, None);
+        let saved: Preferences = serde_json::from_str(r#"{"ui_scale":150}"#).unwrap();
+        assert_eq!(saved.ui_scale, Some(150));
+        assert_eq!(
+            serde_json::from_str::<Preferences>(&serde_json::to_string(&saved).unwrap())
+                .unwrap()
+                .ui_scale,
+            Some(150)
+        );
     }
 
     #[test]

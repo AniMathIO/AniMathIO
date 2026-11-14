@@ -100,7 +100,7 @@ pub(super) fn paint_timeline(
     let width = f32::from(bounds.size.width).max(1.0);
     let layout = TimelineLayout::zoomed(
         width,
-        RULER_H,
+        ruler_height(),
         snapshot.row_height,
         snapshot.duration,
         zoom,
@@ -114,12 +114,15 @@ pub(super) fn paint_timeline(
     let height = f32::from(bounds.size.height);
     let ruler = Bounds::from_corners(
         bounds.origin,
-        point(bounds.origin.x + px(width), bounds.origin.y + px(RULER_H)),
+        point(
+            bounds.origin.x + px(width),
+            bounds.origin.y + px(ruler_height()),
+        ),
     );
     window.paint_quad(fill(ruler, ruler_bg));
     paint_ruler(bounds, &layout, snapshot, width, muted, border, window, cx);
     for row in 0..snapshot.rows {
-        let top = bounds.origin.y + px(RULER_H + row as f32 * snapshot.row_height);
+        let top = bounds.origin.y + px(ruler_height() + row as f32 * snapshot.row_height);
         let row_bounds = Bounds::from_corners(
             point(bounds.origin.x, top),
             point(bounds.origin.x + px(width), top + px(snapshot.row_height)),
@@ -139,7 +142,7 @@ pub(super) fn paint_timeline(
                 "Drop media here".into(),
                 point(
                     bounds.left() + px(20.),
-                    bounds.top() + px(RULER_H + row as f32 * snapshot.row_height + 16.),
+                    bounds.top() + px(ruler_height() + row as f32 * snapshot.row_height + 16.),
                 ),
                 bounds.right(),
                 font(snapshot.theme.font_family.clone()),
@@ -168,7 +171,7 @@ pub(super) fn paint_timeline(
         let x0 = timeline::time_to_x(&layout, range.start).clamp(0., layout.width);
         let x1 = timeline::time_to_x(&layout, range.end).clamp(0., layout.width);
         #[allow(clippy::cast_precision_loss)]
-        let top = RULER_H + *row as f32 * snapshot.row_height;
+        let top = ruler_height() + *row as f32 * snapshot.row_height;
         window.paint_quad(fill(
             Bounds::from_corners(
                 point(bounds.origin.x + px(x0), bounds.origin.y + px(top)),
@@ -188,7 +191,7 @@ pub(super) fn paint_timeline(
         window.paint_quad(fill(
             Bounds::from_corners(
                 point(x0, bounds.origin.y),
-                point(x1, bounds.origin.y + px(RULER_H)),
+                point(x1, bounds.origin.y + px(ruler_height())),
             ),
             style::hex(colors::ACCENT).opacity(0.25),
         ));
@@ -256,7 +259,7 @@ pub(super) fn paint_timeline(
         paint_icon(
             IconName::Magnet,
             Bounds::new(
-                point(x + px(3.), bounds.top() + px(RULER_H + 3.)),
+                point(x + px(3.), bounds.top() + px(ruler_height() + 3.)),
                 size(px(14.), px(14.)),
             ),
             style::hex(colors::ACCENT),
@@ -279,8 +282,9 @@ pub(super) fn paint_clip(
 ) {
     let x0 = bounds.origin.x + px(timeline::time_to_x(layout, clip.start));
     let x1 = bounds.origin.x + px(timeline::time_to_x(layout, clip.end));
-    let y0 = bounds.origin.y + px(RULER_H + clip.row as f32 * layout.row_height + 3.0);
-    let y1 = bounds.origin.y + px(RULER_H + (clip.row as f32 + 1.0) * layout.row_height - 3.0);
+    let y0 = bounds.origin.y + px(ruler_height() + clip.row as f32 * layout.row_height + 3.0);
+    let y1 =
+        bounds.origin.y + px(ruler_height() + (clip.row as f32 + 1.0) * layout.row_height - 3.0);
     let block = Bounds::from_corners(point(x0, y0), point(x1, y1));
     let kind_color = clip_color(&clip.kind, cx.theme());
     if !timeline::visible_span(layout, clip.start, clip.end) {
@@ -571,7 +575,7 @@ fn paint_transition(
         .max(bounds.left());
     let right =
         (bounds.left() + px(timeline::time_to_x(layout, transition.range.end))).min(bounds.right());
-    let top = bounds.top() + px(RULER_H + transition.row as f32 * layout.row_height + 3.);
+    let top = bounds.top() + px(ruler_height() + transition.row as f32 * layout.row_height + 3.);
     let bottom = top + px((layout.row_height - 6.).max(8.));
     let area = Bounds::from_corners(point(left, top), point(right, bottom));
     // Outgoing-to-incoming gradient over the overlap, with a soft accent rim.
@@ -859,7 +863,7 @@ pub(super) fn paint_ruler(
         let mark_top = bounds.origin.y + px(if is_major { 19.0 } else { 24.0 });
         let mark = Bounds::from_corners(
             point(x, mark_top),
-            point(x + px(1.0), bounds.origin.y + px(RULER_H)),
+            point(x + px(1.0), bounds.origin.y + px(ruler_height())),
         );
         window.paint_quad(fill(mark, if is_major { muted } else { border }));
         if is_major {
@@ -954,8 +958,8 @@ pub(super) fn paint_clip_label(
     };
     let line = window
         .text_system()
-        .shape_line(label, px(11.), &[run], None);
-    let line_height = px(14.0);
+        .shape_line(label, window.rem_size() * 0.8, &[run], None);
+    let line_height = window.rem_size() * 1.2;
     // Clip the text to the block so long labels never spill into the next clip.
     let mask = ContentMask {
         bounds: Bounds::from_corners(

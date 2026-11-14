@@ -12,7 +12,7 @@ fn heading(icon: IconName, title: &'static str) -> Div {
         .flex()
         .items_center()
         .gap_2()
-        .text_size(px(16.))
+        .text_size(crate::style::type_size::LG)
         .font_weight(FontWeight::SEMIBOLD)
         .child(icons::icon(icon).text_color(style::hex(style::color::ACCENT)))
         .child(title)
@@ -88,7 +88,7 @@ impl Editor {
                 .title(heading(IconName::TriangleAlert, title))
                 .child(
                     div()
-                        .text_sm()
+                        .text_size(crate::style::type_size::SM)
                         .text_color(style::hex(style::color::TEXT_SECONDARY))
                         .child("The current project has unsaved changes that will be lost."),
                 )
@@ -200,7 +200,7 @@ impl Editor {
                 .child(
                     div()
                         .mb_3()
-                        .text_size(px(12.))
+                        .text_size(crate::style::type_size::SM)
                         .text_color(style::hex(style::color::TEXT_SECONDARY))
                         .child("The final cut. Render a video or add it to your queue."),
                 )
@@ -618,6 +618,14 @@ impl Editor {
             window,
             cx,
         );
+        let scale_values: Vec<String> = std::iter::once("Desktop default".to_owned())
+            .chain((80..=200).step_by(10).map(|n| format!("{n}%")))
+            .collect();
+        let scale_index = self
+            .preferences
+            .ui_scale
+            .map_or(0, |n| ((n.clamp(80, 200) - 80) / 10 + 1) as usize);
+        let scale = choices(scale_values, scale_index, window, cx);
         let motion = choices(
             vec!["Full motion".into(), "Reduce motion".into()],
             usize::from(self.preferences.reduce_motion),
@@ -626,6 +634,7 @@ impl Editor {
         );
         let editor = cx.entity();
         window.open_dialog(cx, move |dialog, _, cx| {
+            let scale_submit = scale.clone();
             let motion_submit = motion.clone();
             let autosave_submit = autosave.clone();
             let folder_submit = folder.clone();
@@ -642,6 +651,7 @@ impl Editor {
                             NumberInput::new(&autosave),
                         ))
                         .child(field("Default export folder", Input::new(&folder)))
+                        .child(field("Interface: UI scale", Select::new(&scale)))
                         .child(field("Theme density", Select::new(&density)))
                         .child(field("Motion", Select::new(&motion))),
                 )
@@ -658,6 +668,10 @@ impl Editor {
                             autosave_seconds: seconds,
                             export_folder: folder,
                             compact,
+                            ui_scale: selected(&scale_submit, cx)
+                                .trim_end_matches('%')
+                                .parse()
+                                .ok(),
                             reduce_motion,
                         };
                         if let Err(error) = preferences.save() {
@@ -669,9 +683,11 @@ impl Editor {
                         if gpu != this.preview.gpu {
                             this.toggle_gpu_preview(cx);
                         }
+                        style::set_ui_scale(this.preferences.effective_scale());
                         cx.set_reduce_motion(reduce_motion);
                         gpui_component::Theme::update(cx, |theme| {
-                            theme.font_size = px(if compact { 12. } else { 14. });
+                            theme.font_size = px((if compact { 15. } else { 16. })
+                                * this.preferences.effective_scale());
                             theme.motion.duration_fast = Duration::from_millis(if reduce_motion {
                                 0
                             } else {

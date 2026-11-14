@@ -18,12 +18,12 @@ impl Editor {
                 if this.dock.left_open
                     && let Some(size) = sizes.first()
                 {
-                    this.dock.left_width = f32::from(*size);
+                    this.dock.left_width = f32::from(*size) / style::ui_scale();
                 }
                 if this.dock.right_open
                     && let Some(size) = sizes.last()
                 {
-                    this.dock.right_width = f32::from(*size);
+                    this.dock.right_width = f32::from(*size) / style::ui_scale();
                 }
                 this.dock.clamp();
                 this.dock.save();
@@ -32,8 +32,8 @@ impl Editor {
         if self.dock.left_open {
             middle = middle.child(
                 resizable_panel()
-                    .size(px(self.dock.left_width))
-                    .size_range(px(160.)..px(640.))
+                    .size(px(self.dock.left_width * style::ui_scale()))
+                    .size_range(px(160. * style::ui_scale())..px(640. * style::ui_scale()))
                     .child(style::panel(
                         div()
                             .size_full()
@@ -59,7 +59,7 @@ impl Editor {
         }
         middle = middle.child(
             resizable_panel()
-                .size_range(px(240.)..px(10000.))
+                .size_range(px(240. * style::ui_scale())..px(10000. * style::ui_scale()))
                 .child(style::panel(
                     div()
                         .size_full()
@@ -69,7 +69,7 @@ impl Editor {
                             IconName::MonitorPlay,
                             "Preview",
                             div()
-                                .text_size(px(11.))
+                                .text_size(crate::style::type_size::XS)
                                 .text_color(style::hex(color::TEXT_SECONDARY))
                                 .child("PROGRAM"),
                         ))
@@ -79,8 +79,8 @@ impl Editor {
         if self.dock.right_open {
             middle = middle.child(
                 resizable_panel()
-                    .size(px(self.dock.right_width))
-                    .size_range(px(200.)..px(720.))
+                    .size(px(self.dock.right_width * style::ui_scale()))
+                    .size_range(px(200. * style::ui_scale())..px(720. * style::ui_scale()))
                     .child(style::panel(
                         div()
                             .size_full()
@@ -116,14 +116,14 @@ impl Editor {
         })
         .child(
             resizable_panel()
-                .size_range(px(140.)..px(10000.))
+                .size_range(px(140. * style::ui_scale())..px(10000. * style::ui_scale()))
                 .child(middle),
         )
         .when(self.dock.bottom_open, |workspace| {
             workspace.child(
                 resizable_panel()
-                    .size(px(self.dock.bottom_height))
-                    .size_range(px(120.)..px(600.))
+                    .size(px(self.dock.bottom_height * style::ui_scale()))
+                    .size_range(px(120. * style::ui_scale())..px(600. * style::ui_scale()))
                     .child(style::panel(
                         div()
                             .size_full()
@@ -133,7 +133,7 @@ impl Editor {
                                 IconName::Film,
                                 "Timeline",
                                 div()
-                                    .text_size(px(11.))
+                                    .text_size(crate::style::type_size::XS)
                                     .text_color(style::hex(color::TEXT_SECONDARY))
                                     .child(format!("{} tracks", self.project.tracks().len())),
                             ))
@@ -146,7 +146,7 @@ impl Editor {
                 if this.dock.bottom_open
                     && let Some(size) = state.read(cx).sizes().last()
                 {
-                    this.dock.bottom_height = f32::from(*size);
+                    this.dock.bottom_height = f32::from(*size) / style::ui_scale();
                     this.dock.clamp();
                     this.dock.save();
                 }
@@ -192,7 +192,7 @@ impl Editor {
             div()
                 .relative()
                 .flex()
-                .h(px(30.))
+                .h(gpui::rems(2.0))
                 .rounded(px(style::radius::CONTROL))
                 .bg(style::hex(color::BG))
                 .child(indicator)
@@ -226,7 +226,7 @@ impl Editor {
                             .gap_1()
                             .rounded(px(style::radius::CONTROL))
                             .cursor_pointer()
-                            .text_size(px(11.))
+                            .text_size(crate::style::type_size::XS)
                             .text_color(style::hex(if selected {
                                 color::TEXT
                             } else {

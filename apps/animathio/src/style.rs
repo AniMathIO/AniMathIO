@@ -132,12 +132,28 @@ impl gpui::AssetSource for Assets {
     }
 }
 
-/// Install once before creating widgets. `Theme::update` also synchronizes the
-/// semantic backgrounds and the base kit (resize handles and scrollbars).
+/// Scale shared by canvas geometry and the component theme.
+static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1.0f32.to_bits());
+pub fn ui_scale() -> f32 {
+    f32::from_bits(UI_SCALE.load(std::sync::atomic::Ordering::Relaxed))
+}
+pub fn set_ui_scale(scale: f32) {
+    UI_SCALE.store(scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+pub mod type_size {
+    pub const XS: gpui::Rems = gpui::rems(0.8);
+    pub const SM: gpui::Rems = gpui::rems(0.933);
+    pub const BASE: gpui::Rems = gpui::rems(1.0);
+    pub const DISPLAY: gpui::Rems = gpui::rems(2.4);
+    pub const LG: gpui::Rems = gpui::rems(1.333);
+}
+
+/// Install the palette, bundled fonts and scaled base size before creating widgets.
 pub fn install_theme(cx: &mut gpui::App, compact: bool, reduce_motion: bool) {
     use gpui::px;
     use gpui_component::{Theme, ThemeMode};
     use std::borrow::Cow;
+    set_ui_scale(crate::preferences::Preferences::load().effective_scale());
     let fonts = vec![
         Cow::Borrowed(include_bytes!("../assets/fonts/InterVariable.ttf").as_slice()),
         Cow::Borrowed(include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf").as_slice()),
@@ -151,7 +167,7 @@ pub fn install_theme(cx: &mut gpui::App, compact: bool, reduce_motion: bool) {
             theme.font_family = "Inter Variable".into();
             theme.mono_font_family = "JetBrains Mono".into();
         }
-        theme.font_size = px(if compact { 12. } else { 14. });
+        theme.font_size = px((if compact { 15. } else { 16. }) * ui_scale());
         theme.radius = px(radius::CONTROL);
         theme.radius_lg = px(radius::PANEL);
         theme.shadow = true;
@@ -325,19 +341,19 @@ pub fn panel_header(
     title: &'static str,
     action: impl gpui::IntoElement,
 ) -> gpui::Div {
-    use gpui::{ParentElement as _, Styled as _, div, px};
+    use gpui::{ParentElement as _, Styled as _, div};
     use gpui_component::Sizable as _;
     div()
         .flex()
         .items_center()
-        .h(px(38.))
+        .h(gpui::rems(2.533))
         .flex_shrink_0()
         .px_3()
         .gap_2()
         .bg(hex(color::PANEL))
         .border_b_1()
         .border_color(hex(color::BORDER))
-        .text_size(px(13.))
+        .text_size(crate::style::type_size::SM)
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .child(
             crate::icons::icon(icon)

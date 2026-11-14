@@ -963,7 +963,7 @@ impl Editor {
         let overview_rows = snapshot.rows;
         let duration = snapshot.duration;
         let content_height =
-            RULER_H + self.project.tracks().len() as f32 * self.dock.track_height.pixels();
+            ruler_height() + self.project.tracks().len() as f32 * self.dock.track_height.pixels();
         let pool_dragging = self.pool_drag.is_some();
 
         div()
@@ -976,7 +976,7 @@ impl Editor {
             .bg(cx.theme().background)
             .child(
                 div()
-                    .h(px(30.))
+                    .h(gpui::rems(2.4))
                     .flex_shrink_0()
                     .w_full()
                     .flex()
@@ -990,22 +990,22 @@ impl Editor {
                             (
                                 Tool::Select,
                                 IconName::MousePointer2,
-                                "Select",
+                                "Select (V)",
                                 "tool-select",
                             ),
                             (
                                 Tool::Blade,
                                 IconName::Scissors,
-                                "Blade; Shift-click all tracks",
+                                "Blade (C); Shift-click all tracks",
                                 "tool-blade",
                             ),
                             (
                                 Tool::Ripple,
                                 IconName::FoldHorizontal,
-                                "Ripple trim",
+                                "Ripple trim (B)",
                                 "tool-ripple",
                             ),
-                            (Tool::Hand, IconName::Hand, "Pan", "tool-hand"),
+                            (Tool::Hand, IconName::Hand, "Pan (H)", "tool-hand"),
                         ]
                         .map(|(tool, icon, label, id)| {
                             icon_button(
@@ -1127,10 +1127,10 @@ impl Editor {
                     .bg(crate::style::hex(crate::style::color::BG))
                     .child(
                         div()
-                            .w(px(HEADER_W))
+                            .w(px(track_header_width()))
                             .flex_shrink_0()
                             .px_2()
-                            .text_xs()
+                            .text_size(crate::style::type_size::XS)
                             .text_color(crate::style::hex(crate::style::color::TEXT_MUTED))
                             .child("OVERVIEW"),
                     )
@@ -1308,7 +1308,7 @@ impl Editor {
 
     pub(super) fn track_header(&self, cx: &mut Context<Self>) -> Div {
         let mut header = div()
-            .w(px(HEADER_W))
+            .w(px(track_header_width()))
             .h_full()
             .flex_shrink_0()
             .flex()
@@ -1316,7 +1316,7 @@ impl Editor {
             .bg(cx.theme().popover);
         header = header.child(
             div()
-                .h(px(RULER_H))
+                .h(px(ruler_height()))
                 .flex_shrink_0()
                 .w_full()
                 .border_b_1()
@@ -1538,7 +1538,7 @@ impl Editor {
                     .w_full()
                     .h(px(14.))
                     .truncate()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(cx.theme().foreground)
                     .flex()
                     .flex_row()

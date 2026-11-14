@@ -75,7 +75,18 @@ fn main() {
             })
             .detach();
 
-            let bounds = Bounds::centered(None, size(px(1400.), px(900.)), cx);
+            let available = cx
+                .primary_display()
+                .map_or(size(px(1400.), px(900.)), |display| display.bounds().size);
+            let scale = style::ui_scale();
+            let bounds = Bounds::centered(
+                None,
+                size(
+                    px(1400. * scale).min(available.width * 0.95),
+                    px(900. * scale).min(available.height * 0.95),
+                ),
+                cx,
+            );
             editor::actions::init(cx);
             cx.open_window(
                 WindowOptions {
