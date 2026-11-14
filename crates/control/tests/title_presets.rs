@@ -6,6 +6,7 @@ use animathio_control::{
 use animathio_core::{
     ClipKind, Command, History, Project, TICKS_PER_SECOND, Time, TimeRange, evaluate,
 };
+use base64::Engine as _;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -245,7 +246,6 @@ fn title_cpu_goldens_and_safe_areas() {
                         path.display(),
                         actual.display()
                     ));
-                    use base64::Engine as _;
                     failures.push(format!(
                         "actual {id} png base64: {}",
                         base64::engine::general_purpose::STANDARD
