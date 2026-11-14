@@ -179,6 +179,12 @@ impl HeadlessHandler {
         Ok(added)
     }
 
+    fn command_apply(&mut self, command: &animathio_core::Command) -> Result<Value, ControlError> {
+        self.check_effect_params(command)?;
+        self.history.execute(&mut self.project, command)?;
+        Ok(serde_json::to_value(())?)
+    }
+
     /// Reject commands that would store effect parameters outside the plugin's
     /// declared ranges (core only validates names and finiteness).
     fn check_effect_params(
@@ -330,11 +336,7 @@ impl ControlHandler for HeadlessHandler {
                 serde_json::to_value(())?
             }
             Call::ProjectSave { path } => serde_json::to_value(self.save(path)?)?,
-            Call::CommandApply { command } => {
-                self.check_effect_params(&command)?;
-                self.history.execute(&mut self.project, &command)?;
-                serde_json::to_value(())?
-            }
+            Call::CommandApply { command } => self.command_apply(&command)?,
             Call::HistoryUndo => serde_json::to_value(self.history.undo(&mut self.project)?)?,
             Call::HistoryRedo => serde_json::to_value(self.history.redo(&mut self.project)?)?,
             Call::RenderFrame { params } => serde_json::to_value(self.render_frame_inner(params)?)?,
