@@ -362,6 +362,21 @@ mod tests {
     }
 
     #[test]
+    fn completion_wins_over_racing_cancel() {
+        let mut queue = ExportQueue::default();
+        let (task, tx) = fake_task();
+        let id = queue.adopt_running(&spec("done.mp4"), task);
+        tx.send(Ok(PathBuf::from("done.mp4"))).unwrap();
+        queue.cancel(id);
+        let events = queue.pump(|_| panic!("no queued jobs"));
+        assert!(matches!(&events[0], Event::Finished { .. }));
+        assert_eq!(
+            queue.jobs()[0].state,
+            JobState::Done(PathBuf::from("done.mp4"))
+        );
+    }
+
+    #[test]
     fn jobs_run_one_at_a_time_in_order_and_report_events() {
         let mut queue = ExportQueue::default();
         let a = queue.enqueue(spec("a.mp4"), false);

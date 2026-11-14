@@ -419,9 +419,11 @@ impl Editor {
                     .collect();
                 Some(Command::Batch { commands })
             }
-            InputTarget::AudioEffectParam { clip, effect, name } => {
-                self.audio_effect_param_command(clip, effect, &name, value)
-            }
+            InputTarget::AudioEffectParam {
+                chain,
+                effect,
+                name,
+            } => self.audio_effect_chain_param_command(chain, effect, &name, value),
             InputTarget::PluginNumber { id, name } => self.plugin_number_command(id, &name, value),
             InputTarget::PluginPoint { id, name, axis } => {
                 let mut point = self.plugin_point_value(id, &name);
@@ -706,7 +708,7 @@ impl Editor {
     /// Keyframe diamond for one animatable property: filled when a keyframe sits
     /// at the playhead.
     #[allow(clippy::if_not_else)]
-    fn row_diamond(&self, id: ClipId, target: &Target, cx: &mut Context<Self>) -> Div {
+    pub(super) fn row_diamond(&self, id: ClipId, target: &Target, cx: &mut Context<Self>) -> Div {
         let active = self
             .find_clip(id)
             .is_some_and(|clip| inspector::keyframed(clip, target, self.position));
@@ -771,7 +773,7 @@ impl Editor {
     }
 
     /// One `[diamond] label ........ control` inspector row.
-    fn param_row(
+    pub(super) fn param_row(
         diamond: Option<Div>,
         label: impl IntoElement,
         control: impl IntoElement,
@@ -1273,6 +1275,25 @@ impl Editor {
             .text_color(hex(color::TEXT))
             .text_size(px(12.));
         let Some(id) = self.selected else {
+            if let Some(track) = self.audio_inspector_track
+                && let Some(model) = self.project.tracks().iter().find(|t| t.id() == track)
+            {
+                let title = format!("{} — Audio effects", model.name());
+                let rows = self.audio_chain_rows(AudioChain::Track(track), window, cx);
+                return pane.child(
+                    div()
+                        .id("track-audio-inspector")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child(self.section(
+                            "track-audio",
+                            &title,
+                            div().flex().flex_col().children(rows),
+                            cx,
+                        )),
+                );
+            }
             return pane.child(
                 div()
                     .p_3()

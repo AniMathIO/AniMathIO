@@ -35,6 +35,7 @@ impl Editor {
             self.selected_field = None;
             self.selected_keyframe = None;
         }
+        self.audio_inspector_track = None;
         self.selected = primary;
         self.selection = ids;
     }
@@ -44,6 +45,7 @@ impl Editor {
     }
 
     pub(super) fn clear_selection(&mut self) {
+        self.audio_inspector_track = None;
         self.selected = None;
         self.selection.clear();
         self.selected_field = None;

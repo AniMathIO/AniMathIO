@@ -81,9 +81,6 @@ impl ExportTask {
                             },
                         )
                         .map_err(|e| e.to_string())?;
-                    if task_cancel.load(Ordering::Relaxed) {
-                        return Err("export cancelled".into());
-                    }
                     Ok(written)
                 })();
                 if let Some(reply) = reply {

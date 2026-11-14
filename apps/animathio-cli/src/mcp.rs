@@ -19,14 +19,14 @@
 use std::{path::PathBuf, sync::Arc};
 
 use animathio_control::{
-    AssetInfo, Call, ControlClient, ControlHandler, ExportPreset, GraphAddParams, HeadlessHandler,
+    Call, ControlClient, ControlHandler, ExportPreset, GraphAddParams, HeadlessHandler,
     ImportManimParams, MathAddParams, ProjectState, RenderFrameParams, TitleStyle,
     TrimSilenceParams, default_socket_spec,
 };
 use animathio_core::{
-    Asset, Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Project, Rounding,
-    TICKS_PER_SECOND, Target, Time, TimeRange, Track, TrackId, Transform, TransformProperty,
-    Transition, TransitionId, TransitionKind, WipeDirection,
+    Clip, ClipId, Command, Interpolation, Keyframe, Project, Rounding, TICKS_PER_SECOND, Target,
+    Time, TimeRange, Track, TrackId, Transform, TransformProperty, Transition, TransitionId,
+    TransitionKind, WipeDirection,
 };
 use rmcp::{
     ErrorData as McpError, ServerHandler,
@@ -315,6 +315,56 @@ pub(crate) struct TrimSilence {
     pub(crate) padding_ms: f64,
     /// Numeric track id whose audio is analysed; omit to analyse the mix of all tracks.
     pub(crate) track: Option<u64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct ProposeAutocuts {
+    /// Silence entry threshold in dBFS (default -40).
+    silence_db: Option<f64>,
+    /// Minimum raw pause length in milliseconds (default 500).
+    min_silence_ms: Option<f64>,
+    /// Exit hysteresis in dB (default 3).
+    hysteresis_db: Option<f64>,
+    /// Use peak amplitude instead of RMS.
+    #[serde(default)]
+    peak: bool,
+    /// Preserve pauses shorter than `min_silence_ms` (default true).
+    keep_short_pauses: Option<bool>,
+    /// Silence kept before speech in milliseconds (default 100).
+    padding_before_ms: Option<f64>,
+    /// Silence kept after speech in milliseconds (default 100).
+    padding_after_ms: Option<f64>,
+    /// Analyse a clip (video resolves its linked audio).
+    clip: Option<u64>,
+    /// Analyse one track's audio mix.
+    track: Option<u64>,
+    /// Inclusive start of the analysis range in milliseconds (requires `to_ms`).
+    from_ms: Option<f64>,
+    /// Exclusive end of the analysis range in milliseconds (requires `from_ms`).
+    to_ms: Option<f64>,
+    /// Cut every unlocked track instead of the selected tracks and companions.
+    #[serde(default)]
+    all_unlocked_tracks: bool,
+    /// Include filler/repeat cuts; requires Whisper.
+    #[serde(default)]
+    fillers: bool,
+    /// Language code; omitted means automatic detection.
+    language: Option<String>,
+    /// Filler phrase override; empty uses language defaults (English and Hungarian).
+    #[serde(default)]
+    filler_words: Vec<String>,
+    /// Local Whisper model (default base).
+    model: Option<String>,
+    /// Explicit consent to download a missing model.
+    #[serde(default)]
+    download_model: bool,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ApplyAutocuts {
+    /// Exact proposal object returned by `propose_autocuts`. Toggle cuts[].enabled
+    /// for review; range start/end and `total_saved` are integer timeline ticks.
+    proposal: serde_json::Value,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -821,76 +871,13 @@ impl McpServer {
         Parameters(p): Parameters<AddMedia>,
     ) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
-        let info: AssetInfo = backend
-            .assets_import(PathBuf::from(&p.path))
-            .map_err(mcp_error)?;
-        let state = backend.project_get().map_err(mcp_error)?;
-        let kind = match media_kind(&info.media_type) {
-            Some(MediaKind::Image) => ClipKind::Image(info.id.clone()),
-            Some(MediaKind::Video) => ClipKind::Video(info.id.clone()),
-            Some(MediaKind::Audio) => ClipKind::Audio(info.id.clone()),
-            None => {
-                return Err(invalid(&format!("unsupported media type for '{}'", p.path)));
-            }
-        };
-        let base = next_id(&state.project);
-        let track_id = TrackId(base);
-        let clip_id = ClipId(base + 1);
-        let mut clip = Clip::new(
-            clip_id,
-            kind,
-            TimeRange::new(Time(0), project_duration(&state)).map_err(|e| mcp_error(e.into()))?,
-        );
-        if matches!(clip.kind, ClipKind::Audio(_)) {
-            clip.params.insert("gain".into(), 1.0.into());
-            clip.params.insert("muted".into(), 0.0.into());
-        }
-        let mut commands = vec![
-            Command::AddAsset {
-                id: info.id.clone(),
-                asset: Asset {
-                    name: info.name.clone(),
-                    media_type: info.media_type.clone(),
-                },
-            },
-            Command::AddTrack {
-                track: Track::new(track_id, info.name),
-                index: state.project.tracks().len(),
-            },
-            Command::AddClip {
-                track: track_id,
-                clip: clip.clone(),
-            },
-        ];
-        if matches!(clip.kind, ClipKind::Video(_)) {
-            use animathio_media::MediaBackend;
-            let info_media = animathio_media::FilmCraftBackend::new()
-                .probe(std::path::Path::new(&p.path))
-                .map_err(|e| invalid(&e.to_string()))?;
-            if !info_media.audio.is_empty() {
-                let audio_track = TrackId(base + 2);
-                let mut audio = Clip::new(ClipId(base + 3), ClipKind::Audio(info.id), clip.range);
-                audio.link_group = Some(clip_id);
-                audio.params.insert("gain".into(), 1.0.into());
-                audio.params.insert("muted".into(), 0.0.into());
-                commands.push(Command::SetClipLink {
-                    id: clip_id,
-                    group: Some(clip_id),
-                });
-                commands.push(Command::AddTrack {
-                    track: Track::new(audio_track, "Audio"),
-                    index: state.project.tracks().len() + 1,
-                });
-                commands.push(Command::AddClip {
-                    track: audio_track,
-                    clip: audio,
-                });
-            }
-        }
-        backend
-            .command_apply(Command::Batch { commands })
-            .map_err(mcp_error)?;
-        tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))
+        tool_text(
+            backend
+                .handle(Call::MediaAdd {
+                    path: PathBuf::from(p.path),
+                })
+                .map_err(mcp_error)?,
+        )
     }
 
     #[tool(
@@ -1465,6 +1452,69 @@ impl McpServer {
     }
 
     #[tool(
+        description = "Propose automatic silence cuts and optional Whisper filler/repeat cuts without changing the project. Returns a revision-bound proposal with integer-tick ranges, heuristic confidence and enabled toggles. Review and pass the proposal to apply_autocuts. Selected tracks and every linked companion ripple together; locked companions cause an error."
+    )]
+    async fn propose_autocuts(
+        &self,
+        Parameters(p): Parameters<ProposeAutocuts>,
+    ) -> Result<CallToolResult, McpError> {
+        let range = match (p.from_ms, p.to_ms) {
+            (None, None) => None,
+            (Some(s), Some(e)) => Some(
+                TimeRange::new(ms_to_ticks(s)?, ms_to_ticks(e)?)
+                    .map_err(|e| invalid(&e.to_string()))?,
+            ),
+            _ => return Err(invalid("give both from_ms and to_ms")),
+        };
+        let params = animathio_control::AutocutParams {
+            silence_db: p.silence_db.unwrap_or(-40.0),
+            min_silence: ms_to_ticks(p.min_silence_ms.unwrap_or(500.0))?,
+            hysteresis_db: p.hysteresis_db.unwrap_or(3.0),
+            metric: if p.peak {
+                animathio_control::SilenceMetric::Peak
+            } else {
+                animathio_control::SilenceMetric::Rms
+            },
+            keep_short_pauses: p.keep_short_pauses.unwrap_or(true),
+            padding_before: ms_to_ticks(p.padding_before_ms.unwrap_or(100.0))?,
+            padding_after: ms_to_ticks(p.padding_after_ms.unwrap_or(100.0))?,
+            clip: p.clip.map(ClipId),
+            track: p.track.map(TrackId),
+            range,
+            all_unlocked_tracks: p.all_unlocked_tracks,
+            fillers: p.fillers,
+            language: p.language,
+            filler_words: p.filler_words,
+            model: p.model.unwrap_or_else(|| "base".into()),
+            download_model: p.download_model,
+        };
+        let result = self
+            .backend
+            .lock()
+            .await
+            .propose_autocuts(params)
+            .map_err(mcp_error)?;
+        tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
+    }
+
+    #[tool(
+        description = "Apply a reviewed proposal from propose_autocuts as one undoable ripple batch. Set cuts[].enabled=false to keep a proposed range. Rejects stale project revisions, overlapping ranges and locked tracks; linked video/audio stays aligned. Coordinates remain those of the original project."
+    )]
+    async fn apply_autocuts(
+        &self,
+        Parameters(p): Parameters<ApplyAutocuts>,
+    ) -> Result<CallToolResult, McpError> {
+        let proposal = serde_json::from_value(p.proposal).map_err(|e| invalid(&e.to_string()))?;
+        let result = self
+            .backend
+            .lock()
+            .await
+            .apply_autocuts(proposal)
+            .map_err(mcp_error)?;
+        tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
+    }
+
+    #[tool(
         description = "Cut pauses out of a recording: detect silent stretches in the decoded audio (RMS in 10 ms windows below threshold_db for at least min_silence_ms), keep padding_ms of silence on each side, and ripple-remove them from ALL tracks so video and audio stay in sync. One undo step. Returns the removed ranges in pre-edit timeline milliseconds. Only audio clips are analysed; import the recording's audio as an audio clip."
     )]
     async fn trim_silence(
@@ -1767,25 +1817,6 @@ impl ServerHandler for McpServer {
                  top-left)."
                     .to_owned(),
             )
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MediaKind {
-    Image,
-    Video,
-    Audio,
-}
-
-fn media_kind(media_type: &str) -> Option<MediaKind> {
-    if media_type.starts_with("image/") {
-        Some(MediaKind::Image)
-    } else if media_type.starts_with("video/") {
-        Some(MediaKind::Video)
-    } else if media_type.starts_with("audio/") {
-        Some(MediaKind::Audio)
-    } else {
-        None
     }
 }
 

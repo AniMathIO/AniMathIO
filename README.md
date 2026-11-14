@@ -45,7 +45,13 @@ Audio effects are plugins too: `org.animathio.audio-basic` provides gain/trim, a
 compressor, noise gate, high-pass filter and a voice-cleanup preset (high-pass + gentle gate +
 de-esser). Clips and tracks carry ordered, undoable audio-effect chains that run in the shared
 mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
-Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools.
+Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools. Open a track header’s
+**Audio effects** context-menu entry to edit its chain with the same controls. Clip audio-effect
+parameters have keyframe controls, and parameter drags update playback live.
+
+Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
+the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
+and 256-byte display strings.
 
 ## Automatic subtitles
 
@@ -276,3 +282,11 @@ Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, 
 ## License
 
 [MIT](LICENSE)
+
+Automatic cuts for recordings are available through Clip > Automatic cuts,
+`animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence
+ranges on the timeline before applying one undoable linked audio/video ripple edit.
+Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see the
+[CLI reference](docs/cli.md#autocut) and [review rules](docs/mcp.md#automatic-cut-review).
+
+![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)

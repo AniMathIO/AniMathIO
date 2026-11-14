@@ -164,6 +164,22 @@ pub(super) fn paint_timeline(
         window.paint_quad(fill(band, cx.theme().ring.opacity(0.18)));
         window.paint_quad(outline(band, cx.theme().ring, BorderStyle::Solid));
     }
+    for (range, row) in &snapshot.autocuts {
+        let x0 = timeline::time_to_x(&layout, range.start).clamp(0., layout.width);
+        let x1 = timeline::time_to_x(&layout, range.end).clamp(0., layout.width);
+        #[allow(clippy::cast_precision_loss)]
+        let top = RULER_H + *row as f32 * snapshot.row_height;
+        window.paint_quad(fill(
+            Bounds::from_corners(
+                point(bounds.origin.x + px(x0), bounds.origin.y + px(top)),
+                point(
+                    bounds.origin.x + px(x1),
+                    bounds.origin.y + px(top + snapshot.row_height),
+                ),
+            ),
+            style::hex(colors::WARNING).opacity(0.3),
+        ));
+    }
     if snapshot.marks.marked()
         && let Some(range) = snapshot.marks.range(snapshot.duration)
     {

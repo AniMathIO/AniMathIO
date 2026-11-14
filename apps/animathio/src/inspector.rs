@@ -316,6 +316,7 @@ pub(crate) fn numeric_base(clip: &Clip, target: &Target) -> f64 {
         Target::Effect { effect, param } => clip
             .effects
             .iter()
+            .chain(&clip.audio_effects)
             .find(|instance| instance.id == *effect)
             .and_then(|instance| instance.params.get(param))
             .copied()
@@ -520,6 +521,27 @@ mod tests {
     use super::*;
     use animathio_core::{ClipId, ClipKind, TimeRange, Track, TrackId};
     use animathio_plugin_api::InspectorSchema;
+
+    #[test]
+    fn audio_effect_diamond_uses_its_parameter_value() {
+        let mut clip = clip_with_params();
+        let effect = animathio_core::EffectId(99);
+        clip.audio_effects.push(animathio_core::EffectInstance::new(
+            effect,
+            "test",
+            "gain",
+            std::collections::BTreeMap::from([("amount".to_owned(), 0.75)]),
+        ));
+        let target = Target::Effect {
+            effect,
+            param: "amount".into(),
+        };
+        assert_eq!(numeric_base(&clip, &target), 0.75);
+        let command = keyframe_toggle_command(&clip, target, Time(5));
+        assert!(
+            matches!(command, Command::AddKeyframe { keyframe, .. } if keyframe.value == ParamValue::Number(0.75))
+        );
+    }
 
     fn clip_with_params() -> Clip {
         let mut clip = Clip::new(

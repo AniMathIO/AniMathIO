@@ -11,6 +11,12 @@
 //! constant time.
 
 mod authoring;
+mod autocut;
+pub use autocut::{
+    Autocut, AutocutParams, AutocutProposal, AutocutReason, SilenceMetric, apply_autocuts,
+    autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
+    propose_autocuts_cancellable,
+};
 mod client;
 mod edit;
 mod effects;
@@ -18,7 +24,9 @@ mod error;
 mod export_presets;
 mod handler;
 mod headless;
+mod media_import;
 mod method;
+pub use media_import::prepare_media_import;
 mod path;
 mod server;
 mod subtitles;

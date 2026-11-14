@@ -79,6 +79,7 @@ impl Editor {
     }
 
     pub(super) fn after_edit(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_autocut();
         self.dirty = true;
         self.next_id = self.next_id.max(next_id(&self.project));
         self.prune_selection();
@@ -172,18 +173,20 @@ impl Editor {
                 Ok(value) => self.commit_selection_field(&field, value, cx),
                 Err(_) => self.error = Some("invalid number".into()),
             },
-            InputTarget::AudioEffectParam { clip, effect, name } => {
-                match buffer.trim().parse::<f64>() {
-                    Ok(value) => {
-                        if let Some(command) =
-                            self.audio_effect_param_command(clip, effect, &name, value)
-                        {
-                            self.execute(&command, cx);
-                        }
+            InputTarget::AudioEffectParam {
+                chain,
+                effect,
+                name,
+            } => match buffer.trim().parse::<f64>() {
+                Ok(value) => {
+                    if let Some(command) =
+                        self.audio_effect_chain_param_command(chain, effect, &name, value)
+                    {
+                        self.execute(&command, cx);
                     }
-                    Err(_) => self.error = Some("invalid number".into()),
                 }
-            }
+                Err(_) => self.error = Some("invalid number".into()),
+            },
             InputTarget::PluginNumber { id, name } => {
                 let Ok(value) = buffer.trim().parse::<f64>() else {
                     self.error = Some("invalid number".into());

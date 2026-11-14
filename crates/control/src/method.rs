@@ -299,6 +299,12 @@ pub enum Call {
         /// Existing media file.
         path: PathBuf,
     },
+    /// Import and place media atomically from a bounded read.
+    #[serde(rename = "media.add")]
+    MediaAdd {
+        /// Existing media file.
+        path: PathBuf,
+    },
     /// Read the timeline summary.
     #[serde(rename = "timeline.list")]
     TimelineList,
@@ -349,6 +355,18 @@ pub enum Call {
     TrimSilence {
         /// Detection parameters.
         params: crate::TrimSilenceParams,
+    },
+    /// Propose silence and optional speech cuts without editing the project.
+    #[serde(rename = "timeline.propose_autocuts")]
+    ProposeAutocuts {
+        /// Detection settings and selection.
+        params: crate::AutocutParams,
+    },
+    /// Apply enabled review ranges as one undoable ripple batch.
+    #[serde(rename = "timeline.apply_autocuts")]
+    ApplyAutocuts {
+        /// Snapshot-bound proposal with per-cut toggles.
+        proposal: crate::AutocutProposal,
     },
     /// Transcribe audio locally and add the result as caption clips on a new `Subtitles`
     /// track, as one undo step.

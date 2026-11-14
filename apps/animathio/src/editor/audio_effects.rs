@@ -32,9 +32,9 @@ impl Editor {
     }
 
     /// Command that sets one parameter of a clip's audio effect, clamped to the plugin's range.
-    pub(super) fn audio_effect_param_command(
+    pub(super) fn audio_effect_chain_param_command(
         &self,
-        clip: ClipId,
+        chain: AudioChain,
         effect: EffectId,
         name: &str,
         value: f64,
@@ -42,17 +42,37 @@ impl Editor {
         if !value.is_finite() {
             return None;
         }
-        let instance = self
-            .find_clip(clip)?
-            .audio_effects
-            .iter()
-            .find(|e| e.id == effect)?;
+        let effects: &[animathio_core::EffectInstance] = match chain {
+            AudioChain::Clip(id) => &self.find_clip(id)?.audio_effects,
+            AudioChain::Track(id) => self
+                .project
+                .tracks()
+                .iter()
+                .find(|t| t.id() == id)?
+                .audio_effects(),
+        };
+        let instance = effects.iter().find(|e| e.id == effect)?;
         let value = self
             .audio_effect_descriptor(&instance.plugin, &instance.effect)
             .and_then(|d| d.params.into_iter().find(|p| p.id == name))
             .map_or(value, |p| value.clamp(p.min, p.max));
+        if let AudioChain::Clip(id) = chain {
+            let clip = self.find_clip(id)?;
+            let target = Target::Effect {
+                effect,
+                param: name.to_owned(),
+            };
+            if clip.animations.iter().any(|a| a.target == target) {
+                return Some(inspector::numeric_edit_command(
+                    clip,
+                    target,
+                    value,
+                    self.position,
+                ));
+            }
+        }
         Some(Command::SetAudioEffectParam {
-            chain: AudioChain::Clip(clip),
+            chain,
             effect,
             name: name.to_owned(),
             value: Some(value),
@@ -67,7 +87,7 @@ impl Editor {
         effect: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(descriptor) = self.audio_effect_descriptor(plugin, effect) else {
+        let Some(_descriptor) = self.audio_effect_descriptor(plugin, effect) else {
             self.error = Some(format!("audio effect {plugin}/{effect} is not available"));
             cx.notify();
             return;
@@ -80,12 +100,33 @@ impl Editor {
             cx.notify();
             return;
         }
-        let index = clip.audio_effects.len();
+        self.add_audio_effect_to_chain(AudioChain::Clip(id), plugin, effect, cx);
+    }
+
+    fn add_audio_effect_to_chain(
+        &mut self,
+        chain: AudioChain,
+        plugin: &str,
+        effect: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(descriptor) = self.audio_effect_descriptor(plugin, effect) else {
+            return;
+        };
+        let index = match chain {
+            AudioChain::Clip(id) => self.find_clip(id).map_or(0, |c| c.audio_effects.len()),
+            AudioChain::Track(id) => self
+                .project
+                .tracks()
+                .iter()
+                .find(|t| t.id() == id)
+                .map_or(0, |t| t.audio_effects().len()),
+        };
         let instance = descriptor.instance(EffectId(self.next_id));
         self.next_id = self.next_id.saturating_add(1);
         self.execute(
             &Command::AddAudioEffect {
-                chain: AudioChain::Clip(id),
+                chain,
                 index,
                 effect: instance,
             },
@@ -100,20 +141,37 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id).cloned() else {
+        self.audio_chain_rows(AudioChain::Clip(id), window, cx)
+    }
+
+    pub(super) fn audio_chain_rows(
+        &mut self,
+        chain: AudioChain,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<Div> {
+        let instances = match chain {
+            AudioChain::Clip(id) => self.find_clip(id).map(|c| c.audio_effects.clone()),
+            AudioChain::Track(id) => self
+                .project
+                .tracks()
+                .iter()
+                .find(|t| t.id() == id)
+                .map(|t| t.audio_effects().to_vec()),
+        };
+        let Some(instances) = instances else {
             return Vec::new();
         };
         let available = self.available_audio_effects();
-        let count = clip.audio_effects.len();
+        let count = instances.len();
         let mut rows = Vec::new();
-        for (index, instance) in clip.audio_effects.iter().enumerate() {
+        for (index, instance) in instances.iter().enumerate() {
             let descriptor = available
                 .iter()
                 .find(|d| d.plugin_id == instance.plugin && d.effect_id == instance.effect);
             let title = descriptor.map_or_else(|| instance.effect.clone(), |d| d.name.clone());
             let effect = instance.id;
-            let chain = AudioChain::Clip(id);
-            let key = format!("c{}:ae{}", id.0, effect.0);
+            let key = format!("{chain:?}:ae{}", effect.0);
             let bypassed = instance.bypass;
             let header =
                 div()
@@ -247,15 +305,37 @@ impl Editor {
                             .map(|p| p.default)
                     })
                     .unwrap_or_default();
+                let value = match chain {
+                    AudioChain::Clip(id) => self.find_clip(id).map_or(value, |clip| {
+                        inspector::sampled_numeric(
+                            clip,
+                            &Target::Effect {
+                                effect,
+                                param: name.clone(),
+                            },
+                            self.position,
+                            value,
+                        )
+                    }),
+                    AudioChain::Track(_) => value,
+                };
                 let target = InputTarget::AudioEffectParam {
-                    clip: id,
+                    chain,
                     effect,
                     name: name.clone(),
                 };
                 let field = format!("{key}:{name}");
                 let control = self.number_control(&field, target.clone(), value, step, window, cx);
                 let label = Self::scrub_label(&field, label, target, value, step, cx);
-                card = card.child(Self::param_row_flush(label, control));
+                let target = Target::Effect {
+                    effect,
+                    param: name.clone(),
+                };
+                let diamond = match chain {
+                    AudioChain::Clip(id) => Some(self.row_diamond(id, &target, cx)),
+                    AudioChain::Track(_) => None,
+                };
+                card = card.child(Self::param_row(diamond, label, control, cx));
             }
             rows.push(card);
         }
@@ -278,18 +358,15 @@ impl Editor {
                     .gap_1()
                     .children(available.into_iter().map(|descriptor| {
                         let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
-                        Button::new(SharedString::from(format!(
-                            "add-ae-{id}-{effect}",
-                            id = id.0
-                        )))
-                        .ghost()
-                        .compact()
-                        .icon(icons::icon(IconName::Plus).xsmall())
-                        .label(descriptor.name)
-                        .tooltip(descriptor.description)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.add_audio_effect_to_clip(id, &plugin, &effect, cx);
-                        }))
+                        Button::new(SharedString::from(format!("add-ae-{chain:?}-{effect}")))
+                            .ghost()
+                            .compact()
+                            .icon(icons::icon(IconName::Plus).xsmall())
+                            .label(descriptor.name)
+                            .tooltip(descriptor.description)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.add_audio_effect_to_chain(chain, &plugin, &effect, cx);
+                            }))
                     })),
             );
         }

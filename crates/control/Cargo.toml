@@ -13,6 +13,7 @@ whisper = ["animathio-transcribe/whisper"]
 [dependencies]
 animathio-plugin-api = { path = "../plugin-api" }
 animathio-audio = { path = "../audio" }
+animathio-media = { path = "../media" }
 animathio-export = { path = "../export" }
 animathio-core.workspace = true
 animathio-format = { path = "../format" }

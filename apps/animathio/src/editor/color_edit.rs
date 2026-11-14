@@ -48,6 +48,7 @@ impl Editor {
         }
         match ColorEdit::preview(&mut self.project, command, &mut self.color_edit) {
             Ok(()) => {
+                self.sync_audio(cx);
                 self.request_render(self.current_render_time());
                 cx.notify();
             }
@@ -107,6 +108,51 @@ mod tests {
             duration: project.duration(),
         }
     }
+    #[core::prelude::v1::test]
+    fn track_audio_drag_updates_snapshot_and_commits_one_undo() {
+        let mut project = Project::default();
+        let chain = AudioChain::Track(TrackId(1));
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Audio"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddAudioEffect {
+            chain,
+            index: 0,
+            effect: animathio_core::EffectInstance::new(
+                EffectId(2),
+                "test",
+                "gain",
+                std::collections::BTreeMap::from([("gain".into(), 1.0)]),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let before = project.clone();
+        let mut history = History::default();
+        let mut edit = None;
+        for value in [0.8, 0.6, 0.4] {
+            ColorEdit::preview(
+                &mut project,
+                Command::SetAudioEffectParam {
+                    chain,
+                    effect: EffectId(2),
+                    name: "gain".into(),
+                    value: Some(value),
+                },
+                &mut edit,
+            )
+            .unwrap();
+            assert_eq!(project.tracks()[0].audio_effects()[0].params["gain"], value);
+        }
+        edit.unwrap().commit(&mut project, &mut history).unwrap();
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before);
+        assert!(!history.undo(&mut project).unwrap());
+    }
+
     #[core::prelude::v1::test]
     fn drag_is_one_undo_step_and_preserves_previous_history() {
         let mut project = Project::default();

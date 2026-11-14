@@ -20,6 +20,8 @@ use crate::animathio::plugin::types as wit_types;
 use crate::compat::Pre as EffectPluginPre;
 use crate::{EpochTicker, HostState, SandboxLimits, build_store};
 
+/// Interactive calls get a 200 ms backstop (the epoch ticker advances every 10 ms).
+const PREVIEW_DEADLINE_TICKS: u64 = 20;
 /// Fixed memory budget of a pixel-effect call before the per-pixel allowance.
 const EFFECT_BASE_MEMORY: usize = 64 * 1024 * 1024;
 /// Memory allowance per frame pixel: the input copy, the output copy and ~40 bytes of
@@ -137,6 +139,9 @@ impl EffectRuntime {
         let listed = instance
             .list_effects(&mut *store)
             .map_err(|e| e.to_string())?;
+        if listed.len() > 64 {
+            return Err("too many effects (maximum 64)".into());
+        }
         let effects = listed
             .into_iter()
             .map(|descriptor| convert_descriptor(plugin_id, descriptor))
@@ -196,6 +201,7 @@ impl EffectRuntime {
         time: Time,
         size: (u32, u32),
         pixels: &mut Vec<u8>,
+        preview: bool,
     ) -> Result<(), String> {
         let (width, height) = size;
         let count = (width as usize)
@@ -252,6 +258,11 @@ impl EffectRuntime {
         let _timer = animathio_core::timing::Timer::new("effects");
         let setup = animathio_core::timing::Timer::new("effects-setup");
         let mut store = self.store(count);
+        if preview {
+            store.set_epoch_deadline(
+                PREVIEW_DEADLINE_TICKS.min(self.limits.effect_epoch_deadline_ticks),
+            );
+        }
         let instance = entry
             .pre
             .instantiate(&mut store)
@@ -270,7 +281,10 @@ impl EffectRuntime {
             .map_err(|e| {
                 format!(
                     "effect {}/{} failed: {}: {}",
-                    effect.plugin, effect.effect, e.code, e.message
+                    effect.plugin,
+                    effect.effect,
+                    crate::truncate_utf8(&e.code, 64),
+                    crate::truncate_utf8(&e.message, 256)
                 )
             })?;
         if output.len() != pixels.len() {
@@ -310,6 +324,9 @@ pub(crate) fn build_descriptor(
     description: String,
     specs: Vec<wit_types::ParamSpec>,
 ) -> Result<EffectDescriptor, String> {
+    if specs.len() > 32 {
+        return Err("too many effect parameters (maximum 32)".into());
+    }
     let valid_id = |id: &str| {
         !id.is_empty()
             && id.len() <= 64
@@ -318,7 +335,10 @@ pub(crate) fn build_descriptor(
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
     };
     if !valid_id(&id) || name.trim().is_empty() {
-        return Err(format!("invalid effect id {id:?}"));
+        return Err(format!(
+            "invalid effect id {:?}",
+            crate::truncate_utf8(&id, 256)
+        ));
     }
     let mut params = Vec::new();
     let mut seen = BTreeSet::new();
@@ -326,13 +346,13 @@ pub(crate) fn build_descriptor(
         let wit_types::ParamKind::Number(range) = spec.kind else {
             return Err(format!(
                 "effect {id} parameter {:?} must be a number",
-                spec.id
+                crate::truncate_utf8(&spec.id, 256)
             ));
         };
         let finite = [range.min, range.max, range.default, range.step]
             .iter()
             .all(|v| v.is_finite());
-        if spec.id.is_empty()
+        if !valid_id(&spec.id)
             || spec.label.trim().is_empty()
             || !seen.insert(spec.id.clone())
             || !finite
@@ -342,12 +362,12 @@ pub(crate) fn build_descriptor(
         {
             return Err(format!(
                 "effect {id} has an invalid parameter {:?}",
-                spec.id
+                crate::truncate_utf8(&spec.id, 256)
             ));
         }
         params.push(EffectParam {
             id: spec.id,
-            label: spec.label,
+            label: crate::truncate_utf8(&spec.label, 256),
             min: range.min,
             max: range.max,
             default: range.default,
@@ -357,8 +377,8 @@ pub(crate) fn build_descriptor(
     Ok(EffectDescriptor {
         plugin_id: plugin_id.to_owned(),
         effect_id: id,
-        name,
-        description,
+        name: crate::truncate_utf8(&name, 256),
+        description: crate::truncate_utf8(&description, 256),
         params,
     })
 }
@@ -370,11 +390,22 @@ pub(crate) fn build_descriptor(
 #[derive(Clone)]
 pub struct EffectHandle {
     runtime: Arc<EffectRuntime>,
+    preview: bool,
 }
 
 impl EffectHandle {
     pub(crate) fn new(runtime: Arc<EffectRuntime>) -> Self {
-        Self { runtime }
+        Self {
+            runtime,
+            preview: false,
+        }
+    }
+
+    /// Use a 200 ms wall-clock backstop for interactive preview calls.
+    #[must_use]
+    pub fn for_preview(mut self) -> Self {
+        self.preview = true;
+        self
     }
 
     /// Filters currently offered by loaded effect plugins.
@@ -392,6 +423,63 @@ impl EffectProcessor for EffectHandle {
         size: (u32, u32),
         pixels: &mut Vec<u8>,
     ) -> Result<(), String> {
-        self.runtime.apply(effect, time, size, pixels)
+        self.runtime.apply(effect, time, size, pixels, self.preview)
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn guest_display_metadata_is_bounded_at_utf8_boundaries() {
+        let descriptor = build_descriptor(
+            "test",
+            "test".into(),
+            format!("a{}", "é".repeat(1000)),
+            format!("b{}", "🙂".repeat(1000)),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(descriptor.name.len(), 255);
+        assert_eq!(descriptor.description.len(), 253);
+    }
+
+    #[test]
+    fn parameter_count_and_identifiers_are_bounded() {
+        let spec = wit_types::ParamSpec {
+            id: "a".into(),
+            label: "a".into(),
+            kind: wit_types::ParamKind::Bool(wit_types::BoolParam { default: false }),
+        };
+        assert!(
+            build_descriptor(
+                "test",
+                "test".into(),
+                "test".into(),
+                String::new(),
+                vec![spec; 33]
+            )
+            .unwrap_err()
+            .contains("too many")
+        );
+        assert!(
+            build_descriptor(
+                "test",
+                "x".repeat(10000),
+                String::new(),
+                String::new(),
+                vec![]
+            )
+            .unwrap_err()
+            .len()
+                < 300
+        );
+    }
+
+    #[test]
+    fn effect_capacity_covers_every_valid_project_resolution() {
+        assert!(PREVIEW_DEADLINE_TICKS < SandboxLimits::default().effect_epoch_deadline_ticks);
+        assert_eq!(SandboxLimits::default().max_effect_pixels, 32 * 1024 * 1024);
     }
 }
