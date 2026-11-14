@@ -100,6 +100,22 @@ fn opacity_effect() {
 /// Test double: `broken` fails like a missing plugin, `invert` flips RGB.
 struct Stub;
 
+/// Counts effect executions of [`Counting`].
+struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl animathio_core::EffectProcessor for Counting {
+    fn apply(
+        &mut self,
+        effect: &EffectInstance,
+        _time: Time,
+        _size: (u32, u32),
+        _pixels: &mut Vec<u8>,
+    ) -> Result<(), String> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(format!("{} unavailable", effect.plugin))
+    }
+}
+
 impl animathio_core::EffectProcessor for Stub {
     fn apply(
         &mut self,
@@ -194,4 +210,39 @@ fn preview_passes_failing_effects_through_while_export_render_fails() {
         .unwrap();
     let preview = animathio_render::render_preview(&failing, &mut bare, size).unwrap();
     assert_eq!(preview.frame, plain);
+}
+
+#[test]
+fn preview_work_is_bounded_when_many_clips_fail() {
+    let bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("effects.png"),
+    )
+    .unwrap();
+    let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut ctx = RenderCtx::default();
+    ctx.set_effect_processor(Counting(counter.clone()));
+    ctx.resources
+        .insert(animathio_core::AssetId::of(&bytes), bytes.clone())
+        .unwrap();
+    let broken = EffectInstance::new(
+        EffectId(1),
+        "org.example.slow",
+        "broken",
+        std::collections::BTreeMap::new(),
+    );
+    let mut scene = effect_scene(&bytes, vec![broken.clone(), broken.clone(), broken]);
+    let template = scene.clips[0].clone();
+    for id in 8..60 {
+        let mut clip = template.clone();
+        clip.id = ClipId(id);
+        scene.clips.push(clip);
+    }
+    let preview = animathio_render::render_preview(&scene, &mut ctx, (64, 64)).unwrap();
+    assert_eq!(preview.effect_failures.len(), scene.clips.len());
+    // One failing full-frame render plus at most a fixed number of probes, never one
+    // run per clip or effect.
+    assert!(counter.load(std::sync::atomic::Ordering::SeqCst) <= 16);
 }
