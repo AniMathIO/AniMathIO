@@ -43,10 +43,9 @@ fn silence_hysteresis_padding_and_partial_windows_are_exact() {
         vec![range(1200, 1900)]
     );
     p.padding_before = Time(900 * MS);
-    assert!(
-        detect_silent_samples(&samples, Time(0), &p)
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        detect_silent_samples(&samples, Time(0), &p).unwrap().len(),
+        0
     );
     p = options();
     let near_threshold = pcm(&[(0.5, 100), (0., 200), (0.011, 100), (0., 200), (0.5, 100)]);
@@ -55,10 +54,11 @@ fn silence_hysteresis_padding_and_partial_windows_are_exact() {
         vec![range(100, 600)]
     );
     p.hysteresis_db = 0.;
-    assert!(
+    assert_eq!(
         detect_silent_samples(&near_threshold, Time(0), &p)
             .unwrap()
-            .is_empty()
+            .len(),
+        0
     );
     p.keep_short_pauses = false;
     assert_eq!(
@@ -83,10 +83,9 @@ fn peak_preserves_transients_that_rms_treats_as_silence() {
         vec![range(0, 1000)]
     );
     p.metric = SilenceMetric::Peak;
-    assert!(
-        detect_silent_samples(&samples, Time(0), &p)
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        detect_silent_samples(&samples, Time(0), &p).unwrap().len(),
+        0
     );
     p.silence_db = f64::NAN;
     assert!(detect_silent_samples(&samples, Time(0), &p).is_err());
@@ -123,14 +122,17 @@ fn fillers_support_phrases_hungarian_repeats_false_starts_and_overrides() {
         detect_filler_words(&words(&["ÖÖ,", "Hát", "jó"]), "hu", &[]).len(),
         2
     );
-    assert!(detect_filler_words(&words(&["um"]), "en", &["well".into()]).is_empty());
+    assert_eq!(
+        detect_filler_words(&words(&["um"]), "en", &["well".into()]).len(),
+        0
+    );
     let cuts = detect_filler_words(&words(&["you", "know", "know"]), "en", &[]);
     assert_eq!(cuts.len(), 1); // overlapping filler/repeat intervals merged
     assert_eq!(cuts[0].range, range(0, 500));
     let mut distant = words(&["you", "know"]);
     distant[1].start = Time(2000 * MS);
     distant[1].end = Time(2200 * MS);
-    assert!(detect_filler_words(&distant, "en", &[]).is_empty());
+    assert_eq!(detect_filler_words(&distant, "en", &[]).len(), 0);
 }
 
 fn recording() -> (Project, BTreeMap<AssetId, Vec<u8>>) {
@@ -215,11 +217,12 @@ fn linked_video_selection_review_apply_undo_redo_and_stale_guard() {
     assert_eq!(proposal.cuts[0].range, range(1000, 2000));
     let mut history = History::default();
     proposal.cuts[0].enabled = false;
-    assert!(
+    assert_eq!(
         apply_autocuts(&mut project, &mut history, &proposal)
             .unwrap()
             .removed
-            .is_empty()
+            .len(),
+        0
     );
     assert!(!history.undo(&mut project).unwrap());
     proposal.cuts[0].enabled = true;

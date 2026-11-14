@@ -329,7 +329,7 @@ pub(crate) struct ProposeAutocuts {
     /// Use peak amplitude instead of RMS.
     #[serde(default)]
     peak: bool,
-    /// Preserve pauses shorter than min_silence_ms (default true).
+    /// Preserve pauses shorter than `min_silence_ms` (default true).
     keep_short_pauses: Option<bool>,
     /// Silence kept before speech in milliseconds (default 100).
     padding_before_ms: Option<f64>,
@@ -339,9 +339,9 @@ pub(crate) struct ProposeAutocuts {
     clip: Option<u64>,
     /// Analyse one track's audio mix.
     track: Option<u64>,
-    /// Inclusive start of the analysis range in milliseconds (requires to_ms).
+    /// Inclusive start of the analysis range in milliseconds (requires `to_ms`).
     from_ms: Option<f64>,
-    /// Exclusive end of the analysis range in milliseconds (requires from_ms).
+    /// Exclusive end of the analysis range in milliseconds (requires `from_ms`).
     to_ms: Option<f64>,
     /// Cut every unlocked track instead of the selected tracks and companions.
     #[serde(default)]
@@ -362,8 +362,8 @@ pub(crate) struct ProposeAutocuts {
 }
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ApplyAutocuts {
-    /// Exact proposal object returned by propose_autocuts. Toggle cuts[].enabled
-    /// for review; range start/end and total_saved are integer timeline ticks.
+    /// Exact proposal object returned by `propose_autocuts`. Toggle cuts[].enabled
+    /// for review; range start/end and `total_saved` are integer timeline ticks.
     proposal: serde_json::Value,
 }
 

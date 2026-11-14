@@ -67,7 +67,7 @@ impl Editor {
                                     0 => review.params.silence_db = value,
                                     1 => {
                                         review.params.min_silence =
-                                            Time((value * TICKS_PER_SECOND as f64).round() as i64)
+                                            Time((value * TICKS_PER_SECOND as f64).round() as i64);
                                     }
                                     _ => {
                                         let padding =
@@ -138,13 +138,13 @@ impl Editor {
                     return;
                 }
                 review.busy = false;
-                if audio_generation != editor.audio_generation {
-                    review.error = Some("Project changed; analyse again".into());
-                } else {
+                if audio_generation == editor.audio_generation {
                     match result {
                         Ok(proposal) => review.proposal = Some(proposal),
                         Err(error) => review.error = Some(error.to_string()),
                     }
+                } else {
+                    review.error = Some("Project changed; analyse again".into());
                 }
                 cx.notify();
             });
@@ -175,7 +175,7 @@ impl Editor {
             .id("autocut-review")
             .absolute()
             .left(px(12.))
-            .bottom(px(36.))
+            .top(px(56.))
             .w(px(380.))
             .p_3()
             .flex()

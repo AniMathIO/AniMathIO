@@ -119,7 +119,7 @@ pub(crate) fn run(args: AutocutArgs) -> Result<()> {
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("json")) =>
             {
-                animathio_format::save_json(args.project, &bundle.project)?
+                animathio_format::save_json(args.project, &bundle.project)?;
             }
             None => animathio_format::save_amio(args.project, &bundle.project, &bundle.assets)?,
         }

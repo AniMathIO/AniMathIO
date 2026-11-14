@@ -282,3 +282,5 @@ Automatic cuts for recordings are available through Clip > Automatic cuts,
 ranges on the timeline before applying one undoable linked audio/video ripple edit.
 Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see the
 [CLI reference](docs/cli.md#autocut) and [review rules](docs/mcp.md#automatic-cut-review).
+
+![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
