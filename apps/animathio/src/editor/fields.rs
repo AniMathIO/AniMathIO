@@ -353,12 +353,26 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        self.range_slider_control(key, target, value, (0., 1., 0.01), window, cx)
+    }
+
+    /// A slider over `(min, max, step)`. The range is fixed when the slider for `key` is
+    /// first created, so callers key it by something that determines the range.
+    pub(super) fn range_slider_control(
+        &mut self,
+        key: &str,
+        target: Option<InputTarget>,
+        value: f64,
+        (min, max, step): (f64, f64, f64),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         if !self.fields.sliders.contains_key(key) {
             let state = cx.new(|_| {
                 SliderState::new()
-                    .min(0.)
-                    .max(1.)
-                    .step(0.01)
+                    .min(min as f32)
+                    .max(max as f32)
+                    .step(step as f32)
                     .default_value(value as f32)
             });
             let sub = cx.subscribe(
@@ -424,6 +438,9 @@ impl Editor {
                 effect,
                 name,
             } => self.audio_effect_chain_param_command(chain, effect, &name, value),
+            InputTarget::VideoEffectParam { id, effect, name } => {
+                self.video_effect_param_command(id, effect, &name, value)
+            }
             InputTarget::PluginNumber { id, name } => self.plugin_number_command(id, &name, value),
             InputTarget::PluginPoint { id, name, axis } => {
                 let mut point = self.plugin_point_value(id, &name);
@@ -1418,8 +1435,11 @@ impl Editor {
             ));
         }
         {
-            let mut rows = self.effect_rows(id, cx);
-            if rows.is_empty() {
+            let mut rows = self.video_effect_rows(id, window, cx);
+            if self
+                .find_clip(id)
+                .is_some_and(|clip| clip.effects.is_empty())
+            {
                 rows.push(
                     div()
                         .px_3()

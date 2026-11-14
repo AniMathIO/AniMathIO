@@ -11,7 +11,7 @@ pub(super) struct ColorEdit {
 }
 
 impl ColorEdit {
-    fn preview(
+    pub(super) fn preview(
         project: &mut Project,
         command: Command,
         edit: &mut Option<Self>,
@@ -28,7 +28,7 @@ impl ColorEdit {
         Ok(())
     }
 
-    fn commit(
+    pub(super) fn commit(
         self,
         project: &mut Project,
         history: &mut History,

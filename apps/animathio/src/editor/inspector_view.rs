@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::style::{color, hex};
-use gpui_component::switch::Switch;
 
 impl Editor {
     pub(super) fn toggle_keyframe(&mut self, id: ClipId, target: Target, cx: &mut Context<Self>) {
@@ -294,97 +293,5 @@ impl Editor {
                     .effects
                     .iter()
                     .any(|e| !loaded.contains(&(e.plugin.clone(), e.effect.clone()))))
-    }
-
-    /// Read-only summary of the selected clip's effect chain. Effects whose plugin
-    /// is not loaded, or that failed on the last preview frame, carry a warning.
-    pub(super) fn effect_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Vec<Div> {
-        let Some(clip) = self.find_clip(id) else {
-            return Vec::new();
-        };
-        let loaded = self.loaded_effect_ids();
-        let failed = self.failed_effect_clips.contains(&clip.id);
-        clip.effects
-            .iter()
-            .map(|instance| {
-                let params: Vec<String> = instance
-                    .params
-                    .iter()
-                    .map(|(name, value)| format!("{name} {value:.3}"))
-                    .collect();
-                let label = self.effect_label(&instance.plugin, &instance.effect);
-                let summary = if params.is_empty() {
-                    label
-                } else {
-                    format!("{label} ({})", params.join(", "))
-                };
-                let warning =
-                    if !loaded.contains(&(instance.plugin.clone(), instance.effect.clone())) {
-                        Some(format!("Plugin {} is not loaded", instance.plugin))
-                    } else if failed {
-                        Some("Failed on the last preview frame".to_owned())
-                    } else {
-                        None
-                    };
-                let bypassed = instance.bypass;
-                let effect = instance.id;
-                let row = div().px_2().py_1().flex().flex_col().gap_1().child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            icons::icon(if warning.is_some() {
-                                IconName::TriangleAlert
-                            } else {
-                                IconName::Sparkles
-                            })
-                            .small()
-                            .text_color(hex(if warning.is_some() {
-                                color::WARNING
-                            } else {
-                                color::TEXT_SECONDARY
-                            })),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_color(hex(if bypassed {
-                                    color::TEXT_MUTED
-                                } else {
-                                    color::TEXT
-                                }))
-                                .child(summary),
-                        )
-                        .child(
-                            Switch::new(SharedString::from(format!("c{}:fx{}-on", id.0, effect.0)))
-                                .checked(!bypassed)
-                                .on_click(cx.listener(move |this, checked: &bool, _, cx| {
-                                    this.execute(
-                                        &Command::SetEffectBypass {
-                                            id,
-                                            effect,
-                                            bypass: !*checked,
-                                        },
-                                        cx,
-                                    );
-                                })),
-                        ),
-                );
-                match warning {
-                    Some(text) => row.child(
-                        div()
-                            .pl_6()
-                            .text_size(px(11.))
-                            .text_color(hex(color::WARNING))
-                            .child(text),
-                    ),
-                    None => row,
-                }
-            })
-            .collect()
     }
 }

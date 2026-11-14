@@ -58,6 +58,7 @@ mod timeline_thumbnails;
 mod timeline_view;
 mod titles;
 mod transport;
+mod video_effects;
 mod viewer;
 mod workspace;
 
@@ -178,6 +179,12 @@ enum InputTarget {
         id: ClipId,
         field: Field,
     },
+    /// Numeric parameter of one of a clip's video effects.
+    VideoEffectParam {
+        id: ClipId,
+        effect: EffectId,
+        name: String,
+    },
     /// Numeric parameter of one of a clip's audio effects.
     AudioEffectParam {
         chain: AudioChain,
@@ -216,6 +223,7 @@ impl InputTarget {
                 | Self::PluginNumber { .. }
                 | Self::PluginPoint { .. }
                 | Self::AudioEffectParam { .. }
+                | Self::VideoEffectParam { .. }
         )
     }
 }
