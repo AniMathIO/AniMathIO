@@ -137,19 +137,17 @@ def recording(name, fetch=False):
             data["url"], headers={"User-Agent": "AniMathIO-showcase/2.0"}
         )
         # Download to a private temporary file and publish only verified bytes.
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
-            temp = Path(output.name)
-            try:
+        temp = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
+                temp = Path(output.name)
                 with urllib.request.urlopen(request, timeout=60) as response:
                     shutil.copyfileobj(response, output)
-            except BaseException:
-                temp.unlink(missing_ok=True)
-                raise
-        try:
             verify(temp, data["sha256"])
             temp.replace(path)
         finally:
-            temp.unlink(missing_ok=True)
+            if temp is not None:
+                temp.unlink(missing_ok=True)
     if path.exists():
         verify(path, data["sha256"])
         return path
@@ -157,7 +155,9 @@ def recording(name, fetch=False):
 
 
 def verify(path, expected):
-    if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+    with path.open("rb") as source:
+        actual = hashlib.file_digest(source, "sha256").hexdigest()
+    if actual != expected:
         raise ValueError(f"SHA-256 mismatch: {path}")
 
 

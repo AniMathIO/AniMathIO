@@ -248,7 +248,10 @@ impl Guest for LatexPlugin {
         let full_count = ((reveal * path_count as f32).floor() as usize).min(path_count);
         let partial = reveal > 0.0 && reveal < 1.0 && full_count < path_count;
 
-        let mut elements = Vec::with_capacity(path_count + usize::from(partial));
+        // The host returns individual contours, including oppositely wound counters.
+        // Fill them together so holes in letters such as a, b and theta stay open.
+        let mut filled = Vec::new();
+        let mut elements = Vec::with_capacity(2);
         for (index, path) in result.paths.iter().enumerate() {
             if index >= full_count && !(partial && index == full_count) {
                 continue;
@@ -268,8 +271,11 @@ impl Guest for LatexPlugin {
                     },
                 )));
             } else {
-                elements.push(DrawCommand::FillPath((offset, color)));
+                filled.extend(offset);
             }
+        }
+        if !filled.is_empty() {
+            elements.insert(0, DrawCommand::FillPath((filled, color)));
         }
 
         Ok(Scene {

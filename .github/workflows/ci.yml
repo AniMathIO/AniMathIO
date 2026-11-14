@@ -87,7 +87,15 @@ jobs:
         if: runner.os == 'Linux'
         env:
           ANIMATHIO_PLUGIN_DIR: ${{ github.workspace }}/target/plugins
-        run: python3 examples/showcase/test.py
+        # Use the interpreter that owns apt's python3-pil, independent of runner PATH.
+        run: /usr/bin/python3 examples/showcase/test.py --output target/showcase-e2e
+      - name: Upload failed showcase renders
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: showcase-e2e-failure
+          path: target/showcase-e2e
+          if-no-files-found: ignore
       - name: Check licenses
         if: runner.os == 'Linux'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2

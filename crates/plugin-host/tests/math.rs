@@ -285,6 +285,54 @@ fn graph_renders_parabola_and_unit_circle() {
 }
 
 #[test]
+fn latex_preserves_glyph_holes_after_reveal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let latex = load_plugin(&mut host, "latex");
+    for source in ["O", "0", r"\theta"] {
+        let scene = host
+            .render_clip(
+                &latex,
+                &BTreeMap::new(),
+                &json!({ "source": source, "mode": "latex", "size": 128.0, "reveal": 1.0 }),
+                0,
+                (640, 360),
+            )
+            .unwrap();
+        let scene = CoreScene {
+            canvas: (0, 0),
+            clips: vec![vector_clip(scene)],
+        };
+        let frame = render(&scene, &mut RenderCtx::default(), (640, 360)).unwrap();
+        let mut bounds = (640, 360, 0, 0);
+        for y in 0..360 {
+            for x in 0..640 {
+                if frame.pixels[(y * 640 + x) * 4 + 3] > 127 {
+                    bounds.0 = bounds.0.min(x);
+                    bounds.1 = bounds.1.min(y);
+                    bounds.2 = bounds.2.max(x);
+                    bounds.3 = bounds.3.max(y);
+                }
+            }
+        }
+        assert!(bounds.0 < bounds.2 && bounds.1 < bounds.3);
+        let cx = (bounds.0 + bounds.2) / 2;
+        let cy = (bounds.1 + bounds.3) / 2;
+        // Theta has a central crossbar, so inspect a point in its upper counter.
+        let hole_y = if source == r"\theta" {
+            (bounds.1 + cy) / 2
+        } else {
+            cy
+        };
+        assert_eq!(
+            frame.pixels[(hole_y * 640 + cx) * 4 + 3],
+            0,
+            "{source} must have a transparent counter"
+        );
+    }
+}
+
+#[test]
 fn latex_golden_frame() {
     let tmp = tempfile::tempdir().unwrap();
     let mut host = PluginHost::new(tmp.path()).unwrap();
@@ -470,6 +518,11 @@ fn graph_parametric_rejects_invalid_domains_and_breaks_at_nonfinite_values() {
         ("parametric x=unknown(t) y=t", 0),
         ("parametric x=t y=t from=1 to=-1", 0),
         ("parametric x=t y=t from=NaN to=1", 0),
+        ("parametric x=t y=t from=oops to=1", 0),
+        ("parametric x=t y=t from=0 to=inf", 0),
+        ("parametric x=t y=t from=-1e308 to=1e308", 0),
+        // Finite f64 evaluations that overflow canvas f32 coordinates must also break paths.
+        ("parametric x=exp(100) y=t", 0),
     ] {
         let scene = host
             .render_clip(
@@ -496,4 +549,21 @@ fn graph_parametric_rejects_invalid_domains_and_breaks_at_nonfinite_values() {
             .sum::<usize>();
         assert_eq!(moves, expected_moves, "{items}");
     }
+    // A finite domain must not overflow during sample-index multiplication.
+    let scene = host
+        .render_clip(
+            &graph,
+            &BTreeMap::new(),
+            &json!({
+                "items": "parametric x=cos(t) y=sin(t) from=0 to=1e308",
+                "show_grid": false, "show_axes": false, "show_labels": false,
+            }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    let VectorElement::StrokePath { path, .. } = &scene.elements[0] else {
+        panic!("expected a finite sampled curve");
+    };
+    assert_eq!(path.len(), 257);
 }

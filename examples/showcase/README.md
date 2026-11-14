@@ -19,7 +19,10 @@ vector layouts: a media crop/reframe would cut off equations and diagrams. An
 explicit shape background keeps transparent PNG rendering and opaque MP4 deliveries
 consistent. Output is 1920×1080 / 1080×1920 at 30 fps, with a smaller CI mode. The
 examples use LaTeX write-on, parametric curves, graph draw-on, normalized shapes,
-keyframes, animation presets, caption styles, markers and beat-synced cuts. Pythagoras also uses a real track-level equation dissolve.
+keyframes, animation presets, caption styles, markers and beat-synced cuts.
+Track-level dissolves join equations and successive Fourier sums.
+The LaTeX plugin fills revealed contours together, preserving the holes in
+symbols such as θ instead of turning them into solid shapes.
 
 ## Build and export
 
@@ -82,12 +85,15 @@ Requires Pillow and FFmpeg/ffprobe, only as test tooling; AniMathIO encodes the 
 python3 examples/showcase/test.py
 # Retain artifacts when inspecting a regression:
 python3 examples/showcase/test.py --output target/showcase-e2e
-# Deliberate reference refresh; review the PNGs before committing:
+# Render all frames for visual review without changing references:
+python3 examples/showcase/test.py --render-only --output target/showcase-review
+# After inspecting those frames, deliberately refresh references:
 python3 examples/showcase/test.py --update-golden --output target/showcase-review
 ```
 
-CI builds all six projects with click audio, checks model structure and beat
-boundaries, renders four PNGs per layout (including an equation/graph transition),
+CI builds all six projects with click audio, checks model structure, beat
+boundaries and vector/tracing-point connections at every authored sample,
+renders four PNGs per layout (including an equation/graph transition),
 and compares every RGBA channel with maximum absolute error 2 (the renderer's existing golden policy). It exports
 seconds 8–10 at 12 fps per project, then checks H.264/AAC, dimensions, duration,
 24 decoded frames, non-silent decoded audio and A/V start alignment, and decodes

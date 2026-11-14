@@ -486,8 +486,18 @@ fn parse_items(text: &str, default_color: Color) -> Vec<GraphItem> {
                         .and_then(|(_, value)| parse_expression(value).ok())
                 };
                 if let (Some(x), Some(y)) = (expression("x"), expression("y")) {
-                    let (from, to) = (number("from", 0.0), number("to", std::f64::consts::TAU));
-                    if from.is_finite() && to.is_finite() && to > from {
+                    let domain = |name, default| {
+                        fields
+                            .iter()
+                            .find(|(key, _)| *key == name)
+                            .map_or(Some(default), |(_, value)| parse_number(value))
+                    };
+                    let (Some(from), Some(to)) =
+                        (domain("from", 0.0), domain("to", std::f64::consts::TAU))
+                    else {
+                        continue;
+                    };
+                    if from.is_finite() && to.is_finite() && to > from && (to - from).is_finite() {
                         items.push(GraphItem::Parametric {
                             x,
                             y,
@@ -1068,10 +1078,15 @@ impl Guest for GraphPlugin {
                     let mut path = Vec::with_capacity(samples + 1);
                     let mut connected = false;
                     for i in 0..=samples {
-                        let t = from + (to - from) * draw * i as f64 / samples as f64;
+                        let fraction = draw * (i as f64 / samples as f64);
+                        let t = from + (to - from) * fraction;
                         let (x, y) = (eval(x, t), eval(y, t));
-                        if x.is_finite() && y.is_finite() {
-                            let point = map_point(x, y, bounds, size);
+                        let point = map_point(x, y, bounds, size);
+                        if x.is_finite()
+                            && y.is_finite()
+                            && point.x.is_finite()
+                            && point.y.is_finite()
+                        {
                             path.push(if connected {
                                 PathVerb::LineTo(point)
                             } else {

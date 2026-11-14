@@ -979,9 +979,10 @@ scale with it. Normalized shapes remain static unless their parameters are keyfr
 
 All first-party components and the example are built against ABI 1.1.0 and declare
 `api_version = "1.1.0"`; their plugin versions are 1.0.0 except `org.animathio.text`
-1.1.0 (caption styles and `reveal`) and `org.animathio.graph` 1.2.0 (parametric
-curves, styling and explicit axis scaling). The frozen 1.0 fixture and the explicit 0.2.x adapter
-retain older binaries; 0.1 packages are rejected.
+1.1.0 (caption styles and `reveal`), `org.animathio.latex` 1.1.1 (normalized sizing
+and preserved glyph holes), and `org.animathio.graph` 1.2.0 (parametric curves,
+styling and explicit axis scaling). The frozen 1.0 fixture and the explicit
+0.2.x adapter retain older binaries; 0.1 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.
 
@@ -1021,10 +1022,11 @@ smaller viewport.
 
 Items can include `parametric x=cos(t) y=sin(t) from=0 to=6.283185307179586`.
 Both expressions accept the existing function grammar, with `t` as the parameter
-(`x` is an alias); the default domain is 0–2π. Invalid expressions, reversed or
-nonfinite domains omit the item. The animatable `draw` parameter reveals the
-fraction of its domain, so its sampled endpoint follows the same curve. Sampling
-uses 256 intervals; nonfinite evaluations break the path. This remains plugin data
-and needs no project schema change.
+(`x` is an alias); the default domain is 0–2π. Invalid expressions, malformed,
+reversed or nonfinite domains (including an overflowing span) omit the item.
+The animatable `draw` parameter reveals a fraction of the domain, so its sampled
+endpoint follows the same curve. Sampling
+uses 256 intervals; nonfinite evaluations or canvas coordinates break the path.
+This remains plugin data and needs no project schema change.
 The [showcase builders](../examples/showcase/README.md) exercise this with a unit
 circle, independent function-chart axes and a subdued grid.

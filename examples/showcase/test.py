@@ -5,6 +5,7 @@ import argparse
 import array
 import contextlib
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -14,23 +15,29 @@ from common import HERE, Session, build, manifest, run, ticks
 from PIL import Image, ImageChops
 
 
+def check_frame(actual):
+    with Image.open(actual) as source:
+        a = source.convert("RGBA")
+        assert a.getchannel("A").getextrema() == (255, 255), actual
+        background = Image.new("RGBA", a.size, (12, 19, 35, 255))
+        assert (
+            ImageChops.difference(a, background).convert("RGB").getbbox()
+        ), f"Blank frame: {actual}"
+
+
 def compare(actual, golden, update):
+    check_frame(actual)
     if update:
         golden.parent.mkdir(parents=True, exist_ok=True)
         golden.write_bytes(actual.read_bytes())
     with Image.open(actual) as a, Image.open(golden) as g:
         a, g = a.convert("RGBA"), g.convert("RGBA")
         assert a.size == g.size, (actual, a.size, g.size)
-        assert a.getchannel("A").getextrema() == (255, 255), actual
         # Match crates/render/tests/golden.rs: every RGBA channel must be within 2.
         extremes = ImageChops.difference(a, g).getextrema()
         assert (
             max(high for _, high in extremes) <= 2
         ), f"Golden mismatch: {actual}; {extremes}"
-        background = Image.new("RGBA", a.size, (12, 19, 35, 255))
-        assert (
-            ImageChops.difference(a, background).convert("RGB").getbbox()
-        ), f"Blank frame: {actual}"
 
 
 def probe(path, vertical):
@@ -143,6 +150,66 @@ def check_structure(session, data, vertical):
     rail = next(t for t in project["tracks"] if t["name"] == "Beat rail")
     boundaries = {c["range"]["start"] for c in rail["clips"].values()}
     assert {ticks(ms / 1000) for ms in data["beats_ms"]} <= boundaries
+    check_motion(project)
+
+
+def check_motion(project):
+    """Check the authored rig's geometric constraints independently of raster goldens."""
+    width, height = project["width"], project["height"]
+    tracks = project["tracks"]
+    names = {c["id"]: t["name"] for t in tracks for c in t["clips"].values()}
+
+    def clips_named(name):
+        return [
+            c for t in tracks if t["name"].startswith(name)
+            for c in t["clips"].values()
+        ]
+
+    def keys(clip, property):
+        return next(
+            curve["keys"]
+            for curve in clip["animations"]
+            if curve["target"] == {"Transform": property}
+        )
+
+    def number(values, time):
+        return values[time]["value"]["Number"]
+
+    for point in clips_named("Tracing point"):
+        vectors = sorted(
+            [c for c in clips_named("Rotating vector") if c["range"] == point["range"]],
+            key=lambda c: int(names[c["id"]].split()[-1]),
+        )
+        assert vectors
+        projection = next(
+            c for c in clips_named("Height projection")
+            if c["range"] == point["range"]
+        )
+        px, py = keys(point, "X"), keys(point, "Y")
+        for time in px:
+            end = None
+            for vector in vectors:
+                center = (
+                    number(keys(vector, "X"), time) * width,
+                    number(keys(vector, "Y"), time) * height,
+                )
+                if end is not None:
+                    assert math.dist(center, end) < 0.01, ("disconnected epicycle", time)
+                rotation = keys(vector, "Rotation")
+                finish = max(rotation, key=int)
+                angle = number(rotation, finish) * int(time) / int(finish)
+                radius = vector["transform"]["scale_x"] * width / 2
+                end = (
+                    center[0] + radius * math.cos(angle),
+                    center[1] + radius * math.sin(angle),
+                )
+            tracer = (number(px, time) * width, number(py, time) * height)
+            assert math.dist(tracer, end) < 0.01, ("tracer detached from vector", time)
+            source = (
+                number(keys(projection, "X"), time) * width,
+                number(keys(projection, "Y"), time) * height,
+            )
+            assert math.dist(source, tracer) < 0.01, ("projection detached from tracer", time)
 
 
 def main():
@@ -152,10 +219,18 @@ def main():
         type=Path,
         help="Retain generated projects, frames and smoke MP4s here",
     )
-    parser.add_argument("--update-golden", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--update-golden", action="store_true")
+    mode.add_argument(
+        "--render-only",
+        action="store_true",
+        help="Render review frames without comparing/replacing goldens or exporting MP4s; requires --output",
+    )
     parser.add_argument("--only", choices=["pythagorean", "unit-circle", "fourier"])
     args = parser.parse_args()
     update = args.update_golden or os.environ.get("UPDATE_GOLDEN") == "1"
+    if args.render_only and (not args.output or update):
+        parser.error("--render-only requires --output and conflicts with golden updates")
     with contextlib.ExitStack() as stack:
         output = (
             args.output.resolve()
@@ -195,11 +270,17 @@ def main():
                             height=640 if vertical else 360,
                             output=str(actual),
                         )
-                        compare(
-                            actual,
-                            HERE / name / "golden" / f"{aspect}-{index}.png",
-                            update,
-                        )
+                        if args.render_only:
+                            check_frame(actual)
+                        else:
+                            compare(
+                                actual,
+                                HERE / name / "golden" / f"{aspect}-{index}.png",
+                                update,
+                            )
+                if args.render_only:
+                    print(f"REVIEW {name} {aspect}: {folder}", flush=True)
+                    continue
                 smoke = folder / "smoke.mp4"
                 # Exercise the dynamic middle of each composition, not just a title card.
                 run(

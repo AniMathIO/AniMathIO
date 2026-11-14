@@ -99,11 +99,10 @@ def scene(b, steps):
     b.text("a²", ax, ay, 0.06, GOLD, start=steps[2])
     b.text("b²", dx, dy, 0.06, GOLD, start=steps[2])
     ex, ey = (0.5, 0.68) if b.vertical else (0.77, 0.43)
-    _, track = b.math(r"(a+b)^2-4\frac{ab}{2}=c^2", ex, ey, end=steps[2], size=46)
+    left, track = b.math(r"(a+b)^2-4\frac{ab}{2}=c^2", ex, ey, end=steps[2], size=46)
     right, _ = b.math(
         r"a^2+b^2=c^2", ex, ey, start=steps[2], size=58, track=track, reveal=False
     )
-    left = right - 2
     b.commands.append(
         {
             "AddTransition": {
