@@ -320,10 +320,23 @@ fn respond<H: ControlHandler>(handler: &mut H, expected_token: &str, message: &[
     if request.jsonrpc.as_deref() != Some("2.0") {
         return error_response(&id, -32_600, "invalid JSON-RPC version");
     }
-    let Ok(call) = serde_json::from_value::<Call>(json!({
-        "method": request.method,
-        "params": request.params,
-    })) else {
+    let parse = |params: &Value| {
+        serde_json::from_value::<Call>(json!({
+            "method": request.method,
+            "params": params,
+        }))
+    };
+    // Methods without parameters also accept the `{}` / `[]` many JSON-RPC
+    // clients always send.
+    let empty = matches!(&request.params, Value::Object(map) if map.is_empty())
+        || matches!(&request.params, Value::Array(items) if items.is_empty());
+    let Ok(call) = parse(&request.params).or_else(|error| {
+        if empty {
+            parse(&Value::Null)
+        } else {
+            Err(error)
+        }
+    }) else {
         return error_response(&id, -32_602, "invalid params");
     };
     match handler.handle(call) {
@@ -515,4 +528,33 @@ fn ensure_runtime_dir(dir: &Path) -> io::Result<()> {
 #[cfg(windows)]
 fn ensure_runtime_dir(dir: &Path) -> io::Result<()> {
     fs::create_dir_all(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::HeadlessHandler;
+
+    fn call(params: &str) -> Value {
+        let mut handler = HeadlessHandler::new();
+        let message = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"project.get","token":"secret"{params}}}"#
+        );
+        serde_json::from_slice(&respond(&mut handler, "secret", message.as_bytes())).unwrap()
+    }
+
+    #[test]
+    fn methods_without_params_accept_empty_params() {
+        for params in [
+            "",
+            r#","params":null"#,
+            r#","params":{}"#,
+            r#","params":[]"#,
+        ] {
+            let response = call(params);
+            assert!(response.get("result").is_some(), "{params}: {response}");
+        }
+        let response = call(r#","params":{"unexpected":1}"#);
+        assert_eq!(response["error"]["code"], -32_602, "{response}");
+    }
 }

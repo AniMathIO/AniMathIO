@@ -214,7 +214,13 @@ mute). A locked track rejects every clip-level edit (`AddClip`, `RemoveClip`,
 keyframe commands) in `Command::apply` itself, so the editor, the control
 protocol and MCP all see the same `track N is locked` error; layer-level
 commands (gain, mute, solo, lock) always work so a track can be unlocked.
-`SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks.
+`MoveClip` also refuses a locked destination track. Inside a `Batch` each member is
+checked against the locks as the earlier members left them, so a batch may unlock a
+track and then edit it but cannot lock one and then edit it. Undo and redo replay
+recorded history without the lock check (locks guard new edits, not history).
+`SplitAt`, `RemoveRange` and `RippleDelete` also refuse locked tracks. `RemoveRange`
+re-bases the keyframes of a clip whose head it removes, exactly as a split does, so
+fades and animations on the kept part stay where they were on screen.
 `RenameTrack` and `MoveTrack { id, index }` (the track's position after the move) are
 layer-level, so they work on locked tracks too. The editor's multi-clip edits (grouped
 move, nudge, delete, paste, duplicate, linked ripple) are plain `Batch`es planned by the

@@ -53,7 +53,7 @@ gets a JSON-RPC error instead of a result.
 | `export` | `{ params: { output, from?, to?, settings?, overwrite? } }` | destination path (after completion) |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
-| `media.add` | `{ path }` | track_id, clip_id; bounded import and placement in one undo step, with a single video probe before retaining bytes |
+| `media.add` | `{ path }` | track_id, clip_id; bounded import and placement in one undo step, with a single video/audio probe before retaining bytes. The clip takes the probed media length (images: the project duration, else three seconds); placing a file that is already in the project reuses its asset |
 | `assets.import` | `{ path }` | `AssetInfo` (id, name, media_type) |
 | `timeline.list` | — | `Timeline` (frame rate, duration, tracks, clips) |
 | `project.import_v1` | `{ path }` | — (replaces the current project) |
@@ -108,6 +108,8 @@ you to pass `--project`. With `--project`, it drives the file through the same
 `ControlHandler` trait, so tools behave identically either way.
 
 Times are milliseconds; coordinates are canvas pixels with the origin top-left.
+Clip and track ids may be passed as strings (`"3"`) or numbers (`3`), matching
+how `describe_timeline` prints them.
 Timeline edits are applied as `Command`s and are undoable; replacing a project
 clears its undo history.
 

@@ -3,7 +3,7 @@
 //! editable in the keyframe UI and renders/mixes with no extra engine support.
 
 use animathio_core::{Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Target, Time};
-use animathio_core::{ParamValue, TransformProperty};
+use animathio_core::{ParamValue, Project, TransformProperty};
 
 /// Which end of the clip a fade belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,12 +153,35 @@ pub(crate) fn fade_command(clip: &Clip, edge: FadeEdge, ticks: i64) -> Option<Co
     Some(Command::Batch { commands })
 }
 
+/// Remove both fades of clip `id` as one command (one undo step). The fade-out
+/// is planned on the clip as it is after the fade-in was removed. `None` when
+/// there is nothing to clear; a command that cannot apply (e.g. a locked track)
+/// is still returned so executing it reports the error.
+pub(crate) fn clear_fades_command(project: &Project, id: ClipId) -> Option<Command> {
+    let find = |project: &Project| {
+        project
+            .tracks()
+            .iter()
+            .find_map(|track| track.clips().get(&id).cloned())
+    };
+    let mut scratch = project.clone();
+    let mut commands = Vec::new();
+    for edge in [FadeEdge::In, FadeEdge::Out] {
+        if let Some(command) = fade_command(&find(&scratch)?, edge, 0) {
+            let applied = command.apply(&mut scratch).is_ok();
+            commands.push(command);
+            if !applied {
+                break;
+            }
+        }
+    }
+    (!commands.is_empty()).then_some(Command::Batch { commands })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use animathio_core::{
-        AssetId, History, Project, TICKS_PER_SECOND, TimeRange, Track, TrackId, evaluate,
-    };
+    use animathio_core::{AssetId, History, TICKS_PER_SECOND, TimeRange, Track, TrackId, evaluate};
 
     fn project_with(kind: ClipKind) -> (Project, Clip) {
         let mut project = Project::default();
@@ -195,6 +218,24 @@ mod tests {
 
     fn current(project: &Project) -> Clip {
         project.tracks()[0].clips()[&ClipId(1)].clone()
+    }
+
+    #[test]
+    fn clearing_both_fades_is_one_undo_step() {
+        let (mut project, _) = project_with(ClipKind::Audio(AssetId::of(b"a")));
+        let mut history = History::default();
+        for edge in [FadeEdge::In, FadeEdge::Out] {
+            let command = fade_command(&current(&project), edge, TICKS_PER_SECOND).unwrap();
+            history.execute(&mut project, &command).unwrap();
+        }
+        let faded = project.clone();
+        let clear = clear_fades_command(&project, ClipId(1)).unwrap();
+        history.execute(&mut project, &clear).unwrap();
+        assert_eq!(fade_len(&current(&project), FadeEdge::In), 0);
+        assert_eq!(fade_len(&current(&project), FadeEdge::Out), 0);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, faded);
+        assert!(clear_fades_command(&Project::default(), ClipId(1)).is_none());
     }
 
     #[test]

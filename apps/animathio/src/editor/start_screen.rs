@@ -223,8 +223,10 @@ impl Editor {
                             ExportPreset::Square => ("Square", "1080 x 1080"),
                             ExportPreset::Portrait => ("4:5 Portrait", "1080 x 1350"),
                         };
-                        let preview_width = if width >= height { 114. } else { 48. };
-                        let preview_height = preview_width * height as f32 / width as f32;
+                        // Fit the canvas shape in a 114 x 84 box (the slot is 96 tall).
+                        let fit = (114. / width as f32).min(84. / height as f32);
+                        let (preview_width, preview_height) =
+                            (width as f32 * fit, height as f32 * fit);
                         let from = if self.previous_hovered_preset == Some(index) {
                             1.
                         } else {
@@ -251,10 +253,7 @@ impl Editor {
                             }))
                             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.new_project(cx);
-                                    if let Ok(command) = preset.command(&this.project) {
-                                        this.execute(&command, cx);
-                                    }
+                                    this.new_project_with_preset(preset, cx);
                                     cx.stop_propagation();
                                 }
                             }))
@@ -344,10 +343,7 @@ impl Editor {
                                     .child(format!("{detail} / 30 fps")),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.new_project(cx);
-                                if let Ok(command) = preset.command(&this.project) {
-                                    this.execute(&command, cx);
-                                }
+                                this.new_project_with_preset(preset, cx);
                             }))
                     }),
             );

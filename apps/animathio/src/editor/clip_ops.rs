@@ -97,7 +97,7 @@ impl Editor {
 
     /// Copy the selection to the in-app clipboard and the system clipboard.
     pub(super) fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(board) = Clipboard::copy(&self.project, &self.selected_ids()) else {
+        let Some(board) = Clipboard::copy_linked(&self.project, &self.selected_ids()) else {
             return false;
         };
         cx.write_to_clipboard(ClipboardItem::new_string(board.to_json()));
@@ -130,7 +130,7 @@ impl Editor {
 
     /// Duplicate the selection right after itself.
     pub(super) fn duplicate_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(board) = Clipboard::copy(&self.project, &self.selected_ids()) else {
+        let Some(board) = Clipboard::copy_linked(&self.project, &self.selected_ids()) else {
             return;
         };
         self.apply_placement(|project, next| board.duplicate(project, next), cx);

@@ -38,8 +38,9 @@ pub(crate) struct SubtitleJob {
     pub(crate) style: animathio_control::CaptionStyleParams,
     pub(crate) state: State,
     pub(crate) cancelling: bool,
-    /// Project path when the job started; results are dropped if another project is open.
-    pub(crate) project_path: Option<std::path::PathBuf>,
+    /// The editor's project session when the job started; results are dropped if
+    /// another project (or a new untitled one) was opened since.
+    pub(crate) project_session: u64,
     /// Answer owed to a control client that started the job.
     pub(crate) reply: Option<SyncSender<Result<Value, ControlError>>>,
     cancel: Cancel,
@@ -60,7 +61,7 @@ impl SubtitleJob {
         assets: Arc<BTreeMap<AssetId, Vec<u8>>>,
         params: SubtitleGenerateParams,
         label: String,
-        project_path: Option<std::path::PathBuf>,
+        project_session: u64,
         reply: Option<SyncSender<Result<Value, ControlError>>>,
     ) -> Result<Self, String> {
         let style = params.style.clone();
@@ -96,7 +97,7 @@ impl SubtitleJob {
             style,
             state: State::Running,
             cancelling: false,
-            project_path,
+            project_session,
             reply,
             cancel,
             phase,
