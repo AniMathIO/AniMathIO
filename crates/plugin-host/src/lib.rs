@@ -20,11 +20,11 @@ use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 wasmtime::component::bindgen!({
     path: "../plugin-api/wit",
-    world: "plugin",
+    world: "source-plugin",
 });
 
 /// Bindings for the pixel-effect world (`effect-plugin`). Shared interfaces reuse the
-/// `plugin` world's generated types and host imports, so one linker serves both worlds.
+/// `source-plugin` world's generated types and host imports, so one linker serves both worlds.
 mod effect_world {
     wasmtime::component::bindgen!({
         path: "../plugin-api/wit",
@@ -49,6 +49,7 @@ mod audio_world {
 }
 
 mod audio;
+mod compat;
 mod discovery;
 mod effect_params;
 mod effects;
@@ -238,6 +239,7 @@ pub struct HostState {
     typeset: Arc<TypesetEngine>,
     limiter: StoreLimits,
     logs: Vec<String>,
+    policy: SandboxLimits,
 }
 
 impl WasiView for HostState {
@@ -251,8 +253,8 @@ impl WasiView for HostState {
 
 impl animathio::plugin::types::Host for HostState {}
 
-impl Host for HostState {
-    fn shape_text(&mut self, text: String, font_size: f32) -> Vec<Vec<wit_types::PathVerb>> {
+impl HostState {
+    fn legacy_shape_text(&mut self, text: String, font_size: f32) -> Vec<Vec<wit_types::PathVerb>> {
         let char_count = text.chars().count();
         if char_count > MAX_SHAPE_TEXT_CHARS {
             log::warn!(
@@ -263,7 +265,7 @@ impl Host for HostState {
         shape_text_skrifa(&self.font_data, &text, font_size, MAX_SHAPE_TEXT_VERBS)
     }
 
-    fn svg_to_paths(&mut self, svg_xml: String) -> Vec<Vec<wit_types::PathVerb>> {
+    fn legacy_svg_to_paths(&mut self, svg_xml: String) -> Vec<Vec<wit_types::PathVerb>> {
         if svg_xml.len() > MAX_SVG_INPUT_BYTES {
             log::warn!(
                 "svg_to_paths: rejecting {} input bytes (max {MAX_SVG_INPUT_BYTES})",
@@ -274,7 +276,7 @@ impl Host for HostState {
         parse_svg_to_paths(&svg_xml, MAX_SVG_VERBS)
     }
 
-    fn typeset_math(
+    fn legacy_typeset_math(
         &mut self,
         source: String,
         mode: wit_types::MathMode,
@@ -301,7 +303,7 @@ impl Host for HostState {
         }
     }
 
-    fn log(&mut self, message: String) {
+    fn legacy_log(&mut self, message: String) {
         let message = truncate_utf8(&message, MAX_LOG_MESSAGE_BYTES);
         log::info!("[plugin log] {}", message);
         if self.logs.len() < MAX_LOG_ENTRIES {
@@ -599,8 +601,8 @@ fn build_store(
     font_data: Vec<u8>,
     typeset: Arc<TypesetEngine>,
     limiter: StoreLimits,
-    fuel: u64,
-    epoch_deadline_ticks: u64,
+    budget: (u64, u64),
+    policy: SandboxLimits,
 ) -> Store<HostState> {
     let state = HostState {
         table: ResourceTable::new(),
@@ -609,10 +611,11 @@ fn build_store(
         typeset,
         limiter,
         logs: Vec::new(),
+        policy,
     };
     let mut store = Store::new(engine, state);
-    let _ = store.set_fuel(fuel);
-    store.set_epoch_deadline(epoch_deadline_ticks);
+    let _ = store.set_fuel(budget.0);
+    store.set_epoch_deadline(budget.1);
     store.limiter(|s| &mut s.limiter);
     store
 }
@@ -660,7 +663,8 @@ impl PluginHost {
         let mut linker: Linker<HostState> = Linker::new(&engine);
 
         wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
-        Plugin::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |s| s)?;
+        SourcePlugin::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |s| s)?;
+        compat::add_to_linker(&mut linker)?;
 
         let font_data = load_system_font_bytes();
         let typeset = Arc::new(
@@ -816,6 +820,11 @@ impl PluginHost {
     /// Plugin ids must be unique within a host. Signing is deferred: an untrusted package may
     /// still claim any id, so callers must only load packages from trusted sources for now.
     pub fn load_plugin_package(&mut self, package: PluginPackage) -> Result<String, HostError> {
+        package
+            .manifest
+            .validate()
+            .map_err(|e| HostError::InvalidOutput(e.to_string()))?;
+        let legacy = package.manifest.api_version.starts_with("0.");
         let id = package.manifest.id.clone();
         if self.plugins.contains_key(&id) {
             return Err(HostError::DuplicateId(id));
@@ -830,17 +839,21 @@ impl PluginHost {
         let mut store = self.create_store(CapabilityGrants::default())?;
         let wit_manifest = if package.manifest.kinds.contains(&PluginKind::AudioEffect) {
             self.audio_effects
-                .register(&id, &component, &mut store)
+                .register(&package.manifest, &component, &mut store, legacy)
                 .map_err(|e| {
                     HostError::CompilationFailed(format!("audio effect plugin {id}: {e}"))
                 })?
         } else if package.manifest.kinds.contains(&PluginKind::Effect) {
             self.effects
-                .register(&id, &component, &mut store)
+                .register(&package.manifest, &component, &mut store, legacy)
                 .map_err(|e| HostError::CompilationFailed(format!("effect plugin {id}: {e}")))?
         } else {
-            let instance = Plugin::instantiate(&mut store, &component, &self.linker)?;
-            instance.call_describe(&mut store)?
+            let pre = compat::Pre::new(self.linker.instantiate_pre(&component)?, legacy);
+            let instance = pre.instantiate(&mut store)?;
+            instance.validate_source(&mut store)?;
+            let manifest = instance.describe(&mut store, false)?;
+            validate_manifest(&package.manifest, &manifest)?;
+            manifest
         };
 
         let inspector_schema = wit_manifest_to_inspector(&wit_manifest);
@@ -886,8 +899,8 @@ impl PluginHost {
             self.font_data.clone(),
             Arc::clone(&self.typeset),
             sandbox_store_limits(&self.limits),
-            self.limits.fuel_per_call,
-            self.limits.epoch_deadline_ticks,
+            (self.limits.fuel_per_call, self.limits.epoch_deadline_ticks),
+            self.limits,
         ))
     }
 
@@ -967,12 +980,18 @@ impl PluginHost {
 
         // 3. Sandboxed execution with fuel and epoch limit
         let mut store = self.create_store(CapabilityGrants::default())?;
-        let instance = Plugin::instantiate(&mut store, &plugin.component, &self.linker)
+        let pre = compat::Pre::new(
+            self.linker.instantiate_pre(&plugin.component)?,
+            plugin.manifest.api_version.starts_with("0."),
+        );
+        let instance = pre
+            .instantiate(&mut store)
             .map_err(|e| HostError::Trapped(e.to_string()))?;
 
         let wit_scene = instance
-            .call_render_clip(&mut store, &wit_params, time_ticks, size)
-            .map_err(|e| HostError::Trapped(e.to_string()))?;
+            .render(&mut store, &wit_params, time_ticks, size)
+            .map_err(|e| HostError::Trapped(e.to_string()))?
+            .map_err(|e| HostError::InvalidOutput(format!("{}: {}", e.code, e.message)))?;
 
         let core_scene = wit_scene_to_core(wit_scene);
         core_scene
@@ -1723,6 +1742,7 @@ mod tests {
             version: "1".into(),
             description: String::new(),
             kinds: vec![],
+            metadata: vec![],
             params: cases
                 .iter()
                 .map(|(id, kind, _)| ParamSpec {
@@ -1977,3 +1997,340 @@ mod tests {
 
 #[cfg(feature = "test-support")]
 pub mod test_support;
+
+impl SandboxLimits {
+    /// Stable advisory keys exposed to guests. Unknown future keys are ignored.
+    fn wire_limits(self) -> Vec<(String, u64)> {
+        vec![
+            ("ticks-per-second", animathio_core::TICKS_PER_SECOND as u64),
+            ("max-memory-bytes", self.max_memory_bytes as u64),
+            ("max-table-elements", self.max_table_elements as u64),
+            ("fuel-per-call", self.fuel_per_call),
+            ("epoch-interval-ms", EPOCH_TICK_INTERVAL.as_millis() as u64),
+            ("epoch-deadline-ticks", self.epoch_deadline_ticks),
+            ("max-effect-pixels", self.max_effect_pixels as u64),
+            ("effect-memory-bytes", self.effect_memory_bytes as u64),
+            ("effect-fuel-per-pixel", self.effect_fuel_per_pixel),
+            (
+                "effect-epoch-deadline-ticks",
+                self.effect_epoch_deadline_ticks,
+            ),
+            ("max-audio-block-frames", self.max_audio_block_frames as u64),
+            ("max-audio-state-bytes", self.max_audio_state_bytes as u64),
+            ("audio-memory-bytes", self.audio_memory_bytes as u64),
+            ("audio-fuel-per-sample", self.audio_fuel_per_sample),
+            (
+                "audio-epoch-deadline-ticks",
+                self.audio_epoch_deadline_ticks,
+            ),
+            ("max-audio-channels", 32),
+            ("max-audio-sample-rate", 768_000),
+            ("max-shape-text-chars", MAX_SHAPE_TEXT_CHARS as u64),
+            ("max-shape-text-verbs", MAX_SHAPE_TEXT_VERBS as u64),
+            ("max-svg-input-bytes", MAX_SVG_INPUT_BYTES as u64),
+            ("max-svg-verbs", MAX_SVG_VERBS as u64),
+            ("max-typeset-verbs", MAX_TYPESET_VERBS as u64),
+            (
+                "max-typeset-source-bytes",
+                animathio_typeset::MAX_SOURCE_BYTES as u64,
+            ),
+            (
+                "max-typeset-font-size-px",
+                animathio_typeset::MAX_FONT_SIZE as u64,
+            ),
+            (
+                "typeset-timeout-ms",
+                animathio_typeset::TYPESET_TIMEOUT.as_millis() as u64,
+            ),
+            ("max-log-message-bytes", MAX_LOG_MESSAGE_BYTES as u64),
+            ("max-log-entries", MAX_LOG_ENTRIES as u64),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect()
+    }
+}
+
+fn validate_kinds(manifest: &wit_types::Manifest, expected: &[&str]) -> Result<(), HostError> {
+    let mut kinds = std::collections::BTreeSet::new();
+    for kind in &manifest.kinds {
+        if kind.trim().is_empty() || !kinds.insert(kind.as_str()) {
+            return Err(HostError::InvalidOutput(
+                "empty or duplicate describe kind".into(),
+            ));
+        }
+    }
+    // Open wire strings allow advisory classifications. Known execution kinds
+    // must match exactly, and unknown strings do not enable new execution paths.
+    let known = ["clip-source", "animation", "effect", "audio-effect"];
+    if known
+        .iter()
+        .any(|kind| kinds.contains(kind) != expected.contains(kind))
+    {
+        return Err(HostError::InvalidOutput(
+            "describe kinds disagree with plugin.toml".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_manifest(
+    package: &PluginManifestToml,
+    manifest: &wit_types::Manifest,
+) -> Result<(), HostError> {
+    validate_kinds(
+        manifest,
+        &package.kinds.iter().map(|k| k.as_str()).collect::<Vec<_>>(),
+    )?;
+    if manifest.version != package.version {
+        return Err(HostError::InvalidOutput(
+            "describe version disagrees with plugin.toml".into(),
+        ));
+    }
+    let mut keys = std::collections::BTreeSet::new();
+    if manifest
+        .metadata
+        .iter()
+        .any(|(key, _)| key.is_empty() || !keys.insert(key))
+    {
+        return Err(HostError::InvalidOutput(
+            "empty or duplicate metadata key".into(),
+        ));
+    }
+    validate_params(&manifest.params)
+}
+
+fn validate_params(params: &[wit_types::ParamSpec]) -> Result<(), HostError> {
+    let mut seen = std::collections::BTreeSet::new();
+    for param in params {
+        let valid = match &param.kind {
+            wit_types::ParamKind::Number(r) => {
+                [r.min, r.max, r.default, r.step]
+                    .iter()
+                    .all(|n| n.is_finite())
+                    && r.min <= r.max
+                    && (r.min..=r.max).contains(&r.default)
+                    && r.step > 0.0
+            }
+            wit_types::ParamKind::EnumChoice(e) => {
+                !e.options.is_empty()
+                    && e.options.contains(&e.default)
+                    && e.options.iter().all(|o| !o.is_empty())
+                    && e.options
+                        .iter()
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        == e.options.len()
+            }
+            wit_types::ParamKind::Point(p) => p.default.x.is_finite() && p.default.y.is_finite(),
+            _ => true,
+        };
+        if param.id.is_empty() || param.label.trim().is_empty() || !seen.insert(&param.id) || !valid
+        {
+            return Err(HostError::InvalidOutput(format!(
+                "invalid parameter schema {:?}",
+                param.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn diagnostic(code: &str, message: impl Into<String>) -> wit_types::Diagnostic {
+    wit_types::Diagnostic {
+        code: code.into(),
+        message: message.into(),
+        metadata: Vec::new(),
+    }
+}
+
+impl Host for HostState {
+    fn limits(&mut self) -> Vec<(String, u64)> {
+        self.policy.wire_limits()
+    }
+
+    fn shape_text(
+        &mut self,
+        text: String,
+        font_size: f32,
+    ) -> Result<Vec<Vec<wit_types::PathVerb>>, wit_types::Diagnostic> {
+        if !font_size.is_finite() || font_size <= 0.0 {
+            return Err(diagnostic(
+                "invalid-input",
+                "font size must be finite and positive",
+            ));
+        }
+        if text.chars().count() > MAX_SHAPE_TEXT_CHARS {
+            return Err(diagnostic("limit-exceeded", "text exceeds character limit"));
+        }
+        let paths = shape_text_skrifa(&self.font_data, &text, font_size, usize::MAX);
+        if paths.iter().map(Vec::len).sum::<usize>() > MAX_SHAPE_TEXT_VERBS {
+            return Err(diagnostic("limit-exceeded", "text exceeds path verb limit"));
+        }
+        Ok(paths)
+    }
+
+    fn typeset_math(
+        &mut self,
+        source: String,
+        mode: wit_types::MathMode,
+        font_size: f32,
+    ) -> Result<wit_types::TypesetResult, wit_types::Diagnostic> {
+        if !font_size.is_finite() || font_size <= 0.0 {
+            return Err(diagnostic(
+                "invalid-input",
+                "font size must be finite and positive",
+            ));
+        }
+        if source.trim().is_empty() {
+            return Err(diagnostic("invalid-input", "math source is empty"));
+        }
+        if source.len() > animathio_typeset::MAX_SOURCE_BYTES {
+            return Err(diagnostic(
+                "limit-exceeded",
+                "math exceeds source byte limit",
+            ));
+        }
+        if font_size > animathio_typeset::MAX_FONT_SIZE {
+            return Err(diagnostic("limit-exceeded", "math exceeds font size limit"));
+        }
+        let mode = match mode {
+            wit_types::MathMode::Latex => MathMode::Latex,
+            wit_types::MathMode::Typst => MathMode::Typst,
+        };
+        let result = self
+            .typeset
+            .typeset(&source, mode, font_size)
+            .map_err(|e| diagnostic("service-failed", e.to_string()))?;
+        let result = typeset_to_wit(&result, usize::MAX);
+        if result.paths.iter().map(Vec::len).sum::<usize>() > MAX_TYPESET_VERBS {
+            return Err(diagnostic("limit-exceeded", "math exceeds path verb limit"));
+        }
+        Ok(result)
+    }
+
+    fn svg_to_paths(
+        &mut self,
+        svg_xml: String,
+    ) -> Result<Vec<Vec<wit_types::PathVerb>>, wit_types::Diagnostic> {
+        if svg_xml.len() > MAX_SVG_INPUT_BYTES {
+            return Err(diagnostic("limit-exceeded", "SVG exceeds input byte limit"));
+        }
+        let paths = parse_svg_to_paths(&svg_xml, usize::MAX);
+        if paths.iter().map(Vec::len).sum::<usize>() > MAX_SVG_VERBS {
+            return Err(diagnostic("limit-exceeded", "SVG exceeds path verb limit"));
+        }
+        if paths.is_empty() && !svg_xml.trim().is_empty() {
+            return Err(diagnostic(
+                "invalid-input",
+                "SVG contains no supported paths",
+            ));
+        }
+        Ok(paths)
+    }
+
+    fn log(&mut self, message: String) {
+        self.legacy_log(message);
+    }
+}
+
+#[cfg(test)]
+mod abi_tests {
+    use super::*;
+
+    fn manifest() -> wit_types::Manifest {
+        wit_types::Manifest {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            description: String::new(),
+            kinds: vec!["audio-effect".into(), "com.example.experimental".into()],
+            metadata: Vec::new(),
+            params: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn open_wire_kinds_do_not_enable_unknown_execution_worlds() {
+        let mut m = manifest();
+        assert!(validate_kinds(&m, &["audio-effect"]).is_ok());
+        assert!(validate_kinds(&m, &["effect"]).is_err());
+        m.kinds.push("effect".into());
+        assert!(validate_kinds(&m, &["audio-effect"]).is_err());
+        m.kinds = vec!["audio-effect".into(), "audio-effect".into()];
+        assert!(validate_kinds(&m, &["audio-effect"]).is_err());
+    }
+
+    #[test]
+    fn malformed_parameter_schemas_are_rejected() {
+        let mut spec = wit_types::ParamSpec {
+            id: "amount".into(),
+            label: "Amount".into(),
+            kind: wit_types::ParamKind::Number(wit_types::NumberRange {
+                min: 0.0,
+                max: 1.0,
+                default: 0.5,
+                step: 0.1,
+            }),
+        };
+        assert!(validate_params(&[spec.clone()]).is_ok());
+        assert!(validate_params(&[spec.clone(), spec.clone()]).is_err());
+        for step in [0.0, -1.0, f64::NAN] {
+            let wit_types::ParamKind::Number(r) = &mut spec.kind else {
+                unreachable!()
+            };
+            r.step = step;
+            assert!(validate_params(&[spec.clone()]).is_err());
+        }
+        spec.kind = wit_types::ParamKind::EnumChoice(wit_types::EnumParam {
+            options: vec!["a".into()],
+            default: "b".into(),
+        });
+        assert!(validate_params(&[spec.clone()]).is_err());
+        spec.kind = wit_types::ParamKind::Point(wit_types::PointParam {
+            default: wit_types::Point {
+                x: f32::NAN,
+                y: 0.0,
+            },
+        });
+        assert!(validate_params(&[spec]).is_err());
+    }
+
+    #[test]
+    fn v1_services_report_errors_while_legacy_keeps_empty_results() {
+        let cache = tempfile::tempdir().unwrap();
+        let limits = SandboxLimits {
+            max_audio_block_frames: 123,
+            ..SandboxLimits::default()
+        };
+        let host = PluginHost::with_limits(cache.path(), limits).unwrap();
+        let mut store = host.create_store(CapabilityGrants::default()).unwrap();
+        let state = store.data_mut();
+        assert!(Host::limits(state).contains(&("max-audio-block-frames".into(), 123)));
+        let text = "a".repeat(MAX_SHAPE_TEXT_CHARS + 1);
+        assert_eq!(
+            Host::shape_text(state, text.clone(), 12.0)
+                .unwrap_err()
+                .code,
+            "limit-exceeded"
+        );
+        assert!(state.legacy_shape_text(text, 12.0).is_empty());
+        assert_eq!(
+            Host::shape_text(state, "x".into(), f32::NAN)
+                .unwrap_err()
+                .code,
+            "invalid-input"
+        );
+        assert_eq!(
+            Host::svg_to_paths(state, "garbage".into())
+                .unwrap_err()
+                .code,
+            "invalid-input"
+        );
+        assert!(state.legacy_svg_to_paths("garbage".into()).is_empty());
+        assert!(
+            Host::shape_text(state, String::new(), 12.0)
+                .unwrap()
+                .is_empty()
+        );
+    }
+}

@@ -1,4 +1,4 @@
-package animathio:plugin@0.2.2;
+package animathio:plugin@1.0.0;
 
 /// Shared data types for vector graphics, parameter schemas and plugin manifests.
 interface types {
@@ -8,7 +8,7 @@ interface types {
         height: u32,
     }
 
-    /// 2D coordinates in canvas or local coordinates.
+    /// Finite 2D coordinates: x right, y down. Scene.coordinate-space selects units.
     record point {
         x: f32,
         y: f32,
@@ -76,7 +76,11 @@ interface types {
         text-run(text-element),
     }
 
-    /// Generic drawing coordinates.
+    /// canvas: pixels on the requested render canvas. normalized: local unit square,
+    /// with x scaled by width and y by height. Strokes are outlined in local
+    /// units then transformed with the paths (nonuniform scaling is allowed).
+    /// Normalized text-run font-size is a fraction of canvas height; x/y are
+    /// offsets from the centered text block. Values outside 0..1 are allowed.
     enum coordinate-space { canvas, normalized }
 
     /// Evaluated vector scene composed of ordered draw commands.
@@ -105,7 +109,7 @@ interface types {
         typst,
     }
 
-    /// Floating-point parameter range with step size and default.
+    /// Finite inclusive range; min <= default <= max and step > 0 (UI hint).
     record number-range {
         min: f64,
         max: f64,
@@ -156,7 +160,8 @@ interface types {
         asset-ref(asset-ref-param),
     }
 
-    /// Parameter specification declaring UI metadata and constraints.
+    /// Stable id, fallback human label and typed schema. Labels are not identifiers.
+    /// Translation keys and units may be supplied in manifest.metadata.
     record param-spec {
         id: string,
         label: string,
@@ -183,11 +188,26 @@ interface types {
     /// Map of parameter values passed to plugin invocations.
     type param-map = list<param-entry>;
 
-    /// Plugin classification.
-    enum plugin-kind {
-        clip-source,
-        effect,
-        animation,
+    /// Open classification: clip-source, effect or audio-effect.
+    /// The legacy animation kind has no 1.0 execution world.
+    /// Unknown strings are metadata, never permission to invoke an unknown world.
+    type plugin-kind = string;
+
+    /// Optional, namespaced advisory metadata. Unknown keys must be ignored.
+    /// Keys are unique; values are UTF-8, never executable content. Reserved
+    /// conventions: label-key, description-key, param.<id>.unit,
+    /// param.<id>.label-key and param.<id>.option.<value>.label-key;
+    /// prefix with effect.<id>. for effect descriptors. No localization service
+    /// is implied: plain labels/messages remain mandatory fallbacks.
+    type metadata = list<tuple<string, string>>;
+
+    /// Extensible error code plus fallback diagnostic text and advisory details.
+    /// Known codes: invalid-input, limit-exceeded, service-failed, plugin-error.
+    /// Unknown codes are displayed using message; callers must not parse messages.
+    record diagnostic {
+        code: string,
+        message: string,
+        metadata: metadata,
     }
 
     /// Plugin metadata and parameter schema.
@@ -196,23 +216,42 @@ interface types {
         version: string,
         description: string,
         kinds: list<plugin-kind>,
+        metadata: metadata,
         params: list<param-spec>,
     }
 }
 
 /// Host-provided services imported by plugins.
 interface host {
-    use types.{path, math-mode, typeset-result};
+    use types.{path, math-mode, typeset-result, diagnostic};
 
-    /// Text shaping via host font engine. Returns glyph outline paths.
-    shape-text: func(text: string, font-size: f32) -> list<path>;
+    /// Text shaping via host font engine. Size is pixels; positive and finite.
+    /// Returns glyph outline paths or an explicit diagnostic.
+    shape-text: func(text: string, font-size: f32) -> result<list<path>, diagnostic>;
 
     /// Typeset math via the host typesetting engine. Returns glyph and rule
     /// outline paths plus a tight bounding box.
-    typeset-math: func(source: string, mode: math-mode, font-size: f32) -> typeset-result;
+    typeset-math: func(source: string, mode: math-mode, font-size: f32) -> result<typeset-result, diagnostic>;
 
-    /// Parse SVG XML string into vector paths.
-    svg-to-paths: func(svg-xml: string) -> list<path>;
+    /// Extract double-quoted d attributes from SVG path elements, or accept raw
+    /// SVG path data. This is not a complete SVG renderer: transforms, styles,
+    /// other primitives and external resources are not interpreted. Empty input
+    /// succeeds with no paths; unsupported/non-path input returns a diagnostic.
+    svg-to-paths: func(svg-xml: string) -> result<list<path>, diagnostic>;
+
+    /// Hard limits configured for this host, as unique key/value pairs.
+    /// Stable keys: ticks-per-second, max-memory-bytes, max-table-elements,
+    /// fuel-per-call, epoch-interval-ms, epoch-deadline-ticks, max-effect-pixels,
+    /// effect-memory-bytes, effect-fuel-per-pixel, effect-epoch-deadline-ticks,
+    /// max-audio-block-frames, max-audio-state-bytes, audio-memory-bytes,
+    /// audio-fuel-per-sample, audio-epoch-deadline-ticks, max-audio-channels,
+    /// max-audio-sample-rate, max-shape-text-chars, max-shape-text-verbs,
+    /// max-svg-input-bytes, max-svg-verbs, max-typeset-verbs,
+    /// max-typeset-source-bytes, max-typeset-font-size-px, typeset-timeout-ms,
+    /// max-log-message-bytes, max-log-entries.
+    /// Keys and units are specified in docs/plugins.md; unknown keys are ignored.
+    /// This reports policy, not remaining fuel or memory. Budgets reset per call.
+    limits: func() -> list<tuple<string, u64>>;
 
     /// Host logging for diagnostic and debug output.
     log: func(message: string);
@@ -224,7 +263,7 @@ interface host {
 /// frame of the same size. The host enforces size, fuel, wall-clock and memory
 /// limits on every call; see `SandboxLimits` in `plugin-host`.
 interface frame-effects {
-    use types.{size, param-map, param-spec};
+    use types.{size, param-map, param-spec, diagnostic};
 
     /// One filter offered by an effect plugin.
     record effect-descriptor {
@@ -245,8 +284,8 @@ interface frame-effects {
     /// Apply filter `effect` to `pixels`: `size.width * size.height * 4` bytes of
     /// row-major straight-alpha sRGB RGBA8. Must return exactly the same number
     /// of bytes. `time-ticks` is the clip-local source time. The call is a pure
-    /// function of its arguments. Returns a diagnostic string on invalid input.
-    apply-frame: func(effect: string, pixels: list<u8>, size: size, params: param-map, time-ticks: s64) -> result<list<u8>, string>;
+    /// function of its arguments. Returns a diagnostic on invalid input.
+    apply-frame: func(effect: string, pixels: list<u8>, size: size, params: param-map, time-ticks: s64) -> result<list<u8>, diagnostic>;
 }
 
 /// Audio effects, added in API 0.2.2.
@@ -258,7 +297,7 @@ interface frame-effects {
 /// memory between calls. The host enforces block size, state size, fuel, wall-clock and
 /// memory limits on every call; see `SandboxLimits` in `plugin-host`.
 interface audio-effects {
-    use types.{param-map, param-spec};
+    use types.{param-map, param-spec, diagnostic};
 
     /// One audio filter offered by an audio-effect plugin.
     record audio-effect-descriptor {
@@ -282,7 +321,9 @@ interface audio-effects {
         /// Time of the first frame in the chain's own timeline, in ticks: clip-local for a
         /// clip chain, project time for a track chain.
         start-ticks: s64,
-        /// `frames * channels` samples. Unclipped; values may exceed 1.0.
+        /// `frames * channels` finite samples, frame-major interleaving. Unclipped;
+        /// values may exceed 1.0. Preserve channel order (stereo is left, right).
+        /// No channel-layout negotiation or planar format is implied.
         samples: list<f32>,
     }
 
@@ -298,9 +339,10 @@ interface audio-effects {
     list-audio-effects: func() -> list<audio-effect-descriptor>;
 
     /// Process one block with filter `effect`. `state` is `none` for the first block of a
-    /// signal and otherwise exactly what the previous call returned. The call is a pure
-    /// function of its arguments. Returns a diagnostic string on invalid input.
-    process-block: func(effect: string, block: audio-block, params: param-map, state: option<list<u8>>) -> result<block-output, string>;
+    /// signal; an empty blob is equivalent to none. Otherwise it is exactly the
+    /// nonempty blob the previous call returned. The call is a pure
+    /// function of its arguments. Returns a diagnostic on invalid input.
+    process-block: func(effect: string, block: audio-block, params: param-map, state: option<list<u8>>) -> result<block-output, diagnostic>;
 }
 
 /// World for audio-effect plugins (`kinds = ["audio-effect"]`): describe plus audio filters.
@@ -330,22 +372,17 @@ world effect-plugin {
     export frame-effects;
 }
 
-/// WebAssembly Component interface exported by AniMathIO plugins.
-world plugin {
+/// Pure vector generators. Frame and audio effects use their own worlds.
+world source-plugin {
     import host;
 
-    use types.{manifest, scene, param-map, size};
+    use types.{manifest, scene, param-map, size, diagnostic};
 
     /// Describe the plugin, its kinds and its parameter schema.
     export describe: func() -> manifest;
 
-    /// Render a vector scene for a clip-source plugin at a given time and canvas size.
-    export render-clip: func(params: param-map, time-ticks: s64, size: size) -> scene;
-
-    /// Reserved vector-scene effect hook (unused by the host; pixel effects use
-    /// the `effect-plugin` world). Kept so 0.2.0 components stay valid.
-    export apply-effect: func(input: scene, params: param-map, time-ticks: s64, size: size) -> scene;
-
-    /// Evaluate an animation value curve at a given time.
-    export evaluate-curve: func(time-ticks: s64, duration-ticks: s64, params: param-map) -> f64;
+    /// Render a vector scene, pure in its arguments. time-ticks is clip-local source
+    /// time in integer flicks (705600000 ticks/second). size is the render canvas.
+    /// An empty scene is valid; invalid geometry or traps fail the call.
+    export render-clip: func(params: param-map, time-ticks: s64, size: size) -> result<scene, diagnostic>;
 }

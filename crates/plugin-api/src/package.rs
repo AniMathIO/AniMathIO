@@ -17,6 +17,7 @@ pub const MAX_ENTRIES: usize = 16;
 
 /// Error creating, reading or extracting an `.amplugin` package.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PackageError {
     /// IO error reading or writing zip stream.
     #[error("io error: {0}")]

@@ -3,7 +3,7 @@
 
 wit_bindgen::generate!({
     path: "../../../crates/plugin-api/wit",
-    world: "plugin",
+    world: "source-plugin",
 });
 
 use animathio::plugin::host;
@@ -90,9 +90,13 @@ impl Guest for HelloPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "hello".to_string(),
-            version: "0.1.0".to_string(),
+            version: "1.0.0".to_string(),
             description: "Minimal example plugin: a filled circle".to_string(),
-            kinds: vec![PluginKind::ClipSource],
+            kinds: vec!["clip-source".into(), "com.example.circle".into()],
+            metadata: vec![
+                ("param.radius.unit".into(), "px".into()),
+                ("param.radius.label-key".into(), "hello.radius".into()),
+            ],
             params: vec![
                 ParamSpec {
                     id: "radius".to_string(),
@@ -120,7 +124,11 @@ impl Guest for HelloPlugin {
         }
     }
 
-    fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
+    fn render_clip(
+        params: Vec<ParamEntry>,
+        _time_ticks: i64,
+        size: Size,
+    ) -> Result<Scene, Diagnostic> {
         let radius = get_number(&params, "radius", 96.0) as f32;
         let color = get_color(
             &params,
@@ -132,26 +140,23 @@ impl Guest for HelloPlugin {
                 a: 255,
             },
         );
+        let ticks_per_second = host::limits()
+            .into_iter()
+            .find(|(key, _)| key == "ticks-per-second")
+            .map(|(_, value)| value)
+            .unwrap_or(705_600_000);
         host::log(&format!(
-            "hello: circle radius={radius} at {}x{}",
+            "hello: circle radius={radius} at {}x{} ({ticks_per_second} ticks/s)",
             size.width, size.height
         ));
 
-        Scene {
+        Ok(Scene {
             coordinate_space: CoordinateSpace::Canvas,
             elements: vec![DrawCommand::FillPath((
                 circle(size.width as f32 / 2.0, size.height as f32 / 2.0, radius),
                 color,
             ))],
-        }
-    }
-
-    fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {
-        input
-    }
-
-    fn evaluate_curve(_t: i64, _duration: i64, _params: Vec<ParamEntry>) -> f64 {
-        0.0
+        })
     }
 }
 

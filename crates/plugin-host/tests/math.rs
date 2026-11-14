@@ -223,12 +223,12 @@ fn latex_typesets_required_expressions() {
 }
 
 #[test]
-fn invalid_latex_returns_empty_scene_without_panicking() {
+fn invalid_latex_returns_a_diagnostic_without_panicking() {
     let tmp = tempfile::tempdir().unwrap();
     let mut host = PluginHost::new(tmp.path()).unwrap();
     let latex = load_plugin(&mut host, "latex");
 
-    let scene = host
+    let error = host
         .render_clip(
             &latex,
             &BTreeMap::new(),
@@ -236,11 +236,8 @@ fn invalid_latex_returns_empty_scene_without_panicking() {
             0,
             (640, 360),
         )
-        .unwrap();
-    assert!(
-        scene.elements.is_empty(),
-        "invalid LaTeX must not produce paths"
-    );
+        .unwrap_err();
+    assert!(error.to_string().contains("service-failed"));
 
     // The host stays usable after the failed typesetting call.
     let ok = host

@@ -9,7 +9,7 @@
 
 wit_bindgen::generate!({
     path: "../../crates/plugin-api/wit",
-    world: "plugin",
+    world: "source-plugin",
 });
 
 use animathio::plugin::host;
@@ -352,12 +352,39 @@ fn parse_expression(input: &str) -> Result<Expr, String> {
 // Graph items
 
 enum GraphItem {
-    Plot { expr: Expr, color: Color },
-    Point { x: f64, y: f64, color: Color },
-    Segment { x1: f64, y1: f64, x2: f64, y2: f64, color: Color },
-    Circle { cx: f64, cy: f64, r: f64, color: Color },
-    Polygon { points: Vec<(f64, f64)>, color: Color },
-    Vector { x1: f64, y1: f64, x2: f64, y2: f64, color: Color },
+    Plot {
+        expr: Expr,
+        color: Color,
+    },
+    Point {
+        x: f64,
+        y: f64,
+        color: Color,
+    },
+    Segment {
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        color: Color,
+    },
+    Circle {
+        cx: f64,
+        cy: f64,
+        r: f64,
+        color: Color,
+    },
+    Polygon {
+        points: Vec<(f64, f64)>,
+        color: Color,
+    },
+    Vector {
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        color: Color,
+    },
 }
 
 fn parse_color(value: &str, default: Color) -> Color {
@@ -543,23 +570,47 @@ fn ellipse_verbs(cx: f32, cy: f32, rx: f32, ry: f32) -> Vec<PathVerb> {
     vec![
         PathVerb::MoveTo(Point { x: cx + rx, y: cy }),
         PathVerb::CubicTo((
-            Point { x: cx + rx, y: cy + ky },
-            Point { x: cx + kx, y: cy + ry },
+            Point {
+                x: cx + rx,
+                y: cy + ky,
+            },
+            Point {
+                x: cx + kx,
+                y: cy + ry,
+            },
             Point { x: cx, y: cy + ry },
         )),
         PathVerb::CubicTo((
-            Point { x: cx - kx, y: cy + ry },
-            Point { x: cx - rx, y: cy + ky },
+            Point {
+                x: cx - kx,
+                y: cy + ry,
+            },
+            Point {
+                x: cx - rx,
+                y: cy + ky,
+            },
             Point { x: cx - rx, y: cy },
         )),
         PathVerb::CubicTo((
-            Point { x: cx - rx, y: cy - ky },
-            Point { x: cx - kx, y: cy - ry },
+            Point {
+                x: cx - rx,
+                y: cy - ky,
+            },
+            Point {
+                x: cx - kx,
+                y: cy - ry,
+            },
             Point { x: cx, y: cy - ry },
         )),
         PathVerb::CubicTo((
-            Point { x: cx + kx, y: cy - ry },
-            Point { x: cx + rx, y: cy - ky },
+            Point {
+                x: cx + kx,
+                y: cy - ry,
+            },
+            Point {
+                x: cx + rx,
+                y: cy - ky,
+            },
             Point { x: cx + rx, y: cy },
         )),
         PathVerb::Close,
@@ -624,9 +675,10 @@ impl Guest for GraphPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "graph".to_string(),
-            version: "0.1.0".to_string(),
+            version: "1.0.0".to_string(),
             description: "Mafs-like coordinate plane with plots and shapes".to_string(),
-            kinds: vec![PluginKind::ClipSource],
+            kinds: vec!["clip-source".into()],
+            metadata: vec![],
             params: vec![
                 ParamSpec {
                     id: "x_min".to_string(),
@@ -716,7 +768,11 @@ impl Guest for GraphPlugin {
         }
     }
 
-    fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
+    fn render_clip(
+        params: Vec<ParamEntry>,
+        _time_ticks: i64,
+        size: Size,
+    ) -> Result<Scene, Diagnostic> {
         let x_min = get_number(&params, "x_min", -5.0);
         let x_max = get_number(&params, "x_max", 5.0);
         let y_min = get_number(&params, "y_min", -5.0);
@@ -738,7 +794,10 @@ impl Guest for GraphPlugin {
         let items_text = get_string(&params, "items", "plot y=x^2");
 
         if x_max <= x_min || y_max <= y_min {
-            return Scene { coordinate_space: CoordinateSpace::Canvas, elements: Vec::new() };
+            return Ok(Scene {
+                coordinate_space: CoordinateSpace::Canvas,
+                elements: Vec::new(),
+            });
         }
         let bounds = (x_min, x_max, y_min, y_max);
 
@@ -769,10 +828,7 @@ impl Guest for GraphPlugin {
                 let p1 = map_point(gx, y_min, bounds, size);
                 let p2 = map_point(gx, y_max, bounds, size);
                 elements.push(DrawCommand::StrokePath((
-                    vec![
-                        PathVerb::MoveTo(p1),
-                        PathVerb::LineTo(p2),
-                    ],
+                    vec![PathVerb::MoveTo(p1), PathVerb::LineTo(p2)],
                     StrokeStyle {
                         width: 1.0,
                         color: grid_color,
@@ -787,10 +843,7 @@ impl Guest for GraphPlugin {
                 let p1 = map_point(x_min, gy, bounds, size);
                 let p2 = map_point(x_max, gy, bounds, size);
                 elements.push(DrawCommand::StrokePath((
-                    vec![
-                        PathVerb::MoveTo(p1),
-                        PathVerb::LineTo(p2),
-                    ],
+                    vec![PathVerb::MoveTo(p1), PathVerb::LineTo(p2)],
                     StrokeStyle {
                         width: 1.0,
                         color: grid_color,
@@ -807,10 +860,7 @@ impl Guest for GraphPlugin {
                 let p1 = map_point(x_min, 0.0, bounds, size);
                 let p2 = map_point(x_max, 0.0, bounds, size);
                 elements.push(DrawCommand::StrokePath((
-                    vec![
-                        PathVerb::MoveTo(p1),
-                        PathVerb::LineTo(p2),
-                    ],
+                    vec![PathVerb::MoveTo(p1), PathVerb::LineTo(p2)],
                     stroke,
                 )));
             }
@@ -818,10 +868,7 @@ impl Guest for GraphPlugin {
                 let p1 = map_point(0.0, y_min, bounds, size);
                 let p2 = map_point(0.0, y_max, bounds, size);
                 elements.push(DrawCommand::StrokePath((
-                    vec![
-                        PathVerb::MoveTo(p1),
-                        PathVerb::LineTo(p2),
-                    ],
+                    vec![PathVerb::MoveTo(p1), PathVerb::LineTo(p2)],
                     stroke,
                 )));
             }
@@ -834,7 +881,7 @@ impl Guest for GraphPlugin {
                 if tick.abs() > f64::EPSILON {
                     let p = map_point(tick, 0.0, bounds, size);
                     let label = format!("{tick:.1}");
-                    for contour in host::shape_text(&label, 12.0) {
+                    for contour in host::shape_text(&label, 12.0)? {
                         let offset: Vec<PathVerb> = contour
                             .iter()
                             .map(|verb| offset_verb(verb, p.x, p.y + 4.0))
@@ -849,7 +896,7 @@ impl Guest for GraphPlugin {
                 if tick.abs() > f64::EPSILON {
                     let p = map_point(0.0, tick, bounds, size);
                     let label = format!("{tick:.1}");
-                    for contour in host::shape_text(&label, 12.0) {
+                    for contour in host::shape_text(&label, 12.0)? {
                         let offset: Vec<PathVerb> = contour
                             .iter()
                             .map(|verb| offset_verb(verb, p.x - 18.0, p.y - 6.0))
@@ -900,14 +947,17 @@ impl Guest for GraphPlugin {
                         *color,
                     )));
                 }
-                GraphItem::Segment { x1, y1, x2, y2, color } => {
+                GraphItem::Segment {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    color,
+                } => {
                     let p1 = map_point(*x1, *y1, bounds, size);
                     let p2 = map_point(*x2, *y2, bounds, size);
                     elements.push(DrawCommand::StrokePath((
-                        vec![
-                            PathVerb::MoveTo(p1),
-                            PathVerb::LineTo(p2),
-                        ],
+                        vec![PathVerb::MoveTo(p1), PathVerb::LineTo(p2)],
                         StrokeStyle {
                             width: 2.0,
                             color: *color,
@@ -935,7 +985,13 @@ impl Guest for GraphPlugin {
                         elements.push(DrawCommand::FillPath((path, *color)));
                     }
                 }
-                GraphItem::Vector { x1, y1, x2, y2, color } => {
+                GraphItem::Vector {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    color,
+                } => {
                     elements.push(DrawCommand::StrokePath((
                         vector_verbs(*x1, *y1, *x2, *y2, bounds, size),
                         StrokeStyle {
@@ -949,15 +1005,10 @@ impl Guest for GraphPlugin {
             }
         }
 
-        Scene { coordinate_space: CoordinateSpace::Canvas, elements }
-    }
-
-    fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {
-        input
-    }
-
-    fn evaluate_curve(_t: i64, _duration: i64, _params: Vec<ParamEntry>) -> f64 {
-        0.0
+        Ok(Scene {
+            coordinate_space: CoordinateSpace::Canvas,
+            elements,
+        })
     }
 }
 

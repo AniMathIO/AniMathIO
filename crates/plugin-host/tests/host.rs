@@ -264,13 +264,13 @@ fn output_cache_hits_on_identical_params() {
 }
 
 #[test]
-fn oversized_shape_text_returns_empty_scene() {
+fn oversized_shape_text_returns_a_diagnostic() {
     let tmp = tempfile::tempdir().unwrap();
     let mut host = PluginHost::new(tmp.path()).unwrap();
     let text = load_plugin(&mut host, "text");
 
     let huge = "x".repeat(20_000);
-    let scene = host
+    let error = host
         .render_clip(
             &text,
             &BTreeMap::new(),
@@ -278,11 +278,8 @@ fn oversized_shape_text_returns_empty_scene() {
             0,
             (1280, 720),
         )
-        .unwrap();
-    assert!(
-        scene.elements.is_empty(),
-        "oversized text must be rejected by the host shaper"
-    );
+        .unwrap_err();
+    assert!(error.to_string().contains("limit-exceeded"));
 }
 
 #[test]

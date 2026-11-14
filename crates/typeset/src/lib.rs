@@ -34,11 +34,11 @@ use typst_layout::PagedDocument;
 const MATH_FONT: &[u8] = include_bytes!("../fonts/STIXTwoMath-Regular.otf");
 
 /// Maximum UTF-8 bytes accepted for a single math source expression.
-const MAX_SOURCE_BYTES: usize = 4 * 1024;
+pub const MAX_SOURCE_BYTES: usize = 4 * 1024;
 /// Maximum accepted font size in canvas pixels.
-const MAX_FONT_SIZE: f32 = 1_000.0;
+pub const MAX_FONT_SIZE: f32 = 1_000.0;
 /// How long a single typesetting call may take before it is abandoned.
-const TYPESET_TIMEOUT: Duration = Duration::from_secs(2);
+pub const TYPESET_TIMEOUT: Duration = Duration::from_secs(2);
 /// Number of cached typesetting results kept in memory.
 const CACHE_CAPACITY: usize = 512;
 

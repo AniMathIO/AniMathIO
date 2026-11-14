@@ -2,7 +2,7 @@
 
 wit_bindgen::generate!({
     path: "../../crates/plugin-api/wit",
-    world: "plugin",
+    world: "source-plugin",
 });
 
 use animathio::plugin::host;
@@ -100,7 +100,7 @@ fn fitted_text(
     height: f32,
     color: Color,
     size: Size,
-) -> Scene {
+) -> Result<Scene, Diagnostic> {
     let box_width = width * size.width as f32;
     let box_height = height * size.height as f32;
     let lines: Vec<_> = text.lines().collect();
@@ -118,7 +118,7 @@ fn fitted_text(
     let top = (box_height - count * line_height) / 2.0;
     let mut elements = Vec::new();
     for (line, text) in lines.iter().enumerate() {
-        let contours = host::shape_text(text, font);
+        let contours = host::shape_text(text, font)?;
         let min_x = contours
             .iter()
             .flatten()
@@ -154,19 +154,20 @@ fn fitted_text(
             elements.push(DrawCommand::FillPath((path, color)));
         }
     }
-    Scene {
+    Ok(Scene {
         coordinate_space: CoordinateSpace::Normalized,
         elements,
-    }
+    })
 }
 
 impl Guest for TextPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "text".to_string(),
-            version: "0.1.0".to_string(),
+            version: "1.0.0".to_string(),
             description: "Host-shaped text with size, colour and alignment".to_string(),
-            kinds: vec![PluginKind::ClipSource],
+            kinds: vec!["clip-source".into()],
+            metadata: vec![],
             params: vec![
                 ParamSpec {
                     id: "fit_width".into(),
@@ -241,7 +242,11 @@ impl Guest for TextPlugin {
         }
     }
 
-    fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
+    fn render_clip(
+        params: Vec<ParamEntry>,
+        _time_ticks: i64,
+        size: Size,
+    ) -> Result<Scene, Diagnostic> {
         let text = get_string(&params, "text", "AniMathIO");
         let font_size = get_number(&params, "font_size", 48.0) as f32;
         let color = get_color(
@@ -264,7 +269,7 @@ impl Guest for TextPlugin {
             }
             // Generic TextRun uses the host's wrapped, embedded-font layout.
             // Keep coordinates and font size relative to the unscaled canvas.
-            return Scene {
+            return Ok(Scene {
                 coordinate_space: CoordinateSpace::Normalized,
                 elements: vec![DrawCommand::TextRun(TextElement {
                     align: match align.as_str() {
@@ -278,10 +283,10 @@ impl Guest for TextPlugin {
                     y: 0.0,
                     color,
                 })],
-            };
+            });
         }
 
-        let contours = host::shape_text(&text, font_size);
+        let contours = host::shape_text(&text, font_size)?;
 
         let mut min_x = f32::MAX;
         let mut max_x = f32::MIN;
@@ -309,18 +314,10 @@ impl Guest for TextPlugin {
             elements.push(DrawCommand::FillPath((offset, color)));
         }
 
-        Scene {
+        Ok(Scene {
             coordinate_space: CoordinateSpace::Canvas,
             elements,
-        }
-    }
-
-    fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {
-        input
-    }
-
-    fn evaluate_curve(_t: i64, _duration: i64, _params: Vec<ParamEntry>) -> f64 {
-        0.0
+        })
     }
 }
 

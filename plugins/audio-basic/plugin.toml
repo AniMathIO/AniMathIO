@@ -1,7 +1,7 @@
-api_version = "0.2.2"
+api_version = "1.0.0"
 id = "org.animathio.audio-basic"
 name = "Basic Audio Effects"
-version = "0.1.0"
+version = "1.0.0"
 description = "Gain/trim, 3-band EQ, compressor, noise gate, high-pass filter and a voice-cleanup preset"
 kinds = ["audio-effect"]
 capabilities = []

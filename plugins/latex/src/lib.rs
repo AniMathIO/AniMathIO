@@ -2,7 +2,7 @@
 
 wit_bindgen::generate!({
     path: "../../crates/plugin-api/wit",
-    world: "plugin",
+    world: "source-plugin",
 });
 
 use animathio::plugin::host;
@@ -85,9 +85,10 @@ impl Guest for LatexPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "latex".to_string(),
-            version: "0.1.0".to_string(),
+            version: "1.0.0".to_string(),
             description: "LaTeX/Typst math typeset by the host into vector outlines".to_string(),
-            kinds: vec![PluginKind::ClipSource],
+            kinds: vec!["clip-source".into()],
+            metadata: vec![],
             params: vec![
                 ParamSpec {
                     id: "units".into(),
@@ -160,7 +161,11 @@ impl Guest for LatexPlugin {
         }
     }
 
-    fn render_clip(params: Vec<ParamEntry>, _time_ticks: i64, size: Size) -> Scene {
+    fn render_clip(
+        params: Vec<ParamEntry>,
+        _time_ticks: i64,
+        size: Size,
+    ) -> Result<Scene, Diagnostic> {
         let source = get_string(&params, "source", r"\frac{a}{b}");
         let mode = get_string(&params, "mode", "latex");
         let mut font_size = get_number(&params, "size", 48.0) as f32;
@@ -184,12 +189,12 @@ impl Guest for LatexPlugin {
             "typst" => MathMode::Typst,
             _ => MathMode::Latex,
         };
-        let result = host::typeset_math(&source, math_mode, font_size);
+        let result = host::typeset_math(&source, math_mode, font_size)?;
         if result.paths.is_empty() {
-            return Scene {
+            return Ok(Scene {
                 coordinate_space: CoordinateSpace::Canvas,
                 elements: Vec::new(),
-            };
+            });
         }
 
         let raw_width = result.bbox.max_x - result.bbox.min_x;
@@ -238,18 +243,10 @@ impl Guest for LatexPlugin {
             }
         }
 
-        Scene {
+        Ok(Scene {
             coordinate_space: CoordinateSpace::Canvas,
             elements,
-        }
-    }
-
-    fn apply_effect(input: Scene, _params: Vec<ParamEntry>, _t: i64, _size: Size) -> Scene {
-        input
-    }
-
-    fn evaluate_curve(_t: i64, _duration: i64, _params: Vec<ParamEntry>) -> f64 {
-        0.0
+        })
     }
 }
 
