@@ -12,12 +12,21 @@
 
 mod animations;
 mod authoring;
+mod beats;
+pub use beats::{
+    BeatDetectParams, BeatDetection, BeatInfo, BeatMarkerOptions, BeatMarkersParams,
+    BeatMarkersResult, BeatSelection, CutShift, MarkerAddParams, MarkerAdded, SyncCutsParams,
+    SyncCutsResult, SyncMode, SyncSource, add_marker_command, analyze_beats, apply_beat_markers,
+    apply_sync_cuts, markers_at_beats_command, select_beats, sync_cuts_command,
+};
 mod autocut;
 pub use autocut::{
     Autocut, AutocutParams, AutocutProposal, AutocutReason, SilenceMetric, apply_autocuts,
     autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
     propose_autocuts_cancellable,
 };
+mod reframe;
+pub use reframe::{ReframeDraft, ReframeParams, analyse_reframe, auto_reframe, reframe_command};
 mod client;
 mod edit;
 mod effects;
@@ -28,6 +37,7 @@ mod headless;
 mod media_import;
 mod method;
 pub use media_import::prepare_media_import;
+mod captions;
 mod path;
 mod server;
 mod subtitles;
@@ -38,6 +48,11 @@ pub use title_presets::{
     title_presets,
 };
 
+pub use captions::{
+    CaptionPosition, CaptionStyleInfo, CaptionStyleParams, SubtitleStyleParams,
+    SubtitleStyleResult, apply_caption_style, caption_style_command, caption_styles,
+    clip_caption_style, parse_caption_color,
+};
 pub use subtitles::{
     ProgressFn, SUBTITLE_TRACK, SubtitleCueInfo, SubtitleDraft, SubtitleExportParams,
     SubtitleExportResult, SubtitleGenerateParams, SubtitleImportParams, SubtitleProgress,
@@ -76,4 +91,7 @@ pub use server::{
 };
 
 mod templates;
-pub use templates::{Placeholder, ProjectTemplate, TemplateManifest, project_templates};
+pub use templates::{
+    MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, delete_user_template,
+    project_templates, save_user_template, template_catalog, template_library_dir,
+};

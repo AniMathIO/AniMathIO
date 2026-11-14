@@ -89,6 +89,16 @@ impl InOut {
     }
 }
 
+/// Where forward playback starts: from the playhead, or from the start when the
+/// playhead is at or past the end (otherwise play would stop immediately).
+pub(crate) fn play_start(position: Time, duration: Time) -> Time {
+    if position >= duration || position < Time(0) {
+        Time(0)
+    } else {
+        position
+    }
+}
+
 /// Return a bounded position and whether playback has reached the end. Handles reverse
 /// shuttle and arbitrarily large overshoots without losing the loop remainder.
 pub(crate) fn playback_position(
@@ -251,6 +261,15 @@ pub(crate) fn write_on_command(clip: &Clip, seconds: f64) -> Option<Command> {
 mod tests {
     use super::*;
     use animathio_core::{ClipKind, FrameRate, History, Track, TrackId};
+
+    #[test]
+    fn play_from_the_end_restarts_at_the_beginning() {
+        let duration = Time(1000);
+        assert_eq!(play_start(Time(1000), duration), Time(0));
+        assert_eq!(play_start(Time(5000), duration), Time(0));
+        assert_eq!(play_start(Time(999), duration), Time(999));
+        assert_eq!(play_start(Time(0), duration), Time(0));
+    }
     #[test]
     fn ripple_delete_uses_clip_or_explicit_range() {
         let range = TimeRange::new(Time(2), Time(4)).unwrap();

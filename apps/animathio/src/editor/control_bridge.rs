@@ -15,6 +15,10 @@ impl Editor {
                 return;
             };
             self.finish_color_edit(cx);
+            if let Call::AutoReframe { params } = &call {
+                self.start_reframe(params.clone(), Some(reply), cx);
+                continue;
+            }
             if let Call::ProposeAutocuts { params } = &call {
                 let project = self.project.clone();
                 let assets = self.assets.clone();
@@ -28,6 +32,48 @@ impl Editor {
                         })
                         .await;
                     let _ = reply.send(result);
+                })
+                .detach();
+                continue;
+            }
+            if let Call::BeatsDetect { params } = &call {
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                let params = params.clone();
+                cx.spawn(async move |_, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            Ok::<_, ControlError>(serde_json::to_value(
+                                animathio_control::analyze_beats(&project, &assets, &params)?,
+                            )?)
+                        })
+                        .await;
+                    let _ = reply.send(result);
+                })
+                .detach();
+                continue;
+            }
+            if let Some(detect) = super::markers::beat_analysis_params(&call) {
+                let expected = self.project.clone();
+                let snapshot = expected.clone();
+                let assets = self.assets.clone();
+                cx.spawn(async move |this, cx| {
+                    let analysed = cx
+                        .background_spawn(async move {
+                            animathio_control::analyze_beats(&snapshot, &assets, &detect)
+                        })
+                        .await;
+                    let _ = this.update(cx, |editor, cx| {
+                        let result = analysed.and_then(|detection| {
+                            if editor.project != expected {
+                                return Err(ControlError::Other(
+                                    "project changed during beat analysis; retry".into(),
+                                ));
+                            }
+                            editor.apply_beat_call(&call, Some(&detection), cx)
+                        });
+                        let _ = reply.send(result);
+                    });
                 })
                 .detach();
                 continue;
@@ -225,8 +271,7 @@ impl Editor {
             })?,
             Call::ProjectOpen { path } => {
                 self.error = None;
-                self.open_path(&path, cx);
-                if self.path.as_deref() != Some(path.as_path()) {
+                if !self.try_open_path(&path, cx) {
                     return Err(ControlError::Other(
                         self.error
                             .take()
@@ -387,6 +432,27 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(result)?
             }
+            Call::MarkersList => serde_json::to_value(self.project.markers())?,
+            Call::MarkersAdd { params } => {
+                let (command, id) = animathio_control::add_marker_command(&self.project, &params)?;
+                self.history.execute(&mut self.project, &command)?;
+                self.after_edit(cx);
+                serde_json::to_value(animathio_control::MarkerAdded { id })?
+            }
+            Call::MarkersRemove { id } => {
+                self.history
+                    .execute(&mut self.project, &Command::RemoveMarker { id })?;
+                self.after_edit(cx);
+                serde_json::to_value(())?
+            }
+            Call::BeatsDetect { .. } => {
+                return Err(ControlError::Other(
+                    "beat analysis is handled asynchronously".into(),
+                ));
+            }
+            call @ (Call::BeatsAddMarkers { .. } | Call::SyncCutsToBeats { .. }) => {
+                self.apply_beat_call(&call, None, cx)?
+            }
             Call::TrimSilence { params } => {
                 let result = animathio_control::trim_silence(
                     &mut self.project,
@@ -397,6 +463,11 @@ impl Editor {
                 self.after_edit(cx);
                 serde_json::to_value(result)?
             }
+            Call::AutoReframe { .. } => {
+                return Err(ControlError::Other(
+                    "auto reframe is handled asynchronously".into(),
+                ));
+            }
             Call::SubtitlesGenerate { .. } => {
                 return Err(ControlError::Other(
                     "subtitle generation is handled asynchronously".into(),
@@ -404,6 +475,15 @@ impl Editor {
             }
             Call::SubtitlesExport { params } => {
                 serde_json::to_value(animathio_control::export_subtitles(&self.project, &params)?)?
+            }
+            Call::SubtitlesStyle { params } => {
+                let result = animathio_control::apply_caption_style(
+                    &mut self.project,
+                    &mut self.history,
+                    &params,
+                )?;
+                self.after_edit(cx);
+                serde_json::to_value(result)?
             }
             Call::SubtitlesImport { params } => {
                 let result = animathio_control::import_subtitles(
@@ -425,11 +505,8 @@ impl Editor {
                     self.plugin_host.as_ref(),
                 )?;
                 if replace {
-                    self.marks = InOut::default();
-                    self.shuttle = Shuttle::default();
+                    self.reset_project_session();
                     self.path = None;
-                    self.clear_selection();
-                    self.selected_field = None;
                     self.seek_to(Time(0), cx);
                 }
                 self.next_id = next_id(&self.project);
@@ -500,16 +577,14 @@ impl Editor {
             eprintln!("warning: {warning}");
         }
         let _ = self.clock.pause();
-        self.marks = InOut::default();
-        self.shuttle = Shuttle::default();
+        self.audio_generation = self.audio_generation.wrapping_add(1);
+        self.reset_project_session();
         self.project = project;
         self.history = History::default();
         self.assets = Arc::new(assets.into_iter().map(|a| (a.id, a.bytes)).collect());
         self.path = None;
         self.position = Time(0);
         self.playing = false;
-        self.clear_selection();
-        self.selected_field = None;
         self.pool = AudioPool::default();
         if let Err(error) = load_audio(&mut self.pool, &self.project, &self.assets) {
             self.error = Some(error);
@@ -519,6 +594,7 @@ impl Editor {
         self.next_id = next_id(&self.project);
         self.dirty = true;
         self.worker.load(self.assets.clone());
+        self.request_render(Time(0));
         Ok(())
     }
 }

@@ -43,6 +43,23 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::Mutex;
 
+#[derive(Deserialize, JsonSchema)]
+struct CreateFromTemplate {
+    /// Catalog identity from `list_templates`.
+    template: String,
+    /// New .amio destination; existing files are refused.
+    output: String,
+    /// Placeholder clip id to replacement text.
+    #[serde(default)]
+    text: std::collections::BTreeMap<String, String>,
+    /// Placeholder clip id to media file path.
+    #[serde(default)]
+    media: std::collections::BTreeMap<String, String>,
+    /// Crop to fill the box; false contains the entire source.
+    #[serde(default)]
+    cover: bool,
+}
+
 /// Shared control backend: a connected editor or a headless project.
 pub(crate) type Backend = Box<dyn ControlHandler + Send>;
 
@@ -122,6 +139,34 @@ pub(crate) struct AddGraph {
     pub(crate) draw_duration_ms: Option<f64>,
 }
 
+/// An id written as a JSON string (`"3"`) or number (`3`); `describe_timeline`
+/// prints ids as numbers, so agents naturally pass them back that way.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LenientId {
+    Text(String),
+    Number(u64),
+}
+
+impl From<LenientId> for String {
+    fn from(id: LenientId) -> Self {
+        match id {
+            LenientId::Text(text) => text,
+            LenientId::Number(number) => number.to_string(),
+        }
+    }
+}
+
+fn lenient_id<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    LenientId::deserialize(deserializer).map(String::from)
+}
+
+fn lenient_opt_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<LenientId>::deserialize(deserializer).map(|id| id.map(String::from))
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddMedia {
     pub(crate) path: String,
@@ -129,6 +174,8 @@ pub(crate) struct AddMedia {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddAnimation {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) target_id: String,
     pub(crate) kind: String,
     pub(crate) duration_ms: f64,
@@ -137,6 +184,8 @@ pub(crate) struct AddAnimation {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct UpdateElement {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) placement: Option<Placement>,
     pub(crate) time_frame: Option<TimeFrame>,
@@ -164,10 +213,16 @@ pub(crate) struct TimeFrame {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddTransitionArgs {
     /// Track id; optional, narrows the `at_time_ms` search.
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) track: Option<String>,
     /// Outgoing clip id (its end is the cut).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) between_clip_a: Option<String>,
     /// Incoming clip id (its start is the cut).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) clip_b: Option<String>,
     /// Pick the edit point nearest to this time instead of naming clips.
     pub(crate) at_time_ms: Option<f64>,
@@ -181,6 +236,8 @@ pub(crate) struct AddTransitionArgs {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ElementId {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
 }
 
@@ -194,6 +251,8 @@ pub(crate) struct SetCanvas {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SetParam {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) value: f64,
@@ -202,6 +261,8 @@ pub(crate) struct SetParam {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddEffect {
     /// Clip id.
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     /// Plugin id from `list_effects`, e.g. `org.animathio.effects-basic`.
     pub(crate) plugin: String,
@@ -229,9 +290,13 @@ pub(crate) struct ApplyAnimationPreset {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddAudioEffect {
     /// Clip id whose own audio chain to extend (give exactly one of `id` and `track`).
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) id: Option<String>,
     /// Track id whose audio chain to extend; the effect then processes the sum of the track's
     /// clips before the track gain.
+    #[serde(default, deserialize_with = "lenient_opt_id")]
+    #[schemars(with = "Option<String>")]
     pub(crate) track: Option<String>,
     /// Plugin id from `list_audio_effects`, e.g. `org.animathio.audio-basic`.
     pub(crate) plugin: String,
@@ -245,6 +310,8 @@ pub(crate) struct AddAudioEffect {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AddKeyframe {
+    #[serde(deserialize_with = "lenient_id")]
+    #[schemars(with = "String")]
     pub(crate) id: String,
     pub(crate) target: String,
     pub(crate) time_ms: f64,
@@ -383,6 +450,95 @@ pub(crate) struct ApplyAutocuts {
     proposal: serde_json::Value,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct AutoReframe {
+    /// Target aspect: 9:16 (default), 1:1 or 4:5.
+    aspect: Option<String>,
+    /// Tracking smoothness in 0..=1 (default 0.5).
+    smoothness: Option<f64>,
+    /// Video clip ids; omitted or empty selects all video clips.
+    clips: Option<Vec<u64>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct AddMarker {
+    /// Marker position in timeline milliseconds.
+    time_ms: f64,
+    /// Display name (default empty).
+    name: Option<String>,
+    /// Palette colour: red, orange, yellow, green, cyan, blue (default), purple or pink.
+    color: Option<String>,
+    /// Free-form note.
+    note: Option<String>,
+    /// Length in milliseconds for a range marker; omit for a point marker.
+    duration_ms: Option<f64>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct RemoveMarker {
+    /// Numeric marker id from `list_markers`.
+    id: u64,
+}
+#[derive(Deserialize, JsonSchema)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct DetectBeats {
+    /// Analyse one clip (video resolves to its linked audio); omit for the whole mix.
+    clip: Option<u64>,
+    /// Analyse one track's mixed audio.
+    track: Option<u64>,
+    /// Inclusive start of the analysis range in milliseconds (requires `to_ms`).
+    from_ms: Option<f64>,
+    /// Exclusive end of the analysis range in milliseconds (requires `from_ms`).
+    to_ms: Option<f64>,
+    /// Slowest tempo considered (default 60).
+    min_bpm: Option<f64>,
+    /// Fastest tempo considered (default 200).
+    max_bpm: Option<f64>,
+    /// Force this tempo instead of estimating it.
+    bpm: Option<f64>,
+    /// Beats per bar for downbeat picking (default 4).
+    beats_per_bar: Option<u32>,
+    /// Also add a marker at each selected beat (one undo step).
+    #[serde(default)]
+    add_markers: bool,
+    /// With `add_markers`: use every Nth beat (default 1).
+    every: Option<u32>,
+    /// With `add_markers`: only downbeats.
+    #[serde(default)]
+    downbeats_only: bool,
+    /// With `add_markers`: marker colour (default cyan).
+    color: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct SyncCutsToBeats {
+    /// Numeric ids of the clips whose cut points are edited. Linked companions follow.
+    clips: Vec<u64>,
+    /// Snap to `beats` (default), `markers` or `both`.
+    source: Option<String>,
+    /// `snap` (default) moves existing cut points to the nearest target as roll edits;
+    /// `split` cuts the clips into segments at the targets inside them.
+    mode: Option<String>,
+    /// Largest distance a cut may move in milliseconds (default 250).
+    max_shift_ms: Option<f64>,
+    /// `split` only: smallest segment in milliseconds (default 100).
+    min_segment_ms: Option<f64>,
+    /// Round edits to the frame grid (default true).
+    frame_align: Option<bool>,
+    /// Use every Nth beat (default 1).
+    every: Option<u32>,
+    /// Use only downbeats.
+    #[serde(default)]
+    downbeats_only: bool,
+    /// Analyse this clip's audio for beats (default: the whole mix).
+    analyze_clip: Option<u64>,
+    /// Analyse this track's audio for beats.
+    analyze_track: Option<u64>,
+    /// Force this tempo instead of estimating it.
+    bpm: Option<f64>,
+    /// Beats per bar for downbeat picking (default 4).
+    beats_per_bar: Option<u32>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AutoSubtitles {
     /// Whisper model size: "tiny" (78 MB), "base" (148 MB, default) or "small" (488 MB).
@@ -406,6 +562,71 @@ pub(crate) struct AutoSubtitles {
     pub(crate) max_chars_per_line: Option<usize>,
     /// Most lines per subtitle. Default 2.
     pub(crate) max_lines: Option<usize>,
+    /// Caption style: "classic" (default, white text on a translucent bar), "word-highlight"
+    /// (active word on an accent pill), "karaoke" (words fill with the accent colour),
+    /// "pop" (active word scales up), "one-word" (one big word at a time) or "bold-outline"
+    /// (big uppercase type with a thick outline, centred on 9:16). Word timings from the
+    /// recogniser drive the animation.
+    pub(crate) style: Option<String>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
+}
+
+/// Optional overrides of a caption style.
+#[derive(Deserialize, JsonSchema, Default)]
+pub(crate) struct CaptionLook {
+    /// Font size relative to the shorter canvas dimension (0.01-0.2; style default, about 0.04-0.06).
+    pub(crate) font_size: Option<f64>,
+    /// Text colour as "#RRGGBB" or "#RRGGBBAA". Default white.
+    pub(crate) color: Option<String>,
+    /// Colour of the active word (pill, fill or pop), "#RRGGBB[AA]". Default yellow.
+    pub(crate) accent: Option<String>,
+    /// Outline colour, "#RRGGBB[AA]". Default black.
+    pub(crate) outline: Option<String>,
+    /// "top", "middle" or "bottom" inside the safe area (style default: bottom; bold-outline
+    /// on a portrait canvas: middle).
+    pub(crate) position: Option<String>,
+    /// Words per line, 0 to fit the box width. Style default (bold-outline: 3).
+    pub(crate) max_words: Option<u32>,
+}
+
+impl CaptionLook {
+    fn style_params(
+        &self,
+        style: Option<&str>,
+    ) -> Result<animathio_control::CaptionStyleParams, McpError> {
+        let color = |text: &Option<String>| {
+            text.as_deref()
+                .map(animathio_control::parse_caption_color)
+                .transpose()
+                .map_err(mcp_error)
+        };
+        Ok(animathio_control::CaptionStyleParams {
+            style: style.unwrap_or("classic").to_owned(),
+            font_size: self.font_size,
+            color: color(&self.color)?,
+            accent: color(&self.accent)?,
+            outline: color(&self.outline)?,
+            position: self
+                .position
+                .as_deref()
+                .map(animathio_control::CaptionPosition::parse)
+                .transpose()
+                .map_err(mcp_error)?,
+            max_words: self.max_words,
+        })
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct SetCaptionStyle {
+    /// Style id: "classic", "word-highlight", "karaoke", "pop", "one-word" or "bold-outline".
+    pub(crate) style: String,
+    /// Numeric id of the track holding the captions; default: every track named "Subtitles*"
+    /// that has caption clips.
+    pub(crate) track: Option<u64>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -429,6 +650,10 @@ pub(crate) struct ImportSubtitles {
     /// Shift all cues by this many milliseconds (may be negative). Default 0.
     #[serde(default)]
     pub(crate) offset_ms: f64,
+    /// Caption style (see `auto_subtitles`); words are spread evenly over each cue.
+    pub(crate) style: Option<String>,
+    #[serde(flatten)]
+    pub(crate) look: CaptionLook,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -517,7 +742,7 @@ fn subtitle_result_json(result: &animathio_control::SubtitleResult) -> serde_jso
     json!({
         "language": result.language,
         "track": result.added.map(|a| a.track_id.0),
-        "background_track": result.added.map(|a| a.background_track_id.0),
+        "background_track": result.added.and_then(|a| a.background_track_id).map(|id| id.0),
         "first_clip": result.added.map(|a| a.first_clip.0),
         "cues": result.cues.iter().map(|c| json!({
             "from_ms": ticks_to_ms(c.start),
@@ -722,6 +947,54 @@ fn find_edit_point(
         .min_by_key(|candidate| candidate.3)
         .map(|(track, a, b, _)| (track, a, b))
         .ok_or_else(|| invalid("no edit point between adjacent clips found"))
+}
+
+fn parse_marker_color(value: Option<&str>) -> Result<animathio_core::MarkerColor, McpError> {
+    value.map_or(Ok(animathio_core::MarkerColor::default()), |name| {
+        animathio_core::MarkerColor::parse(name).ok_or_else(|| {
+            invalid("color must be red, orange, yellow, green, cyan, blue, purple or pink")
+        })
+    })
+}
+
+fn marker_json(marker: &animathio_core::Marker) -> serde_json::Value {
+    json!({
+        "id": marker.id.0,
+        "time_ms": ticks_to_ms(marker.time),
+        "ticks": marker.time.0,
+        "duration_ms": marker.duration.map(ticks_to_ms),
+        "name": marker.name,
+        "color": marker.color.name(),
+        "note": marker.note,
+    })
+}
+
+fn beat_range(from_ms: Option<f64>, to_ms: Option<f64>) -> Result<Option<TimeRange>, McpError> {
+    match (from_ms, to_ms) {
+        (None, None) => Ok(None),
+        (Some(s), Some(e)) => TimeRange::new(ms_to_ticks(s)?, ms_to_ticks(e)?)
+            .map(Some)
+            .map_err(|e| invalid(&e.to_string())),
+        _ => Err(invalid("give both from_ms and to_ms")),
+    }
+}
+
+fn detect_defaults(
+    clip: Option<u64>,
+    track: Option<u64>,
+    range: Option<TimeRange>,
+    bpm: Option<f64>,
+    beats_per_bar: Option<u32>,
+) -> animathio_control::BeatDetectParams {
+    let d = animathio_control::BeatDetectParams::default();
+    animathio_control::BeatDetectParams {
+        clip: clip.map(ClipId),
+        track: track.map(TrackId),
+        range,
+        bpm,
+        beats_per_bar: beats_per_bar.unwrap_or(d.beats_per_bar),
+        ..d
+    }
 }
 
 fn tool_text(value: impl serde::Serialize) -> Result<CallToolResult, McpError> {
@@ -1499,6 +1772,28 @@ impl McpServer {
     }
 
     #[tool(
+        description = "Auto reframe video clips to 9:16, 1:1 or 4:5 using deterministic offline motion/contrast tracking. Changes the canvas and replaces selected videos' position/scale animation as one undo step; preserves opacity and effects. Unrotated unlocked videos only. No downloads. Returns the number of clips. Other layers keep their normalized transforms. Can take seconds to minutes."
+    )]
+    async fn auto_reframe(
+        &self,
+        Parameters(p): Parameters<AutoReframe>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::ReframeParams {
+            aspect: p.aspect.unwrap_or_else(|| "9:16".into()),
+            smoothness: p.smoothness.unwrap_or(0.5),
+            clips: p
+                .clips
+                .unwrap_or_default()
+                .into_iter()
+                .map(ClipId)
+                .collect(),
+        };
+        let mut backend = self.backend.lock().await;
+        let count = backend.auto_reframe(params).map_err(mcp_error)?;
+        tool_text(json!({"clips":count}))
+    }
+
+    #[tool(
         description = "Propose automatic silence cuts and optional Whisper filler/repeat cuts without changing the project. Returns a revision-bound proposal with integer-tick ranges, heuristic confidence and enabled toggles. Review and pass the proposal to apply_autocuts. Selected tracks and every linked companion ripple together; locked companions cause an error."
     )]
     async fn propose_autocuts(
@@ -1562,6 +1857,167 @@ impl McpServer {
     }
 
     #[tool(
+        description = "List the timeline markers (named, coloured points or ranges on the ruler), sorted by time. Each has an id, time in ms and ticks, optional duration, name, colour and note."
+    )]
+    async fn list_markers(&self) -> Result<CallToolResult, McpError> {
+        let markers = self
+            .backend
+            .lock()
+            .await
+            .markers_list()
+            .map_err(mcp_error)?;
+        tool_text(json!({"markers": markers.iter().map(marker_json).collect::<Vec<_>>()}))
+    }
+
+    #[tool(
+        description = "Add a timeline marker at a time (one undo step). Markers never affect rendering; they are snap targets in the editor and targets for sync_cuts_to_beats. Returns the new marker id."
+    )]
+    async fn add_marker(
+        &self,
+        Parameters(p): Parameters<AddMarker>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::MarkerAddParams {
+            time: ms_to_ticks(p.time_ms)?,
+            duration: p.duration_ms.map(ms_to_ticks).transpose()?,
+            name: p.name.unwrap_or_default(),
+            color: parse_marker_color(p.color.as_deref())?,
+            note: p.note.unwrap_or_default(),
+        };
+        let added = self
+            .backend
+            .lock()
+            .await
+            .markers_add(params)
+            .map_err(mcp_error)?;
+        tool_text(json!({"id": added.id.0}))
+    }
+
+    #[tool(description = "Remove a timeline marker by id (one undo step).")]
+    async fn remove_marker(
+        &self,
+        Parameters(p): Parameters<RemoveMarker>,
+    ) -> Result<CallToolResult, McpError> {
+        self.backend
+            .lock()
+            .await
+            .markers_remove(animathio_core::MarkerId(p.id))
+            .map_err(mcp_error)?;
+        tool_text(json!({"removed": p.id}))
+    }
+
+    #[tool(
+        description = "Detect tempo and beats offline from the decoded audio (the whole mix, or one clip/track/range), deterministically and without editing. Returns bpm, a 0..1 confidence, beat times in ms and ticks, and downbeat indices. With add_markers=true it also adds a marker at each selected beat (every Nth, or downbeats only) as one undo step. Needs audio clips with a clear pulse; silence or very short audio is an error."
+    )]
+    async fn detect_beats(
+        &self,
+        Parameters(p): Parameters<DetectBeats>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut detect = detect_defaults(
+            p.clip,
+            p.track,
+            beat_range(p.from_ms, p.to_ms)?,
+            p.bpm,
+            p.beats_per_bar,
+        );
+        if let Some(v) = p.min_bpm {
+            detect.min_bpm = v;
+        }
+        if let Some(v) = p.max_bpm {
+            detect.max_bpm = v;
+        }
+        let mut backend = self.backend.lock().await;
+        let detection = backend.beats_detect(detect.clone()).map_err(mcp_error)?;
+        let mut out = json!({
+            "bpm": detection.bpm,
+            "confidence": detection.confidence,
+            "beats_ms": detection.beats.iter().map(|b| ticks_to_ms(b.time)).collect::<Vec<_>>(),
+            "beat_ticks": detection.beats.iter().map(|b| b.time.0).collect::<Vec<_>>(),
+            "downbeats": detection.downbeats,
+        });
+        if p.add_markers {
+            let options = animathio_control::BeatMarkerOptions {
+                selection: animathio_control::BeatSelection {
+                    every: p.every.unwrap_or(1),
+                    downbeats_only: p.downbeats_only,
+                },
+                color: p
+                    .color
+                    .as_deref()
+                    .map_or(Ok(animathio_core::MarkerColor::Cyan), |c| {
+                        parse_marker_color(Some(c))
+                    })?,
+                name_prefix: None,
+            };
+            let added = backend
+                .beats_add_markers(animathio_control::BeatMarkersParams { detect, options })
+                .map_err(mcp_error)?;
+            out["markers_added"] = json!(added.added);
+        }
+        tool_text(out)
+    }
+
+    #[tool(
+        description = "Sync edits to the beat or to markers, as one undo step. mode=snap moves the selected clips' cut points (clip edges) to the nearest beat/marker within max_shift_ms as roll edits (the neighbouring clip's edge moves too, source content stays in place, linked audio/video follows); mode=split cuts each clip into segments at the targets inside it. source is beats (analysed from the audio), markers or both. Cuts that would overlap, collapse a clip or touch a locked track are skipped and reported. Moving an edge later than a clip's source media extends it past its footage; keep max_shift_ms small for video."
+    )]
+    async fn sync_cuts_to_beats(
+        &self,
+        Parameters(p): Parameters<SyncCutsToBeats>,
+    ) -> Result<CallToolResult, McpError> {
+        let source = match p.source.as_deref().unwrap_or("beats") {
+            "beats" => animathio_control::SyncSource::Beats,
+            "markers" => animathio_control::SyncSource::Markers,
+            "both" => animathio_control::SyncSource::Both,
+            _ => return Err(invalid("source must be beats, markers or both")),
+        };
+        let mode = match p.mode.as_deref().unwrap_or("snap") {
+            "snap" => animathio_control::SyncMode::Snap,
+            "split" => animathio_control::SyncMode::Split,
+            _ => return Err(invalid("mode must be snap or split")),
+        };
+        let defaults = animathio_control::SyncCutsParams::default();
+        let params = animathio_control::SyncCutsParams {
+            clips: p.clips.into_iter().map(ClipId).collect(),
+            source,
+            mode,
+            max_shift: p.max_shift_ms.map_or(Ok(defaults.max_shift), ms_to_ticks)?,
+            min_segment: p
+                .min_segment_ms
+                .map_or(Ok(defaults.min_segment), ms_to_ticks)?,
+            frame_align: p.frame_align.unwrap_or(true),
+            selection: animathio_control::BeatSelection {
+                every: p.every.unwrap_or(1),
+                downbeats_only: p.downbeats_only,
+            },
+            detect: detect_defaults(
+                p.analyze_clip,
+                p.analyze_track,
+                None,
+                p.bpm,
+                p.beats_per_bar,
+            ),
+        };
+        let result = self
+            .backend
+            .lock()
+            .await
+            .sync_cuts_to_beats(params)
+            .map_err(mcp_error)?;
+        tool_text(json!({
+            "bpm": result.bpm,
+            "shifted": result.shifted.iter().map(|s| json!({
+                "track": s.track.0,
+                "left_clip": s.left.map(|c| c.0),
+                "right_clip": s.right.map(|c| c.0),
+                "from_ms": ticks_to_ms(s.from),
+                "to_ms": ticks_to_ms(s.to),
+            })).collect::<Vec<_>>(),
+            "splits_ms": result.splits.iter().map(|t| ticks_to_ms(*t)).collect::<Vec<_>>(),
+            "unchanged": result.unchanged,
+            "skipped": result.skipped,
+        }))
+    }
+
+    #[tool(
         description = "Cut pauses out of a recording: detect silent stretches in the decoded audio (RMS in 10 ms windows below threshold_db for at least min_silence_ms), keep padding_ms of silence on each side, and ripple-remove them from ALL tracks so video and audio stay in sync. One undo step. Returns the removed ranges in pre-edit timeline milliseconds. Only audio clips are analysed; import the recording's audio as an audio clip."
     )]
     async fn trim_silence(
@@ -1598,7 +2054,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Generate subtitles (captions) for the project's audio with a fully local Whisper speech recogniser (no cloud). Mixes the audio of the project, or of one clip/track/range, transcribes it, splits the text into readable cues (max 2 lines, max_chars_per_line chars per line, 0.8-6 s each, no overlaps) and adds them as caption-bar text clips on a new \"Subtitles\" track with a background bar track, as one undo step. The model must be installed: if it is not, the call fails with instructions unless download_model is true (one-time 78-488 MB download, SHA-256 verified; ask the user first). Can take from seconds to minutes. Returns the language, the new track ids and the cues (with start/end in ms). Requires an app build with the whisper feature."
+        description = "Generate subtitles (captions) for the project's audio with a fully local Whisper speech recogniser (no cloud). Mixes the audio of the project, or of one clip/track/range, transcribes it, splits the text into readable cues (max 2 lines, max_chars_per_line chars per line, 0.8-6 s each, no overlaps) and adds them as caption text clips on a new \"Subtitles\" track (with a background bar track for the default \"classic\" style) as one undo step. Pass `style` for an animated CapCut-style caption (word-highlight, karaoke, pop, one-word, bold-outline); the recogniser's per-word timings drive the animation. The model must be installed: if it is not, the call fails with instructions unless download_model is true (one-time 78-488 MB download, SHA-256 verified; ask the user first). Can take from seconds to minutes. Returns the language, the new track ids and the cues (with start/end in ms). Requires an app build with the whisper feature."
     )]
     async fn auto_subtitles(
         &self,
@@ -1621,10 +2077,27 @@ impl McpServer {
                 max_lines: p.max_lines,
                 ..animathio_control::SubtitleSplit::default()
             },
+            style: p.look.style_params(p.style.as_deref())?,
         };
         let mut backend = self.backend.lock().await;
         let result = backend.subtitles_generate(params).map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))
+    }
+
+    #[tool(
+        description = "Restyle existing caption clips (from auto_subtitles or import_subtitles) as one undo step: style (classic, word-highlight, karaoke, pop, one-word, bold-outline), font_size, colours, position (top, middle, bottom, safe-area aware) and max_words per line. Applies to every caption on the track (default: all \"Subtitles*\" tracks); adds or removes the background bars as the style needs. Returns the style and the number of captions changed."
+    )]
+    async fn set_caption_style(
+        &self,
+        Parameters(p): Parameters<SetCaptionStyle>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = animathio_control::SubtitleStyleParams {
+            track: p.track.map(TrackId),
+            style: p.look.style_params(Some(&p.style))?,
+        };
+        let mut backend = self.backend.lock().await;
+        let result = backend.subtitles_style(params).map_err(mcp_error)?;
+        tool_text(json!({ "style": result.style, "captions": result.captions }))
     }
 
     #[tool(
@@ -1653,7 +2126,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Import an SRT or WebVTT file as caption clips on a new \"Subtitles\" track (same look as auto_subtitles), as one undo step."
+        description = "Import an SRT or WebVTT file as caption clips on a new \"Subtitles\" track (same look and `style` choices as auto_subtitles), as one undo step."
     )]
     async fn import_subtitles(
         &self,
@@ -1669,9 +2142,113 @@ impl McpServer {
             .subtitles_import(animathio_control::SubtitleImportParams {
                 path: PathBuf::from(p.path),
                 offset,
+                style: p.look.style_params(p.style.as_deref())?,
             })
             .map_err(mcp_error)?;
         tool_text(subtitle_result_json(&result))
+    }
+
+    #[tool(
+        description = "List bundled and user project templates with labelled placeholder clip identities."
+    )]
+    async fn list_templates(&self) -> Result<CallToolResult, McpError> {
+        let catalog = animathio_control::template_catalog().map_err(mcp_error)?;
+        tool_text(json!(
+            catalog
+                .into_iter()
+                .map(|t| {
+                    let placeholders: Vec<_> = t
+                        .manifest
+                        .placeholders
+                        .iter()
+                        .map(|p| {
+                            json!({
+                                "clip": p.clip,
+                                "label": p.label,
+                                "accepts_text": t.accepts_text(p.clip),
+                            })
+                        })
+                        .collect();
+                    let mut manifest = json!(t.manifest);
+                    manifest["placeholders"] = json!(placeholders);
+                    manifest
+                })
+                .collect::<Vec<_>>()
+        ))
+    }
+
+    #[tool(
+        description = "Create a new portable .amio project from a catalog template and text/media placeholder maps. Refuses existing destinations; opens the created project in the current backend."
+    )]
+    async fn create_from_template(
+        &self,
+        Parameters(p): Parameters<CreateFromTemplate>,
+    ) -> Result<CallToolResult, McpError> {
+        let template = animathio_control::template_catalog()
+            .map_err(mcp_error)?
+            .into_iter()
+            .find(|t| t.manifest.id == p.template)
+            .ok_or_else(|| invalid("unknown template"))?;
+        let parse = |id: String| {
+            id.parse::<u64>()
+                .map(ClipId)
+                .map_err(|_| invalid("placeholder id must be an integer"))
+        };
+        let text = p
+            .text
+            .into_iter()
+            .map(|(id, text)| parse(id).map(|id| (id, text)))
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let media = p
+            .media
+            .into_iter()
+            .map(|(id, path)| {
+                let id = parse(id)?;
+                // Same rule as add_media: an existing regular file, canonicalized.
+                let path = animathio_control::validate_existing_file(std::path::Path::new(&path))
+                    .map_err(mcp_error)?;
+                Ok((
+                    id,
+                    animathio_control::MediaFill {
+                        path,
+                        cover: p.cover,
+                    },
+                ))
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+        let fill = template.fill(&text, &media).map_err(mcp_error)?;
+        let mut project = template.project.clone();
+        fill.command
+            .apply(&mut project)
+            .map_err(|e| invalid(&e.to_string()))?;
+        let mut assets = template.assets.clone();
+        assets.extend(fill.assets);
+        let requested = PathBuf::from(p.output);
+        if !requested
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("amio"))
+        {
+            return Err(invalid("output must be a .amio file"));
+        }
+        // Same rule as the other writers: the nearest existing ancestor must be a
+        // directory and an existing target must be a regular file (refused below).
+        animathio_control::validate_output_file(&requested).map_err(mcp_error)?;
+        let path = requested;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| invalid(&e.to_string()))?;
+        if let Err(error) = animathio_format::write_amio(file, &project, &assets) {
+            let _ = std::fs::remove_file(&path);
+            return Err(invalid(&error.to_string()));
+        }
+        self.backend
+            .lock()
+            .await
+            .handle(Call::ProjectOpen { path: path.clone() })
+            .map_err(mcp_error)?;
+        tool_text(json!({"path": path}))
     }
 
     #[tool(
@@ -1882,5 +2459,29 @@ mod preset_tests {
             let parsed: ExportPresetParam = serde_json::from_value(json!(preset.name())).unwrap();
             assert_eq!(parsed.0, preset);
         }
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    #[test]
+    fn ids_accept_strings_and_numbers_and_stay_strings_in_the_schema() {
+        let numeric: AddTransitionArgs = serde_json::from_value(
+            json!({"between_clip_a": 3, "clip_b": "10", "duration_ms": 400.0}),
+        )
+        .unwrap();
+        assert_eq!(numeric.between_clip_a.as_deref(), Some("3"));
+        assert_eq!(numeric.clip_b.as_deref(), Some("10"));
+        assert_eq!(numeric.track, None);
+        let keyframe: AddKeyframe = serde_json::from_value(
+            json!({"id": 13, "target": "opacity", "time_ms": 0.0, "value": 1.0}),
+        )
+        .unwrap();
+        assert_eq!(keyframe.id, "13");
+        assert!(serde_json::from_value::<ElementId>(json!({"id": -1})).is_err());
+        let schema = serde_json::to_value(schemars::schema_for!(ElementId)).unwrap();
+        assert_eq!(schema["properties"]["id"]["type"], "string");
     }
 }

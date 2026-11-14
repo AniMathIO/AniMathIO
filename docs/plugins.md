@@ -672,10 +672,14 @@ formulas, not remaining resources. The query includes `ticks-per-second`,
 `max-shape-text-chars`, `max-shape-text-verbs`, `max-svg-input-bytes`,
 `max-svg-verbs`, `max-typeset-verbs`, `max-typeset-source-bytes`,
 `max-typeset-font-size-px`, `typeset-timeout-ms`, `max-log-message-bytes`,
-`max-log-entries`, and since 1.1 `max-import-source-bytes`, `import-memory-bytes`,
+`max-log-entries`, `max-effects-per-plugin` (64: the most frame effects, and
+separately the most audio effects, one plugin may list; a longer listing is rejected at load),
+and since 1.1 `max-import-source-bytes`, `import-memory-bytes`,
 `import-fuel-per-byte`, `import-epoch-deadline-ticks`, `max-import-output-bytes`,
 `max-import-commands`, `max-sibling-file-bytes`, `max-sibling-total-bytes`,
 `max-sibling-files` and `max-preset-keys`.
+`max-effects-per-plugin` was added after the 1.0.0 freeze as a minor-compatible key, so a
+host older than that omits it: treat any missing key as "not reported", never as unlimited.
 Limits may be lower in a custom host. Unknown keys must be ignored; a missing
 optional key does not authorize unbounded work. Fuel, memory and time limits
 remain enforced even if the guest never queries them.
@@ -942,6 +946,17 @@ expressed as fractions of the full canvas. In that mode the plugin emits normali
 glyph outlines sized for a clip with the matching width/height scale, centres explicit
 lines in the box, and shrinks long text to fit. Title presets use this mode to keep
 edited fields and transform handles inside safe areas.
+Caption styles (text plugin 1.1.0, ABI unchanged) add optional parameters that are ignored
+when `caption_style` is absent or `off`: `caption_style` (`off`, `classic`, `"word-highlight"`,
+`karaoke`, `pop`, `"one-word"`, `"bold-outline"`), `words` (space-separated `start:end` pairs in
+ticks, one per whitespace-separated word of `text`, relative to the clip's source time),
+`accent` and `outline` colours, `outline_width` (a fraction of the font size) and `max_words`
+(words per line, 0 fits the box). They only apply in the fitted-title mode (`fit_width` and
+`fit_height` set). The active word is the last one whose start time has passed; the scene is a
+pure function of the clip's source time, so preview and export match. `classic` renders exactly
+like the plain fitted title; when the edited text no longer has as many words as `words`, the
+timings are spread over the stored span. The editor and `subtitles.generate` write these
+parameters; see `docs/mcp.md` for `subtitles.style`.
 The LaTeX plugin also accepts `units`: `pixels` preserves existing projects;
 `normalized` interprets `size` relative to the shorter render-canvas edge and fits
 formula outlines within 84% width and 22% height.

@@ -550,3 +550,191 @@ fn audio_effects_round_trip_through_json_and_old_files_still_load() {
     let text = serde_json::to_string(&command).unwrap();
     assert_eq!(serde_json::from_str::<Command>(&text).unwrap(), command);
 }
+
+#[test]
+fn video_effect_bypass_is_reversible_and_dropped_from_the_evaluated_scene() {
+    let mut project = project_with_clip();
+    let mut history = History::default();
+    history
+        .execute(
+            &mut project,
+            &Command::AddEffect {
+                id: ClipId(0),
+                index: 0,
+                effect: EffectInstance::basic(EffectId(1), "grayscale"),
+            },
+        )
+        .unwrap();
+    let evaluated = |project: &Project| evaluate(project, Time(10)).clips[0].effects.len();
+    assert_eq!(evaluated(&project), 1);
+
+    let bypass = |bypass| Command::SetEffectBypass {
+        id: ClipId(0),
+        effect: EffectId(1),
+        bypass,
+    };
+    history.execute(&mut project, &bypass(true)).unwrap();
+    assert!(clip(&project).effects[0].bypass);
+    // The effect stays in the chain with its parameters, but is not evaluated.
+    assert_eq!(clip(&project).effects[0].params["amount"], 1.0);
+    assert_eq!(evaluated(&project), 0);
+
+    history.undo(&mut project).unwrap();
+    assert!(!clip(&project).effects[0].bypass);
+    assert_eq!(evaluated(&project), 1);
+    history.redo(&mut project).unwrap();
+    assert!(clip(&project).effects[0].bypass);
+
+    // Serializable, and a missing effect is rejected without changing anything.
+    let json = serde_json::to_string(&bypass(true)).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Command>(&json).unwrap(),
+        bypass(true)
+    );
+    let before = project.clone();
+    let missing = Command::SetEffectBypass {
+        id: ClipId(0),
+        effect: EffectId(9),
+        bypass: true,
+    };
+    assert!(history.execute(&mut project, &missing).is_err());
+    assert_eq!(project, before);
+}
+
+fn add_video_effects(project: &mut Project, effects: &[(u64, &str)]) {
+    for (index, (id, name)) in effects.iter().enumerate() {
+        Command::AddEffect {
+            id: ClipId(0),
+            index,
+            effect: EffectInstance::basic(EffectId(*id), name),
+        }
+        .apply(project)
+        .unwrap();
+    }
+}
+
+fn chain_ids(project: &Project) -> Vec<u64> {
+    clip(project).effects.iter().map(|e| e.id.0).collect()
+}
+
+#[test]
+fn move_effect_reorders_the_chain_and_round_trips_through_undo() {
+    let mut project = project_with_clip();
+    add_video_effects(
+        &mut project,
+        &[(1, "grayscale"), (2, "invert"), (3, "blur")],
+    );
+    let original = project.clone();
+    let mut history = History::default();
+
+    let down = Command::MoveEffect {
+        id: ClipId(0),
+        effect: EffectId(1),
+        index: 2,
+    };
+    history.execute(&mut project, &down).unwrap();
+    assert_eq!(chain_ids(&project), [2, 3, 1]);
+    // The reordered chain is what the renderer evaluates.
+    let order: Vec<u64> = evaluate(&project, Time(10)).clips[0]
+        .effects
+        .iter()
+        .map(|e| e.id.0)
+        .collect();
+    assert_eq!(order, [2, 3, 1]);
+
+    history.undo(&mut project).unwrap();
+    assert_eq!(project, original);
+    history.redo(&mut project).unwrap();
+    assert_eq!(chain_ids(&project), [2, 3, 1]);
+
+    // Serializable; unknown effects and out-of-range indices change nothing.
+    let json = serde_json::to_string(&down).unwrap();
+    assert_eq!(serde_json::from_str::<Command>(&json).unwrap(), down);
+    let before = project.clone();
+    for bad in [
+        Command::MoveEffect {
+            id: ClipId(0),
+            effect: EffectId(9),
+            index: 0,
+        },
+        Command::MoveEffect {
+            id: ClipId(0),
+            effect: EffectId(2),
+            index: 3,
+        },
+    ] {
+        assert!(bad.apply(&mut project).is_err());
+        assert_eq!(project, before);
+    }
+}
+
+#[test]
+fn move_effect_respects_locked_tracks() {
+    let mut project = project_with_clip();
+    add_video_effects(&mut project, &[(1, "grayscale"), (2, "invert")]);
+    Command::SetTrackLocked {
+        id: TrackId(0),
+        locked: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let command = Command::MoveEffect {
+        id: ClipId(0),
+        effect: EffectId(1),
+        index: 1,
+    };
+    assert_eq!(command.locked_track(&project), Some(TrackId(0)));
+    assert!(command.apply(&mut project).is_err());
+    assert_eq!(chain_ids(&project), [1, 2]);
+}
+
+#[test]
+fn removing_an_animated_effect_with_its_keyframes_is_one_undo_step() {
+    let mut project = project_with_clip();
+    add_video_effects(&mut project, &[(1, "grayscale")]);
+    let target = Target::Effect {
+        effect: EffectId(1),
+        param: "amount".into(),
+    };
+    for (time, value) in [(Time(0), 0.0), (Time(50), 1.0)] {
+        Command::AddKeyframe {
+            id: ClipId(0),
+            target: target.clone(),
+            time,
+            keyframe: Keyframe {
+                value: value.into(),
+                interpolation: Interpolation::Linear,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let before = project.clone();
+    let mut history = History::default();
+    history
+        .execute(
+            &mut project,
+            &Command::Batch {
+                commands: vec![
+                    Command::RemoveKeyframe {
+                        id: ClipId(0),
+                        target: target.clone(),
+                        time: Time(0),
+                    },
+                    Command::RemoveKeyframe {
+                        id: ClipId(0),
+                        target,
+                        time: Time(50),
+                    },
+                    Command::RemoveEffect {
+                        id: ClipId(0),
+                        effect: EffectId(1),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+    assert!(clip(&project).effects.is_empty() && clip(&project).animations.is_empty());
+    history.undo(&mut project).unwrap();
+    assert_eq!(project, before);
+}

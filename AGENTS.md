@@ -152,11 +152,21 @@ overrides it). Cue splitting and SRT/WebVTT are pure and unit-tested; the model-
 ignored: `cargo test -p animathio-transcribe --features whisper --test whisper_tiny -- --ignored`.
 The editor job (`subtitle_job.rs`, `editor/subtitles.rs`) runs on a worker with progress and cancel
 and applies the cues as one `Command::Batch` through `control::subtitle_command`.
+Caption styles (`control::captions`, `org.animathio.text` 1.1.0 parameters `caption_style`, `words`,
+`accent`, ...) are plugin parameters on the caption clips, not format fields; per-word timings
+ride on `Cue::words` and `subtitles.style` / `set_caption_style` restyle existing captions.
 
 Audio clips use numeric `gain` (linear, default 1) and `muted` (nonzero means muted,
 default 0) parameters, including clip-local keyframes. Track gain is changed through
-`Command::SetTrackGain`. `AudioPool::prepare(rate, channels)` does decoding/resampling
-work outside playback; `Mixer::mix(project, range)` is shared by preview and export.
+`Command::SetTrackGain`. `AudioPool::prepare(rate, channels)` is cheap: it plans the output
+format, and decoding, resampling and channel mapping then run lazily inside
+`Mixer::mix(project, range)` (shared by preview and export) in fixed blocks held by an LRU cache
+with a byte budget (`PrepareOptions`, default 256 MiB). Nothing holds a whole asset: the pool keeps
+one seekable `PcmReader` per asset (`AudioSource::open_reader`; `SymphoniaSource` streams, `Pcm`
+stays resident), so memory is independent of the length of the media. Output equals the old
+whole-asset decode and resample bit for bit: the FFT resampler lets each block start one chunk
+early (pre-roll), and the sinc fallback used only for extreme rate ratios replays sequentially. Insert
+long assets with `pool.insert(id, &SymphoniaSource::open(..)?)`; do not call `decode_all` on them.
 The device callback only consumes the ring and updates the latency-corrected master
 clock; `Player::now()` is quantized to callbacks and freezes on underflow. Seek drops
 the old stream/ring and joins its worker before starting a new session.
@@ -165,11 +175,22 @@ Linux builds need `libasound2-dev` (CI installs it). Normal tests need no device
 The ignored device test can be run explicitly; `cargo run -p animathio-audio
 --example play` emits a 0.01-amplitude tone for at most 3 seconds and prints clock
 drift. Apply the same resource limits to these cargo invocations. Symphonia 0.5
-supports WAV/PCM, MP3, FLAC, AAC-LC/M4A and Vorbis; Opus returns an explicit
-unsupported-codec error. Full-asset decoding and equal-layout/mono channel mapping
-are prototype limits; streaming and surround layout matrices are deferred. Timeline waveforms come from
-`AudioPool::waveform` (4096 downsampled peaks per asset, cached by the editor and
-pruned with the pool).
+supports WAV/PCM, MP3, FLAC, AAC-LC/M4A and Vorbis; Opus (Ogg, Matroska/WebM, MP4) is decoded by
+the pure-Rust `filmcraft-opus` crate (MIT/Apache, no system libraries) behind Symphonia's
+demuxers; the pre-skip is removed, Matroska/MP4 keep up to one packet of trailing padding. Opening a
+`SymphoniaSource` scans the asset once (bounded memory) for its exact length, the `DecodeLimits`
+and one restart packet per 2^21-frame segment; reads then reopen the container, skip to that packet
+without decoding and decode from there after a quarter-second pre-roll, so a frame's samples never
+depend on what was read before. That is bit-identical to a front-to-back decode for PCM, FLAC,
+MP3 and Vorbis, and within a small tolerance for AAC (random noise substitution) and Opus (energy
+prediction), which the tests state. Channel mapping (`ChannelLayout`, `ChannelMatrix`):
+identical layouts copy, mono duplicates, stereo averages to mono, 5.1/7.1/quad and other
+surround layouts fold to stereo with ITU-R BS.775 coefficients (centre and surrounds -3 dB, LFE
+dropped, no normalisation; both rear pairs of 7.1 at -6 dB) and to mono as the mean of that fold,
+and stereo to a wider layout fills the front pair; layouts without a rule are `Unsupported`.
+Timeline waveforms come from `AudioPool::waveform` (a streaming pass; 4096 downsampled peaks per
+asset, cached by the editor and pruned with the pool). The export path wraps the media backend's
+audio decoder as an `AudioSource` too, so exporting a long track never holds it decoded.
 
 Plugin compiled-component disk cache entries are stored as `MAC(32) || serialized`,
 where the MAC is a `blake3::keyed_hash` over the serialized bytes using a per-install

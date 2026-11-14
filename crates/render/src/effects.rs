@@ -11,7 +11,8 @@ use animathio_core::{EffectProcessor, SceneClip};
 
 /// Apply a clip's ordered effect chain to its rasterized layer.
 ///
-/// A clip without effects never touches the processor. A non-empty chain needs one
+/// A clip without active effects (bypassed ones are skipped) never touches the processor. A
+/// chain with an active effect needs one
 /// (see [`RenderCtx::set_effect_processor`](crate::RenderCtx::set_effect_processor)); a
 /// missing plugin, rejected parameter or sandbox violation fails the frame with
 /// [`Error::Effect`] instead of silently skipping the filter.
@@ -21,7 +22,7 @@ pub fn apply_chain(
     pool: &mut ResourcePool,
 ) -> Result<(), Error> {
     frame.validate()?;
-    if clip.effects.is_empty() {
+    if !clip.has_active_effects() {
         return Ok(());
     }
     let processor = pool.effects.as_deref_mut().ok_or_else(|| {
@@ -35,7 +36,7 @@ fn run(
     frame: &mut Frame,
     clip: &SceneClip,
 ) -> Result<(), Error> {
-    for instance in &clip.effects {
+    for instance in clip.effects.iter().filter(|effect| !effect.bypass) {
         processor
             .apply(instance, clip.source_time, frame.size, &mut frame.pixels)
             .map_err(Error::Effect)?;

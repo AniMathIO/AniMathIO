@@ -77,6 +77,8 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
         .collect();
     for expected in [
         "get_project_state",
+        "list_templates",
+        "create_from_template",
         "add_text",
         "add_math",
         "add_graph",
@@ -462,4 +464,97 @@ fn export_video_creates_parents_and_requires_overwrite() {
 
     drop(stdin);
     let _ = child.wait();
+}
+
+#[test]
+fn lists_templates_and_creates_projects_from_them_over_mcp() {
+    let dir = tempdir().unwrap();
+    let input = empty_project(dir.path());
+    let output = dir.path().join("created.amio");
+    let (mut child, mut stdout, mut stdin) = spawn_mcp(&input);
+    initialize(&mut stdin, &mut stdout);
+
+    let listed = call(&mut stdin, &mut stdout, "list_templates", json!({}));
+    let quote = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "quote")
+        .expect("bundled quote template");
+    let placeholders = quote["placeholders"].as_array().unwrap();
+    assert!(placeholders.iter().all(|p| p["accepts_text"].is_boolean()));
+    let first = placeholders.first().expect("a placeholder")["clip"]
+        .as_u64()
+        .unwrap();
+    let second = placeholders.get(1).map(|p| p["clip"].as_u64().unwrap());
+
+    let photo = dir.path().join("photo.png");
+    image::RgbaImage::from_pixel(8, 2, image::Rgba([255, 0, 0, 255]))
+        .save(&photo)
+        .unwrap();
+    let mut arguments = json!({
+        "template": "quote",
+        "output": output,
+        "media": { first.to_string(): photo },
+        "cover": true,
+    });
+    if let Some(second) = second {
+        arguments["text"] = json!({ second.to_string(): "Custom words" });
+    }
+    let created = call(
+        &mut stdin,
+        &mut stdout,
+        "create_from_template",
+        arguments.clone(),
+    );
+    assert_eq!(created["path"], json!(output));
+    let bundle = animathio_format::read_amio(
+        std::fs::File::open(&output).unwrap(),
+        animathio_format::Limits::default(),
+    )
+    .unwrap();
+    let clip = bundle
+        .project
+        .tracks()
+        .iter()
+        .find_map(|t| t.clips().get(&animathio_core::ClipId(first)))
+        .unwrap();
+    assert!(matches!(clip.kind, animathio_core::ClipKind::Image(_)));
+    assert_eq!(
+        clip.params["media_fit"],
+        animathio_core::ParamValue::String("cover".into())
+    );
+    assert_eq!(bundle.assets.len(), 1);
+
+    // Existing destinations are refused; so are placeholders supplied twice.
+    send(
+        &mut stdin,
+        11,
+        "tools/call",
+        json!({"name": "create_from_template", "arguments": arguments}),
+    );
+    let response = recv(&mut stdout);
+    assert!(
+        response.get("error").is_some() || response["result"]["isError"] == true,
+        "{response}"
+    );
+    send(
+        &mut stdin,
+        12,
+        "tools/call",
+        json!({"name": "create_from_template", "arguments": {
+            "template": "quote",
+            "output": dir.path().join("twice.amio"),
+            "text": { first.to_string(): "x" },
+            "media": { first.to_string(): photo },
+        }}),
+    );
+    let response = recv(&mut stdout);
+    assert!(
+        response.get("error").is_some() || response["result"]["isError"] == true,
+        "{response}"
+    );
+    assert!(!dir.path().join("twice.amio").exists());
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
 }

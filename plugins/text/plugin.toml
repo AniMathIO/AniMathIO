@@ -2,6 +2,6 @@ api_version = "1.1.0"
 id = "org.animathio.text"
 name = "Text"
 version = "1.1.0"
-description = "Host-shaped text with size, colour and alignment"
+description = "Host-shaped text with size, colour, alignment and animated caption styles"
 kinds = ["clip-source"]
 capabilities = []

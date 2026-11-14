@@ -246,3 +246,150 @@ fn preview_work_is_bounded_when_many_clips_fail() {
     // run per clip or effect.
     assert!(counter.load(std::sync::atomic::Ordering::SeqCst) <= 16);
 }
+
+#[test]
+fn bypassed_effects_are_skipped_without_needing_a_processor() {
+    let bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("effects.png"),
+    )
+    .unwrap();
+    let size = (64, 64);
+    let mut invert = EffectInstance::new(
+        EffectId(2),
+        "org.example.ok",
+        "invert",
+        std::collections::BTreeMap::default(),
+    );
+    let mut ctx = RenderCtx::default();
+    ctx.set_effect_processor(Stub);
+    ctx.resources
+        .insert(animathio_core::AssetId::of(&bytes), bytes.clone())
+        .unwrap();
+    let plain = render(&effect_scene(&bytes, Vec::new()), &mut ctx, size).unwrap();
+    let active = render(&effect_scene(&bytes, vec![invert.clone()]), &mut ctx, size).unwrap();
+    assert_ne!(active, plain);
+
+    // A bypassed effect left in the scene is still ignored by the renderer itself.
+    invert.bypass = true;
+    let bypassed = render(&effect_scene(&bytes, vec![invert.clone()]), &mut ctx, size).unwrap();
+    assert_eq!(bypassed, plain);
+
+    // It never reaches the processor, so a missing processor or plugin is not an error.
+    let mut bare = RenderCtx::default();
+    bare.resources
+        .insert(animathio_core::AssetId::of(&bytes), bytes.clone())
+        .unwrap();
+    assert_eq!(
+        render(&effect_scene(&bytes, vec![invert]), &mut bare, size).unwrap(),
+        plain
+    );
+}
+
+/// Test double whose output depends on the effect's `amount` parameter: it blends the
+/// frame towards white by that amount, so different sampled values give different pixels.
+struct Whiten;
+
+impl animathio_core::EffectProcessor for Whiten {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn apply(
+        &mut self,
+        effect: &EffectInstance,
+        _time: Time,
+        _size: (u32, u32),
+        pixels: &mut Vec<u8>,
+    ) -> Result<(), String> {
+        let amount = effect.params.get("amount").copied().unwrap_or(0.0);
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            for channel in &mut pixel[..3] {
+                let value = f64::from(*channel);
+                *channel = (value + (255.0 - value) * amount).clamp(0.0, 255.0).round() as u8;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn keyframed_effect_parameters_render_differently_over_time() {
+    use animathio_core::{
+        Asset, AssetId, Clip, Command, Interpolation, Keyframe, Project, Target, TimeRange, Track,
+        evaluate,
+    };
+    let bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("effects.png"),
+    )
+    .unwrap();
+    let asset = AssetId::of(&bytes);
+    let mut project = Project::default();
+    for command in [
+        Command::AddAsset {
+            id: asset.clone(),
+            asset: Asset {
+                name: "effects.png".into(),
+                media_type: "image/png".into(),
+            },
+        },
+        Command::AddTrack {
+            track: Track::new(TrackId(0), "video"),
+            index: 0,
+        },
+        Command::AddClip {
+            track: TrackId(0),
+            clip: Clip::new(
+                ClipId(7),
+                ClipKind::Image(asset.clone()),
+                TimeRange::new(Time(0), Time(1000)).unwrap(),
+            ),
+        },
+        Command::AddEffect {
+            id: ClipId(7),
+            index: 0,
+            effect: EffectInstance::basic(EffectId(1), "grayscale"),
+        },
+    ] {
+        command.apply(&mut project).unwrap();
+    }
+    // Keyframe the effect's `amount` from 0 (at the clip start) to 1 (at its end).
+    for (time, value) in [(Time(0), 0.0), (Time(1000), 1.0)] {
+        Command::AddKeyframe {
+            id: ClipId(7),
+            target: Target::Effect {
+                effect: EffectId(1),
+                param: "amount".into(),
+            },
+            time,
+            keyframe: Keyframe {
+                value: value.into(),
+                interpolation: Interpolation::Linear,
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let mut ctx = RenderCtx::default();
+    ctx.set_effect_processor(Whiten);
+    ctx.resources.insert(asset, bytes.clone()).unwrap();
+    let size = (64, 64);
+    let at =
+        |ctx: &mut RenderCtx, time| render(&evaluate(&project, Time(time)), ctx, size).unwrap();
+    let start = at(&mut ctx, 0);
+    let middle = at(&mut ctx, 500);
+    let end = at(&mut ctx, 1000 - 1);
+
+    // The sampled amount drives the output.
+    assert_ne!(start, middle);
+    assert_ne!(middle, end);
+
+    // The animated frame equals the same scene with a static effect at the sampled value.
+    let mut half_scene = evaluate(&project, Time(0));
+    half_scene.clips[0].effects[0]
+        .params
+        .insert("amount".into(), 0.5);
+    assert_eq!(middle, render(&half_scene, &mut ctx, size).unwrap());
+}

@@ -1,15 +1,12 @@
 #![allow(clippy::cast_possible_truncation)] // Amplitudes, never timeline positions.
 use crate::{
-    AudioSource, Error, Pcm,
-    source::{MAX_CHANNELS, MAX_INTERLEAVED_SAMPLES, MAX_SAMPLE_RATE, sample_bounds},
+    AudioSource, Error,
+    prepared::{Asset, BlockCache, Cursor, PrepareOptions, PreparedSource},
+    source::{MAX_CHANNELS, MAX_SAMPLE_RATE, StreamInfo, sample_bounds},
 };
 use animathio_core::{
     AssetId, AudioBlock, AudioEffectProcessor, Clip, ClipKind, EffectInstance, Project,
     TICKS_PER_SECOND, Target, Time, TimeRange, Track, Transition, TransitionKind, equal_power,
-};
-use rubato::{
-    FftFixedInOut, Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters,
-    SincInterpolationType, WindowFunction,
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, hash_map::DefaultHasher},
@@ -17,35 +14,35 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-/// FFT resampling is used only while both FFT lengths stay at or below this bound.
-const MAX_FFT_FRAMES: usize = 16_384;
-/// Default chunk size (in frames) for the bounded windowed-sinc fallback.
-const SINC_CHUNK_FRAMES: usize = 4096;
-/// Windowed-sinc filter length used by the fallback resampler.
-const SINC_LEN: usize = 256;
-/// Largest input chunk the sinc fallback accepts before rejecting the ratio.
-const MAX_SINC_INPUT_FRAMES: usize = MAX_SAMPLE_RATE as usize + SINC_LEN + 1;
-
-/// Engine-owned native decoded resources, keyed by the project's asset identities.
+/// Engine-owned native audio resources, keyed by the project's asset identities. Each entry is
+/// a seekable reader: streaming sources (such as `SymphoniaSource`) never hold the decoded
+/// asset in memory, in-memory sources (such as `Pcm`) keep their samples.
 #[derive(Clone, Default)]
 pub struct AudioPool {
-    pub(crate) sources: BTreeMap<AssetId, Arc<Pcm>>,
+    pub(crate) sources: BTreeMap<AssetId, Arc<Asset>>,
 }
 impl AudioPool {
-    /// Decode once, outside the real-time callback. Replacement is explicit by identity.
+    /// Open the source for reading, outside the real-time callback. Replacement is explicit by
+    /// identity. A streaming source is not decoded here; its reader fetches blocks on demand.
     pub fn insert(&mut self, id: AssetId, source: &impl AudioSource) -> Result<(), Error> {
-        self.sources.insert(id, Arc::new(source.decode_all()?));
+        self.sources
+            .insert(id, Arc::new(Asset::new(source.open_reader()?)));
         Ok(())
     }
-    /// Number of live native decoded resources.
+    /// Number of live native audio resources.
     #[must_use]
     pub fn len(&self) -> usize {
         self.sources.len()
     }
-    /// Whether a decoded resource is present for this asset.
+    /// Whether a resource is present for this asset.
     #[must_use]
     pub fn contains(&self, id: &AssetId) -> bool {
         self.sources.contains_key(id)
+    }
+    /// Native rate, channels and exact length of a pooled asset.
+    #[must_use]
+    pub fn info(&self, id: &AssetId) -> Option<StreamInfo> {
+        self.sources.get(id).map(|asset| asset.info.clone())
     }
     /// Whether the pool is empty.
     #[must_use]
@@ -53,7 +50,7 @@ impl AudioPool {
         self.sources.is_empty()
     }
     /// Drop resources no longer referenced by any audio clip. Existing mixer snapshots
-    /// retain their immutable buffers until their playback/export job finishes.
+    /// retain their readers until their playback/export job finishes.
     pub fn collect(&mut self, project: &Project) {
         let live: BTreeSet<_> = project
             .tracks()
@@ -66,21 +63,47 @@ impl AudioPool {
             .collect();
         self.sources.retain(|id, _| live.contains(id));
     }
-    /// Resample whole assets once and compensate Rubato's startup delay. Whole-asset
-    /// preparation gives arbitrary mix ranges the same filter history and sample phase.
+    /// Plan the preparation of every asset at the output format. Decoding, resampling and
+    /// channel mapping happen lazily, block by block, inside [`Mixer::mix`], bounded by a
+    /// shared cache; whole-asset resampling semantics (Rubato's start-up delay compensated,
+    /// identical results for any mix range) are preserved exactly.
     pub fn prepare(&self, rate: u32, channels: u16) -> Result<Mixer, Error> {
+        self.prepare_with(rate, channels, PrepareOptions::default())
+    }
+    /// [`AudioPool::prepare`] with explicit block size and cache budget.
+    pub fn prepare_with(
+        &self,
+        rate: u32,
+        channels: u16,
+        options: PrepareOptions,
+    ) -> Result<Mixer, Error> {
         if rate == 0 || rate > MAX_SAMPLE_RATE || channels == 0 || channels > MAX_CHANNELS {
             return Err(Error::Invalid(
                 "output rate must be within 1..=768000 Hz and channels within 1..=32".into(),
             ));
         }
+        let blocks = Arc::new(Mutex::new(BlockCache::new(options.cache_bytes)));
         let sources = self
             .sources
             .iter()
-            .map(|(id, pcm)| Ok((id.clone(), Arc::new(prepare(pcm, rate, channels)?))))
+            .enumerate()
+            .map(|(n, (id, asset))| {
+                Ok((
+                    id.clone(),
+                    Arc::new(PreparedSource::new(
+                        Arc::clone(asset),
+                        Arc::clone(&blocks),
+                        n as u64,
+                        rate,
+                        channels,
+                        options,
+                    )?),
+                ))
+            })
             .collect::<Result<_, Error>>()?;
         Ok(Mixer {
             sources,
+            blocks,
             rate,
             channels,
             effects: None,
@@ -146,7 +169,9 @@ impl EffectWarnings {
 /// pass of each chain instead of one pass per requested range.
 #[derive(Clone)]
 pub struct Mixer {
-    sources: BTreeMap<AssetId, Arc<Vec<f32>>>,
+    sources: BTreeMap<AssetId, Arc<PreparedSource>>,
+    /// Prepared-block cache shared by every asset and every clone of this mixer.
+    blocks: Arc<Mutex<BlockCache>>,
     rate: u32,
     channels: u16,
     effects: Option<Arc<dyn AudioEffectProcessor>>,
@@ -167,6 +192,17 @@ impl Mixer {
     #[must_use]
     pub fn channels(&self) -> u16 {
         self.channels
+    }
+    /// Bytes of prepared audio currently cached (bounded by [`PrepareOptions::cache_bytes`]).
+    ///
+    /// # Panics
+    /// If a mixer thread panicked while holding the cache lock.
+    #[must_use]
+    pub fn prepared_cache_bytes(&self) -> usize {
+        self.blocks
+            .lock()
+            .expect("prepared block cache lock")
+            .bytes()
     }
     /// Attach the plugin runner used for clip and track audio effects. Returns a mixer with an
     /// empty block cache.
@@ -282,6 +318,7 @@ impl Mixer {
             .get(id)
             .ok_or_else(|| Error::MissingAsset(id.as_str().into()))?;
         let chain_active = !self.dry && clip.audio_effects.iter().any(|e| !e.bypass);
+        let mut cursor = source.cursor();
         if chain_active {
             // The chain output is per block; blocks are cached and shared across calls.
             let key = clip_key(self, clip, play);
@@ -335,12 +372,11 @@ impl Mixer {
             }
             let source_frame = usize::try_from((source_ticks + ticks - 1) / ticks)
                 .map_err(|e| Error::Invalid(e.to_string()))?;
-            if source_frame >= source.len() / channels {
+            let Some(samples) = cursor.frame(source_frame)? else {
                 continue;
-            }
-            for channel in 0..channels {
-                out[(frame - out_first) * channels + channel] +=
-                    (f64::from(source[source_frame * channels + channel]) * gain) as f32;
+            };
+            for (channel, sample) in samples.iter().enumerate() {
+                out[(frame - out_first) * channels + channel] += (f64::from(*sample) * gain) as f32;
             }
         }
         Ok(())
@@ -352,13 +388,14 @@ impl Mixer {
     fn clip_chain_input(
         &self,
         clip: &Clip,
-        source: &[f32],
+        source: &PreparedSource,
         play: TimeRange,
         block: usize,
     ) -> Result<Vec<f32>, Error> {
         let channels = usize::from(self.channels);
         let base = block * EFFECT_BLOCK_FRAMES;
         let mut input = vec![0.0_f32; EFFECT_BLOCK_FRAMES * channels];
+        let mut cursor: Cursor<'_> = source.cursor();
         let (clip_start, clip_end) = sample_bounds(play, self.rate)?;
         let ticks = i128::from(TICKS_PER_SECOND);
         for frame in base.max(clip_start)..(base + EFFECT_BLOCK_FRAMES).min(clip_end) {
@@ -381,12 +418,11 @@ impl Mixer {
             }
             let source_frame = usize::try_from((source_ticks + ticks - 1) / ticks)
                 .map_err(|e| Error::Invalid(e.to_string()))?;
-            if source_frame >= source.len() / channels {
+            let Some(samples) = cursor.frame(source_frame)? else {
                 continue;
-            }
-            for channel in 0..channels {
-                input[(frame - base) * channels + channel] =
-                    (f64::from(source[source_frame * channels + channel]) * gain) as f32;
+            };
+            for (channel, sample) in samples.iter().enumerate() {
+                input[(frame - base) * channels + channel] = (f64::from(*sample) * gain) as f32;
             }
         }
         Ok(input)
@@ -396,7 +432,7 @@ impl Mixer {
     fn clip_chain_block(
         &self,
         clip: &Clip,
-        source: &[f32],
+        source: &PreparedSource,
         play: TimeRange,
         key: u64,
         block: usize,
@@ -674,175 +710,4 @@ fn param(clip: &Clip, name: &str, time: Time, fallback: f64) -> f64 {
                 .and_then(animathio_core::ParamValue::as_number)
                 .unwrap_or(fallback)
         })
-}
-
-#[allow(clippy::cast_precision_loss)] // Channel count becomes an amplitude divisor only.
-fn prepare(pcm: &Pcm, rate: u32, channels: u16) -> Result<Vec<f32>, Error> {
-    let native_channels = usize::from(pcm.channels());
-    let channels = usize::from(channels);
-    if channels != native_channels && channels != 1 && native_channels != 1 {
-        return Err(Error::Unsupported(format!(
-            "cannot map {native_channels}-channel audio to {channels}-channel output; only equal layouts or mono conversion are supported"
-        )));
-    }
-    let mut planar: Vec<Vec<f32>> = (0..native_channels)
-        .map(|channel| {
-            pcm.samples()
-                .iter()
-                .skip(channel)
-                .step_by(native_channels)
-                .copied()
-                .collect()
-        })
-        .collect();
-    if rate != pcm.rate() && pcm.frames() != 0 {
-        let wanted = output_frames(pcm.frames(), pcm.rate(), rate)?;
-        let (mut resampler, delay) = build_resampler(pcm.rate(), rate, native_channels)?;
-        let target = wanted
-            .checked_add(delay)
-            .ok_or_else(|| Error::Invalid("prepared audio too large".into()))?;
-        if target
-            .checked_mul(channels)
-            .is_none_or(|total| total > MAX_INTERLEAVED_SAMPLES)
-        {
-            return Err(Error::Invalid("prepared audio too large".into()));
-        }
-        let mut result = vec![Vec::new(); native_channels];
-        let mut offset = 0;
-        while result[0].len() < target {
-            let chunk = resampler.input_frames_next();
-            let mut input = vec![vec![0.0; chunk]; native_channels];
-            let count = pcm.frames().saturating_sub(offset).min(chunk);
-            for (channel, input) in input.iter_mut().enumerate() {
-                if count != 0 {
-                    input[..count].copy_from_slice(&planar[channel][offset..offset + count]);
-                }
-            }
-            let block = resampler.process(&input)?;
-            for (out, data) in result.iter_mut().zip(block) {
-                out.extend(data);
-            }
-            offset += chunk;
-        }
-        planar = result
-            .into_iter()
-            .map(|data| data[delay..delay + wanted].to_vec())
-            .collect();
-    }
-    let mut output = Vec::with_capacity(planar[0].len() * channels);
-    for frame in 0..planar[0].len() {
-        for channel in 0..channels {
-            output.push(if native_channels == channels {
-                planar[channel][frame]
-            } else if native_channels == 1 {
-                planar[0][frame]
-            } else {
-                planar.iter().map(|c| c[frame]).sum::<f32>() / native_channels as f32
-            });
-        }
-    }
-    Ok(output)
-}
-
-enum PreparedResampler {
-    Fft(FftFixedInOut<f32>),
-    SincIn(SincFixedIn<f32>),
-    SincOut(SincFixedOut<f32>),
-}
-impl PreparedResampler {
-    fn input_frames_next(&self) -> usize {
-        match self {
-            Self::Fft(resampler) => resampler.input_frames_next(),
-            Self::SincIn(resampler) => resampler.input_frames_next(),
-            Self::SincOut(resampler) => resampler.input_frames_next(),
-        }
-    }
-    fn process(&mut self, input: &[Vec<f32>]) -> Result<Vec<Vec<f32>>, Error> {
-        match self {
-            Self::Fft(resampler) => resampler
-                .process(input, None)
-                .map_err(|e| Error::Decode(e.to_string())),
-            Self::SincIn(resampler) => resampler
-                .process(input, None)
-                .map_err(|e| Error::Decode(e.to_string())),
-            Self::SincOut(resampler) => resampler
-                .process(input, None)
-                .map_err(|e| Error::Decode(e.to_string())),
-        }
-    }
-}
-
-fn build_resampler(
-    input_rate: u32,
-    output_rate: u32,
-    channels: usize,
-) -> Result<(PreparedResampler, usize), Error> {
-    let mut a = input_rate;
-    let mut b = output_rate;
-    while b != 0 {
-        (a, b) = (b, a % b);
-    }
-    let gcd = a;
-    let period = (input_rate / gcd) as usize;
-    let chunk_in = 1024_usize.div_ceil(2 * period) * 2 * period;
-    let fft_chunks = chunk_in.div_ceil(period);
-    let fft_in = fft_chunks * period;
-    let fft_out = fft_chunks * (output_rate / gcd) as usize;
-    if fft_in <= MAX_FFT_FRAMES && fft_out <= MAX_FFT_FRAMES {
-        let resampler = FftFixedInOut::<f32>::new(
-            input_rate as usize,
-            output_rate as usize,
-            chunk_in,
-            channels,
-        )
-        .map_err(|e| Error::Decode(e.to_string()))?;
-        let delay = resampler.output_delay();
-        Ok((PreparedResampler::Fft(resampler), delay))
-    } else if output_rate < input_rate {
-        let min_chunk = input_rate.div_ceil(output_rate) as usize + SINC_LEN + 1;
-        let chunk = SINC_CHUNK_FRAMES.max(min_chunk);
-        if chunk > MAX_SINC_INPUT_FRAMES {
-            return Err(Error::Unsupported(
-                "sample-rate ratio too extreme for resampling".into(),
-            ));
-        }
-        let resampler = SincFixedIn::<f32>::new(
-            f64::from(output_rate) / f64::from(input_rate),
-            1.0,
-            sinc_params(),
-            chunk,
-            channels,
-        )
-        .map_err(|e| Error::Decode(e.to_string()))?;
-        let delay = resampler.output_delay();
-        Ok((PreparedResampler::SincIn(resampler), delay))
-    } else {
-        let resampler = SincFixedOut::<f32>::new(
-            f64::from(output_rate) / f64::from(input_rate),
-            1.0,
-            sinc_params(),
-            SINC_CHUNK_FRAMES,
-            channels,
-        )
-        .map_err(|e| Error::Decode(e.to_string()))?;
-        let delay = resampler.output_delay();
-        Ok((PreparedResampler::SincOut(resampler), delay))
-    }
-}
-
-fn sinc_params() -> SincInterpolationParameters {
-    SincInterpolationParameters {
-        sinc_len: SINC_LEN,
-        f_cutoff: 0.95,
-        oversampling_factor: 256,
-        interpolation: SincInterpolationType::Linear,
-        window: WindowFunction::BlackmanHarris2,
-    }
-}
-
-fn output_frames(input_frames: usize, input_rate: u32, output_rate: u32) -> Result<usize, Error> {
-    usize::try_from(
-        (input_frames as u128 * u128::from(output_rate)).div_ceil(u128::from(input_rate)),
-    )
-    .map_err(|e| Error::Invalid(e.to_string()))
 }

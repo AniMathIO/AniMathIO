@@ -506,3 +506,63 @@ fn import_media_preserves_companion_audio_and_video_only_sources() {
     assert_eq!(bundle.project.tracks().len(), 1);
     assert_eq!(bundle.project.tracks()[0].clips().len(), 1);
 }
+
+#[test]
+fn markers_list_add_remove_and_beats_errors_without_audio() {
+    let dir = tempdir().unwrap();
+    let project = dir.path().join("sample.amio");
+    ok(&["new-sample", "-o", path(&project)]);
+    ok(&[
+        "markers",
+        path(&project),
+        "add",
+        "--time",
+        "1.5",
+        "--name",
+        "Drop",
+        "--color",
+        "red",
+        "--note",
+        "chorus",
+    ]);
+    ok(&["markers", path(&project), "add", "--time", "0.5"]);
+    let listed = cli(&["markers", path(&project), "list"]);
+    assert!(listed.status.success());
+    let markers: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(markers.as_array().unwrap().len(), 2);
+    assert_eq!(markers[0]["seconds"], 0.5, "sorted by time");
+    assert_eq!(markers[1]["name"], "Drop");
+    assert_eq!(markers[1]["color"], "red");
+    // The saved archive is schema 5 and loads with its markers.
+    let bundle = read_amio(File::open(&project).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.markers().len(), 2);
+
+    // Bad colour, duplicate-free ids and removal.
+    assert!(
+        !cli(&[
+            "markers",
+            path(&project),
+            "add",
+            "--time",
+            "1",
+            "--color",
+            "magenta"
+        ])
+        .status
+        .success()
+    );
+    ok(&["markers", path(&project), "remove", "2"]);
+    assert!(
+        !cli(&["markers", path(&project), "remove", "2"])
+            .status
+            .success()
+    );
+    let bundle = read_amio(File::open(&project).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.markers().len(), 1);
+
+    // The sample has no audio, so beat detection fails cleanly and changes nothing.
+    let before = fs::read(&project).unwrap();
+    let beats = cli(&["beats", path(&project), "--add-markers"]);
+    assert!(!beats.status.success());
+    assert_eq!(fs::read(&project).unwrap(), before);
+}

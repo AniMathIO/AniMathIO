@@ -10,6 +10,53 @@ use gpui_component::{
     slider::{Slider, SliderEvent, SliderState},
 };
 
+/// What the review analyses: the selected clip, its track's mix, or the whole project
+/// (or the in/out range).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scope {
+    Clip,
+    Track,
+    Project,
+}
+
+impl Scope {
+    const ALL: [Self; 3] = [Self::Clip, Self::Track, Self::Project];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Clip => "Clip",
+            Self::Track => "Track",
+            Self::Project => "Project",
+        }
+    }
+
+    fn of(params: &AutocutParams) -> Self {
+        if params.clip.is_some() {
+            Self::Clip
+        } else if params.track.is_some() {
+            Self::Track
+        } else {
+            Self::Project
+        }
+    }
+
+    /// Point `params` at this scope; `track` is the selection's audio track, if any.
+    fn apply(
+        self,
+        params: &mut AutocutParams,
+        selected: Option<ClipId>,
+        track: Option<animathio_core::TrackId>,
+    ) {
+        params.clip = None;
+        params.track = None;
+        match self {
+            Self::Clip => params.clip = selected,
+            Self::Track => params.track = track,
+            Self::Project => {}
+        }
+    }
+}
+
 pub(super) struct Review {
     cancel: animathio_transcribe::Cancel,
     identity: Arc<()>,
@@ -30,6 +77,31 @@ impl Drop for Review {
 }
 
 impl Editor {
+    /// The track holding the selected clip's audio (a video clip resolves to its linked
+    /// audio companion).
+    fn selected_audio_track(&self) -> Option<animathio_core::TrackId> {
+        let clip = self.selected.and_then(|id| self.find_clip(id))?;
+        let audio = if matches!(clip.kind, animathio_core::ClipKind::Video(_)) {
+            self.project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .find(|other| {
+                    matches!(other.kind, animathio_core::ClipKind::Audio(_))
+                        && clip.link_group.is_some()
+                        && other.link_group == clip.link_group
+                })
+                .map(|other| other.id)?
+        } else {
+            clip.id
+        };
+        self.project
+            .tracks()
+            .iter()
+            .find(|t| t.clips().contains_key(&audio))
+            .map(Track::id)
+    }
+
     pub(super) fn open_autocut(&mut self, cx: &mut Context<Self>) {
         let params = AutocutParams {
             clip: self.selected,
@@ -206,45 +278,33 @@ impl Editor {
                 },
             ));
         if self.selected.is_some() {
-            panel = panel.child(
-                Button::new("autocut-scope")
+            let current = Scope::of(&review.params);
+            let mut picker = div().flex().flex_row().gap_1().items_center().child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("Analyse"),
+            );
+            for scope in Scope::ALL {
+                picker = picker.child(
+                    Button::new(SharedString::from(format!(
+                        "autocut-scope-{}",
+                        scope.label()
+                    )))
                     .compact()
-                    .label("Change audio: clip / track / project")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let selected = this.selected.and_then(|id| this.find_clip(id));
-                        let audio_id = selected.and_then(|c| {
-                            if matches!(c.kind, animathio_core::ClipKind::Video(_)) {
-                                this.project
-                                    .tracks()
-                                    .iter()
-                                    .flat_map(|t| t.clips().values())
-                                    .find(|a| {
-                                        matches!(a.kind, animathio_core::ClipKind::Audio(_))
-                                            && c.link_group.is_some()
-                                            && a.link_group == c.link_group
-                                    })
-                                    .map(|a| a.id)
-                            } else {
-                                Some(c.id)
-                            }
-                        });
-                        let track = audio_id.and_then(|id| {
-                            this.project
-                                .tracks()
-                                .iter()
-                                .find(|t| t.clips().contains_key(&id))
-                                .map(Track::id)
-                        });
+                    .selected(scope == current)
+                    .label(scope.label())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let track = this.selected_audio_track();
+                        let selected = this.selected;
                         if let Some(r) = this.autocut_review.as_mut() {
-                            if r.params.clip.take().is_some() {
-                                r.params.track = track;
-                            } else if r.params.track.take().is_none() {
-                                r.params.clip = this.selected;
-                            }
+                            scope.apply(&mut r.params, selected, track);
                         }
                         this.analyse_autocut(cx);
                     })),
-            );
+                );
+            }
+            panel = panel.child(picker);
         }
         let labels = [
             format!("Silence threshold: {:.0} dBFS", review.params.silence_db),
@@ -483,5 +543,36 @@ impl Editor {
                 ),
         );
         Some(panel)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use animathio_core::TrackId;
+
+    #[core::prelude::v1::test]
+    fn scope_picker_selects_exactly_one_target_and_round_trips() {
+        let mut params = AutocutParams {
+            clip: Some(ClipId(3)),
+            ..AutocutParams::default()
+        };
+        assert_eq!(Scope::of(&params), Scope::Clip);
+
+        Scope::Track.apply(&mut params, Some(ClipId(3)), Some(TrackId(7)));
+        assert_eq!((params.clip, params.track), (None, Some(TrackId(7))));
+        assert_eq!(Scope::of(&params), Scope::Track);
+
+        Scope::Project.apply(&mut params, Some(ClipId(3)), Some(TrackId(7)));
+        assert_eq!((params.clip, params.track), (None, None));
+        assert_eq!(Scope::of(&params), Scope::Project);
+
+        Scope::Clip.apply(&mut params, Some(ClipId(3)), Some(TrackId(7)));
+        assert_eq!((params.clip, params.track), (Some(ClipId(3)), None));
+
+        // A selection without an audio track falls back to the project scope rather than
+        // keeping a stale target.
+        Scope::Track.apply(&mut params, Some(ClipId(3)), None);
+        assert_eq!(Scope::of(&params), Scope::Project);
     }
 }

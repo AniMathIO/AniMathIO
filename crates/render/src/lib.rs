@@ -357,7 +357,7 @@ pub fn render_preview(
         clips: vec![clip.clone()],
     };
     for clip in &mut repaired.clips {
-        if clip.effects.is_empty() {
+        if !clip.has_active_effects() {
             continue;
         }
         if probes_left == 0 {

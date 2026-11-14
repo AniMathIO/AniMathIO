@@ -1,7 +1,7 @@
 use crate::{
     Animation, Asset, AssetId, AudioChain, Clip, ClipId, ClipKind, EffectId, EffectInstance, Error,
-    FrameRate, Keyframe, Keyframes, Project, Target, Time, TimeRange, Track, TrackId, Transform,
-    Transition, TransitionId, invalid,
+    FrameRate, Keyframe, Keyframes, Marker, MarkerId, Project, Target, Time, TimeRange, Track,
+    TrackId, Transform, Transition, TransitionId, invalid,
 };
 use serde::{Deserialize, Serialize};
 
@@ -192,6 +192,15 @@ pub enum Command {
         /// Effect identity.
         effect: EffectId,
     },
+    /// Move a video effect to another position in the clip's chain.
+    MoveEffect {
+        /// Clip identity.
+        id: ClipId,
+        /// Effect identity.
+        effect: EffectId,
+        /// New index in the chain after the move.
+        index: usize,
+    },
     /// Set or remove an effect parameter.
     SetEffectParam {
         /// Clip identity.
@@ -202,6 +211,15 @@ pub enum Command {
         name: String,
         /// New value; `None` removes it (only if not animated).
         value: Option<f64>,
+    },
+    /// Bypass or re-enable a clip's video effect without removing it.
+    SetEffectBypass {
+        /// Clip identity.
+        id: ClipId,
+        /// Effect identity.
+        effect: EffectId,
+        /// New bypass state.
+        bypass: bool,
     },
     /// Insert an audio effect into a clip's or track's ordered audio-effect chain.
     AddAudioEffect {
@@ -345,20 +363,74 @@ pub enum Command {
         /// New positive duration in ticks.
         duration: Time,
     },
+    /// Add a timeline marker (with a project-unique id). Markers are never locked.
+    AddMarker {
+        /// Marker to insert.
+        marker: Marker,
+    },
+    /// Remove a marker.
+    RemoveMarker {
+        /// Marker identity.
+        id: MarkerId,
+    },
+    /// Move a marker to another time, keeping everything else.
+    MoveMarker {
+        /// Marker identity.
+        id: MarkerId,
+        /// New nonnegative time.
+        time: Time,
+    },
+    /// Replace a marker's time, span, name, colour and note (its id must match).
+    UpdateMarker {
+        /// Marker identity.
+        id: MarkerId,
+        /// Replacement data; its `id` is ignored and kept as `id`.
+        marker: Marker,
+    },
 }
 
 impl Command {
     /// Apply transactionally, validating the resulting project and returning its inverse.
     /// Cloning for rollback is deliberately simple for the initial prototype.
+    ///
+    /// Locked tracks are checked step by step: each member of a [`Command::Batch`] is
+    /// checked against the state left by the members before it, so a batch that
+    /// unlocks a track may then edit it, and one that locks a track may not.
     pub fn apply(&self, project: &mut Project) -> Result<Self, Error> {
-        if let Some(track) = self.locked_track(project) {
-            return Err(Error(format!("track {} is locked", track.0)));
-        }
+        self.apply_transaction(project, true)
+    }
+
+    /// [`Command::apply`] without the locked-track guard. Undo and redo replay
+    /// recorded history, which must restore exactly what was there even if a
+    /// track's lock changed in between; locks only guard new edits.
+    fn apply_ignoring_locks(&self, project: &mut Project) -> Result<Self, Error> {
+        self.apply_transaction(project, false)
+    }
+
+    fn apply_transaction(&self, project: &mut Project, check_locks: bool) -> Result<Self, Error> {
         let mut candidate = project.clone();
-        let inverse = self.apply_inner(&mut candidate)?;
+        let inverse = if check_locks {
+            self.apply_checked(&mut candidate)?
+        } else {
+            self.apply_inner(&mut candidate)?
+        };
         candidate.validate()?;
         *project = candidate;
         Ok(inverse)
+    }
+
+    /// Apply one command, rejecting it if it edits a track that is locked right now.
+    fn apply_checked(&self, project: &mut Project) -> Result<Self, Error> {
+        if let Self::Batch { commands } = self {
+            if commands.len() > MAX_BATCH {
+                return Err(invalid("batch too large"));
+            }
+            return apply_all(project, commands, true);
+        }
+        if let Some(track) = self.locked_track(project) {
+            return Err(Error(format!("track {} is locked", track.0)));
+        }
+        self.apply_inner(project)
     }
 
     /// The locked layer this command would edit, if any. Layer-level commands
@@ -382,19 +454,33 @@ impl Command {
             Self::Exact { command } => command.locked_track(project),
             Self::SetClipLink { id, .. }
             | Self::RemoveClip { id }
-            | Self::MoveClip { id, .. }
             | Self::TrimClip { id, .. }
             | Self::SplitClip { id, .. }
             | Self::SetTransform { id, .. }
             | Self::SetParam { id, .. }
             | Self::AddEffect { id, .. }
             | Self::RemoveEffect { id, .. }
+            | Self::MoveEffect { id, .. }
             | Self::SetEffectParam { id, .. }
+            | Self::SetEffectBypass { id, .. }
             | Self::SetPluginParam { id, .. }
             | Self::AddKeyframe { id, .. }
             | Self::RemoveKeyframe { id, .. }
             | Self::MoveKeyframe { id, .. } => of_clip(*id),
+            // Moving onto a locked track edits it too.
+            Self::MoveClip { id, track, .. } => of_clip(*id).or_else(|| {
+                project
+                    .tracks
+                    .iter()
+                    .find(|t| t.id == *track && t.locked)
+                    .map(|t| t.id)
+            }),
             Self::MergeClip { left, right } => of_clip(*left).or_else(|| of_clip(*right)),
+            Self::RestoreClips { track, .. } => project
+                .tracks
+                .iter()
+                .find(|t| t.id == *track && t.locked)
+                .map(|t| t.id),
             Self::AddAudioEffect { chain, .. }
             | Self::RemoveAudioEffect { chain, .. }
             | Self::MoveAudioEffect { chain, .. }
@@ -409,6 +495,93 @@ impl Command {
                 .find_map(|command| command.locked_track(project)),
             _ => None,
         }
+    }
+
+    /// `self` (a move, trim, removal or split of `original`) followed by the same
+    /// edit for every other member of `original`'s link group.
+    fn with_linked_companions(
+        &self,
+        project: &Project,
+        original: &Clip,
+    ) -> Result<Vec<Self>, Error> {
+        let id = original.id;
+        let group = original.link_group;
+        let members: Vec<_> = project
+            .tracks
+            .iter()
+            .flat_map(|t| t.clips.values().map(move |c| (t.id, c.clone())))
+            .filter(|(_, c)| c.id != id && c.link_group == group)
+            .collect();
+        let mut commands = vec![self.clone()];
+        let mut next = next_clip_id(project)?;
+        if let Self::SplitClip { right_id, .. } = self {
+            next = next.max(
+                right_id
+                    .0
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("clip id overflow"))?,
+            );
+        }
+        for (track, clip) in members {
+            // A companion that was trimmed so it no longer spans the split
+            // point has nothing to split (pairs may be misaligned).
+            if let Self::SplitClip { at, right_id, .. } = self
+                && !(clip.range.start < *at && *at < clip.range.end)
+            {
+                // One lying wholly after the cut belongs with the right half
+                // (whose new group is named after `right_id`).
+                if clip.range.start >= *at {
+                    commands.push(Self::SetClipLink {
+                        id: clip.id,
+                        group: Some(*right_id),
+                    });
+                }
+                continue;
+            }
+            commands.push(match self {
+                Self::RemoveClip { .. } => Self::RemoveClip { id: clip.id },
+                Self::MoveClip { start, .. } => Self::MoveClip {
+                    id: clip.id,
+                    track,
+                    start: shifted(clip.range.start, original.range.start, *start)
+                        .ok_or_else(|| invalid("move overflow"))?,
+                },
+                // Apply the edit's deltas, not the absolute range, so a pair
+                // that was ever misaligned keeps its relative offset.
+                Self::TrimClip {
+                    range,
+                    source_offset,
+                    ..
+                } => Self::TrimClip {
+                    id: clip.id,
+                    range: TimeRange::new(
+                        shifted(clip.range.start, original.range.start, range.start)
+                            .ok_or_else(|| invalid("trim overflow"))?,
+                        shifted(clip.range.end, original.range.end, range.end)
+                            .ok_or_else(|| invalid("trim overflow"))?,
+                    )?,
+                    source_offset: shifted(
+                        clip.source_offset,
+                        original.source_offset,
+                        *source_offset,
+                    )
+                    .ok_or_else(|| invalid("trim overflow"))?,
+                },
+                Self::SplitClip { at, .. } => {
+                    let right_id = ClipId(next);
+                    next = next
+                        .checked_add(1)
+                        .ok_or_else(|| invalid("clip id overflow"))?;
+                    Self::SplitClip {
+                        id: clip.id,
+                        right_id,
+                        at: *at,
+                    }
+                }
+                _ => unreachable!(),
+            });
+        }
+        Ok(commands)
     }
 
     fn apply_inner(&self, project: &mut Project) -> Result<Self, Error> {
@@ -432,67 +605,8 @@ impl Command {
         };
         if let Some(id) = id {
             let original = project.tracks[clip_track_index(project, id)?].clips[&id].clone();
-            if let Some(group) = original.link_group {
-                let members: Vec<_> = project
-                    .tracks
-                    .iter()
-                    .flat_map(|t| t.clips.values().map(move |c| (t.id, c.clone())))
-                    .filter(|(_, c)| c.id != id && c.link_group == Some(group))
-                    .collect();
-                let mut commands = vec![self.clone()];
-                let mut next = next_clip_id(project)?;
-                if let Self::SplitClip { right_id, .. } = self {
-                    next = next.max(
-                        right_id
-                            .0
-                            .checked_add(1)
-                            .ok_or_else(|| invalid("clip id overflow"))?,
-                    );
-                }
-                for (track, clip) in members {
-                    commands.push(match self {
-                        Self::RemoveClip { .. } => Self::RemoveClip { id: clip.id },
-                        Self::MoveClip { start, .. } => Self::MoveClip {
-                            id: clip.id,
-                            track,
-                            start: shifted(clip.range.start, original.range.start, *start)
-                                .ok_or_else(|| invalid("move overflow"))?,
-                        },
-                        // Apply the edit's deltas, not the absolute range, so a pair
-                        // that was ever misaligned keeps its relative offset.
-                        Self::TrimClip {
-                            range,
-                            source_offset,
-                            ..
-                        } => Self::TrimClip {
-                            id: clip.id,
-                            range: TimeRange::new(
-                                shifted(clip.range.start, original.range.start, range.start)
-                                    .ok_or_else(|| invalid("trim overflow"))?,
-                                shifted(clip.range.end, original.range.end, range.end)
-                                    .ok_or_else(|| invalid("trim overflow"))?,
-                            )?,
-                            source_offset: shifted(
-                                clip.source_offset,
-                                original.source_offset,
-                                *source_offset,
-                            )
-                            .ok_or_else(|| invalid("trim overflow"))?,
-                        },
-                        Self::SplitClip { at, .. } => {
-                            let right_id = ClipId(next);
-                            next = next
-                                .checked_add(1)
-                                .ok_or_else(|| invalid("clip id overflow"))?;
-                            Self::SplitClip {
-                                id: clip.id,
-                                right_id,
-                                at: *at,
-                            }
-                        }
-                        _ => unreachable!(),
-                    });
-                }
+            if original.link_group.is_some() {
+                let commands = self.with_linked_companions(project, &original)?;
                 return apply_generated(project, &commands);
             }
         }
@@ -525,7 +639,7 @@ impl Command {
                 if commands.len() > MAX_BATCH {
                     return Err(invalid("batch too large"));
                 }
-                apply_all(project, commands)?
+                apply_all(project, commands, false)?
             }
             Self::SplitAt { times } => {
                 let commands = split_at_commands(project, times)?;
@@ -834,34 +948,7 @@ impl Command {
                 if *at <= left.range.start || *at >= left.range.end {
                     return Err(invalid("split point outside clip"));
                 }
-                let duration = at.0 - left.range.start.0;
-                let mut right = left.clone();
-                right.id = *right_id;
-                right.range = TimeRange::new(*at, left.range.end)?;
-                right.source_offset = Time(left.source_offset.0 + duration);
-                for animation in &mut right.animations {
-                    let boundary = animation.keys.sample(Time(duration));
-                    let interpolation = animation
-                        .keys
-                        .0
-                        .range(..=Time(duration))
-                        .next_back()
-                        .or_else(|| animation.keys.0.first_key_value())
-                        .map_or_default(|(_, key)| key.interpolation);
-                    animation.keys.0 = animation
-                        .keys
-                        .0
-                        .iter()
-                        .filter(|(time, _)| time.0 >= duration)
-                        .map(|(time, key)| (Time(time.0 - duration), key.clone()))
-                        .collect();
-                    if let Some(value) = boundary {
-                        animation.keys.0.entry(Time(0)).or_insert(Keyframe {
-                            value,
-                            interpolation,
-                        });
-                    }
-                }
+                let right = split_right(&left, *at, *right_id)?;
 
                 project.tracks[index]
                     .clips
@@ -971,6 +1058,24 @@ impl Command {
                     effect: removed,
                 }
             }
+            Self::MoveEffect { id, effect, index } => {
+                let clip = clip_mut(project, *id)?;
+                let from = clip
+                    .effects
+                    .iter()
+                    .position(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("effect missing"))?;
+                if *index >= clip.effects.len() {
+                    return Err(invalid("effect index out of bounds"));
+                }
+                let moved = clip.effects.remove(from);
+                clip.effects.insert(*index, moved);
+                Self::MoveEffect {
+                    id: *id,
+                    effect: *effect,
+                    index: from,
+                }
+            }
             Self::SetEffectParam {
                 id,
                 effect,
@@ -978,6 +1083,13 @@ impl Command {
                 value,
             } => {
                 let clip = clip_mut(project, *id)?;
+                if value.is_none()
+                    && clip.animations.iter().any(|animation| {
+                        matches!(&animation.target, Target::Effect { effect: target, param } if target == effect && param == name)
+                    })
+                {
+                    return Err(invalid("effect parameter is animated"));
+                }
                 let instance = clip
                     .effects
                     .iter_mut()
@@ -993,6 +1105,20 @@ impl Command {
                     effect: *effect,
                     name: name.clone(),
                     value: previous,
+                }
+            }
+            Self::SetEffectBypass { id, effect, bypass } => {
+                let clip = clip_mut(project, *id)?;
+                let instance = clip
+                    .effects
+                    .iter_mut()
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("effect missing"))?;
+                let previous = std::mem::replace(&mut instance.bypass, *bypass);
+                Self::SetEffectBypass {
+                    id: *id,
+                    effect: *effect,
+                    bypass: previous,
                 }
             }
             Self::AddAudioEffect {
@@ -1240,6 +1366,41 @@ impl Command {
                     duration: previous,
                 }
             }
+            Self::AddMarker { marker } => {
+                if project.markers.iter().any(|m| m.id == marker.id) {
+                    return Err(invalid("marker already exists"));
+                }
+                insert_marker(project, marker.clone());
+                Self::RemoveMarker { id: marker.id }
+            }
+            Self::RemoveMarker { id } => {
+                let marker = take_marker(project, *id)?;
+                Self::AddMarker { marker }
+            }
+            Self::MoveMarker { id, time } => {
+                let mut marker = take_marker(project, *id)?;
+                let previous = marker.time;
+                marker.time = *time;
+                insert_marker(project, marker);
+                Self::MoveMarker {
+                    id: *id,
+                    time: previous,
+                }
+            }
+            Self::UpdateMarker { id, marker } => {
+                let previous = take_marker(project, *id)?;
+                insert_marker(
+                    project,
+                    Marker {
+                        id: *id,
+                        ..marker.clone()
+                    },
+                );
+                Self::UpdateMarker {
+                    id: *id,
+                    marker: previous,
+                }
+            }
         })
     }
 }
@@ -1250,7 +1411,13 @@ fn shifted(value: Time, from: Time, to: Time) -> Option<Time> {
 
 /// Apply `commands` in order without intermediate validation, returning the combined
 /// inverse. On failure the caller's candidate project is discarded by `Command::apply`.
-fn apply_all(project: &mut Project, commands: &[Command]) -> Result<Command, Error> {
+/// With `check_locks`, each command is checked against the locks as they are when it
+/// runs (earlier members may have locked or unlocked a track).
+fn apply_all(
+    project: &mut Project,
+    commands: &[Command],
+    check_locks: bool,
+) -> Result<Command, Error> {
     let mut inverses = Vec::with_capacity(commands.len());
     let mut removed_companions = std::collections::BTreeSet::new();
     for command in commands {
@@ -1270,7 +1437,11 @@ fn apply_all(project: &mut Project, commands: &[Command]) -> Result<Command, Err
                 );
             }
         }
-        inverses.push(command.apply_inner(project)?);
+        inverses.push(if check_locks {
+            command.apply_checked(project)?
+        } else {
+            command.apply_inner(project)?
+        });
     }
     inverses.reverse();
     Ok(inverse_batch(inverses))
@@ -1299,6 +1470,30 @@ fn apply_generated(project: &mut Project, commands: &[Command]) -> Result<Comman
     let mut inverses = Vec::new();
     let mut split_groups = std::collections::BTreeMap::new();
     for command in commands {
+        // A generated restore replaces a clip's content in place (see `keep_tail`);
+        // its link is whatever the edit so far gave it, e.g. a fresh split group.
+        if let Command::RestoreClips { track, ids, clips } = command {
+            let index = track_index(project, *track)?;
+            let clips = clips
+                .iter()
+                .map(|clip| {
+                    let mut clip = clip.clone();
+                    if let Some(current) = project.tracks[index].clips.get(&clip.id) {
+                        clip.link_group = current.link_group;
+                    }
+                    clip
+                })
+                .collect();
+            let restore = Command::RestoreClips {
+                track: *track,
+                ids: ids.clone(),
+                clips,
+            };
+            inverses.push(Command::Exact {
+                command: Box::new(restore.apply_raw(project)?),
+            });
+            continue;
+        }
         if let Command::SplitClip { id, right_id, at } = command {
             let clip = &project.tracks[clip_track_index(project, *id)?].clips[id];
             if let Some(group) = clip.link_group {
@@ -1419,6 +1614,60 @@ fn split_at_commands(project: &Project, times: &[Time]) -> Result<Vec<Command>, 
     Ok(commands)
 }
 
+/// The part of `clip` from timeline time `at` on, as clip `id`: the source offset
+/// advances and every animation is re-based so the kept part looks exactly as it
+/// did (keys before `at` are dropped, the value at `at` becomes a key at 0).
+fn split_right(clip: &Clip, at: Time, id: ClipId) -> Result<Clip, Error> {
+    let duration = at.0 - clip.range.start.0;
+    let mut right = clip.clone();
+    right.id = id;
+    right.range = TimeRange::new(at, clip.range.end)?;
+    right.source_offset = Time(clip.source_offset.0 + duration);
+    for animation in &mut right.animations {
+        let boundary = animation.keys.sample(Time(duration));
+        let interpolation = animation
+            .keys
+            .0
+            .range(..=Time(duration))
+            .next_back()
+            .or_else(|| animation.keys.0.first_key_value())
+            .map_or_default(|(_, key)| key.interpolation);
+        animation.keys.0 = animation
+            .keys
+            .0
+            .iter()
+            .filter(|(time, _)| time.0 >= duration)
+            .map(|(time, key)| (Time(time.0 - duration), key.clone()))
+            .collect();
+        if let Some(value) = boundary {
+            animation.keys.0.entry(Time(0)).or_insert(Keyframe {
+                value,
+                interpolation,
+            });
+        }
+    }
+    Ok(right)
+}
+
+/// Replace clip `id` on `track` with the part of `clip` after `cut_end`, placed at
+/// `start`. A plain `TrimClip` would keep keyframes in clip-local time, so fades
+/// and animations on the kept tail would drift by the removed length.
+fn keep_tail(
+    track: TrackId,
+    clip: &Clip,
+    id: ClipId,
+    cut_end: Time,
+    start: Time,
+) -> Result<Command, Error> {
+    let mut tail = split_right(clip, cut_end, id)?;
+    tail.range = TimeRange::new(start, Time(start.0 + (clip.range.end.0 - cut_end.0)))?;
+    Ok(Command::RestoreClips {
+        track,
+        ids: vec![id],
+        clips: vec![tail],
+    })
+}
+
 fn remove_range_commands(
     project: &Project,
     range: TimeRange,
@@ -1437,7 +1686,6 @@ fn remove_range_commands(
         }
         for clip in track.clips.values() {
             let (start, end) = (clip.range.start.0, clip.range.end.0);
-            let offset = clip.source_offset.0;
             if end <= cut_start {
                 continue;
             }
@@ -1461,11 +1709,13 @@ fn remove_range_commands(
                     source_offset: clip.source_offset,
                 }),
                 // Crosses the range end: keep the tail.
-                (false, true) => commands.push(Command::TrimClip {
-                    id: clip.id,
-                    range: TimeRange::new(Time(shift(cut_end)), Time(shift(end)))?,
-                    source_offset: Time(offset + (cut_end - start)),
-                }),
+                (false, true) => commands.push(keep_tail(
+                    track.id,
+                    clip,
+                    clip.id,
+                    range.end,
+                    Time(shift(cut_end)),
+                )?),
                 // Spans the whole range: split, then trim the right half.
                 (true, true) => {
                     let right_id = ClipId(next);
@@ -1477,16 +1727,14 @@ fn remove_range_commands(
                         right_id,
                         at: range.start,
                     });
-                    commands.push(Command::TrimClip {
-                        id: clip.id,
-                        range: TimeRange::new(clip.range.start, range.start)?,
-                        source_offset: clip.source_offset,
-                    });
-                    commands.push(Command::TrimClip {
-                        id: right_id,
-                        range: TimeRange::new(Time(shift(cut_end)), Time(shift(end)))?,
-                        source_offset: Time(offset + (cut_end - start)),
-                    });
+                    let right = split_right(clip, range.start, right_id)?;
+                    commands.push(keep_tail(
+                        track.id,
+                        &right,
+                        right_id,
+                        range.end,
+                        Time(shift(cut_end)),
+                    )?);
                 }
             }
         }
@@ -1524,6 +1772,20 @@ fn ripple_delete_commands(project: &Project, id: ClipId) -> Result<Vec<Command>,
     Ok(commands)
 }
 
+fn insert_marker(project: &mut Project, marker: Marker) {
+    let position = project
+        .markers
+        .partition_point(|m| (m.time, m.id) < (marker.time, marker.id));
+    project.markers.insert(position, marker);
+}
+fn take_marker(project: &mut Project, id: MarkerId) -> Result<Marker, Error> {
+    let position = project
+        .markers
+        .iter()
+        .position(|m| m.id == id)
+        .ok_or_else(|| invalid("marker missing"))?;
+    Ok(project.markers.remove(position))
+}
 fn transition_index(project: &Project, id: TransitionId) -> Result<(usize, usize), Error> {
     project
         .tracks
@@ -1596,7 +1858,7 @@ impl History {
         let Some(command) = self.undo.last() else {
             return Ok(false);
         };
-        match command.apply(project) {
+        match command.apply_ignoring_locks(project) {
             Ok(inverse) => {
                 self.undo.pop();
                 self.redo.push(inverse);
@@ -1614,7 +1876,7 @@ impl History {
         let Some(command) = self.redo.last() else {
             return Ok(false);
         };
-        match command.apply(project) {
+        match command.apply_ignoring_locks(project) {
             Ok(inverse) => {
                 self.redo.pop();
                 self.undo.push(inverse);

@@ -52,6 +52,69 @@ fn footer(
         )
 }
 
+/// An action that replaces (or closes) the current project.
+#[derive(Clone, Debug)]
+pub(super) enum ReplaceProject {
+    New,
+    Open,
+    Recent(PathBuf),
+    ImportV1,
+    CloseWindow,
+}
+
+impl Editor {
+    /// Run `action`, first asking whether to discard unsaved changes. Without
+    /// this guard New, Open, Open Recent and Import v1 silently dropped the
+    /// project (an untitled project has no autosave to recover from).
+    pub(super) fn replace_project(
+        &mut self,
+        action: ReplaceProject,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.dirty {
+            self.run_replace(action, window, cx);
+            return;
+        }
+        let editor = cx.entity();
+        let (title, label) = match action {
+            ReplaceProject::CloseWindow => ("Quit without saving?", "Quit without saving"),
+            _ => ("Discard unsaved changes?", "Discard changes"),
+        };
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let editor = editor.clone();
+            let action = action.clone();
+            dialog
+                .title(heading(IconName::TriangleAlert, title))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(style::hex(style::color::TEXT_SECONDARY))
+                        .child("The current project has unsaved changes that will be lost."),
+                )
+                .footer(footer(label, cx, move |_, window, cx| {
+                    window.close_dialog(cx);
+                    // `dirty` is left alone: a cancelled file picker or a failed
+                    // open keeps the old (still unsaved) project.
+                    editor.update(cx, |this, cx| this.run_replace(action.clone(), window, cx));
+                }))
+        });
+    }
+
+    fn run_replace(&mut self, action: ReplaceProject, window: &mut Window, cx: &mut Context<Self>) {
+        match action {
+            ReplaceProject::New => self.new_project(cx),
+            ReplaceProject::Open => self.open(cx),
+            ReplaceProject::Recent(path) => self.open_path(&path, cx),
+            ReplaceProject::ImportV1 => self.import_legacy(cx),
+            ReplaceProject::CloseWindow => {
+                self.dirty = false;
+                window.remove_window();
+            }
+        }
+    }
+}
+
 /// Outcome of submitting the Export dialog.
 enum Submitted {
     Invalid,
@@ -202,15 +265,21 @@ impl Editor {
         });
     }
 
-    /// A free `video.mp4`, `video-2.mp4`, ... in the default export folder, so
-    /// repeated queueing does not collide with earlier jobs or files.
+    /// A free `<project>.mp4`, `<project>-2.mp4`, ... (`video` for an unsaved
+    /// project) in the default export folder, so repeated queueing does not
+    /// collide with earlier jobs or files.
     fn next_export_path(&self) -> PathBuf {
-        let folder = &self.preferences.export_folder;
+        let folder = self.preferences.export_dir(self.path.as_deref());
+        let stem = self
+            .path
+            .as_deref()
+            .and_then(Path::file_stem)
+            .map_or_else(|| "video".to_owned(), |s| s.to_string_lossy().into_owned());
         let candidate = |n: u32| {
             if n == 1 {
-                folder.join("video.mp4")
+                folder.join(format!("{stem}.mp4"))
             } else {
-                folder.join(format!("video-{n}.mp4"))
+                folder.join(format!("{stem}-{n}.mp4"))
             }
         };
         (1..=9999)

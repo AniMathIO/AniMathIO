@@ -248,7 +248,7 @@ interface host {
     /// max-audio-sample-rate, max-shape-text-chars, max-shape-text-verbs,
     /// max-svg-input-bytes, max-svg-verbs, max-typeset-verbs,
     /// max-typeset-source-bytes, max-typeset-font-size-px, typeset-timeout-ms,
-    /// max-log-message-bytes, max-log-entries; since 1.1 also max-import-source-bytes,
+    /// max-log-message-bytes, max-log-entries, max-effects-per-plugin (added in 1.0.x); since 1.1 also max-import-source-bytes,
     /// import-memory-bytes, import-fuel-per-byte, import-epoch-deadline-ticks,
     /// max-import-output-bytes, max-import-commands, max-sibling-file-bytes,
     /// max-sibling-total-bytes, max-sibling-files, max-preset-keys.

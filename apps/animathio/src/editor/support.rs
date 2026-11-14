@@ -203,6 +203,7 @@ pub(super) fn paint_timeline(
             ));
         }
     }
+    super::markers::paint_markers(bounds, &layout, snapshot, height, window, cx);
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let playhead = style::hex(colors::PLAYHEAD);
     for (width, alpha) in [(7.0, 0.06), (3.0, 0.12), (1.0, 1.0)] {
@@ -940,22 +941,6 @@ pub(super) fn field_value(clip: &Clip, field: &Field) -> f64 {
     }
 }
 
-pub(super) fn with_transform(
-    mut transform: Transform,
-    property: TransformProperty,
-    value: f64,
-) -> Transform {
-    match property {
-        TransformProperty::X => transform.x = value,
-        TransformProperty::Y => transform.y = value,
-        TransformProperty::ScaleX => transform.scale_x = value,
-        TransformProperty::ScaleY => transform.scale_y = value,
-        TransformProperty::Rotation => transform.rotation = value,
-        TransformProperty::Opacity => transform.opacity = value,
-    }
-    transform
-}
-
 pub(super) fn field_step(field: &Field) -> f64 {
     match field {
         Field::Transform(TransformProperty::Rotation) => 1.0,
@@ -1394,7 +1379,7 @@ mod ui_units_tests {
         );
         clip.transform.rotation = std::f64::consts::FRAC_PI_2;
         assert!((field_value(&clip, &field) - 90.).abs() < 1e-10);
-        let changed = with_transform(
+        let changed = inspector::with_transform(
             clip.transform,
             TransformProperty::Rotation,
             field_model_value(&field, -45.),

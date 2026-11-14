@@ -433,6 +433,54 @@ impl ControlHandler for HeadlessHandler {
                 &self.assets,
                 &params,
             )?)?,
+            Call::MarkersList => serde_json::to_value(self.project.markers())?,
+            Call::MarkersAdd { params } => {
+                let (command, id) = crate::add_marker_command(&self.project, &params)?;
+                self.history.execute(&mut self.project, &command)?;
+                serde_json::to_value(crate::MarkerAdded { id })?
+            }
+            Call::MarkersRemove { id } => {
+                self.history.execute(
+                    &mut self.project,
+                    &animathio_core::Command::RemoveMarker { id },
+                )?;
+                serde_json::to_value(())?
+            }
+            Call::BeatsDetect { params } => {
+                serde_json::to_value(crate::analyze_beats(&self.project, &self.assets, &params)?)?
+            }
+            Call::BeatsAddMarkers { params } => {
+                let detection = crate::analyze_beats(&self.project, &self.assets, &params.detect)?;
+                serde_json::to_value(crate::apply_beat_markers(
+                    &mut self.project,
+                    &mut self.history,
+                    &detection,
+                    &params.options,
+                )?)?
+            }
+            Call::SyncCutsToBeats { params } => {
+                let detection = if params.source.needs_beats() {
+                    Some(crate::analyze_beats(
+                        &self.project,
+                        &self.assets,
+                        &params.detect,
+                    )?)
+                } else {
+                    None
+                };
+                serde_json::to_value(crate::apply_sync_cuts(
+                    &mut self.project,
+                    &mut self.history,
+                    detection.as_ref(),
+                    &params,
+                )?)?
+            }
+            Call::AutoReframe { params } => serde_json::to_value(crate::auto_reframe(
+                &mut self.project,
+                &mut self.history,
+                &self.assets,
+                &params,
+            )?)?,
             Call::SubtitlesGenerate { params } => serde_json::to_value(crate::generate_subtitles(
                 &mut self.project,
                 &mut self.history,
@@ -444,6 +492,11 @@ impl ControlHandler for HeadlessHandler {
             Call::SubtitlesExport { params } => {
                 serde_json::to_value(crate::export_subtitles(&self.project, &params)?)?
             }
+            Call::SubtitlesStyle { params } => serde_json::to_value(crate::apply_caption_style(
+                &mut self.project,
+                &mut self.history,
+                &params,
+            )?)?,
             Call::SubtitlesImport { params } => serde_json::to_value(crate::import_subtitles(
                 &mut self.project,
                 &mut self.history,

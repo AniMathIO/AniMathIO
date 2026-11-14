@@ -24,13 +24,14 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 3) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 5) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
-| Audio decoding, mixing, playback (cpal) | ✅ `audio` (prototype limits) |
+| Audio decoding (streaming; Opus included), mixing, playback (cpal) | ✅ `audio` |
 | Plugin system (wasmtime Component Model) | ✅ ABI 1.1.0 (1.0.0 frozen, plus animation-preset and importer worlds); first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
+| Auto-reframe to portrait/square (offline subject tracking) | ✅ editor, CLI and MCP |
 | Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
 | v1 and Manim importers | ✅ `import-v1` (native), Manim via the sandboxed `org.animathio.import-manim` plugin |
 | GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
@@ -54,11 +55,24 @@ de-esser). Clips and tracks carry ordered, undoable audio-effect chains that run
 mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
 Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools. Open a track header’s
 **Audio effects** context-menu entry to edit its chain with the same controls. Clip audio-effect
-parameters have keyframe controls, and parameter drags update playback live.
+parameters have keyframe controls, and parameter drags update playback live (throttled snapshots for the mix worker, never the
+device callback). Video effects in the inspector have a bypass switch like audio effects.
 
 Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
 the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
 and 256-byte display strings.
+
+## Auto-reframe
+
+**Clip, Auto reframe…** follows motion and visual contrast in selected video clips
+(or all videos when none are selected). Choose 9:16, 1:1 or 4:5 and tracking
+smoothness, then Reframe. Progress and Cancel run alongside the editor. No models
+or downloads are needed. The canvas changes in place; video position/scale keys
+are replaced in one undo step. Other layers retain their normalized transforms.
+CLI: `animathio-cli reframe landscape.amio -o vertical.amio --aspect 9:16`.
+MCP `auto_reframe` provides the same operation. See [limitations](docs/mcp.md#auto-reframe).
+
+![Auto-reframe settings and vertical video preview](docs/screenshots/editor-auto-reframe.png)
 
 ## Automatic subtitles
 
@@ -68,6 +82,14 @@ caption-bar clips on a new `Subtitles` track, as one undo step; progress and can
 a status-bar popover like the export queue. `animathio-cli transcribe talk.mp4 --srt
 talk.srt`, the `auto_subtitles` / `export_subtitles` / `import_subtitles` MCP tools and SRT
 or WebVTT import and export work the same way.
+
+Captions can be animated CapCut-style from Whisper's per-word timings: **Classic bar**,
+**Word highlight**, **Karaoke fill**, **Pop**, **One word at a time** and **Bold outline**
+(big type with a thick outline, centred for 9:16). Pick one in the Generate dialog, or in the
+inspector of a selected caption (it restyles every caption on the track as one undo step; font
+size, colours, top/middle/bottom position and words per line included). On the command line
+use `transcribe lesson.amio --style karaoke -o out.amio`; over MCP pass `style` to
+`auto_subtitles` or call `set_caption_style` on existing captions.
 
 ![Generated subtitles on a Subtitles track with the progress popover](docs/screenshots/subtitles.png)
 
@@ -319,6 +341,18 @@ Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, 
 
 [MIT](LICENSE)
 
+Timeline markers and beat sync: press M to drop a coloured marker on the ruler at the
+playhead (Shift+M / Ctrl+Shift+M, or Cmd+Shift+M on macOS, jump to the next / previous
+marker). Double-click a flag to edit its name, colour and note, drag it to move it
+(markers snap, and clips and the playhead snap to markers). Clip > Markers and beat
+sync opens a panel that lists the markers, detects the tempo and beats of the project
+audio (or the selected clip) offline, adds markers at every beat, every Nth beat or the
+downbeats, and snaps the selected clips' cut points to beats and markers or splits
+them there, each as one undo step. The same actions are `animathio-cli markers` /
+`animathio-cli beats` and MCP `list_markers`, `add_marker`, `remove_marker`,
+`detect_beats` and `sync_cuts_to_beats`; see the [CLI reference](docs/cli.md#beats)
+and [MCP reference](docs/mcp.md#markers-and-beat-sync).
+
 Automatic cuts for recordings are available through Clip > Automatic cuts,
 `animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence
 ranges on the timeline before applying one undoable linked audio/video ripple edit.
@@ -327,8 +361,10 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 
 ![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
 
-Project template foundations are available headlessly: `animathio-cli templates list`
-prints five bundled, media-free compositions and their placeholder clip ids;
-`animathio-cli new --template quote -o quote.amio` creates an independent project.
-Templates currently provide animated title/text layouts; the launcher library, media
-replacement, thumbnail cards, user-template menu and MCP integration are pending.
+The launcher lists five bundled project templates and saved user templates, with CPU
+thumbnail cards. Creating one opens Fill placeholders for text and picked media;
+media supports cover/contain and replacement is one undoable batch. File > Save as
+template stores the current project and selected placeholder clips in the user data
+library; user cards have Delete. The CLI keeps `templates list` and
+`new --template quote -o quote.amio`; MCP adds `list_templates` and
+`create_from_template`. Template card hover lifts use the shared surface tokens.
