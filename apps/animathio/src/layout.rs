@@ -86,8 +86,7 @@ impl DockLayout {
     /// Config file under the XDG config dir, next to the recent-files list.
     #[must_use]
     pub fn config_path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
-            .map(|dirs| dirs.config_dir().join("dock-layout.json"))
+        crate::editor_env::config_file("dock-layout.json")
     }
 
     /// Load the persisted layout, falling back to the default and clamping.

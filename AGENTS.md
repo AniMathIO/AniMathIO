@@ -95,6 +95,34 @@ Vulkan (RADV) is available inside Xvfb. Benches there present through a software
 path, so report those numbers as "Xvfb" and don't compare them with
 native-compositor results.
 
+## UI tests (headless editor windows)
+
+`apps/animathio/src/editor/ui_tests/` runs the real `Editor` view in gpui's test platform
+(`gpui/test-support` as a dev-dependency of `animathio`), so UI behaviour is tested in plain
+`cargo test --workspace` on Linux and Windows with no display, GPU or audio device. These
+tests never open a window on the desktop, so they do not go through `scripts/virtual-display.sh`.
+
+- `Editor::new` is `Editor::with_env(.., EditorEnv::production())`. `EditorEnv`
+  (`src/editor_env.rs`) injects the audio output (`AudioOutput::Null` = monotonic clock, no
+  device), the preview backend (CPU), the plugin source (`PluginSource::Dir`/`None`) and the
+  config directory (settings, recent files, plugin cache). `EditorEnv::headless` uses a null sink,
+  the CPU backend, the plugin bundles in `target/plugins` when built (else none) and a private
+  config dir under `target/ui-test-config`, so tests never touch the user's settings. Settings
+  and plugin loading go through `editor_env::{config_file, plugin_source, plugin_cache_dir}`:
+  new code must use them instead of `ProjectDirs`/`BaseDirs`.
+- A test is a `#[gpui::test] fn name(cx: &mut TestAppContext)` in `ui_tests/scenarios.rs`.
+  `Ui::open(cx, project, assets)` mounts the editor in a `Root`; then `ui.dispatch(Action)`
+  (like a menu item), `ui.press("m")` (through the keymap), `ui.update(|editor, window, cx| ..)`
+  to call editor methods, `ui.settle()` for background work (analysis, audio prep) and
+  `ui.read(|editor| ..)` to assert. Assert on the project model and view state
+  (`marker_panel`, `autocut_review`, `selected`, `dock`, `left_tab`), not on pixels.
+  `fixtures.rs` has the shared sample, a synthetic voice + music mix and caption cues.
+- Click handlers are closures, which a test cannot press: move the logic into an `Editor` method
+  (like `cycle_autocut_scope` / `apply_autocut`) and have the closure call it.
+- Scenarios that need first-party plugins call `require_plugins(..)` and skip when
+  `scripts/build-plugins.sh` has not produced `target/plugins` (CI builds it before testing).
+- Windows are rendered whenever the editor is updated, so render panics surface too.
+
 ## Commands
 
 The workspace uses stable Rust, edition 2024. Standalone `spikes/` projects are excluded.

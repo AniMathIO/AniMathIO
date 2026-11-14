@@ -21,8 +21,7 @@ impl Default for PreviewSettings {
 
 impl PreviewSettings {
     fn config_path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
-            .map(|dirs| dirs.config_dir().join("preview.json"))
+        crate::editor_env::config_file("preview.json")
     }
 
     /// Stored setting, then the `ANIMATHIO_RENDER` override.

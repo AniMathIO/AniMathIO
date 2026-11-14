@@ -42,8 +42,7 @@ impl Preferences {
     }
 
     fn path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
-            .map(|dirs| dirs.config_dir().join("preferences.json"))
+        crate::editor_env::config_file("preferences.json")
     }
     pub(crate) fn load() -> Self {
         Self::path()

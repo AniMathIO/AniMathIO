@@ -1122,16 +1122,17 @@ pub(super) fn audio_asset_ids(project: &Project) -> BTreeSet<AssetId> {
 }
 
 pub(super) fn plugins_cache_dir() -> PathBuf {
-    directories::BaseDirs::new().map_or_else(
-        || std::env::temp_dir().join("animathio-plugin-cache"),
-        |base| base.cache_dir().join("animathio").join("plugin-cache"),
-    )
+    crate::editor_env::plugin_cache_dir()
 }
 
 /// Load every clip-source plugin from the bundled build output and the user
 /// plugins directory. Descriptors are plain data for the UI; the host itself is
 /// kept on the UI thread and drives both preview and control rendering.
 pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Option<String>) {
+    let source = crate::editor_env::plugin_source();
+    if source == PluginSource::None {
+        return (None, Vec::new(), None);
+    }
     let mut host = match PluginHost::new(plugins_cache_dir()) {
         Ok(host) => host,
         Err(error) => {
@@ -1142,7 +1143,21 @@ pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Opti
             );
         }
     };
-    let problems = host.load_discovered_plugins();
+    let problems = match source {
+        PluginSource::Dir(path) => {
+            let dir = PluginDirectory {
+                path,
+                allow_reserved_ids: true,
+            };
+            let mut problems = Vec::new();
+            if let Err(error) = host.load_plugin_directory(&dir) {
+                problems.push(format!("plugins in {}: {error}", dir.path.display()));
+            }
+            problems.extend(host.load_failures().iter().cloned());
+            problems
+        }
+        _ => host.load_discovered_plugins(),
+    };
     for problem in &problems {
         eprintln!("plugin load problem: {problem}");
     }

@@ -14,7 +14,7 @@ use animathio_core::{
     Track, TrackId, Transform, TransformProperty, evaluate,
 };
 use animathio_plugin_api::PluginKind;
-use animathio_plugin_host::PluginHost;
+use animathio_plugin_host::{PluginDirectory, PluginHost};
 use base64::Engine as _;
 use gpui::{prelude::*, *};
 use gpui_component::button::{Button, ButtonVariants};
@@ -24,11 +24,12 @@ use serde_json::{Value, json};
 use crate::clipboard::Clipboard;
 use crate::control::{ControlMsg, ControlRuntime};
 use crate::editing::{self, InOut, Shuttle, Tool};
+use crate::editor_env::{EditorEnv, PluginSource};
 use crate::fades::{self, FadeEdge};
 use crate::icons::{self, IconName};
 use crate::inspector::{self, ParamModel, PluginDescriptor};
 use crate::layout::DockLayout;
-use crate::playback::{Clock, due_frame, make_clock};
+use crate::playback::{Clock, due_frame};
 use crate::render_worker::{RenderRequest, RenderWorker};
 use crate::ripple::{self, RippleScope};
 use crate::selection;
@@ -64,6 +65,8 @@ mod timeline_view;
 mod titles;
 mod transport;
 mod video_effects;
+#[cfg(test)]
+mod ui_tests;
 mod viewer;
 mod workspace;
 
@@ -450,8 +453,7 @@ struct RecentFiles {
 }
 impl RecentFiles {
     fn config_path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
-            .map(|dirs| dirs.config_dir().join("recent.json"))
+        crate::editor_env::config_file("recent.json")
     }
     fn load() -> Self {
         let paths: Vec<PathBuf> = Self::config_path()
@@ -604,6 +606,8 @@ pub(crate) struct Editor {
     fields: fields::FieldPool,
     waveforms: std::cell::RefCell<BTreeMap<AssetId, Arc<Waveform>>>,
     waveform_paths: WavePathCache,
+    /// Audio output, preview backend, plugins and config directory this editor runs on.
+    env: EditorEnv,
 }
 
 impl Editor {
@@ -617,6 +621,33 @@ impl Editor {
         control: Option<ControlRuntime>,
         bench: bool,
     ) -> Self {
+        Self::with_env(
+            cx,
+            window,
+            project,
+            assets,
+            path,
+            recovered,
+            control,
+            bench,
+            EditorEnv::production(),
+        )
+    }
+
+    /// [`Editor::new`] on an explicit [`EditorEnv`] (audio output, preview backend, plugin
+    /// source, config directory); tests use a headless one.
+    pub(crate) fn with_env(
+        cx: &mut Context<Self>,
+        window: &mut Window,
+        project: Project,
+        assets: BTreeMap<AssetId, Vec<u8>>,
+        path: Option<PathBuf>,
+        recovered: bool,
+        control: Option<ControlRuntime>,
+        bench: bool,
+        env: EditorEnv,
+    ) -> Self {
+        env.install();
         let mut pool = AudioPool::default();
         let mut error = None;
         if let Err(message) = load_audio(&mut pool, &project, &assets) {
@@ -631,9 +662,12 @@ impl Editor {
         }
         let audio_ids = audio_asset_ids(&project);
         let initial_next_id = next_id(&project);
-        let clock = make_clock(&project, &pool);
+        let clock = env.make_clock(&project, &pool);
         let worker = RenderWorker::spawn();
-        let preview = crate::preview_settings::PreviewSettings::load();
+        let mut preview = crate::preview_settings::PreviewSettings::load();
+        if let Some(kind) = env.backend {
+            preview.gpu = kind == animathio_render::BackendKind::Gpu;
+        }
         worker.set_backend(preview.backend());
         worker.load(Arc::new(assets.clone()));
         let mut this = Self {
@@ -737,6 +771,7 @@ impl Editor {
             fields: fields::FieldPool::default(),
             waveforms: std::cell::RefCell::default(),
             waveform_paths: std::rc::Rc::default(),
+            env,
         };
         if recovered {
             this.notices

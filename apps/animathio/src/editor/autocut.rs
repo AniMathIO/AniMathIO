@@ -60,7 +60,7 @@ impl Scope {
 pub(super) struct Review {
     cancel: animathio_transcribe::Cancel,
     identity: Arc<()>,
-    params: AutocutParams,
+    pub(super) params: AutocutParams,
     pub(super) proposal: Option<AutocutProposal>,
     sliders: Vec<Entity<SliderState>>,
     _subscriptions: Vec<Subscription>,
@@ -175,6 +175,62 @@ impl Editor {
             error: None,
         });
         self.analyse_autocut(cx);
+    }
+
+    /// Cycle the analysed audio: the selected clip, then its track's mix, then the project mix
+    /// (or the in/out range), and re-analyse.
+    pub(super) fn cycle_autocut_scope(&mut self, cx: &mut Context<Self>) {
+        let selected = self.selected.and_then(|id| self.find_clip(id));
+        let audio_id = selected.and_then(|c| {
+            if matches!(c.kind, animathio_core::ClipKind::Video(_)) {
+                self.project
+                    .tracks()
+                    .iter()
+                    .flat_map(|t| t.clips().values())
+                    .find(|a| {
+                        matches!(a.kind, animathio_core::ClipKind::Audio(_))
+                            && c.link_group.is_some()
+                            && a.link_group == c.link_group
+                    })
+                    .map(|a| a.id)
+            } else {
+                Some(c.id)
+            }
+        });
+        let track = audio_id.and_then(|id| {
+            self.project
+                .tracks()
+                .iter()
+                .find(|t| t.clips().contains_key(&id))
+                .map(Track::id)
+        });
+        if let Some(r) = self.autocut_review.as_mut() {
+            if r.params.clip.take().is_some() {
+                r.params.track = track;
+            } else if r.params.track.take().is_none() {
+                r.params.clip = self.selected;
+            }
+        }
+        self.analyse_autocut(cx);
+    }
+
+    /// Apply the enabled cuts of the current proposal as one undo step and close the panel.
+    pub(super) fn apply_autocut(&mut self, cx: &mut Context<Self>) {
+        let proposal = self
+            .autocut_review
+            .as_ref()
+            .and_then(|r| r.proposal.clone());
+        if let Some(p) = proposal {
+            match autocut_command(&self.project, &p) {
+                Ok(command) => {
+                    if self.try_execute(&command, cx) {
+                        self.autocut_review = None;
+                    }
+                }
+                Err(error) => self.error = Some(error.to_string()),
+            }
+        }
+        cx.notify();
     }
 
     fn analyse_autocut(&mut self, cx: &mut Context<Self>) {
@@ -523,23 +579,7 @@ impl Editor {
                         .compact()
                         .label("Apply")
                         .disabled(!can_apply)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let proposal = this
-                                .autocut_review
-                                .as_ref()
-                                .and_then(|r| r.proposal.clone());
-                            if let Some(p) = proposal {
-                                match autocut_command(&this.project, &p) {
-                                    Ok(command) => {
-                                        if this.try_execute(&command, cx) {
-                                            this.autocut_review = None;
-                                        }
-                                    }
-                                    Err(error) => this.error = Some(error.to_string()),
-                                }
-                            }
-                            cx.notify();
-                        })),
+                        .on_click(cx.listener(|this, _, _, cx| this.apply_autocut(cx))),
                 ),
         );
         Some(panel)

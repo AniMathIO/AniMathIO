@@ -19,6 +19,7 @@ mod clipboard;
 mod control;
 mod editing;
 mod editor;
+mod editor_env;
 mod export_queue;
 mod export_worker;
 mod fades;

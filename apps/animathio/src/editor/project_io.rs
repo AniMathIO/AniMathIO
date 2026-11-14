@@ -50,7 +50,7 @@ impl Editor {
         self.audio_generation = self.audio_generation.wrapping_add(1);
         self.pool = AudioPool::default();
         self.audio_ids.clear();
-        self.clock = make_clock(&self.project, &self.pool);
+        self.clock = self.env.make_clock(&self.project, &self.pool);
         self.path = None;
         self.dirty = false;
         self.position = Time(0);
@@ -179,7 +179,7 @@ impl Editor {
                     self.error = Some(error);
                 }
                 self.audio_ids = audio_asset_ids(&self.project);
-                self.clock = make_clock(&self.project, &self.pool);
+                self.clock = self.env.make_clock(&self.project, &self.pool);
                 self.position = Time(0);
                 self.playing = false;
                 self.next_id = next_id(&self.project);
