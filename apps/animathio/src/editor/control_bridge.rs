@@ -116,6 +116,16 @@ impl Editor {
                 });
                 continue;
             }
+            if let Call::SubtitlesGenerate { params } = &call {
+                // Long job: transcribe on a worker and answer when it has finished.
+                let label = format!("{} model (control request)", params.model);
+                if let Err(error) =
+                    self.start_subtitle_job(params.clone(), label, Some(reply.clone()), cx)
+                {
+                    let _ = reply.send(Err(ControlError::Other(error)));
+                }
+                continue;
+            }
             if let Call::Export { params } = call {
                 if self.export_queue.is_busy() {
                     let _ = reply.send(Err(ControlError::Other(
@@ -297,6 +307,23 @@ impl Editor {
                     &mut self.project,
                     &mut self.history,
                     &self.assets,
+                    &params,
+                )?;
+                self.after_edit(cx);
+                serde_json::to_value(result)?
+            }
+            Call::SubtitlesGenerate { .. } => {
+                return Err(ControlError::Other(
+                    "subtitle generation is handled asynchronously".into(),
+                ));
+            }
+            Call::SubtitlesExport { params } => {
+                serde_json::to_value(animathio_control::export_subtitles(&self.project, &params)?)?
+            }
+            Call::SubtitlesImport { params } => {
+                let result = animathio_control::import_subtitles(
+                    &mut self.project,
+                    &mut self.history,
                     &params,
                 )?;
                 self.after_edit(cx);

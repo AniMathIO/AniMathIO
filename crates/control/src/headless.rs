@@ -393,6 +393,22 @@ impl ControlHandler for HeadlessHandler {
                 &self.assets,
                 &params,
             )?)?,
+            Call::SubtitlesGenerate { params } => serde_json::to_value(crate::generate_subtitles(
+                &mut self.project,
+                &mut self.history,
+                &self.assets,
+                &params,
+                &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                &(std::sync::Arc::new(|_| {}) as crate::ProgressFn),
+            )?)?,
+            Call::SubtitlesExport { params } => {
+                serde_json::to_value(crate::export_subtitles(&self.project, &params)?)?
+            }
+            Call::SubtitlesImport { params } => serde_json::to_value(crate::import_subtitles(
+                &mut self.project,
+                &mut self.history,
+                &params,
+            )?)?,
             call @ (Call::MathAdd { .. } | Call::GraphAdd { .. } | Call::ImportManim { .. }) => {
                 let replace = matches!(&call, Call::ImportManim { params } if params.replace);
                 let result = crate::apply_authoring_call(

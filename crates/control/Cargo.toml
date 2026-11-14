@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Link the whisper.cpp speech engine for automatic subtitles (needs cmake and a C++ toolchain).
+whisper = ["animathio-transcribe/whisper"]
+
 [dependencies]
 animathio-plugin-api = { path = "../plugin-api" }
 animathio-audio = { path = "../audio" }
@@ -16,6 +20,7 @@ animathio-import-manim = { path = "../import-manim" }
 animathio-import-v1 = { path = "../import-v1" }
 animathio-plugin-host = { path = "../plugin-host" }
 animathio-render = { path = "../render" }
+animathio-transcribe = { path = "../transcribe" }
 animathio-typeset = { path = "../typeset" }
 serde.workspace = true
 serde_json.workspace = true

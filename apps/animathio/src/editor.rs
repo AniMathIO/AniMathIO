@@ -50,6 +50,7 @@ mod menus;
 mod playback_glue;
 mod project_io;
 mod start_screen;
+mod subtitles;
 mod support;
 mod timeline_thumbnails;
 mod timeline_view;
@@ -501,6 +502,9 @@ pub(crate) struct Editor {
     preview: crate::preview_settings::PreviewSettings,
     export_queue: crate::export_queue::ExportQueue,
     export_queue_open: bool,
+    /// The automatic-subtitle job, running or finished (see `editor/subtitles.rs`).
+    subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
+    subtitle_panel_open: bool,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
     last_export_tick: Instant,
@@ -619,6 +623,8 @@ impl Editor {
             preview,
             export_queue: crate::export_queue::ExportQueue::default(),
             export_queue_open: false,
+            subtitle_job: None,
+            subtitle_panel_open: false,
             pending_export: None,
             last_export_tick: Instant::now(),
             keyframe_drag: None,
@@ -698,6 +704,7 @@ impl Editor {
                             cx.notify();
                         }
                         this.drain_control(cx);
+                        this.pump_subtitle_job(cx);
                         if this.clock.has_error() {
                             this.error =
                                 Some("Audio playback failed; pause and play to retry".into());
@@ -815,6 +822,9 @@ impl Render for Editor {
             .child(workspace);
         root = root.child(self.status_line(cx));
         if let Some(panel) = self.export_queue_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.subtitle_panel(cx) {
             root = root.child(panel);
         }
         if let Some(menu) = self.context_menu_dropdown(cx) {

@@ -6,7 +6,13 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Link the whisper.cpp speech engine so Clip > Generate subtitles can run (needs cmake, a C++
+# toolchain and libclang to build). Without it the dialog explains that this build has no engine.
+whisper = ["animathio-control/whisper"]
+
 [dependencies]
+animathio-transcribe = { path = "../../crates/transcribe" }
 animathio-media = { path = "../../crates/media" }
 animathio-export = { path = "../../crates/export" }
 animathio-core.workspace = true
@@ -40,7 +46,9 @@ workspace = true
 # before resolving config and packaging-command paths. `binaries` paths, in
 # contrast, are resolved from cargo's workspace `target/<profile>` directory.
 [package.metadata.packager]
-before-packaging-command = "cargo build --release --locked -p animathio -p animathio-cli"
+# Installers ship the local speech engine (automatic subtitles): the `whisper` features need
+# cmake, a C++ toolchain and libclang on the packaging machine.
+before-packaging-command = "cargo build --release --locked -p animathio -p animathio-cli --features animathio/whisper,animathio-cli/whisper"
 product-name = "AniMathIO"
 identifier = "org.animathio.animathio"
 out-dir = "../../target/packages"

@@ -318,6 +318,54 @@ pub(crate) struct TrimSilence {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct AutoSubtitles {
+    /// Whisper model size: "tiny" (78 MB), "base" (148 MB, default) or "small" (488 MB).
+    #[serde(default = "default_subtitle_model")]
+    pub(crate) model: String,
+    /// ISO 639-1 language code such as "en" or "de"; omit to detect it automatically.
+    pub(crate) language: Option<String>,
+    /// Numeric clip id: transcribe only this clip's audio.
+    pub(crate) clip: Option<u64>,
+    /// Numeric track id: transcribe only this track's audio.
+    pub(crate) track: Option<u64>,
+    /// Start of the range to transcribe, in timeline milliseconds (give with `to_ms`).
+    pub(crate) from_ms: Option<f64>,
+    /// End of the range to transcribe, in timeline milliseconds (give with `from_ms`).
+    pub(crate) to_ms: Option<f64>,
+    /// Download the model first if it is not installed. Downloads 78-488 MB once, verifies
+    /// its SHA-256 and stores it in the user data dir; only set it with the user's consent.
+    #[serde(default)]
+    pub(crate) download_model: bool,
+    /// Longest subtitle line in characters. Default 42.
+    pub(crate) max_chars_per_line: Option<usize>,
+    /// Most lines per subtitle. Default 2.
+    pub(crate) max_lines: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ExportSubtitles {
+    /// "srt" (default) or "vtt". A `.vtt` output path also selects `WebVTT`.
+    pub(crate) format: Option<String>,
+    /// Numeric id of the track holding the subtitle text clips; defaults to the first
+    /// track named "Subtitles".
+    pub(crate) track: Option<u64>,
+    /// Write the file here instead of returning the text.
+    pub(crate) path: Option<String>,
+    /// Replace an existing file.
+    #[serde(default)]
+    pub(crate) overwrite: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ImportSubtitles {
+    /// `.srt` or `.vtt` file to add as caption clips.
+    pub(crate) path: String,
+    /// Shift all cues by this many milliseconds (may be negative). Default 0.
+    #[serde(default)]
+    pub(crate) offset_ms: f64,
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum TitleStyleParam {
     /// Large centred title.
@@ -382,6 +430,9 @@ pub(crate) struct SetExportPreset {
 fn default_true() -> bool {
     true
 }
+fn default_subtitle_model() -> String {
+    "base".to_owned()
+}
 fn default_threshold_db() -> f64 {
     -40.0
 }
@@ -394,6 +445,20 @@ fn default_padding_ms() -> f64 {
 
 fn ticks_to_ms(time: Time) -> f64 {
     time.0 as f64 * 1000.0 / TICKS_PER_SECOND as f64
+}
+
+fn subtitle_result_json(result: &animathio_control::SubtitleResult) -> serde_json::Value {
+    json!({
+        "language": result.language,
+        "track": result.added.map(|a| a.track_id.0),
+        "background_track": result.added.map(|a| a.background_track_id.0),
+        "first_clip": result.added.map(|a| a.first_clip.0),
+        "cues": result.cues.iter().map(|c| json!({
+            "from_ms": ticks_to_ms(c.start),
+            "to_ms": ticks_to_ms(c.end),
+            "text": c.text,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 fn range_ms(from_ms: f64, to_ms: f64) -> Result<TimeRange, McpError> {
@@ -1433,6 +1498,83 @@ impl McpServer {
             "removed": removed,
             "total_removed_ms": ticks_to_ms(result.total_removed),
         }))
+    }
+
+    #[tool(
+        description = "Generate subtitles (captions) for the project's audio with a fully local Whisper speech recogniser (no cloud). Mixes the audio of the project, or of one clip/track/range, transcribes it, splits the text into readable cues (max 2 lines, max_chars_per_line chars per line, 0.8-6 s each, no overlaps) and adds them as caption-bar text clips on a new \"Subtitles\" track with a background bar track, as one undo step. The model must be installed: if it is not, the call fails with instructions unless download_model is true (one-time 78-488 MB download, SHA-256 verified; ask the user first). Can take from seconds to minutes. Returns the language, the new track ids and the cues (with start/end in ms). Requires an app build with the whisper feature."
+    )]
+    async fn auto_subtitles(
+        &self,
+        Parameters(p): Parameters<AutoSubtitles>,
+    ) -> Result<CallToolResult, McpError> {
+        let range = match (p.from_ms, p.to_ms) {
+            (None, None) => None,
+            (Some(from), Some(to)) => Some(range_ms(from, to)?),
+            _ => return Err(invalid("from_ms and to_ms must be given together")),
+        };
+        let params = animathio_control::SubtitleGenerateParams {
+            model: p.model,
+            language: p.language,
+            clip: p.clip.map(ClipId),
+            track: p.track.map(TrackId),
+            range,
+            download_model: p.download_model,
+            split: animathio_control::SubtitleSplit {
+                max_chars_per_line: p.max_chars_per_line,
+                max_lines: p.max_lines,
+                ..animathio_control::SubtitleSplit::default()
+            },
+        };
+        let mut backend = self.backend.lock().await;
+        let result = backend.subtitles_generate(params).map_err(mcp_error)?;
+        tool_text(subtitle_result_json(&result))
+    }
+
+    #[tool(
+        description = "Export a subtitle track as SRT or WebVTT. Returns the subtitle text, or writes it to `path`. Reads the text clips of the given track (default: the first track named \"Subtitles\", as created by auto_subtitles or import_subtitles)."
+    )]
+    async fn export_subtitles(
+        &self,
+        Parameters(p): Parameters<ExportSubtitles>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let result = backend
+            .subtitles_export(animathio_control::SubtitleExportParams {
+                format: p.format.unwrap_or_else(|| "srt".to_owned()),
+                output: p.path.map(PathBuf::from),
+                track: p.track.map(TrackId),
+                overwrite: p.overwrite,
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({
+            "format": result.format,
+            "track": result.track.0,
+            "cues": result.cues,
+            "text": result.text,
+            "path": result.path,
+        }))
+    }
+
+    #[tool(
+        description = "Import an SRT or WebVTT file as caption clips on a new \"Subtitles\" track (same look as auto_subtitles), as one undo step."
+    )]
+    async fn import_subtitles(
+        &self,
+        Parameters(p): Parameters<ImportSubtitles>,
+    ) -> Result<CallToolResult, McpError> {
+        if !p.offset_ms.is_finite() {
+            return Err(invalid("offset_ms must be finite"));
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let offset = Time((p.offset_ms * TICKS_PER_SECOND as f64 / 1000.0).round() as i64);
+        let mut backend = self.backend.lock().await;
+        let result = backend
+            .subtitles_import(animathio_control::SubtitleImportParams {
+                path: PathBuf::from(p.path),
+                offset,
+            })
+            .map_err(mcp_error)?;
+        tool_text(subtitle_result_json(&result))
     }
 
     #[tool(

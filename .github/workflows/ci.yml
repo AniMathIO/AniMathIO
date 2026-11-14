@@ -39,6 +39,8 @@ jobs:
             libxcb-sync-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
+            cmake \
+            libclang-dev \
             pkg-config
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
@@ -58,6 +60,21 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked
+      # The whisper.cpp speech engine (cargo feature `whisper`) needs cmake, a C++ toolchain and
+      # libclang, so it is not part of the default workspace build. Build, lint and test it
+      # here on both OSes; the model-backed test is #[ignore]d, CI never downloads a model.
+      - name: Speech engine (whisper feature)
+        if: runner.os == 'Linux'
+        run: |
+          cargo clippy -p animathio-transcribe -p animathio-cli --features animathio-transcribe/whisper,animathio-cli/whisper --all-targets --locked -- -D warnings
+          cargo test -p animathio-transcribe --features whisper --locked
+      - name: Speech engine (whisper feature, Windows)
+        if: runner.os == 'Windows'
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: |
+          cargo build -p animathio-cli --features whisper --locked
+          cargo test -p animathio-transcribe --features whisper --locked
       - name: Check docs against the code
         if: runner.os == 'Linux'
         run: |

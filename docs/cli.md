@@ -24,6 +24,8 @@ Commands:
   import-media  Import media into a new project, including linked companion audio
   import-v1     Convert a v1 `.animathio` project to a `.amio` archive
   import-manim  Convert a Manim Community scene script to a `.amio` archive
+  transcribe    Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
+  models        List or download the local Whisper speech models
   new-sample    Write a three-second animated image/text/shape demo archive
   mcp           Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
   help          Print this message or the help of the given subcommand(s)
@@ -254,6 +256,71 @@ Options:
 ```bash
 animathio-cli import-manim scene.py -o imported.amio
 animathio-cli import-manim scene.py --scene MyScene -o imported.amio
+```
+
+## `transcribe`
+
+Local automatic subtitles. The input is a project (`.amio` or `project.json`; its audio
+clips are mixed) or an audio/video file (first audio track). The speech engine is
+whisper.cpp, built with `--features whisper` (needs cmake, a C++ compiler and libclang);
+without it the command reports that this build has no engine. The Whisper model must be
+installed: pass `--download` to fetch a missing one (SHA-256 verified), or fetch it first
+with the `models` subcommand. With no `--srt`, `--vtt` or `--output`, the subtitles are
+printed as SRT.
+
+<!-- help:transcribe -->
+```text
+Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
+
+Usage: animathio-cli transcribe [OPTIONS] <INPUT>
+
+Arguments:
+  <INPUT>  A project (`.amio` or `project.json`; its audio tracks are mixed) or an audio/video file (first audio track)
+
+Options:
+      --model <MODEL>          Whisper model: `tiny`, `base` or `small` [default: base]
+      --language <LANGUAGE>    ISO 639-1 language code (`en`, `de`, ...); detected automatically when omitted
+      --download               Download the model first if it is not installed (verified, one-time)
+      --srt <SRT>              Write `SubRip` subtitles here
+      --vtt <VTT>              Write `WebVTT` subtitles here
+  -o, --output <OUTPUT>        For project inputs: save a copy with the subtitle clips added to this `.amio`
+      --track <TRACK>          Project input only: transcribe this track's audio (numeric id)
+      --clip <CLIP>            Project input only: transcribe this clip's audio (numeric id)
+      --from <FROM>            Project input only: inclusive start in decimal seconds or Nticks
+      --to <TO>                Project input only: exclusive end in decimal seconds or Nticks
+      --max-chars <MAX_CHARS>  Longest subtitle line in characters
+      --max-lines <MAX_LINES>  Most lines per subtitle
+      --overwrite              Replace existing output files
+  -h, --help                   Print help
+```
+<!-- /help:transcribe -->
+
+```bash
+cargo build -p animathio-cli --features whisper
+animathio-cli transcribe talk.mp4 --download --srt talk.srt --vtt talk.vtt
+animathio-cli transcribe lesson.amio --language de --output lesson-subtitled.amio
+```
+
+## `models`
+
+List the Whisper models (`tiny`, `base`, `small`) and whether they are installed, or
+download one into the user data directory (`ANIMATHIO_MODEL_DIR` overrides it).
+
+<!-- help:models -->
+```text
+List or download the local Whisper speech models
+
+Usage: animathio-cli models [OPTIONS]
+
+Options:
+      --download <DOWNLOAD>  Download this model (`tiny`, `base` or `small`) into the user data directory, verifying its SHA-256; resumes an interrupted download
+  -h, --help                 Print help
+```
+<!-- /help:models -->
+
+```bash
+animathio-cli models
+animathio-cli models --download base
 ```
 
 ## `new-sample`
