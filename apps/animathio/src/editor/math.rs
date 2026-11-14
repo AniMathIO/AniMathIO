@@ -5,6 +5,7 @@ use animathio_control::{
     LATEX_SNIPPETS, LATEX_TEMPLATES, MathObjectDraft, MathObjectKind, math_object_command,
     math_object_draft, math_object_range,
 };
+use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{
     Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction, Textarea,
     TextareaState,
@@ -135,7 +136,7 @@ impl Editor {
         let session = self.project_session;
         let size = project_size(&self.project);
         let panel = cx.new(|cx| {
-            MathEditor::new(draft, editor, session, range, edit, size, window, cx).dialog()
+            MathEditor::new(draft, editor, session, range, edit, true, size, window, cx)
         });
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
@@ -302,7 +303,7 @@ impl Editor {
             let session = self.project_session;
             let size = project_size(&self.project);
             let state = cx.new(|cx| {
-                MathEditor::new(draft, editor, session, range, Some(id), size, window, cx)
+                MathEditor::new(draft, editor, session, range, Some(id), false, size, window, cx)
             });
             self.math_inspector = Some((id, signature, state));
         }
@@ -316,7 +317,7 @@ pub(super) struct MathEditor {
     fields: BTreeMap<String, Entity<InputState>>,
     source: Option<Entity<TextareaState>>,
     vertices: Vec<[Entity<InputState>; 2]>,
-    color: Entity<InputState>,
+    color: Entity<ColorPickerState>,
     _subscriptions: Vec<Subscription>,
     editor: WeakEntity<Editor>,
     session: u64,
@@ -327,6 +328,7 @@ pub(super) struct MathEditor {
     image: Option<Arc<RenderImage>>,
     error: Option<String>,
     busy: bool,
+    focused: bool,
 }
 impl MathEditor {
     fn new(
@@ -335,6 +337,7 @@ impl MathEditor {
         session: u64,
         range: TimeRange,
         edit: Option<ClipId>,
+        dialog: bool,
         size: (u32, u32),
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -366,14 +369,22 @@ impl MathEditor {
             } else {
                 let state = cx.new(|cx| InputState::new(window, cx).default_value(value));
                 let key = spec.id;
-                subscriptions.push(cx.subscribe(
+                subscriptions.push(cx.subscribe_in(
                     &state,
-                    move |this, state, event: &InputEvent, cx| {
-                        if matches!(event, InputEvent::Change) {
-                            this.draft
-                                .fields
-                                .insert(key.into(), state.read(cx).value().to_string());
-                            this.schedule_preview(cx);
+                    window,
+                    move |this, state, event: &InputEvent, window, cx| {
+                        match event {
+                            InputEvent::Change => {
+                                this.draft
+                                    .fields
+                                    .insert(key.into(), state.read(cx).value().to_string());
+                                this.schedule_preview(cx);
+                            }
+                            // Enter submits the dialog from any single-line field.
+                            InputEvent::PressEnter { .. } if this.dialog => {
+                                this.apply(window, cx);
+                            }
+                            _ => {}
                         }
                     },
                 ));
@@ -399,16 +410,31 @@ impl MathEditor {
                 fields.insert(key.into(), state);
             }
         }
-        let color = cx.new(|cx| InputState::new(window, cx).default_value(draft.color.clone()));
-        subscriptions.push(cx.subscribe(&color, |this, state, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.draft.color = state.read(cx).value().to_string();
-                this.schedule_preview(cx);
-            }
+        let rgba = animathio_control::parse_caption_color(&draft.color)
+            .unwrap_or([255, 255, 255, 255]);
+        let color = cx.new(|cx| {
+            let mut state = ColorPickerState::new(window, cx);
+            state.set_value(fields::to_hsla(rgba), window, cx);
+            state
+        });
+        subscriptions.push(cx.subscribe(&color, |this, _, event: &ColorPickerEvent, cx| {
+            let ColorPickerEvent::Change(Some(hsla)) = event else {
+                return;
+            };
+            let rgba = Rgba::from(*hsla);
+            let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
+            this.draft.color = format!(
+                "#{:02x}{:02x}{:02x}{:02x}",
+                channel(rgba.r),
+                channel(rgba.g),
+                channel(rgba.b),
+                channel(rgba.a)
+            );
+            this.schedule_preview(cx);
         }));
         let mut this = Self {
             draft,
-            dialog: false,
+            dialog,
             fields,
             source,
             vertices: Vec::new(),
@@ -423,6 +449,7 @@ impl MathEditor {
             image: None,
             error: None,
             busy: false,
+            focused: false,
         };
         if this.draft.kind == MathObjectKind::Polygon {
             let vertices = this
@@ -439,10 +466,6 @@ impl MathEditor {
         }
         this.schedule_preview(cx);
         this
-    }
-    fn dialog(mut self) -> Self {
-        self.dialog = true;
-        self
     }
     fn add_vertex(&mut self, values: [&str; 2], window: &mut Window, cx: &mut Context<Self>) {
         let states =
@@ -603,7 +626,30 @@ impl MathEditor {
     }
 }
 impl Render for MathEditor {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Type straight away: focus the first field once the dialog has taken focus.
+        if self.dialog && !self.focused {
+            self.focused = true;
+            let handle = self
+                .source
+                .as_ref()
+                .map(|state| state.read(cx).focus_handle(cx))
+                .or_else(|| {
+                    self.draft.specs().first().and_then(|spec| {
+                        self.fields
+                            .get(spec.id)
+                            .map(|state| state.read(cx).focus_handle(cx))
+                    })
+                })
+                .or_else(|| {
+                    self.vertices
+                        .first()
+                        .map(|pair| pair[0].read(cx).focus_handle(cx))
+                });
+            if let Some(handle) = handle {
+                window.focus(&handle, cx);
+            }
+        }
         let mut form = div()
             .id("math-editor-form")
             .max_h(px(360.))
@@ -704,8 +750,21 @@ impl Render for MathEditor {
             }
         }
         form = form
-            .child(div().child("Colour (#RRGGBB or #RRGGBBAA)"))
-            .child(Input::new(&self.color).small());
+            .child("Colour")
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(ColorPicker::new(&self.color))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(self.draft.color.clone()),
+                    ),
+            );
         if self.edit.is_none() && self.draft.kind == MathObjectKind::Latex {
             form = form.child(
                 Switch::new("math-write")

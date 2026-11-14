@@ -19,6 +19,7 @@ Usage: animathio-cli <COMMAND>
 Commands:
   set-clip-speed  Change a clip's speed/reverse/ramp, preserving its source interval and linked audio
   freeze-frame    Insert a frame hold at the playhead and ripple trailing clips
+  math-objects    List or add typed objects from the editor Math panel
   templates       List the bundled project templates
   new             Create a project from a bundled template
   render          Render one frame to PNG
@@ -825,6 +826,19 @@ object on a free visual layer. The size field for text and LaTeX is a percentage
 of the short canvas edge. The same plugins validate and render the result.
 
 <!-- help:math-objects -->
+```text
+List or add typed objects from the editor Math panel
+
+Usage: animathio-cli math-objects <COMMAND>
+
+Commands:
+  list  Print default definitions for every supported object kind
+  add   Add an object to a free layer and save a new archive
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
 <!-- /help:math-objects -->
 
 ```sh

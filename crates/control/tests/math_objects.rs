@@ -1,3 +1,5 @@
+//! Typed math-object drafts: every library kind maps to a centred free-layer
+//! clip, edits stay one undo step, and drafts round-trip through clip metadata.
 use animathio_control::{
     MathObjectDraft, MathObjectKind, math_object_command, math_object_draft, math_object_range,
 };
