@@ -20,6 +20,7 @@ actions!(
         RippleTool,
         HandTool,
         RippleDelete,
+        UnlinkClips,
         ToggleRippleScope,
         SelectAllClips,
         ClearSelection,
@@ -115,7 +116,7 @@ fn binding_context(action: &dyn Action, panel: &str) -> KeyBindingContextPredica
     KeyBindingContextPredicate::parse(&context).expect("valid context")
 }
 
-fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
+pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
     vec![
         ("j", Box::new(ShuttleReverse), "Timeline"),
         ("j", Box::new(ShuttleReverse), "Viewer"),
@@ -159,6 +160,7 @@ fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("secondary-shift-z", Box::new(Redo), "Editor"),
         ("delete", Box::new(DeleteSelection), "Timeline"),
         ("secondary-b", Box::new(SplitClip), "Timeline"),
+        ("secondary-alt-l", Box::new(UnlinkClips), "Timeline"),
         ("space", Box::new(TogglePlayback), "Viewer"),
         ("space", Box::new(TogglePlayback), "Timeline"),
         ("left", Box::new(PreviousFrame), "Viewer"),
@@ -547,6 +549,15 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         this.tool = Tool::Hand;
         this.snap_line = None;
         cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &UnlinkClips, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        if let Some(id) = this.selected {
+            this.unlink_clip(id, cx);
+        }
     }))
     .on_action(cx.listener(|this, _: &RippleDelete, window, cx| {
         if this.fields.any_focused(window, cx) {

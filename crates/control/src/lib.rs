@@ -44,6 +44,8 @@ mod method;
 pub use media_import::prepare_media_import;
 mod captions;
 mod path;
+mod placement;
+pub use placement::{Slot, place_visual_clip, visual_slot};
 mod server;
 mod subtitles;
 mod title_presets;

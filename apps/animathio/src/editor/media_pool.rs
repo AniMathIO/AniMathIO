@@ -157,6 +157,12 @@ impl Editor {
             self.add_title_preset(preset, time, cx);
             return;
         }
+        if let PoolDrag::Plugin(plugin_id) = &drag {
+            // Elements are overlays: the row under the pointer when free, else a free layer.
+            let row_track = self.project.tracks().get(row).map(Track::id);
+            self.drop_plugin(plugin_id.clone(), row_track, time, cx);
+            return;
+        }
         let Some(track) = track else {
             self.error = Some("no track to place the clip".into());
             cx.notify();
@@ -165,7 +171,7 @@ impl Editor {
         match drag {
             PoolDrag::Title(_) => unreachable!("titles create their own tracks"),
             PoolDrag::Asset(asset_id) => self.drop_asset(asset_id, track, time, cx),
-            PoolDrag::Plugin(plugin_id) => self.drop_plugin(plugin_id, track, time, cx),
+            PoolDrag::Plugin(_) => unreachable!("plugins are placed above"),
             PoolDrag::Effect { plugin, effect } => {
                 let hit = timeline::hit_test(&layout, &self.project, x, y);
                 if let Some(clip) = hit.map(|hit| hit.clip).or(self.selected) {
@@ -271,36 +277,62 @@ impl Editor {
         self.execute(&Command::Batch { commands }, cx);
     }
 
-    /// Place a plugin clip at an explicit timeline position and track.
+    /// Place a plugin clip at an explicit timeline position. `track` is the row it was dropped
+    /// on; when that row is occupied the clip goes to a free layer above instead.
     pub(super) fn drop_plugin(
         &mut self,
         plugin_id: String,
-        track: TrackId,
+        track: Option<TrackId>,
         time: Time,
         cx: &mut Context<Self>,
     ) {
-        let Some(descriptor) = self.plugins.iter().find(|plugin| plugin.id == plugin_id) else {
+        let Some(descriptor) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == plugin_id)
+            .cloned()
+        else {
             return;
         };
+        self.place_plugin_clip(&descriptor, track, time, cx);
+    }
+
+    fn place_plugin_clip(
+        &mut self,
+        descriptor: &PluginDescriptor,
+        track: Option<TrackId>,
+        start: Time,
+        cx: &mut Context<Self>,
+    ) {
         let models = descriptor.models();
-        let (numeric, opaque) = inspector::default_params(&models);
-        let plugin_id = descriptor.id.clone();
-        let Some(end) = time.0.checked_add(DEFAULT_MEDIA_TICKS) else {
+        let (mut numeric, mut opaque) = inspector::default_params(&models);
+        inspector::element_defaults(&descriptor.id, &mut numeric, &mut opaque);
+        let Some(end) = start.0.checked_add(DEFAULT_MEDIA_TICKS) else {
+            self.error = Some("clip end overflow".into());
+            cx.notify();
             return;
         };
-        let Ok(range) = TimeRange::new(time, Time(end)) else {
+        let Ok(range) = TimeRange::new(start, Time(end)) else {
+            self.error = Some("invalid clip range".into());
+            cx.notify();
             return;
         };
         let mut clip = Clip::new(
             self.next_clip_id(),
             ClipKind::Plugin {
-                plugin_id,
+                plugin_id: descriptor.id.clone(),
                 params: opaque,
             },
             range,
         );
         clip.params = numeric;
-        self.execute(&Command::AddClip { track, clip }, cx);
+        let id = clip.id;
+        let (commands, _) =
+            animathio_control::place_visual_clip(&self.project, clip, &descriptor.name, track);
+        if self.try_execute(&Command::Batch { commands }, cx) {
+            self.select_only(id);
+            cx.notify();
+        }
     }
 
     /// Effects offered by the loaded effect plugins, in plugin then listing order.
@@ -361,42 +393,13 @@ impl Editor {
         self.execute(&Command::AddEffect { id, index, effect }, cx);
     }
 
-    /// Split a specific clip at the playhead.
+    /// Add a plugin clip at the playhead on a free layer, creating a track when needed.
     pub(super) fn add_plugin_clip(
         &mut self,
         descriptor: &PluginDescriptor,
         cx: &mut Context<Self>,
     ) {
-        let models = descriptor.models();
-        let (numeric, opaque) = inspector::default_params(&models);
-        let Some(track) = self.project.tracks().first() else {
-            self.error = Some("no track to place the clip".into());
-            cx.notify();
-            return;
-        };
-        let track = track.id();
-        let start = self.position;
-        let duration = DEFAULT_MEDIA_TICKS;
-        let Some(end) = start.0.checked_add(duration) else {
-            self.error = Some("clip end overflow".into());
-            cx.notify();
-            return;
-        };
-        let Ok(range) = TimeRange::new(start, Time(end)) else {
-            self.error = Some("invalid clip range".into());
-            cx.notify();
-            return;
-        };
-        let mut clip = Clip::new(
-            self.next_clip_id(),
-            ClipKind::Plugin {
-                plugin_id: descriptor.id.clone(),
-                params: opaque,
-            },
-            range,
-        );
-        clip.params = numeric;
-        self.execute(&Command::AddClip { track, clip }, cx);
+        self.place_plugin_clip(descriptor, None, self.position, cx);
     }
 
     pub(super) fn add_plugin_clip_by_id(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -697,6 +700,8 @@ impl Editor {
                             }
                         }))
                         .on_click(cx.listener(move |this, _, _, cx| {
+                            // A click completes the press that armed a drag; drop the ghost.
+                            this.pool_drag = None;
                             this.add_asset_at_playhead(add_id.clone(), cx);
                         }))
                         .on_mouse_down(
@@ -727,13 +732,16 @@ impl Editor {
                     let id = descriptor.id.clone();
                     let drop_id = id.clone();
                     let name = descriptor.name.clone();
-                    let icon = if id.contains("latex") || id.contains("math") {
+                    // Match the plugin's own name, not the reverse-domain prefix (which
+                    // contains "math" for every first-party plugin).
+                    let short = id.rsplit('.').next().unwrap_or(&id);
+                    let icon = if short.contains("latex") || short.contains("math") {
                         IconName::Sigma
-                    } else if id.contains("graph") {
+                    } else if short.contains("graph") {
                         IconName::ChartNoAxesColumn
-                    } else if id.contains("shape") {
+                    } else if short.contains("shape") {
                         IconName::Shapes
-                    } else if id.contains("text") {
+                    } else if short.contains("text") {
                         IconName::Type
                     } else {
                         IconName::Puzzle
@@ -773,6 +781,7 @@ impl Editor {
                                     .child(name),
                             )
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.pool_drag = None;
                                 this.add_plugin_clip_by_id(&id, cx);
                             }))
                             .on_mouse_down(

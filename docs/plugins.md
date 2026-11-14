@@ -959,8 +959,11 @@ like the plain fitted title; when the edited text no longer has as many words as
 timings are spread over the stored span. The editor and `subtitles.generate` write these
 parameters; see `docs/mcp.md` for `subtitles.style`.
 The LaTeX plugin also accepts `units`: `pixels` preserves existing projects;
-`normalized` interprets `size` relative to the shorter render-canvas edge and fits
-formula outlines within 84% width and 22% height.
+`percent` reads `size` as a percentage of the shorter render-canvas edge (so a formula
+looks the same on 16:9 and 9:16) and only shrinks a formula that would leave the frame
+(92% of width/height); `normalized` interprets `size` as a fraction of the shorter edge
+and fits formula outlines within 84% width and 22% height (title presets). Formulas added
+from the editor library start as `percent`, size 14, `e^{i\pi} + 1 = 0`.
 
 `org.animathio.shapes` accepts `shape` (`rect`, `ellipse`, `polygon`, `star`, `arrow`,
 `line`, `path`), `units`, position/dimensions, `fill`, `stroke` and `stroke_width`.

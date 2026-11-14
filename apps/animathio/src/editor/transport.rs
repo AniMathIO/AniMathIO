@@ -13,11 +13,13 @@ impl Editor {
             self.playing = false;
             self.shuttle = Shuttle::default();
             self.position = self.clock.now();
+            self.play_limit = Time(0);
         } else {
+            let duration = animathio_export::duration(&self.project);
             if !self.loop_playback {
-                self.position =
-                    editing::play_start(self.position, animathio_export::duration(&self.project));
+                self.position = editing::play_start(self.position, duration);
             }
+            self.play_limit = editing::play_limit(self.position, duration);
             self.shuttle = Shuttle(1, false);
             let _ = self.clock.set_rate(Speed::NORMAL);
             if let Err(error) = self.clock.seek(self.position) {
@@ -35,6 +37,10 @@ impl Editor {
         if direction == 0 {
             self.seek_to(self.clock.now(), cx);
             return;
+        }
+        if !self.playing {
+            let start = self.clock.now();
+            self.play_limit = editing::play_limit(start, animathio_export::duration(&self.project));
         }
         // J/L while K is held is a half-speed jog; otherwise repeat-doubling shuttle.
         if self.k_held {
@@ -73,6 +79,7 @@ impl Editor {
 
     pub(super) fn seek_to(&mut self, time: Time, cx: &mut Context<Self>) {
         self.playing = false;
+        self.play_limit = Time(0);
         self.shuttle = Shuttle::default();
         if let Err(error) = self.clock.pause() {
             self.error = Some(error);

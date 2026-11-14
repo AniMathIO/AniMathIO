@@ -89,13 +89,27 @@ impl InOut {
     }
 }
 
-/// Where forward playback starts: from the playhead, or from the start when the
-/// playhead is at or past the end (otherwise play would stop immediately).
+/// How far past the end of the project playback may run when it starts there.
+const OVERRUN: i64 = 3_600 * animathio_core::TICKS_PER_SECOND;
+
+/// Where forward playback starts: from the playhead wherever the user parked it (also past
+/// the content end), except exactly at the end, where it rewinds to the start like a player
+/// that has finished.
 pub(crate) fn play_start(position: Time, duration: Time) -> Time {
-    if position >= duration || position < Time(0) {
+    if position == duration || position < Time(0) {
         Time(0)
     } else {
         position
+    }
+}
+
+/// The time playback stops at when it begins at `start`. A playhead parked past the end of the
+/// content keeps playing from there (black frames, running timecode) instead of stopping at once.
+pub(crate) fn play_limit(start: Time, duration: Time) -> Time {
+    if start > duration {
+        Time(start.0.saturating_add(OVERRUN))
+    } else {
+        duration
     }
 }
 
@@ -266,9 +280,20 @@ mod tests {
     fn play_from_the_end_restarts_at_the_beginning() {
         let duration = Time(1000);
         assert_eq!(play_start(Time(1000), duration), Time(0));
-        assert_eq!(play_start(Time(5000), duration), Time(0));
         assert_eq!(play_start(Time(999), duration), Time(999));
         assert_eq!(play_start(Time(0), duration), Time(0));
+    }
+    #[test]
+    fn play_from_a_scrubbed_playhead_past_the_end_continues_from_it() {
+        let duration = Time(1000);
+        // The maintainer scrubbed to 0:06 of a shorter project: play from 0:06, not 0:00.
+        assert_eq!(play_start(Time(5000), duration), Time(5000));
+        assert!(play_limit(Time(5000), duration) > Time(5000));
+        assert_eq!(play_limit(Time(999), duration), duration);
+        assert_eq!(play_limit(Time(1000), duration), duration);
+        let range = TimeRange::new(Time(0), play_limit(Time(5000), duration)).unwrap();
+        let (now, stopped) = playback_position(Time(5100), range, 1, false);
+        assert_eq!((now, stopped), (Time(5100), false));
     }
     #[test]
     fn ripple_delete_uses_clip_or_explicit_range() {

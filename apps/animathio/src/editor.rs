@@ -582,6 +582,8 @@ pub(crate) struct Editor {
     color_edit: Option<color_edit::ColorEdit>,
     notices: Vec<gpui_component::notification::Notification>,
     loop_playback: bool,
+    /// End of the current playback run when it started past the content end (else zero).
+    play_limit: Time,
     snapping: bool,
     hovered_clip: Option<ClipId>,
     viewer_fit: ViewerFit,
@@ -715,6 +717,7 @@ impl Editor {
             color_edit: None,
             notices: Vec::new(),
             loop_playback: false,
+            play_limit: Time(0),
             snapping: true,
             hovered_clip: None,
             viewer_fit: ViewerFit::Contain,
@@ -824,7 +827,10 @@ impl Render for Editor {
         self.flush_notices(window, cx);
 
         if self.playing {
-            let duration = animathio_export::duration(&self.project).0.max(1);
+            let duration = animathio_export::duration(&self.project)
+                .0
+                .max(self.play_limit.0)
+                .max(1);
             let range = if self.loop_playback {
                 self.marks.range(duration)
             } else {
@@ -841,6 +847,7 @@ impl Render for Editor {
                 let _ = self.clock.pause();
                 self.playing = false;
                 self.shuttle = Shuttle::default();
+                self.play_limit = Time(0);
             }
             self.position = now;
             let due = due_frame(&self.project, now);
@@ -912,7 +919,7 @@ impl Render for Editor {
         if let Some(panel) = self.marker_panel(cx) {
             root = root.child(panel);
         }
-        if let Some(menu) = self.context_menu_dropdown(cx) {
+        if let Some(menu) = self.context_menu_dropdown(window, cx) {
             root = root.child(menu);
         }
         if let Some(ghost) = self.pool_drag_ghost(cx) {

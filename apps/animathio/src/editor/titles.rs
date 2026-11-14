@@ -177,6 +177,7 @@ impl Editor {
                     .child(preview)
                     .child(div().p_2().text_size(px(11.)).child(preset.name.clone()))
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                        this.pool_drag = None;
                         if event.click_count() == 2 {
                             this.add_title_preset(&id, this.position, cx);
                         }

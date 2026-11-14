@@ -11,7 +11,8 @@
 
 use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{
-    Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction,
+    Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction, Textarea,
+    TextareaState,
 };
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
@@ -33,6 +34,15 @@ struct InputField {
     target: InputTarget,
     step: f64,
     _subscriptions: Vec<Subscription>,
+}
+
+/// A multi-line plugin text parameter (LaTeX source, graph items). Typing previews live and
+/// the whole focus session commits as one undo step.
+struct TextareaField {
+    state: Entity<TextareaState>,
+    /// Model text last written to (or committed from) the editor.
+    synced: String,
+    _subscription: Subscription,
 }
 
 struct ColorField {
@@ -71,6 +81,7 @@ struct AssetField {
 pub(super) struct FieldPool {
     pub(super) scrub: Option<NumberScrub>,
     inputs: BTreeMap<String, InputField>,
+    textareas: BTreeMap<String, TextareaField>,
     colors: BTreeMap<String, ColorField>,
     enums: BTreeMap<String, EnumField>,
     assets: BTreeMap<String, AssetField>,
@@ -102,6 +113,10 @@ impl FieldPool {
         self.inputs
             .values()
             .any(|field| field.state.read(cx).focus_handle(cx).is_focused(window))
+            || self
+                .textareas
+                .values()
+                .any(|field| field.state.read(cx).focus_handle(cx).is_focused(window))
     }
 
     pub(super) fn retain_clips(&mut self, clips: &BTreeSet<ClipId>) {
@@ -112,6 +127,7 @@ impl FieldPool {
                     .any(|id| key.starts_with(&format!("c{}:", id.0)))
         };
         self.inputs.retain(|key, _| keep(key));
+        self.textareas.retain(|key, _| keep(key));
         self.colors.retain(|key, _| keep(key));
         self.sliders.retain(|key, _| keep(key));
         self.assets.retain(|key, _| keep(key));
@@ -130,12 +146,18 @@ impl FieldPool {
         let prefix = format!("c{}:", clip.0);
         self.inputs
             .retain(|key, _| !key.starts_with('c') || key.starts_with(&prefix));
+        self.textareas.retain(|key, _| key.starts_with(&prefix));
         self.colors.retain(|key, _| key.starts_with(&prefix));
         self.sliders
             .retain(|key, _| !key.starts_with('c') || key.starts_with(&prefix));
         self.assets.retain(|key, _| key.starts_with(&prefix));
         self.enums.retain(|key, _| key.starts_with(&prefix));
     }
+}
+
+/// Plugin text parameters that hold several lines (formula source, item lists, subtitles).
+fn is_multiline_param(name: &str, default: &str, value: &str) -> bool {
+    matches!(name, "source" | "items" | "text") || default.contains('\n') || value.contains('\n')
 }
 
 /// Shortest decimal rendering of `value` with at most four fractional digits.
@@ -478,6 +500,76 @@ impl Editor {
             value,
             self.position,
         ))
+    }
+
+    /// A multi-line editor for plugin text that is naturally several lines (LaTeX source,
+    /// graph items). Edits preview live and commit as one undo step when focus leaves.
+    pub(super) fn textarea_control(
+        &mut self,
+        id: ClipId,
+        name: &str,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let key = format!("c{}:pta:{name}", id.0);
+        if !self.fields.textareas.contains_key(&key) {
+            let initial = value.to_owned();
+            let state = cx.new(|cx| {
+                TextareaState::new(window, cx)
+                    .auto_grow(3, 8)
+                    .default_value(initial)
+            });
+            let param = name.to_owned();
+            let field_key = key.clone();
+            let subscription = cx.subscribe_in(
+                &state,
+                window,
+                move |this, state, event: &InputEvent, _window, cx| match event {
+                    InputEvent::Change => {
+                        let text = state.read(cx).value().to_string();
+                        let Some(field) = this.fields.textareas.get_mut(&field_key) else {
+                            return;
+                        };
+                        if field.synced == text {
+                            return;
+                        }
+                        field.synced.clone_from(&text);
+                        if let Some(command) =
+                            this.plugin_param_command(id, param.clone(), json!(text))
+                        {
+                            this.preview_live(command, cx);
+                        }
+                    }
+                    InputEvent::Blur => this.finish_color_edit(cx),
+                    _ => {}
+                },
+            );
+            self.fields.textareas.insert(
+                key.clone(),
+                TextareaField {
+                    state,
+                    synced: value.to_owned(),
+                    _subscription: subscription,
+                },
+            );
+        }
+        let field = self
+            .fields
+            .textareas
+            .get_mut(&key)
+            .expect("textarea field was just inserted");
+        let focused = field.state.read(cx).focus_handle(cx).is_focused(window);
+        if !focused && field.state.read(cx).value().as_ref() != value {
+            field.state.update(cx, |state, cx| {
+                state.set_value(value.to_owned(), window, cx);
+            });
+        }
+        if !focused {
+            value.clone_into(&mut field.synced);
+        }
+        let state = field.state.clone();
+        div().w_full().child(Textarea::new(&state))
     }
 
     pub(super) fn text_control(
@@ -1084,6 +1176,16 @@ impl Editor {
             }
             ParamModel::Text { default, .. } => {
                 let value = self.plugin_text_value(id, &name, default);
+                if is_multiline_param(&name, default, &value) {
+                    // Label on its own line so the editor can use the full inspector width.
+                    let editor = self.textarea_control(id, &name, &value, window, cx);
+                    return div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(Self::param_row(Some(diamond), label, div(), cx))
+                        .child(div().px_2().pb_1().w_full().child(editor));
+                }
                 self.text_control(
                     &format!("c{}:pt:{name}", id.0),
                     InputTarget::PluginText {

@@ -992,13 +992,19 @@ pub(super) fn asset_kind_label(media_type: &str) -> &'static str {
     }
 }
 
-/// A themed context-menu item.
+/// A themed context-menu item. `shortcut` is the action bound to the same command, shown
+/// right-aligned exactly like the application menu bar does.
 pub(super) fn context_item(
     icon: IconName,
     label: &str,
+    shortcut: Option<&dyn Action>,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    window: &Window,
     cx: &mut Context<Editor>,
 ) -> Stateful<Div> {
+    let binding = shortcut.and_then(|action| {
+        gpui_component::kbd::Kbd::binding_for_action(action, Some("Timeline"), window)
+    });
     div()
         .px_2()
         .py_1()
@@ -1009,7 +1015,8 @@ pub(super) fn context_item(
         .cursor_pointer()
         .hover(|this| this.bg(cx.theme().list_hover))
         .child(icons::icon(icon).small())
-        .child(label.to_owned())
+        .child(div().flex_1().child(label.to_owned()))
+        .children(binding.map(|kbd| kbd.appearance(false)))
         .id(SharedString::from(format!("context-item-{label}")))
         .on_click(listener)
 }

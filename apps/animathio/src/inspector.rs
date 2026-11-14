@@ -190,6 +190,24 @@ pub(crate) fn default_params(
     (numeric, serde_json::Value::Object(opaque))
 }
 
+/// Starting values for an element added from the library. The manifest defaults keep old
+/// projects stable (absolute pixels), so a fresh formula opts into resolution-independent
+/// sizing here: it reads the same on a 16:9 and a 9:16 canvas.
+pub(crate) fn element_defaults(
+    plugin_id: &str,
+    numeric: &mut BTreeMap<String, ParamValue>,
+    opaque: &mut serde_json::Value,
+) {
+    if plugin_id != "org.animathio.latex" {
+        return;
+    }
+    numeric.insert("size".into(), 14.0.into());
+    if let Some(map) = opaque.as_object_mut() {
+        map.insert("source".into(), json!(r"e^{i\pi} + 1 = 0"));
+        map.insert("units".into(), json!("percent"));
+    }
+}
+
 /// Interpret legacy opaque JSON with the schema, retaining enum/asset identity.
 pub(crate) fn model_value(model: &ParamModel, value: Option<&serde_json::Value>) -> ParamValue {
     match model {
@@ -636,6 +654,18 @@ mod tests {
         );
         assert!(matches!(&models[5], ParamModel::Point { id, .. } if id == "p"));
         assert!(matches!(&models[6], ParamModel::Asset { id, .. } if id == "a"));
+    }
+
+    #[test]
+    fn new_latex_elements_size_relative_to_the_canvas() {
+        let mut numeric = BTreeMap::new();
+        let mut opaque = json!({"source": r"\frac{a}{b}", "units": "pixels"});
+        element_defaults("org.animathio.latex", &mut numeric, &mut opaque);
+        assert_eq!(opaque["units"], "percent");
+        assert_eq!(numeric.get("size"), Some(&ParamValue::Number(14.0)));
+        let mut other = json!({"units": "pixels"});
+        element_defaults("org.animathio.text", &mut BTreeMap::new(), &mut other);
+        assert_eq!(other["units"], "pixels");
     }
 
     #[test]

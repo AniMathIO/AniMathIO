@@ -1,7 +1,7 @@
 api_version = "1.1.0"
 id = "org.animathio.graph"
 name = "Graph"
-version = "1.0.0"
+version = "1.1.0"
 description = "Mafs-like coordinate plane with function plots, points, lines, circles, polygons and vectors"
 kinds = ["clip-source"]
 capabilities = []

@@ -1,7 +1,7 @@
 api_version = "1.1.0"
 id = "org.animathio.latex"
 name = "LaTeX"
-version = "1.0.0"
+version = "1.1.0"
 description = "LaTeX and Typst math typeset by the host into vector outlines"
 kinds = ["clip-source"]
 capabilities = []

@@ -113,15 +113,15 @@ fn plugin_parameters_timing_and_clip_local_animations_match_plugins() {
     invoke(&mut handler, "graph.add", &json!({"items":"plot y=x^2","x_min":-2,"x_max":2,"duration":2*second,"draw_duration":second})).unwrap();
     let scene = evaluate(handler.project(), Time(second / 2));
     assert!((scene.clips[0].params["draw"].as_number().unwrap() - 0.5).abs() < f64::EPSILON);
-    // Each generated keyframe and clip is an ordinary undoable command.
-    for _ in 0..4 {
-        assert!(handler.history_undo().unwrap());
-    }
+    // The track, clip and animation keyframes of one call are a single undo step.
+    assert!(handler.history_undo().unwrap());
     assert_eq!(handler.project().tracks().len(), 1);
-    for _ in 0..4 {
-        assert!(handler.history_redo().unwrap());
-    }
+    assert!(handler.history_redo().unwrap());
     assert_eq!(handler.project().tracks().len(), 2);
+    assert!(handler.history_undo().unwrap());
+    assert!(handler.history_undo().unwrap());
+    assert_eq!(handler.project().tracks().len(), 0);
+    assert!(!handler.history_undo().unwrap());
 }
 
 #[test]
