@@ -2,9 +2,6 @@
 
 // GPUI elements are ergonomic with wildcard imports and pixel/tick casts; this
 // crate is a UI shell, not a reusable library.
-// `#[gpui::test]` (src/editor/ui_tests) needs more macro-expansion recursion than
-// the default 128.
-#![recursion_limit = "256"]
 #![allow(
     clippy::wildcard_imports,
     clippy::unreadable_literal,

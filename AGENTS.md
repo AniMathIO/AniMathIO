@@ -117,8 +117,8 @@ tests never open a window on the desktop, so they do not go through `scripts/vir
   `ui.read(|editor| ..)` to assert. Assert on the project model and view state
   (`marker_panel`, `autocut_review`, `selected`, `dock`, `left_tab`), not on pixels.
   `fixtures.rs` has the shared sample, a synthetic voice + music mix and caption cues.
-- Click handlers are closures, which a test cannot press: move the logic into an `Editor` method
-  (like `cycle_autocut_scope` / `apply_autocut`) and have the closure call it.
+- To exercise shared handler logic directly, move it into an `Editor` method
+  (like `set_autocut_scope` / `apply_autocut`) and have the closure call it.
 - Scenarios that need first-party plugins call `require_plugins(..)` and skip when
   `scripts/build-plugins.sh` has not produced `target/plugins` (CI builds it before testing).
 - Windows are rendered whenever the editor is updated, so render panics surface too.
