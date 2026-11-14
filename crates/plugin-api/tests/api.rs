@@ -266,7 +266,8 @@ fn abi_negotiation_is_strict_and_rejects_future_requirements() {
 
 #[test]
 fn documented_example_is_verbatim_and_targets_the_frozen_abi() {
-    let docs = include_str!("../../../docs/plugins.md");
+    // Windows checkouts may convert line endings; compare on LF only.
+    let docs = include_str!("../../../docs/plugins.md").replace("\r\n", "\n");
     for (path, lang, contents) in [
         (
             "plugins/examples/hello/Cargo.toml",
@@ -284,6 +285,7 @@ fn documented_example_is_verbatim_and_targets_the_frozen_abi() {
             include_str!("../../../plugins/examples/hello/src/lib.rs"),
         ),
     ] {
+        let contents = contents.replace("\r\n", "\n");
         let marker = format!("**`{path}`**\n\n```{lang}\n{}\n```", contents.trim_end());
         assert!(docs.contains(&marker), "{path} must be copied verbatim");
     }

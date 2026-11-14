@@ -59,7 +59,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       # The whisper.cpp speech engine (cargo feature `whisper`) needs cmake, a C++ toolchain and
       # libclang, so it is not part of the default workspace build. Build, lint and test it
       # here on both OSes; the model-backed test is #[ignore]d, CI never downloads a model.
