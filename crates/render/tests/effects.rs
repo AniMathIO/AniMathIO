@@ -246,3 +246,44 @@ fn preview_work_is_bounded_when_many_clips_fail() {
     // run per clip or effect.
     assert!(counter.load(std::sync::atomic::Ordering::SeqCst) <= 16);
 }
+
+#[test]
+fn bypassed_effects_are_skipped_without_needing_a_processor() {
+    let bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("effects.png"),
+    )
+    .unwrap();
+    let size = (64, 64);
+    let mut invert = EffectInstance::new(
+        EffectId(2),
+        "org.example.ok",
+        "invert",
+        std::collections::BTreeMap::default(),
+    );
+    let mut ctx = RenderCtx::default();
+    ctx.set_effect_processor(Stub);
+    ctx.resources
+        .insert(animathio_core::AssetId::of(&bytes), bytes.clone())
+        .unwrap();
+    let plain = render(&effect_scene(&bytes, Vec::new()), &mut ctx, size).unwrap();
+    let active = render(&effect_scene(&bytes, vec![invert.clone()]), &mut ctx, size).unwrap();
+    assert_ne!(active, plain);
+
+    // A bypassed effect left in the scene is still ignored by the renderer itself.
+    invert.bypass = true;
+    let bypassed = render(&effect_scene(&bytes, vec![invert.clone()]), &mut ctx, size).unwrap();
+    assert_eq!(bypassed, plain);
+
+    // It never reaches the processor, so a missing processor or plugin is not an error.
+    let mut bare = RenderCtx::default();
+    bare.resources
+        .insert(animathio_core::AssetId::of(&bytes), bytes.clone())
+        .unwrap();
+    assert_eq!(
+        render(&effect_scene(&bytes, vec![invert]), &mut bare, size).unwrap(),
+        plain
+    );
+}

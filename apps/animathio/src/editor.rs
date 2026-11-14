@@ -464,6 +464,8 @@ pub(crate) struct Editor {
     history: History,
     assets: Arc<BTreeMap<AssetId, Vec<u8>>>,
     audio_generation: u64,
+    /// When a live parameter drag last handed the playback mixer a fresh project snapshot.
+    last_live_audio_sync: Option<Instant>,
     save_pending: bool,
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
@@ -592,6 +594,7 @@ impl Editor {
             history: History::default(),
             assets: Arc::new(assets),
             audio_generation: 0,
+            last_live_audio_sync: None,
             save_pending: false,
             pool,
             audio_ids,
