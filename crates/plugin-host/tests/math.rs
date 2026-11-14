@@ -320,3 +320,178 @@ fn graph_golden_frame() {
         .unwrap();
     golden_vector(scene, "graph-parabola-circle");
 }
+
+#[test]
+fn graph_styles_survive_the_component_boundary() {
+    use animathio_core::{Color, VectorElement};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+    let scene = host
+        .render_clip(
+            &graph,
+            &BTreeMap::new(),
+            &json!({
+                "items": "plot y=sin(x)\nvector x1=0 y1=0 x2=1 y2=1",
+                "show_labels": false,
+                "color": [12, 34, 56, 255],
+                "stroke_width": 6.0,
+                "axis_color": [210, 100, 20, 255],
+                "grid_color": [10, 30, 50, 80],
+            }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    let styles: Vec<_> = scene
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            VectorElement::StrokePath { style, .. } => Some(style),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        styles
+            .iter()
+            .any(|style| style.color == Color::rgba(10, 30, 50, 80))
+    );
+    assert_eq!(
+        styles
+            .iter()
+            .filter(|style| style.color == Color::rgb(210, 100, 20))
+            .count(),
+        2,
+        "both axes must use the requested color"
+    );
+    let plots: Vec<_> = styles
+        .iter()
+        .filter(|style| style.color == Color::rgb(12, 34, 56))
+        .collect();
+    assert_eq!(plots.len(), 2, "plot and vector must both survive");
+    assert!(
+        plots
+            .iter()
+            .all(|style| (style.width - 6.0).abs() < f64::EPSILON)
+    );
+}
+
+#[test]
+fn graph_parametric_progress_and_axis_scaling() {
+    use animathio_core::{PathVerb, VectorElement};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+    for (width, height) in [(640, 360), (360, 640)] {
+        for (mode, half_x, half_y) in [
+            ("uniform", 180.0, 180.0),
+            ("stretch", f64::from(width) / 2.0, f64::from(height) / 2.0),
+        ] {
+            for draw in [0.0, 0.25, 0.5, 1.0] {
+                let mut params = json!({
+                    "items": "parametric x=cos(t) y=sin(t)",
+                    "x_min": -1, "x_max": 1, "y_min": -1, "y_max": 1,
+                    "show_grid": false, "show_axes": false, "show_labels": false,
+                    "draw": draw,
+                });
+                // Omission must retain the uniform default introduced in #234.
+                if mode == "stretch" {
+                    params["scale_mode"] = json!(mode);
+                }
+                let scene = host
+                    .render_clip(&graph, &BTreeMap::new(), &params, 0, (width, height))
+                    .unwrap();
+                if draw < f64::EPSILON {
+                    assert!(scene.elements.is_empty());
+                    continue;
+                }
+                let VectorElement::StrokePath { path, .. } = &scene.elements[0] else {
+                    panic!("expected parametric curve");
+                };
+                let Some(PathVerb::LineTo(end)) = path.last() else {
+                    panic!("expected sampled curve endpoint");
+                };
+                let angle = std::f64::consts::TAU * draw;
+                assert!((end.x - (f64::from(width) / 2.0 + half_x * angle.cos())).abs() < 0.001);
+                assert!((end.y - (f64::from(height) / 2.0 - half_y * angle.sin())).abs() < 0.001);
+            }
+        }
+    }
+}
+
+#[test]
+fn graph_grid_stays_inside_a_transformed_viewport() {
+    use animathio_core::{PathVerb, VectorElement};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+    let scene = host
+        .render_clip(
+            &graph,
+            &BTreeMap::new(),
+            &json!({
+                "items": "", "scale_mode": "stretch",
+                "x_min": 0.2, "x_max": 6.1, "y_min": -1.5, "y_max": 1.5,
+                "show_axes": false, "show_labels": false,
+            }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    assert!(!scene.elements.is_empty());
+    for element in scene.elements {
+        let VectorElement::StrokePath { path, .. } = element else {
+            panic!("expected grid line");
+        };
+        for verb in path {
+            let (PathVerb::MoveTo(point) | PathVerb::LineTo(point)) = verb else {
+                panic!("expected straight grid line");
+            };
+            assert!((0.0..=640.0).contains(&point.x), "{point:?}");
+            assert!((0.0..=360.0).contains(&point.y), "{point:?}");
+        }
+    }
+}
+
+#[test]
+fn graph_parametric_rejects_invalid_domains_and_breaks_at_nonfinite_values() {
+    use animathio_core::{PathVerb, VectorElement};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+    for (items, expected_moves) in [
+        ("parametric x=t y=1/t from=-1 to=1", 2),
+        ("parametric x=unknown(t) y=t", 0),
+        ("parametric x=t y=t from=1 to=-1", 0),
+        ("parametric x=t y=t from=NaN to=1", 0),
+    ] {
+        let scene = host
+            .render_clip(
+                &graph,
+                &BTreeMap::new(),
+                &json!({
+                    "items": items,
+                    "show_grid": false, "show_axes": false, "show_labels": false,
+                }),
+                0,
+                (640, 360),
+            )
+            .unwrap();
+        let moves = scene
+            .elements
+            .iter()
+            .map(|element| match element {
+                VectorElement::StrokePath { path, .. } => path
+                    .iter()
+                    .filter(|verb| matches!(verb, PathVerb::MoveTo(_)))
+                    .count(),
+                _ => 0,
+            })
+            .sum::<usize>();
+        assert_eq!(moves, expected_moves, "{items}");
+    }
+}

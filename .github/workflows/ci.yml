@@ -39,6 +39,8 @@ jobs:
             libxcb-sync-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
+            ffmpeg \
+            python3-pil \
             cmake \
             libclang-dev \
             pkg-config
@@ -80,6 +82,12 @@ jobs:
         run: |
           cargo build -p animathio-cli --locked
           scripts/check-docs.sh --require-binary
+      - name: Showcase offline E2E
+        timeout-minutes: 15
+        if: runner.os == 'Linux'
+        env:
+          ANIMATHIO_PLUGIN_DIR: ${{ github.workspace }}/target/plugins
+        run: python3 examples/showcase/test.py
       - name: Check licenses
         if: runner.os == 'Linux'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2

@@ -1,10 +1,10 @@
 //! First-party `graph` plugin: a Mafs-like coordinate plane drawn entirely in
 //! the plugin, with function plots, points, segments, circles, polygons and
-//! vectors, plus grid/axes/labels from host text shaping.
+//! vectors and parametric curves, plus grid/axes/labels from host text shaping.
 //!
 //! The `items` parameter is a newline-separated list of `key=value` fields.
 //! The first field is the item kind (`plot`, `point`, `segment`, `circle`,
-//! `polygon`, `vector`); the rest configure it, e.g.
+//! `polygon`, `vector`, `parametric`); the rest configure it, e.g.
 //! `plot y=x^2 color=#3b82f6` or `circle cx=0 cy=0 r=1`.
 
 wit_bindgen::generate!({
@@ -16,6 +16,19 @@ use animathio::plugin::host;
 use animathio::plugin::types::*;
 
 struct GraphPlugin;
+
+const AXIS_COLOR: Color = Color {
+    r: 200,
+    g: 205,
+    b: 220,
+    a: 255,
+};
+const GRID_COLOR: Color = Color {
+    r: 120,
+    g: 130,
+    b: 150,
+    a: 90,
+};
 
 // ---------------------------------------------------------------------------
 // Parameter helpers
@@ -184,7 +197,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     i += 1;
                 }
                 let text = &input[start..i];
-                if text.eq_ignore_ascii_case("x") {
+                if text.eq_ignore_ascii_case("x") || text.eq_ignore_ascii_case("t") {
                     tokens.push(Token::Var);
                 } else {
                     let func = match text.to_ascii_lowercase().as_str() {
@@ -352,6 +365,13 @@ fn parse_expression(input: &str) -> Result<Expr, String> {
 // Graph items
 
 enum GraphItem {
+    Parametric {
+        x: Expr,
+        y: Expr,
+        from: f64,
+        to: f64,
+        color: Color,
+    },
     Plot {
         expr: Expr,
         color: Color,
@@ -458,6 +478,26 @@ fn parse_items(text: &str, default_color: Color) -> Vec<GraphItem> {
         };
 
         match kind {
+            "parametric" => {
+                let expression = |name| {
+                    fields
+                        .iter()
+                        .find(|(key, _)| *key == name)
+                        .and_then(|(_, value)| parse_expression(value).ok())
+                };
+                if let (Some(x), Some(y)) = (expression("x"), expression("y")) {
+                    let (from, to) = (number("from", 0.0), number("to", std::f64::consts::TAU));
+                    if from.is_finite() && to.is_finite() && to > from {
+                        items.push(GraphItem::Parametric {
+                            x,
+                            y,
+                            from,
+                            to,
+                            color,
+                        });
+                    }
+                }
+            }
             "plot" => {
                 let y = fields
                     .iter()
@@ -684,7 +724,7 @@ impl Guest for GraphPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "graph".to_string(),
-            version: "1.1.0".to_string(),
+            version: "1.2.0".to_string(),
             description: "Mafs-like coordinate plane with plots and shapes".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -745,6 +785,14 @@ impl Guest for GraphPlugin {
                     kind: ParamKind::Bool(BoolParam { default: true }),
                 },
                 ParamSpec {
+                    id: "scale_mode".into(),
+                    label: "Coordinate Scale".into(),
+                    kind: ParamKind::EnumChoice(EnumParam {
+                        options: vec!["uniform".into(), "stretch".into()],
+                        default: "uniform".into(),
+                    }),
+                },
+                ParamSpec {
                     id: "draw".to_string(),
                     label: "Draw".to_string(),
                     kind: ParamKind::Number(NumberRange {
@@ -764,6 +812,30 @@ impl Guest for GraphPlugin {
                             b: 255,
                             a: 255,
                         },
+                    }),
+                },
+                ParamSpec {
+                    id: "stroke_width".into(),
+                    label: "Plot Stroke Width (540p px)".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.1,
+                        max: 64.0,
+                        default: 2.0,
+                        step: 0.1,
+                    }),
+                },
+                ParamSpec {
+                    id: "axis_color".into(),
+                    label: "Axis Color".into(),
+                    kind: ParamKind::Color(ColorParam {
+                        default: AXIS_COLOR,
+                    }),
+                },
+                ParamSpec {
+                    id: "grid_color".into(),
+                    label: "Grid Color".into(),
+                    kind: ParamKind::Color(ColorParam {
+                        default: GRID_COLOR,
                     }),
                 },
                 ParamSpec {
@@ -808,32 +880,32 @@ impl Guest for GraphPlugin {
                 elements: Vec::new(),
             });
         }
-        // Uniform scale: the requested range always fits inside the frame ("meet") and the
-        // shorter axis shows more of the plane, so circles stay round on any canvas aspect.
+        // Uniform is the default: circles stay round. Function charts may explicitly
+        // stretch the requested ranges to the viewport for independent axis scales.
         let (width, height) = (f64::from(size.width), f64::from(size.height));
-        let per_unit = (width / (x_max - x_min)).min(height / (y_max - y_min));
-        let (mid_x, mid_y) = ((x_min + x_max) / 2.0, (y_min + y_max) / 2.0);
-        let (half_x, half_y) = (width / per_unit / 2.0, height / per_unit / 2.0);
-        let (x_min, x_max) = (mid_x - half_x, mid_x + half_x);
-        let (y_min, y_max) = (mid_y - half_y, mid_y + half_y);
+        let (x_min, x_max, y_min, y_max) =
+            if get_string(&params, "scale_mode", "uniform") == "stretch" {
+                (x_min, x_max, y_min, y_max)
+            } else {
+                let per_unit = (width / (x_max - x_min)).min(height / (y_max - y_min));
+                let (mid_x, mid_y) = ((x_min + x_max) / 2.0, (y_min + y_max) / 2.0);
+                let (half_x, half_y) = (width / per_unit / 2.0, height / per_unit / 2.0);
+                (
+                    mid_x - half_x,
+                    mid_x + half_x,
+                    mid_y - half_y,
+                    mid_y + half_y,
+                )
+            };
         // Stroke widths and label size follow the shorter canvas edge (1080p: 2x).
         let px = (width.min(height) / 540.0).max(1.0);
         let label_size = (12.0 * px) as f32;
         let bounds = (x_min, x_max, y_min, y_max);
 
         let mut elements = Vec::new();
-        let grid_color = Color {
-            r: 120,
-            g: 130,
-            b: 150,
-            a: 90,
-        };
-        let axis_color = Color {
-            r: 200,
-            g: 205,
-            b: 220,
-            a: 255,
-        };
+        let grid_color = get_color(&params, "grid_color", GRID_COLOR);
+        let axis_color = get_color(&params, "axis_color", AXIS_COLOR);
+        let stroke_width = (get_number(&params, "stroke_width", 2.0).clamp(0.1, 64.0) * px) as f32;
         let stroke = StrokeStyle {
             width: (1.5 * px) as f32,
             color: axis_color,
@@ -843,7 +915,7 @@ impl Guest for GraphPlugin {
 
         if show_grid {
             let step = nice_step((x_max - x_min).max(y_max - y_min));
-            let mut gx = (x_min / step).floor() * step;
+            let mut gx = (x_min / step).ceil() * step;
             while gx <= x_max {
                 let p1 = map_point(gx, y_min, bounds, size);
                 let p2 = map_point(gx, y_max, bounds, size);
@@ -858,7 +930,7 @@ impl Guest for GraphPlugin {
                 )));
                 gx += step;
             }
-            let mut gy = (y_min / step).floor() * step;
+            let mut gy = (y_min / step).ceil() * step;
             while gy <= y_max {
                 let p1 = map_point(x_min, gy, bounds, size);
                 let p2 = map_point(x_max, gy, bounds, size);
@@ -919,7 +991,9 @@ impl Guest for GraphPlugin {
                     for contour in host::shape_text(&label, label_size)? {
                         let offset: Vec<PathVerb> = contour
                             .iter()
-                            .map(|verb| offset_verb(verb, p.x - (18.0 * px) as f32, p.y - (6.0 * px) as f32))
+                            .map(|verb| {
+                                offset_verb(verb, p.x - (18.0 * px) as f32, p.y - (6.0 * px) as f32)
+                            })
                             .collect();
                         elements.push(DrawCommand::FillPath((offset, axis_color)));
                     }
@@ -936,6 +1010,41 @@ impl Guest for GraphPlugin {
                 continue;
             }
             match item {
+                GraphItem::Parametric {
+                    x,
+                    y,
+                    from,
+                    to,
+                    color,
+                } => {
+                    let samples = 256;
+                    let mut path = Vec::with_capacity(samples + 1);
+                    let mut connected = false;
+                    for i in 0..=samples {
+                        let t = from + (to - from) * draw * i as f64 / samples as f64;
+                        let (x, y) = (eval(x, t), eval(y, t));
+                        if x.is_finite() && y.is_finite() {
+                            let point = map_point(x, y, bounds, size);
+                            path.push(if connected {
+                                PathVerb::LineTo(point)
+                            } else {
+                                PathVerb::MoveTo(point)
+                            });
+                            connected = true;
+                        } else {
+                            connected = false;
+                        }
+                    }
+                    elements.push(DrawCommand::StrokePath((
+                        path,
+                        StrokeStyle {
+                            width: stroke_width,
+                            color: *color,
+                            cap: StrokeCap::Round,
+                            join: StrokeJoin::Round,
+                        },
+                    )));
+                }
                 GraphItem::Plot { expr, color } => {
                     let samples = 256;
                     let x_end = x_min + (x_max - x_min) * draw;
@@ -952,7 +1061,7 @@ impl Guest for GraphPlugin {
                         elements.push(DrawCommand::StrokePath((
                             polyline(&points, bounds, size),
                             StrokeStyle {
-                                width: (2.0 * px) as f32,
+                                width: stroke_width,
                                 color: *color,
                                 cap: StrokeCap::Round,
                                 join: StrokeJoin::Round,
@@ -979,7 +1088,7 @@ impl Guest for GraphPlugin {
                     elements.push(DrawCommand::StrokePath((
                         vec![PathVerb::MoveTo(p1), PathVerb::LineTo(p2)],
                         StrokeStyle {
-                            width: (2.0 * px) as f32,
+                            width: stroke_width,
                             color: *color,
                             cap: StrokeCap::Round,
                             join: StrokeJoin::Round,
@@ -990,7 +1099,7 @@ impl Guest for GraphPlugin {
                     elements.push(DrawCommand::StrokePath((
                         circle_verbs(*cx, *cy, *r, bounds, size),
                         StrokeStyle {
-                            width: (2.0 * px) as f32,
+                            width: stroke_width,
                             color: *color,
                             cap: StrokeCap::Round,
                             join: StrokeJoin::Round,
@@ -1015,7 +1124,7 @@ impl Guest for GraphPlugin {
                     elements.push(DrawCommand::StrokePath((
                         vector_verbs(*x1, *y1, *x2, *y2, bounds, size),
                         StrokeStyle {
-                            width: (2.0 * px) as f32,
+                            width: stroke_width,
                             color: *color,
                             cap: StrokeCap::Round,
                             join: StrokeJoin::Round,

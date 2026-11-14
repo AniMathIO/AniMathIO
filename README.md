@@ -385,3 +385,10 @@ template stores the current project and selected placeholder clips in the user d
 library; user cards have Delete. The CLI keeps `templates list` and
 `new --template quote -o quote.amio`; MCP adds `list_templates` and
 `create_from_template`. Template card hover lifts use the shared surface tokens.
+
+## Reproducible math showcases
+
+[Three short math explainers](examples/showcase/README.md) exercise the public CLI/MCP
+authoring surface, CPU golden frames and H.264/AAC export offline. Each includes
+landscape and vertical layouts; the opt-in `scripts/showcase-export.sh` produces
+full deliveries using checksum-pinned public-domain recordings.
