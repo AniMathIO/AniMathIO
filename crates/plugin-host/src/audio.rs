@@ -34,9 +34,9 @@ const AUDIO_MEMORY_PER_SAMPLE: usize = 64;
 /// Most idle warm instances kept per plugin.
 const POOL_SIZE: usize = 8;
 /// Highest sample rate accepted by the mixer.
-const MAX_SAMPLE_RATE: u32 = 768_000;
+pub(crate) const MAX_SAMPLE_RATE: u32 = 768_000;
 /// Highest channel count accepted by the mixer.
-const MAX_CHANNELS: u16 = 32;
+pub(crate) const MAX_CHANNELS: u16 = 32;
 
 struct Pooled {
     store: Store<HostState>,

@@ -72,8 +72,11 @@ Cargo-style range. This host supports `1.0.0` and explicitly adapts legacy
 metadata, unknown majors and requirements newer than its implemented ABI before
 compiling the component. Merely changing `plugin.toml` cannot upgrade a component.
 The host checks the selected world's canonical types and versioned exports;
-known execution kinds and the plugin version in `describe` must agree with the
-package. A mismatch fails loading before registry insertion.
+for 1.x packages, known execution kinds, the plugin version and the parameter
+schema returned by `describe` must also agree with the package and be well formed;
+a mismatch fails loading before registry insertion. Legacy 0.2.x packages are not
+retroactively held to these `describe` checks, since they were accepted without
+them, only to the typed export checks.
 
 - A **patch** may fix implementation bugs or clarify documentation without changing
   WIT layouts, required imports/exports, units or valid-input semantics.

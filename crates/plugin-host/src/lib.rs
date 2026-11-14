@@ -2023,8 +2023,8 @@ impl SandboxLimits {
                 "audio-epoch-deadline-ticks",
                 self.audio_epoch_deadline_ticks,
             ),
-            ("max-audio-channels", 32),
-            ("max-audio-sample-rate", 768_000),
+            ("max-audio-channels", u64::from(audio::MAX_CHANNELS)),
+            ("max-audio-sample-rate", u64::from(audio::MAX_SAMPLE_RATE)),
             ("max-shape-text-chars", MAX_SHAPE_TEXT_CHARS as u64),
             ("max-shape-text-verbs", MAX_SHAPE_TEXT_VERBS as u64),
             ("max-svg-input-bytes", MAX_SVG_INPUT_BYTES as u64),
@@ -2078,6 +2078,12 @@ fn validate_manifest(
     package: &PluginManifestToml,
     manifest: &wit_types::Manifest,
 ) -> Result<(), HostError> {
+    // 0.2.x components were accepted without schema or consistency checks. Keeping
+    // them loadable means not retroactively rejecting what they describe; the
+    // typed export checks and sandbox still apply.
+    if package.api_version.starts_with("0.") {
+        return Ok(());
+    }
     validate_kinds(
         manifest,
         &package.kinds.iter().map(|k| k.as_str()).collect::<Vec<_>>(),
