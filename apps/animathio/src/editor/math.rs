@@ -711,7 +711,13 @@ impl Render for MathEditor {
         }
         let mut form = div()
             .id("math-editor-form")
-            .max_h(px(360.))
+            .max_h(px(if self.dialog {
+                // Leave room for the preview and footer, while showing the complete
+                // LaTeX palette without scrolling on normal desktop windows.
+                (f32::from(window.viewport_size().height) - 380.).clamp(120., 440.)
+            } else {
+                360.
+            }))
             .overflow_y_scroll()
             .flex()
             .flex_col()
