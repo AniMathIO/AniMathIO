@@ -26,7 +26,8 @@ BACKGROUND_HEX = "#10131a"
 TITLE = "Fourier series"
 FORMULA = r"\sum_{n=1}^{\infty}\frac{1}{n^2}=\frac{\pi^2}{6}"
 
-# Layout shared by both versions (canvas pixels, top-left origin).
+# Layout shared by both versions (canvas pixels, top-left origin for v1, normalized
+# clip-centre fractions for v2; the v2 values below are the pixel positions converted).
 GRAPH_SCALE = 0.45
 GRAPH_W, GRAPH_H = int(WIDTH * GRAPH_SCALE), int(HEIGHT * GRAPH_SCALE)  # 864 x 486
 GRAPH_CENTER = (0.7, 0.55)  # normalized, v2 transform
@@ -34,6 +35,10 @@ GRAPH_TOP_LEFT = (
     round(GRAPH_CENTER[0] * WIDTH - GRAPH_W / 2),
     round(GRAPH_CENTER[1] * HEIGHT - GRAPH_H / 2),
 )
+# Approximate clip-centre fractions for v2 matching the v1 top-left pixel positions
+# (exact font metrics differ between KaTeX raster and the v2 plugins; same region).
+TITLE_CENTER = (0.19, 0.115)   # v1 title drawn top-left at (120, 80), ~76 px line
+FORMULA_CENTER = (0.17, 0.43)  # v1 formula drawn top-left at (120, 400)
 
 
 def render_graph_png(path: Path) -> None:
@@ -151,8 +156,8 @@ def build_v2_scene(cli: Path, env: dict, out: Path, seconds: int, work: Path) ->
     project["width"], project["height"] = WIDTH, HEIGHT
     project["background"] = list(BACKGROUND)
     placement = [
-        (0.27, 0.13, 1.0),  # title
-        (0.30, 0.50, 1.0),  # formula
+        (*TITLE_CENTER, 1.0),  # title
+        (*FORMULA_CENTER, 1.0),  # formula
         (*GRAPH_CENTER, GRAPH_SCALE),  # plot
         (*GRAPH_CENTER, GRAPH_SCALE),  # circle
         (*GRAPH_CENTER, GRAPH_SCALE),  # triangle
@@ -222,6 +227,32 @@ def build_v2_medium(cli: Path, env: dict, out: Path, work: Path) -> Path:
 # ----------------------------------------------------------------------------------- v1 projects
 
 
+def write_v1_seed(path: Path, seconds: int = 10) -> Path:
+    """A minimal zlib-deflated v1 `.animathio` (the ProjectStore serialize shape) so the
+    benchmark can open *something* before driving set_canvas/add_* through MCP."""
+    import zlib
+
+    state = {
+        "backgroundColor": BACKGROUND_HEX,
+        "selectedMenuOption": "Videos",
+        "audios": [],
+        "videos": [],
+        "images": [],
+        "editorElements": [],
+        "maxTime": seconds * 1000,
+        "animations": [],
+        "currentKeyFrame": 0,
+        "fps": FPS,
+        "selectedVideoFormat": "mp4",
+        "canvas_width": WIDTH,
+        "canvas_height": HEIGHT,
+        "mediaFiles": [],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(zlib.compress(json.dumps(state).encode("utf-8"), 9))
+    return path
+
+
 def v1_scene_steps(graph_png: Path, seconds: int) -> list[dict]:
     """MCP tool calls that build the equivalent scene in v1 (run once, then saved)."""
     ms = seconds * 1000
@@ -231,10 +262,23 @@ def v1_scene_steps(graph_png: Path, seconds: int) -> list[dict]:
         {"tool": "add_math", "args": {"latex": FORMULA, "x": 120, "y": 400, "color": "#ffffff"}},
         {"tool": "add_media", "args": {"path": str(graph_png)}},
     ]
-    for index in (1, 2, 3):  # ids come back from steps 1..3 (0 is set_canvas)
-        step = steps[index]
-        ref = f"${index}.id" if index < 3 else f"${index}.ids"
-        steps.append({"tool": "update_element", "args": {"id": ref, "timeFrame": {"start": 0, "end": ms}}})
+    for index in (1, 2):  # ids come back from steps 1..2 (0 is set_canvas)
+        steps.append(
+            {"tool": "update_element", "args": {"id": f"${index}.id", "timeFrame": {"start": 0, "end": ms}}}
+        )
+    # v1 has no vector graph or shape elements: the graph, circle and triangle ship as
+    # one static raster image (what a Mafs capture is). Place it where v2 puts its
+    # graph+shapes clips. `$3.ids.0` is the image timeline element created by add_media.
+    steps.append(
+        {
+            "tool": "update_element",
+            "args": {
+                "id": "$3.ids.0",
+                "placement": {"x": GRAPH_TOP_LEFT[0], "y": GRAPH_TOP_LEFT[1], "width": GRAPH_W, "height": GRAPH_H},
+                "timeFrame": {"start": 0, "end": ms},
+            },
+        }
+    )
     return steps
 
 
@@ -257,3 +301,55 @@ def v1_medium_steps(seconds: int = 60) -> list[dict]:
             steps.append({"tool": "update_element", "args": {"id": f"${idx}.id", "timeFrame": frame}})
             steps.append({"tool": "add_animation", "args": {"targetId": f"${idx}.id", "type": "fadeIn", "durationMs": 500}})
     return steps
+
+
+# ----------------------------------------------------------------------------------- builder
+
+
+def build(out: Path, cli: Path, plugins: Path | None, save_dir: Path) -> dict:
+    """Generate everything scripts/bench-v1-v2.sh needs:
+    the shared graph raster, the v1 seed project, the v1 MCP step scripts and the v2
+    `.amio` projects (authored through `animathio-cli math-objects add`)."""
+    import os
+
+    graph_png = out / "graph.png"
+    render_graph_png(graph_png)
+
+    seed = write_v1_seed(out / "v1-seed.animathio")
+
+    steps = {
+        "steps-v1-scene-10.json": v1_scene_steps(graph_png, 10) + [{"tool": "save_project", "args": {"path": str(save_dir / "scene-10.animathio")}}],
+        "steps-v1-scene-60.json": v1_scene_steps(graph_png, 60) + [{"tool": "save_project", "args": {"path": str(save_dir / "scene-60.animathio")}}],
+        "steps-v1-medium.json": v1_medium_steps(60) + [{"tool": "save_project", "args": {"path": str(save_dir / "medium.animathio")}}],
+    }
+    for name, body in steps.items():
+        (out / name).write_text(json.dumps(body, indent=1), encoding="utf-8")
+
+    env = dict(os.environ)
+    if plugins is not None:
+        env["ANIMATHIO_PLUGIN_DIR"] = str(plugins)
+    work = out / "v2-work"
+    v2 = {
+        "scene-10.amio": build_v2_scene(cli, env, out / "scene-10.amio", 10, work),
+        "scene-60.amio": build_v2_scene(cli, env, out / "scene-60.amio", 60, work),
+        "medium.amio": build_v2_medium(cli, env, out / "medium.amio", work),
+    }
+    return {"graph": str(graph_png), "seed": str(seed), "v1_steps": {k: str(out / k) for k in steps}, "v2": {k: str(v) for k, v in v2.items()}}
+
+
+def main() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    b = sub.add_parser("build", help="Generate graph raster, v1 seed/steps and v2 projects.")
+    b.add_argument("--out", required=True, type=Path)
+    b.add_argument("--cli", required=True, type=Path, help="animathio-cli binary")
+    b.add_argument("--plugins", type=Path, default=None, help="ANIMATHIO_PLUGIN_DIR for the CLI")
+    b.add_argument("--save-dir", required=True, type=Path, help="Where v1 save_project steps write")
+    args = ap.parse_args()
+    print(json.dumps(build(args.out, args.cli, args.plugins, args.save_dir)))
+
+
+if __name__ == "__main__":
+    main()

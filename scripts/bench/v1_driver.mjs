@@ -10,6 +10,10 @@
 //   node v1_driver.mjs export --v1 DIR --port N --token T --path OUT.mp4 [--timeout MS]
 //   node v1_driver.mjs seek   --v1 DIR --port N --token T [--seconds 10] [--hz 60]
 //
+// `--v1 DIR` points at the v1 checkout: the MCP SDK is loaded from that tree's
+// own node_modules (the packaged app ships it in app.asar, but the version is
+// identical, so the source tree copy is used to keep this driver dependency-free).
+//
 // Every command prints one JSON object on stdout. Timestamps are `Date.now()` epoch
 // milliseconds so the harness can subtract its own launch time from the same clock.
 import { readFileSync } from "node:fs";
@@ -90,10 +94,17 @@ if (cmd === "wait") {
   const steps = JSON.parse(readFileSync(need("script"), "utf8"));
   const { client } = await connectWithRetry(60_000);
   const out = [];
-  // `$N.field` in a string argument refers to the Nth earlier result, so a script can reuse ids.
+  // `$N.field` or `$N.field.0` in a string argument refers to the Nth earlier result
+  // (optionally indexing an array such as add_media's ids), so a script can reuse ids.
   for (const step of steps) {
     const args = JSON.parse(
-      JSON.stringify(step.args ?? {}).replace(/"\$(\d+)\.([A-Za-z_]+)"/g, (_m, n, key) => JSON.stringify(out[Number(n)]?.[key])),
+      JSON.stringify(step.args ?? {}).replace(
+        /"\$(\d+)\.([A-Za-z_]+)(?:\.(\d+))?"/g,
+        (_m, n, key, idx) => {
+          const value = out[Number(n)]?.[key];
+          return JSON.stringify(idx === undefined ? value : value?.[Number(idx)]);
+        },
+      ),
     );
     out.push(await tool(client, step.tool, args, step.timeout ?? 120_000));
   }
