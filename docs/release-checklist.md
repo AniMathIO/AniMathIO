@@ -72,7 +72,7 @@ once enabled.
 | Windows hands-on pass of the editor (CI covers build and tests only) | Maintainer | No | Not done |
 | Real-hardware listen test for the audio shuttle (#196 deferred) | Maintainer | No | Not done |
 | Baseline `v2.0.0` tag, `RELEASE_PLZ_TOKEN` secret, rulesets, Renovate app, "Allow auto-merge": see sections 2, 3 and 6 (all Maintainer, nothing is agent-doable without admin rights) | Maintainer | Partly | Open |
-| Fuzzing (`cargo-fuzz`) of the project parser, v1 importer and media probe (listed under "Quality bar" in #156) | Agent | Yes | Not set up |
+| Fuzzing (`cargo-fuzz`) of the project parser, v1 importer and media probe (listed under "Quality bar" in #156) | Agent | Yes | In progress: standalone `fuzz/` workspace with five libFuzzer targets, manual CI job |
 
 ## 6. Order of operations at the swap
 
