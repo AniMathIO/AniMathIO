@@ -431,3 +431,6 @@ drag it onto the timeline. Double-click an existing object to edit it. LaTeX has
 snippets, formula templates and a Write on preset. See the
 [math workflow](docs/architecture.md#mathematical-object-workflow) and the
 [CLI guide](docs/cli.md) for automation equivalents.
+
+![Math library](docs/screenshots/editor-math-panel.png)
+![Math object editor](docs/screenshots/editor-math-dialog.png)
