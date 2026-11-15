@@ -592,3 +592,68 @@ fn fuzz_regressions_reject_malformed_legacy_json() {
         assert!(result.expect("must not panic").is_err());
     }
 }
+
+#[test]
+fn save_amio_drops_orphan_bytes_but_keeps_manifest_assets() {
+    let (project, assets) = fixture(b"referenced");
+    let mut cache = assets.clone();
+    // Bytes of a removed asset: the manifest no longer lists it, so the save
+    // must not write them, but the cache keeps them for undo.
+    cache.insert(AssetId::of(b"removed"), b"removed".to_vec());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("project.amio");
+    save_amio(&path, &project, &cache).unwrap();
+    let bundle = read_amio(std::fs::File::open(&path).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project, project);
+    assert_eq!(bundle.assets, assets);
+    // An unused but manifest-listed asset is still written.
+    let mut unused = project.clone();
+    let unused_id = AssetId::of(b"unused bytes");
+    Command::AddAsset {
+        id: unused_id.clone(),
+        asset: Asset {
+            name: "unused.mp4".into(),
+            media_type: "video/mp4".into(),
+        },
+    }
+    .apply(&mut unused)
+    .unwrap();
+    let unused_bytes = b"unused bytes".to_vec();
+    let mut cache = cache.clone();
+    cache.insert(unused_id, unused_bytes.clone());
+    let path = dir.path().join("unused.amio");
+    save_amio(&path, &unused, &cache).unwrap();
+    let bundle = read_amio(std::fs::File::open(&path).unwrap(), Limits::default()).unwrap();
+    assert_eq!(
+        bundle.assets.get(&AssetId::of(b"unused bytes")),
+        Some(&unused_bytes)
+    );
+    // Missing bytes for a manifest asset still fail the save.
+    let path = dir.path().join("missing.amio");
+    let mut no_bytes = unused.clone();
+    Command::RemoveAsset {
+        id: AssetId::of(b"unused bytes"),
+    }
+    .apply(&mut no_bytes)
+    .unwrap();
+    Command::AddAsset {
+        id: AssetId::of(b"unused bytes"),
+        asset: Asset {
+            name: "unused.mp4".into(),
+            media_type: "video/mp4".into(),
+        },
+    }
+    .apply(&mut no_bytes)
+    .unwrap();
+    assert!(save_amio(&path, &no_bytes, &assets).is_err());
+    assert!(!path.exists());
+}
+
+#[test]
+fn referenced_assets_matches_manifest_filter() {
+    let (project, assets) = fixture(b"kept");
+    let mut cache = assets.clone();
+    cache.insert(AssetId::of(b"dropped"), b"dropped".to_vec());
+    let referenced = referenced_assets(&project, &cache);
+    assert_eq!(referenced, assets);
+}

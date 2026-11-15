@@ -278,7 +278,8 @@ impl HeadlessHandler {
             save_json(&target, &self.project)?;
             let assets_dir = target.parent().unwrap_or(Path::new(".")).join("assets");
             fs::create_dir_all(&assets_dir)?;
-            for (id, bytes) in &self.assets {
+            // Same manifest rule as the archive writer: only referenced bytes.
+            for (id, bytes) in animathio_format::referenced_assets(&self.project, &self.assets) {
                 fs::write(assets_dir.join(id.as_str()), bytes)?;
             }
         } else {

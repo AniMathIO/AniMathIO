@@ -1450,14 +1450,9 @@ pub(super) fn write_project(
     project: &Project,
     assets: &BTreeMap<AssetId, Vec<u8>>,
 ) -> Result<(), String> {
-    // Only persist bytes still referenced by the model so undo of an asset add
-    // cannot leave orphaned entries that fail the manifest check.
-    let referenced: BTreeMap<AssetId, Vec<u8>> = assets
-        .iter()
-        .filter(|(id, _)| project.assets().contains_key(id))
-        .map(|(id, bytes)| (id.clone(), bytes.clone()))
-        .collect();
-    animathio_format::save_amio(path, project, &referenced).map_err(|e| e.to_string())?;
+    // `save_amio` keeps only manifest-referenced bytes, so undoing an asset
+    // removal cannot leave orphaned entries that fail the manifest check.
+    animathio_format::save_amio(path, project, assets).map_err(|e| e.to_string())?;
     Ok(())
 }
 
