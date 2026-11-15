@@ -304,6 +304,10 @@ separately from projects. Interface → UI scale defaults to the desktop's text 
 set to 80–200% in 10% steps and applies live; `ANIMATHIO_UI_SCALE=150` overrides it for
 a run.
 
+**Import media** (Ctrl/Cmd+I or the library's plus button) adds files to the library
+without inserting clips or changing the playhead. Drag a library card onto a timeline
+track to place it, or click it to add at the playhead. Use **Add track** in the timeline
+header to create an empty layer above existing tracks; adding a track is undoable.
 Drop OS media files on the pool to import assets, or on a timeline track to import
 and place them at that position. Multiple files are placed consecutively. The Plugins
 tab's **Write on…** action replaces a selected LaTeX clip's reveal animation with

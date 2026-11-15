@@ -65,6 +65,67 @@ fn start_screen_then_new_project(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn library_import_at_an_occupied_playhead_leaves_the_timeline_alone(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    let bytes = wav(&[(0.25, 1200)]);
+    let path = super::config_dir().join("library-import-occupied.wav");
+    std::fs::write(&path, &bytes).unwrap();
+    // The Import media picker uses this library-only path, even at time zero.
+    ui.update(|editor, _, cx| editor.import_paths(&[path], None, cx));
+    ui.read(|editor| {
+        assert_eq!(editor.project.tracks(), before.tracks());
+        assert!(editor.project.assets().contains_key(&animathio_core::AssetId::of(&bytes)));
+    });
+    let imported = ui.read(|editor| editor.project.clone());
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), imported);
+}
+
+#[gpui::test]
+fn launcher_library_import_creates_a_drop_target_in_one_undo_step(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    let before = ui.read(|editor| editor.project.clone());
+    let path = super::config_dir().join("library-import-launcher.wav");
+    std::fs::write(&path, wav(&[(0.25, 1000)])).unwrap();
+    ui.update(|editor, _, cx| editor.import_paths(&[path], None, cx));
+    ui.read(|editor| {
+        assert!(!editor.is_start_screen());
+        assert_eq!(editor.project.assets().len(), 1);
+        assert_eq!(editor.project.tracks().len(), 1);
+        assert_eq!(clip_count(editor), 0);
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+}
+
+#[gpui::test]
+fn add_track_button_is_reachable_at_720p_and_undoable(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx.simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.settle();
+    let bounds = ui.cx.debug_bounds("timeline-add-track").expect("visible Add track button");
+    assert!(bounds.bottom() <= gpui::px(720.));
+    assert!(bounds.right() <= gpui::px(1280.));
+    ui.click(bounds.center(), gpui::Modifiers::default());
+    ui.read(|editor| {
+        assert_eq!(editor.project.tracks().len(), before.tracks().len() + 1);
+        assert!(editor.project.tracks()[0].clips().is_empty());
+        assert_eq!(&editor.project.tracks()[1..], before.tracks());
+    });
+    let added = ui.read(|editor| editor.project.clone());
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), added);
+}
+
+#[gpui::test]
 fn split_undo_redo_through_actions(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
