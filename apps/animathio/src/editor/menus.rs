@@ -432,10 +432,8 @@ impl Editor {
             }
             ContextMenu::Track { id } => {
                 let count = self.project.tracks().len();
-                let position = self
-                    .project
-                    .tracks()
-                    .iter()
+                let position = timeline::display_tracks(&self.project)
+                    .into_iter()
                     .position(|track| track.id() == id);
                 let actions: Vec<(IconName, &str, bool, TrackMenuAction)> = vec![
                     (

@@ -186,9 +186,8 @@ impl Editor {
         let Some(proposal) = review.proposal.as_ref() else {
             return Vec::new();
         };
-        self.project
-            .tracks()
-            .iter()
+        timeline::display_tracks(&self.project)
+            .into_iter()
             .enumerate()
             .filter(|(_, t)| {
                 review.params.music_tracks.contains(&t.id())

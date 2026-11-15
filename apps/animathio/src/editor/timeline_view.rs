@@ -296,7 +296,7 @@ impl Editor {
         x: f32,
         y: f32,
     ) -> Option<(ClipId, FadeEdge)> {
-        for (row, track) in self.project.tracks().iter().enumerate() {
+        for (row, track) in timeline::display_tracks(&self.project).into_iter().enumerate() {
             let top = layout.ruler_height + row as f32 * layout.row_height + 3.0;
             if (y - (top + FADE_HANDLE_INSET)).abs() > 7.0 {
                 continue;
@@ -342,10 +342,8 @@ impl Editor {
             return None;
         }
         let mut found = None;
-        for (clip_row, clip) in self
-            .project
-            .tracks()
-            .iter()
+        for (clip_row, clip) in timeline::display_tracks(&self.project)
+            .into_iter()
             .enumerate()
             .flat_map(|(row, track)| track.clips().values().map(move |clip| (row, clip)))
         {
@@ -457,9 +455,7 @@ impl Editor {
                     None
                 };
                 let rows = self.project.tracks().len();
-                let origin_row = self
-                    .project
-                    .tracks()
+                let origin_row = timeline::display_tracks(&self.project)
                     .iter()
                     .position(|track| track.id() == drag.origin_track)
                     .unwrap_or(0);
@@ -913,11 +909,8 @@ impl Editor {
                 }
             }
         }
-        for (row, track) in preview
-            .as_ref()
-            .unwrap_or(&self.project)
-            .tracks()
-            .iter()
+        for (row, track) in timeline::display_tracks(preview.as_ref().unwrap_or(&self.project))
+            .into_iter()
             .enumerate()
         {
             let silenced = track.is_muted() || (any_solo && !track.is_solo());
@@ -1111,9 +1104,8 @@ impl Editor {
                         .iter()
                         .filter(|c| c.enabled)
                         .flat_map(|c| {
-                            self.project
-                                .tracks()
-                                .iter()
+                            timeline::display_tracks(&self.project)
+                                .into_iter()
                                 .enumerate()
                                 .filter(|(_, t)| p.tracks.contains(&t.id()))
                                 .map(move |(row, _)| (c.range, row))
@@ -1539,7 +1531,7 @@ impl Editor {
                 .border_b_1()
                 .border_color(cx.theme().border),
         );
-        for track in self.project.tracks() {
+        for track in timeline::display_tracks(&self.project) {
             let id = track.id();
             let name = track.name().to_owned();
             let gain = self

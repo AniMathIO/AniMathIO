@@ -427,21 +427,12 @@ impl Editor {
         }
     }
 
-    /// Move a track one step up (`-1`) or down (`1`) the stack.
+    /// Move one visual row, keeping visual and audio stacks separate.
     pub(super) fn move_track_by(&mut self, id: TrackId, delta: isize, cx: &mut Context<Self>) {
-        let Some(from) = self
-            .project
-            .tracks()
-            .iter()
-            .position(|track| track.id() == id)
-        else {
-            return;
-        };
-        if let Some(to) = from
-            .checked_add_signed(delta)
-            .filter(|to| *to < self.project.tracks().len())
-        {
-            self.move_track_to(id, to, cx);
-        }
+        let tracks = timeline::display_tracks(&self.project);
+        let Some(from) = tracks.iter().position(|track| track.id() == id) else { return; };
+        let Some(to) = from.checked_add_signed(delta).and_then(|row| tracks.get(row)) else { return; };
+        let index = self.project.tracks().iter().position(|track| track.id() == to.id());
+        if let Some(index) = index { self.move_track_to(id, index, cx); }
     }
 }

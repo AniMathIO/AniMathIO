@@ -165,7 +165,7 @@ pub(crate) fn marquee(
     let (top, bottom) = (a.1.min(b.1), a.1.max(b.1));
     let row_height = layout.row_height.max(1.0);
     let mut hits = BTreeSet::new();
-    for (row, track) in project.tracks().iter().enumerate() {
+    for (row, track) in timeline::display_tracks(project).into_iter().enumerate() {
         let row_top = layout.ruler_height + row as f32 * row_height;
         if row_top + row_height <= top || row_top >= bottom {
             continue;
@@ -183,9 +183,8 @@ pub(crate) fn marquee(
 
 /// Rows (track indices) spanned by `ids`: `(first, last)`.
 pub(crate) fn row_span(project: &Project, ids: &BTreeSet<ClipId>) -> Option<(usize, usize)> {
-    let mut rows = project
-        .tracks()
-        .iter()
+    let mut rows = timeline::display_tracks(project)
+        .into_iter()
         .enumerate()
         .filter(|(_, track)| track.clips().keys().any(|id| ids.contains(id)))
         .map(|(row, _)| row);
@@ -224,7 +223,7 @@ pub(crate) fn move_command(
         return None;
     }
     let mut commands = Vec::new();
-    for (row, track) in project.tracks().iter().enumerate() {
+    for (row, track) in timeline::display_tracks(project).into_iter().enumerate() {
         let mut members = track
             .clips()
             .values()
@@ -233,7 +232,7 @@ pub(crate) fn move_command(
         if members.peek().is_none() {
             continue;
         }
-        let destination = project.tracks()[row.checked_add_signed(row_delta)?].id();
+        let destination = timeline::display_tracks(project)[row.checked_add_signed(row_delta)?].id();
         for clip in members {
             commands.push(Command::MoveClip {
                 id: clip.id,
@@ -311,7 +310,7 @@ pub(crate) fn shifted_row(row: usize, row_delta: isize, rows: usize) -> usize {
 
 /// The track a row index resolves to, if any.
 pub(crate) fn track_at(project: &Project, row: usize) -> Option<TrackId> {
-    project.tracks().get(row).map(Track::id)
+    timeline::display_tracks(project).get(row).map(|track| track.id())
 }
 
 #[cfg(test)]
