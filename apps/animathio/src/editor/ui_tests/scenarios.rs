@@ -1,6 +1,9 @@
 //! Scenarios that drive real actions and assert on model and view state.
 
-use gpui::{AppContext, AsKeystroke};
+use crate::editing;
+use crate::editor::{TimelineGesture, TrimDrag};
+use crate::timeline::TrimEdge;
+use gpui::{AppContext, AsKeystroke, MouseUpEvent};
 
 use animathio_control::{
     MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style, math_object_range,
@@ -794,4 +797,49 @@ fn caption_custom_colour_and_preset_undo(cx: &mut TestAppContext) {
     assert_eq!(ui.read(|e| e.caption_look.clone()), look);
     ui.dispatch(Undo);
     assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+fn additional_tool_scenario(cx: &mut TestAppContext, key: &str, tool: Tool) {
+    let before = editing::tool_tests::fixture();
+    let mut ui = Ui::open(cx, before.clone(), BTreeMap::new());
+    ui.click(ruler_point(&ui, Time(0)), gpui::Modifiers::default());
+    ui.press(key);
+    assert_eq!(ui.read(|e| e.tool), tool);
+    ui.update(|e, window, cx| {
+        let c = e.find_clip(ClipId(2)).unwrap().clone();
+        let delta = if tool == Tool::RateStretch { -100 } else { 100 };
+        e.gesture = Some(TimelineGesture::Trim(TrimDrag {
+            tool,
+            pointer_origin: c.range.end,
+            clip_id: c.id,
+            edge: TrimEdge::Right,
+            origin_start: c.range.start,
+            origin_end: c.range.end,
+            origin_source_offset: c.source_offset,
+            current: Time(c.range.end.0 + delta),
+            ripple: false,
+        }));
+        assert_ne!(e.edit_tool_feedback(), "");
+        e.on_timeline_mouse_up(&MouseUpEvent::default(), window, cx);
+    });
+    assert_ne!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn rate_stretch_tool(cx: &mut TestAppContext) {
+    additional_tool_scenario(cx, "r", Tool::RateStretch);
+}
+#[gpui::test]
+fn slip_tool(cx: &mut TestAppContext) {
+    additional_tool_scenario(cx, "y", Tool::Slip);
+}
+#[gpui::test]
+fn slide_tool(cx: &mut TestAppContext) {
+    additional_tool_scenario(cx, "u", Tool::Slide);
+}
+#[gpui::test]
+fn rolling_tool(cx: &mut TestAppContext) {
+    additional_tool_scenario(cx, "n", Tool::Rolling);
 }

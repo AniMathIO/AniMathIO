@@ -9,6 +9,10 @@ pub(crate) enum Tool {
     Blade,
     Ripple,
     Hand,
+    RateStretch,
+    Slip,
+    Slide,
+    Rolling,
 }
 
 /// J/K/L shuttle state: the whole-number rate (negative is reverse) plus a flag
@@ -524,5 +528,344 @@ mod tests {
             )
             .unwrap();
         assert_eq!(project.tracks()[0].clips()[&ClipId(2)].range.start, Time(0));
+    }
+}
+
+/// Plan an atomic edit and clamp the pointer delta against core source, lock,
+/// overlap and retiming guards, including linked companions.
+pub(crate) fn tool_command(
+    project: &Project,
+    id: ClipId,
+    tool: Tool,
+    edge: TrimEdge,
+    delta: i64,
+) -> Option<(Command, i64)> {
+    tool_command_guarded(project, id, tool, edge, delta, |_| true)
+}
+
+pub(crate) fn tool_command_guarded(
+    project: &Project,
+    id: ClipId,
+    tool: Tool,
+    edge: TrimEdge,
+    delta: i64,
+    mut guard: impl FnMut(&Command) -> bool,
+) -> Option<(Command, i64)> {
+    let track = project
+        .tracks()
+        .iter()
+        .find(|t| t.clips().contains_key(&id))?;
+    let clip = track.clips().get(&id)?;
+    let plan = |d: i64| -> Option<Command> {
+        let trim = |c: &Clip, start: i64, end: i64, offset: i64| -> Option<Command> {
+            Some(Command::TrimClip {
+                id: c.id,
+                range: TimeRange::new(Time(start), Time(end)).ok()?,
+                source_offset: Time(offset),
+            })
+        };
+        let mut commands = Vec::new();
+        match tool {
+            Tool::RateStretch => {
+                if clip.time_map.hold {
+                    return None;
+                }
+                let duration = (clip.range.end.0 - clip.range.start.0)
+                    .checked_add(if edge == TrimEdge::Left { -d } else { d })?;
+                if duration <= 0 {
+                    return None;
+                }
+                let (a, b) = clip.source_bounds();
+                let units = (i128::from(b.0 - a.0) * 1_000_000 + i128::from(duration) / 2)
+                    / i128::from(duration);
+                let speed =
+                    animathio_core::ClipSpeed::new(u32::try_from(units).ok()?, 1_000_000).ok()?;
+                if edge == TrimEdge::Left {
+                    commands.push(Command::MoveClip {
+                        id,
+                        track: track.id(),
+                        start: Time(
+                            clip.range.end.0.checked_sub(
+                                animathio_core::ClipTimeMap {
+                                    speed,
+                                    ..Default::default()
+                                }
+                                .duration_for(Time(b.0 - a.0))
+                                .ok()?
+                                .0,
+                            )?,
+                        ),
+                    });
+                }
+                commands.push(Command::SetClipSpeed {
+                    id,
+                    speed,
+                    reverse: clip.time_map.reverse,
+                    ramps: vec![],
+                    ripple: false,
+                });
+            }
+            Tool::Slip => commands.push(trim(
+                clip,
+                clip.range.start.0,
+                clip.range.end.0,
+                clip.source_offset.0.checked_add(d)?,
+            )?),
+            Tool::Rolling | Tool::Slide => {
+                let left = track
+                    .clips()
+                    .values()
+                    .find(|c| c.id != id && c.range.end == clip.range.start);
+                let right = track
+                    .clips()
+                    .values()
+                    .find(|c| c.id != id && c.range.start == clip.range.end);
+                if tool == Tool::Slide || edge == TrimEdge::Left {
+                    let left = left?;
+                    commands.push(trim(
+                        left,
+                        left.range.start.0,
+                        left.range.end.0.checked_add(d)?,
+                        left.source_offset.0,
+                    )?);
+                }
+                if tool == Tool::Slide || edge == TrimEdge::Right {
+                    let right = right?;
+                    commands.push(trim(
+                        right,
+                        right.range.start.0.checked_add(d)?,
+                        right.range.end.0,
+                        right.source_offset.0.checked_add(d)?,
+                    )?);
+                }
+                if tool == Tool::Slide {
+                    commands.push(Command::MoveClip {
+                        id,
+                        track: track.id(),
+                        start: Time(clip.range.start.0.checked_add(d)?),
+                    });
+                } else {
+                    let start = clip.range.start.0 + if edge == TrimEdge::Left { d } else { 0 };
+                    let end = clip.range.end.0 + if edge == TrimEdge::Right { d } else { 0 };
+                    commands.push(trim(
+                        clip,
+                        start,
+                        end,
+                        clip.source_offset.0 + if edge == TrimEdge::Left { d } else { 0 },
+                    )?);
+                }
+            }
+            _ => return None,
+        }
+        Some(Command::Batch { commands })
+    };
+    let mut valid = |d| {
+        let cmd = plan(d)?;
+        if !guard(&cmd) {
+            return None;
+        }
+        cmd.apply(&mut project.clone()).ok()?;
+        Some(cmd)
+    };
+    if let Some(cmd) = valid(delta) {
+        return Some((cmd, delta));
+    }
+    let mut low = 0_i64;
+    let mut high = delta.saturating_abs();
+    while low < high {
+        let mid = low + (high - low) / 2 + 1;
+        if valid(mid * delta.signum()).is_some() {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    let d = low * delta.signum();
+    valid(d).map(|cmd| (cmd, d))
+}
+
+#[cfg(test)]
+pub(crate) mod tool_tests {
+    use super::*;
+    use animathio_core::{ClipKind, Track, TrackId};
+
+    pub(crate) fn fixture() -> Project {
+        let mut p = Project::default();
+        for row in 0..2 {
+            let track = TrackId(row + 1);
+            Command::AddTrack {
+                track: Track::new(track, "Linked media"),
+                index: usize::try_from(row).unwrap(),
+            }
+            .apply(&mut p)
+            .unwrap();
+            for i in 0..3 {
+                let mut c = Clip::new(
+                    ClipId(row * 3 + i + 1),
+                    ClipKind::Plugin {
+                        plugin_id: "test.clip".into(),
+                        params: serde_json::json!({}),
+                    },
+                    TimeRange::new(
+                        Time(i64::try_from(i).unwrap() * 1000),
+                        Time(i64::try_from(i + 1).unwrap() * 1000),
+                    )
+                    .unwrap(),
+                );
+                c.source_offset = Time(1000);
+                c.link_group = Some(ClipId(i + 1));
+                Command::AddClip { track, clip: c }.apply(&mut p).unwrap();
+            }
+        }
+        p
+    }
+
+    #[test]
+    fn tools_clamp_and_restore_linked_companions_exactly() {
+        for tool in [Tool::RateStretch, Tool::Slip, Tool::Slide, Tool::Rolling] {
+            for delta in [-100_000, -100, 100, 100_000] {
+                let original = fixture();
+                let mut p = original.clone();
+                let (cmd, actual) =
+                    tool_command(&p, ClipId(2), tool, TrimEdge::Right, delta).unwrap();
+                assert!(actual.abs() <= delta.abs());
+                assert!(matches!(cmd, Command::Batch { .. }));
+                let undo = cmd.apply(&mut p).unwrap();
+                let a = p.tracks()[0].clips().get(&ClipId(2)).unwrap();
+                let b = p.tracks()[1].clips().get(&ClipId(5)).unwrap();
+                assert_eq!(a.range, b.range);
+                assert_eq!(a.source_bounds(), b.source_bounds());
+                if tool == Tool::Slip {
+                    assert_eq!(a.range, original.tracks()[0].clips()[&ClipId(2)].range);
+                }
+                if tool == Tool::RateStretch {
+                    assert_eq!(
+                        a.source_bounds(),
+                        original.tracks()[0].clips()[&ClipId(2)].source_bounds()
+                    );
+                }
+                if matches!(tool, Tool::Slide | Tool::Rolling) {
+                    for track in p.tracks() {
+                        assert_eq!(
+                            track.clips().values().map(|c| c.range.end).max(),
+                            Some(Time(3000))
+                        );
+                    }
+                }
+                undo.apply(&mut p).unwrap();
+                assert_eq!(p, original, "{tool:?} {delta}");
+            }
+        }
+    }
+
+    #[test]
+    fn locked_companions_and_missing_neighbours_reject_edits() {
+        let mut p = fixture();
+        Command::SetTrackLocked {
+            id: TrackId(2),
+            locked: true,
+        }
+        .apply(&mut p)
+        .unwrap();
+        for tool in [Tool::RateStretch, Tool::Slip, Tool::Slide, Tool::Rolling] {
+            assert!(tool_command(&p, ClipId(2), tool, TrimEdge::Right, -100).is_none());
+        }
+        let p = fixture();
+        assert!(tool_command(&p, ClipId(1), Tool::Slide, TrimEdge::Right, 100).is_none());
+        assert!(tool_command(&p, ClipId(3), Tool::Rolling, TrimEdge::Right, 100).is_none());
+    }
+
+    #[test]
+    fn stretch_limits_and_left_anchor() {
+        let mut p = fixture();
+        for id in [ClipId(1), ClipId(3)] {
+            Command::RemoveClip { id }.apply(&mut p).unwrap();
+        }
+        for (edge, delta) in [
+            (TrimEdge::Right, 100_000),
+            (TrimEdge::Right, -100_000),
+            (TrimEdge::Left, 500),
+        ] {
+            let (cmd, _) = tool_command(&p, ClipId(2), Tool::RateStretch, edge, delta).unwrap();
+            let mut result = p.clone();
+            cmd.apply(&mut result).unwrap();
+            let c = &result.tracks()[0].clips()[&ClipId(2)];
+            assert!((6.25..=1600.).contains(&c.time_map.speed.percent()));
+            assert_eq!(
+                c.source_bounds(),
+                p.tracks()[0].clips()[&ClipId(2)].source_bounds()
+            );
+            if edge == TrimEdge::Left {
+                assert_eq!(c.range.end, Time(2000));
+            }
+        }
+    }
+
+    #[test]
+    fn probed_media_limits_clamp_linked_slip() {
+        let mut p = fixture();
+        let asset = animathio_core::AssetId::of(b"media");
+        Command::AddAsset {
+            id: asset.clone(),
+            asset: animathio_core::Asset {
+                name: "media.wav".into(),
+                media_type: "audio/wav".into(),
+            },
+        }
+        .apply(&mut p)
+        .unwrap();
+        let tracks = p.tracks().to_vec();
+        for track in tracks {
+            let clips = track
+                .clips()
+                .values()
+                .cloned()
+                .map(|mut c| {
+                    c.kind = ClipKind::Audio(asset.clone());
+                    c
+                })
+                .collect::<Vec<_>>();
+            Command::RestoreClips {
+                track: track.id(),
+                ids: clips.iter().map(|c| c.id).collect(),
+                clips,
+            }
+            .apply(&mut p)
+            .unwrap();
+        }
+        let mut limits = animathio_control::SourceLimits::new();
+        limits.set(asset, Time(2100));
+        for delta in [5000, -5000] {
+            let (cmd, d) =
+                tool_command_guarded(&p, ClipId(2), Tool::Slip, TrimEdge::Right, delta, |cmd| {
+                    limits
+                        .guard(&p, &std::collections::BTreeMap::new(), cmd)
+                        .is_ok()
+                })
+                .unwrap();
+            assert_eq!(d, if delta > 0 { 100 } else { -1000 });
+            let mut result = p.clone();
+            let inverse = cmd.apply(&mut result).unwrap();
+            inverse.apply(&mut result).unwrap();
+            assert_eq!(result, p);
+        }
+    }
+
+    #[test]
+    fn source_guard_clamps_slip_and_neighbour_edits() {
+        for tool in [Tool::Slip, Tool::Slide, Tool::Rolling] {
+            let p = fixture();
+            let (_, d) = tool_command_guarded(&p, ClipId(2), tool, TrimEdge::Right, 5000, |cmd| {
+                let mut candidate = p.clone();
+                cmd.apply(&mut candidate).is_ok()
+                    && candidate
+                        .tracks()
+                        .iter()
+                        .flat_map(|t| t.clips().values())
+                        .all(|c| c.source_bounds().1 <= Time(2100))
+            })
+            .unwrap();
+            assert_eq!(d, 100);
+        }
     }
 }

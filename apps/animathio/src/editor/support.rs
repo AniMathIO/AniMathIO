@@ -29,6 +29,10 @@ pub(super) fn icon_button(
         "tool-select" => Some((Box::new(actions::SelectTool), "Timeline")),
         "tool-blade" => Some((Box::new(actions::BladeTool), "Timeline")),
         "tool-ripple" => Some((Box::new(actions::RippleTool), "Timeline")),
+        "tool-rate-stretch" => Some((Box::new(actions::RateStretchTool), "Timeline")),
+        "tool-slip" => Some((Box::new(actions::SlipTool), "Timeline")),
+        "tool-slide" => Some((Box::new(actions::SlideTool), "Timeline")),
+        "tool-rolling" => Some((Box::new(actions::RollingTool), "Timeline")),
         "tool-hand" => Some((Box::new(actions::HandTool), "Timeline")),
         "mark-in" => Some((Box::new(actions::MarkIn), "Timeline")),
         "mark-out" => Some((Box::new(actions::MarkOut), "Timeline")),
@@ -255,7 +259,7 @@ pub(super) fn paint_timeline(
         let x = bounds.origin.x + px(timeline::time_to_x(&layout, time));
         window.paint_quad(fill(
             Bounds::new(point(x, bounds.top()), size(px(1.), px(height))),
-            style::hex(colors::ACCENT),
+            style::hex(colors::SNAP),
         ));
         paint_icon(
             IconName::Magnet,
@@ -263,7 +267,7 @@ pub(super) fn paint_timeline(
                 point(x + px(3.), bounds.top() + px(ruler_height() + 3.)),
                 size(px(14.), px(14.)),
             ),
-            style::hex(colors::ACCENT),
+            style::hex(colors::SNAP),
             window,
             cx,
         );

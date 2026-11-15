@@ -180,6 +180,10 @@ impl Editor {
                 MenuItem::action("Select", SelectTool),
                 MenuItem::action("Blade", BladeTool),
                 MenuItem::action("Ripple", RippleTool),
+                MenuItem::action("Rate Stretch", RateStretchTool),
+                MenuItem::action("Slip", SlipTool),
+                MenuItem::action("Slide", SlideTool),
+                MenuItem::action("Rolling Edit", RollingTool),
                 MenuItem::action("Hand", HandTool),
                 MenuItem::separator(),
                 MenuItem::action("Ripple all tracks", ToggleRippleScope)
