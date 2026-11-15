@@ -82,7 +82,9 @@ if (cmd === "wait") {
   const { client, at: mcpReady } = await connectWithRetry(timeout);
   const deadline = Date.now() + timeout;
   let state = await tool(client, "get_project_state");
-  while (!(state.isEditorActive && state.elements.length >= want)) {
+  // `--want 0` (cold start) is satisfied by the first answer; otherwise the editor
+  // must be active and show at least `want` elements.
+  while (!(state.elements.length >= want && (want === 0 || state.isEditorActive))) {
     if (Date.now() > deadline) throw new Error(`project never loaded (state: ${JSON.stringify(state)})`);
     await sleep(25);
     state = await tool(client, "get_project_state");

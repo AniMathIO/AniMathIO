@@ -61,8 +61,9 @@ class Bench:
         self.v2_home = Path(args.out) / "v2home"
         for p in (self.v1_home, self.v2_home):
             p.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.control_sock = self.runtime / "animathio-control.sock"
-        self.control_token = self.runtime / "animathio-control.token"
+        # The control socket and token file live under `$XDG_RUNTIME_DIR/animathio`.
+        self.control_sock = self.runtime / "animathio" / "animathio-control.sock"
+        self.control_token = self.runtime / "animathio" / "animathio-control.token"
         self.v1_port = self.free_port()
         self.v1_token = secrets.token_hex(24)
         self.v1_flags: list[str] = []
@@ -97,6 +98,10 @@ class Bench:
         if project is not None:
             argv.append(str(project))
         env = dict(os.environ)
+        # Agent harnesses set ELECTRON_RUN_AS_NODE=1, which turns the Electron
+        # binary into plain Node; the app needs it unset to open a window.
+        env.pop("ELECTRON_RUN_AS_NODE", None)
+        env.pop("NODE_OPTIONS", None)
         env["HOME"] = str(self.v1_home)
         env.pop("ANIMATHIO_PLUGIN_DIR", None)
         log = open(self.raw / "v1-app.log", "ab")
@@ -144,6 +149,10 @@ class Bench:
             try:
                 p.unlink()
             except FileNotFoundError:
+                pass
+            try:
+                p.parent.rmdir()
+            except OSError:
                 pass
 
     # ------------------------------------------------------------------ automation clients
@@ -206,35 +215,50 @@ def v2_wait_usable(bench: Bench, clips: int = 0, timeout_ms: float = 180_000) ->
 
 
 def preflight_v1(bench: Bench) -> None:
-    """Launch v1 once, find its electron-store config dir, enable the MCP server."""
+    """Seed v1's electron-store config in the benchmark HOME so the opt-in MCP
+    server comes up on launch, then verify it answers. electron-store reads
+    `<userData>/config.json`; on Linux userData is `~/.config/<app name>` (the
+    packaged app uses the lowercase package name)."""
     print("[bench] v1 preflight: enabling the opt-in MCP server in a private HOME", flush=True)
-    for attempt in range(4):
+
+    def seed_all() -> None:
+        cfg = json.dumps({"mcpServerEnabled": True, "mcpServerPort": bench.v1_port, "mcpServerToken": bench.v1_token})
+        for name in ("animathio", "AniMathIO"):
+            d = bench.v1_home / ".config" / name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "config.json").write_text(cfg)
+
+    def discover_and_seed() -> bool:
+        """Find Chromium userData dirs created by the first launch and seed them too."""
+        seeded = False
+        cfg_dir = bench.v1_home / ".config"
+        cfg = json.dumps({"mcpServerEnabled": True, "mcpServerPort": bench.v1_port, "mcpServerToken": bench.v1_token})
+        for d in cfg_dir.iterdir() if cfg_dir.exists() else []:
+            if d.is_dir() and (d / "GPUCache").exists() and not (d / "config.json").exists():
+                (d / "config.json").write_text(cfg)
+                seeded = True
+        return seeded
+
+    seed_all()
+    for attempt in range(3):
         proc = bench.launch_v1()
-        found = ""
-        for _ in range(300):
-            matches = list((bench.v1_home / ".config").glob("*/window-state-main.json"))
-            if matches:
-                found = str(matches[0])
-                break
-            if proc.poll() is not None and attempt >= 0 and len(bench.v1_flags) == 0 and not matches:
-                # Died immediately: likely a sandbox problem; retry unsandboxed.
-                break
-            time.sleep(0.1)
-        Bench.stop(proc)
-        time.sleep(1.0)
-        if not found:
-            if not bench.v1_flags:
-                print("[bench] v1 produced no config dir; retrying with --no-sandbox", flush=True)
-                bench.v1_flags = ["--no-sandbox"]
-                continue
-            raise SystemExit(f"v1 preflight failed after {attempt + 1} tries (see raw/v1-app.log)")
-        cfgdir = Path(found).parent
-        (cfgdir / "config.json").write_text(
-            json.dumps({"mcpServerEnabled": True, "mcpServerPort": bench.v1_port, "mcpServerToken": bench.v1_token})
-        )
-        print(f"[bench] v1 MCP enabled via {cfgdir}/config.json (port {bench.v1_port}, flags={bench.v1_flags})", flush=True)
-        return
-    raise SystemExit("v1 preflight failed")
+        try:
+            try:
+                v1_wait_usable(bench, timeout_ms=90_000)
+                print(f"[bench] v1 MCP server answering (port {bench.v1_port}, flags={bench.v1_flags})", flush=True)
+                return
+            except Exception as error:
+                if attempt == 0 and discover_and_seed():
+                    print(f"[bench] re-seeding discovered config dirs: {error}", flush=True)
+                    continue
+                if attempt >= 1 and not bench.v1_flags:
+                    print(f"[bench] retrying v1 with --no-sandbox: {error}", flush=True)
+                    bench.v1_flags = ["--no-sandbox"]
+                    continue
+                raise
+        finally:
+            Bench.stop(proc)
+    raise SystemExit("v1 preflight failed: MCP server never answered (see raw/v1-app.log)")
 
 
 def author_v1_scene(bench: Bench, steps_file: Path, project_out: str) -> dict:
