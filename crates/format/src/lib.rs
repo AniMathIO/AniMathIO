@@ -174,8 +174,38 @@ pub fn write_amio<W: Write + Seek>(
     Ok(archive.finish()?)
 }
 
-/// Atomically replace a project only after validation and a durable temporary write.
+/// Bytes for the assets the project manifest still references. Extra cached
+/// bytes (for example the bytes of a removed asset kept so the edit can be
+/// undone) are dropped, so every save path can hand its full cache to
+/// [`save_amio`] without drifting from the container's strict manifest rule.
+/// An asset that the manifest lists but whose bytes are missing still makes
+/// [`save_amio`] fail. This filter does not replace model validation: writers
+/// also reject native or typed references absent from the manifest.
+#[must_use]
+pub fn referenced_assets(
+    project: &Project,
+    assets: &BTreeMap<AssetId, Vec<u8>>,
+) -> BTreeMap<AssetId, Vec<u8>> {
+    assets
+        .iter()
+        .filter(|(id, _)| project.assets().contains_key(*id))
+        .map(|(id, bytes)| (id.clone(), bytes.clone()))
+        .collect()
+}
+
+/// Atomically replace a project only after validation and a durable temporary
+/// write. Bytes not referenced by the project's manifest are dropped instead of
+/// failing the write, so callers may pass their full asset cache.
 pub fn save_amio(
+    path: impl AsRef<std::path::Path>,
+    project: &Project,
+    assets: &BTreeMap<AssetId, Vec<u8>>,
+) -> Result<(), Error> {
+    save_amio_assets(path, project, &referenced_assets(project, assets))
+}
+
+/// Like [`save_amio`], but `assets` must already match the manifest exactly.
+fn save_amio_assets(
     path: impl AsRef<std::path::Path>,
     project: &Project,
     assets: &BTreeMap<AssetId, Vec<u8>>,

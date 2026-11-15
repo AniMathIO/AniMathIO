@@ -679,6 +679,22 @@ impl Project {
                     ClipKind::Vector(scene) => scene.validate()?,
                 }
                 validate_clip_effects_and_animations(clip)?;
+                let parameter_values = clip.params.values().chain(
+                    clip.animations
+                        .iter()
+                        .flat_map(|animation| animation.keys.0.values().map(|key| &key.value)),
+                );
+                for id in parameter_values.filter_map(ParamValue::asset_reference) {
+                    if !self.assets.contains_key(id) {
+                        return Err(Error(format!(
+                            "missing asset {} referenced by clip {} parameter or keyframe",
+                            id.as_str(),
+                            clip.id.0
+                        )));
+                    }
+                }
+                // Video and audio EffectInstance params are f64 only; their
+                // keyframes above are also required to be numeric.
                 ranges.push(clip.range);
             }
             ranges.sort_by_key(|r| r.start);
