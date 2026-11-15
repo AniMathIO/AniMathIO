@@ -4,12 +4,15 @@ use animathio_core::{ClipId, ClipSpeed, Command, SpeedPoint};
 
 #[derive(Args)]
 pub(crate) struct SpeedArgs {
+    /// Input .amio project archive.
     project: PathBuf,
+    /// Clip identity.
     #[arg(long)]
     clip: u64,
     /// Exact multiplier: 0.5, 2 or 3/2 (1/16..16, millionth precision).
     #[arg(long)]
     speed: ClipSpeed,
+    /// Play the source interval backwards.
     #[arg(long)]
     reverse: bool,
     /// JSON array of {"time": ticks, "speed": {"numerator": n, "denominator": d}}.
@@ -18,14 +21,18 @@ pub(crate) struct SpeedArgs {
     /// Shift trailing clips on all unlocked tracks. Otherwise reject overlaps.
     #[arg(long)]
     ripple: bool,
+    /// Destination .amio archive.
     #[arg(short, long)]
     output: PathBuf,
+    /// Replace an existing output archive.
     #[arg(long)]
     overwrite: bool,
 }
 #[derive(Args)]
 pub(crate) struct HoldArgs {
+    /// Input .amio project archive.
     project: PathBuf,
+    /// Clip identity.
     #[arg(long)]
     clip: u64,
     /// Timeline playhead, decimal seconds or Nticks.
@@ -34,8 +41,10 @@ pub(crate) struct HoldArgs {
     /// Positive hold duration in project frames; inserts and ripples the tail.
     #[arg(long)]
     frames: u32,
+    /// Destination .amio archive.
     #[arg(short, long)]
     output: PathBuf,
+    /// Replace an existing output archive.
     #[arg(long)]
     overwrite: bool,
 }

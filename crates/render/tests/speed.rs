@@ -97,7 +97,7 @@ fn golden(reverse: bool, name: &str) {
             .all(|(a, b)| a.abs_diff(*b) <= 2)
     );
     // Half-open boundary and the last visible sample must not request a frame beyond the source.
-    assert!(evaluate(&p, Time(TICKS_PER_SECOND / 2)).clips.is_empty());
+    assert_eq!(evaluate(&p, Time(TICKS_PER_SECOND / 2)).clips, []);
     animathio_render::render(
         &evaluate(&p, Time(TICKS_PER_SECOND / 2 - 1)),
         &mut ctx,

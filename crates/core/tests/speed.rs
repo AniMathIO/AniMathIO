@@ -48,7 +48,7 @@ fn speed(n: u32, d: u32, reverse: bool, ripple: bool) -> Command {
         ripple,
     }
 }
-fn exact(p: &mut Project, command: Command) {
+fn exact(p: &mut Project, command: &Command) {
     let before = serde_json::to_vec(p).unwrap();
     let inverse = command.apply(p).unwrap();
     let after = p.clone();
@@ -96,7 +96,7 @@ fn rational_validation_and_linear_integral() {
 fn source_span_reverse_boundaries_and_exact_undo() {
     let mut p = project(true, false);
     for reverse in [false, true] {
-        exact(&mut p, speed(2, 1, reverse, false));
+        exact(&mut p, &speed(2, 1, reverse, false));
         for id in [1, 2] {
             let c = clip(&p, id);
             assert_eq!(c.range, range(0, 500));
@@ -111,7 +111,7 @@ fn source_span_reverse_boundaries_and_exact_undo() {
             );
         }
     }
-    exact(&mut p, speed(1, 2, false, false));
+    exact(&mut p, &speed(1, 2, false, false));
     assert_eq!(clip(&p, 1).range.end, Time(2000));
 }
 #[test]
@@ -120,7 +120,7 @@ fn ripple_companions_overlap_and_locked_tracks() {
     let before = p.clone();
     assert!(speed(1, 2, false, false).apply(&mut p).is_err());
     assert_eq!(p, before);
-    exact(&mut p, speed(1, 2, false, true));
+    exact(&mut p, &speed(1, 2, false, true));
     assert_eq!(clip(&p, 3).range, range(2000, 2200));
     Command::SetTrackLocked {
         id: TrackId(2),
@@ -157,7 +157,7 @@ fn split_trim_merge_keep_ramp_phase_and_source_samples() {
     let original = clip(&p, 1).clone();
     exact(
         &mut p,
-        Command::SplitClip {
+        &Command::SplitClip {
             id: ClipId(1),
             right_id: ClipId(4),
             at: Time(200),
@@ -171,7 +171,7 @@ fn split_trim_merge_keep_ramp_phase_and_source_samples() {
     }
     exact(
         &mut p,
-        Command::MergeClip {
+        &Command::MergeClip {
             left: ClipId(1),
             right: ClipId(4),
         },
@@ -179,7 +179,7 @@ fn split_trim_merge_keep_ramp_phase_and_source_samples() {
     assert_eq!(clip(&p, 1), &original);
     exact(
         &mut p,
-        Command::TrimClip {
+        &Command::TrimClip {
             id: ClipId(1),
             range: range(200, 500),
             source_offset: Time(300),
@@ -199,7 +199,7 @@ fn frame_hold_is_a_single_batch_with_exact_undo_and_continuous_tail() {
     let original = clip(&p, 1).clone();
     let command = freeze_frame_command(&p, ClipId(1), Time(200), 1).unwrap();
     assert!(matches!(command, Command::Batch { .. }));
-    exact(&mut p, command);
+    exact(&mut p, &command);
     let length = p
         .frame_rate()
         .frame_to_time(1, Rounding::Nearest)
@@ -253,7 +253,7 @@ fn hold_at_start_and_retime_rollback_leave_no_orphaned_links() {
     let mut p = project(true, true);
     exact(
         &mut p,
-        Command::InsertFrameHold {
+        &Command::InsertFrameHold {
             id: ClipId(1),
             at: Time(0),
             frames: 1,
@@ -339,7 +339,7 @@ fn retiming_keeps_automation_at_its_original_timeline_ticks() {
     .apply(&mut p)
     .unwrap();
     let original = clip(&p, 1).animations.clone();
-    exact(&mut p, speed(2, 1, true, false));
+    exact(&mut p, &speed(2, 1, true, false));
     assert_eq!(clip(&p, 1).animations, original);
     assert!(clip(&p, 1).range.end < Time(800));
 }
