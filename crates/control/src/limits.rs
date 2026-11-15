@@ -17,10 +17,12 @@ pub struct SourceLimits {
     probed: BTreeSet<AssetId>,
 }
 
-/// Source end (`source_offset + length`) of clips before an edit.
+/// Exclusive mapped source end of clips before an edit.
 #[derive(Clone, Debug, Default)]
 pub struct SourceSnapshot {
     ends: BTreeMap<ClipId, i64>,
+    existing: BTreeSet<ClipId>,
+    asset_ends: BTreeMap<AssetId, i64>,
 }
 
 impl SourceLimits {
@@ -107,14 +109,28 @@ impl SourceLimits {
             }
         }
         let mut ends = BTreeMap::new();
+        let mut existing = BTreeSet::new();
+        let mut asset_ends = BTreeMap::<AssetId, i64>::new();
         for track in project.tracks() {
             for clip in track.clips().values() {
+                existing.insert(clip.id);
                 if ids.contains(&clip.id) || clip.link_group.is_some_and(|g| groups.contains(&g)) {
-                    ends.insert(clip.id, source_end(clip));
+                    let end = source_end(clip);
+                    ends.insert(clip.id, end);
+                    if let ClipKind::Video(asset) | ClipKind::Audio(asset) = &clip.kind {
+                        asset_ends
+                            .entry(asset.clone())
+                            .and_modify(|old| *old = (*old).max(end))
+                            .or_insert(end);
+                    }
                 }
             }
         }
-        SourceSnapshot { ends }
+        SourceSnapshot {
+            ends,
+            existing,
+            asset_ends,
+        }
     }
 
     /// Fail when an edit pushed a snapshotted clip's source end further out than before and past
@@ -122,7 +138,21 @@ impl SourceLimits {
     pub fn verify(&self, project: &Project, before: &SourceSnapshot) -> Result<(), String> {
         for track in project.tracks() {
             for clip in track.clips().values() {
-                let Some(old_end) = before.ends.get(&clip.id) else {
+                let old_end = before.ends.get(&clip.id).or_else(|| {
+                    // A split/hold can replace the original id inside the same batch.
+                    // Compare newly generated ids against their asset's previous bound;
+                    // an edit cannot hide an overrun by splitting or inserting a hold.
+                    if before.existing.contains(&clip.id) {
+                        return None;
+                    }
+                    match &clip.kind {
+                        ClipKind::Video(asset) | ClipKind::Audio(asset) => {
+                            before.asset_ends.get(asset)
+                        }
+                        _ => None,
+                    }
+                });
+                let Some(old_end) = old_end else {
                     continue;
                 };
                 let Some(limit) = self.duration_of(&clip.kind) else {

@@ -795,7 +795,7 @@ impl Editor {
 
 impl Editor {
     pub(super) fn open_speed_duration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selection.first().copied() else {
+        let Some(id) = self.selected.or_else(|| self.selection.first().copied()) else {
             return;
         };
         let Some(clip) = self.find_clip(id).cloned() else {
@@ -865,6 +865,7 @@ impl Editor {
                             let count=duration.read(cx).value().parse::<i64>().map_err(|_|"Enter a positive frame count")?;
                             if count<=0 {return Err("Enter a positive frame count".into());}
                             let target=rate.frame_to_time(count,Rounding::Nearest).map_err(|e|e.0)?.0;
+                            if target <= 0 { return Err("Duration must span at least one tick".into()); }
                             let (a,b)=clip.source_bounds();
                             // Quantize the requested ratio to the model's millionth lattice.
                             let units=(i128::from(b.0-a.0)*1_000_000+i128::from(target)/2)/i128::from(target);
@@ -879,7 +880,7 @@ impl Editor {
         });
     }
     pub(super) fn open_frame_hold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selection.first().copied() else {
+        let Some(id) = self.selected.or_else(|| self.selection.first().copied()) else {
             return;
         };
         let at = self.position;

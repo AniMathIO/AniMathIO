@@ -257,6 +257,9 @@ impl Clip {
         self.time_map.source_time(self.source_offset, local)
     }
     /// Half-open source bounds used by source-limit guards and retiming edits.
+    ///
+    /// # Panics
+    /// Panics if reverse is set without a source length (an invalid clock).
     #[must_use]
     pub fn source_bounds(&self) -> (Time, Time) {
         if self.time_map.hold {

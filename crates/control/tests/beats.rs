@@ -711,3 +711,52 @@ fn retiming_uses_mapped_source_limits_and_head_trim_keeps_phase() {
     assert!(invalid.apply(&mut project).is_err());
     assert_eq!(project, previous);
 }
+
+#[test]
+fn a_hold_or_split_cannot_hide_a_source_overrun_in_the_same_batch() {
+    let (project, mut limits) = limited_session();
+    for final_edit in [
+        Command::InsertFrameHold {
+            id: ClipId(2),
+            at: Time(4 * SEC),
+            frames: 30,
+        },
+        Command::SplitClip {
+            id: ClipId(2),
+            right_id: ClipId(3),
+            at: Time(5 * SEC),
+        },
+    ] {
+        let command = Command::Batch {
+            commands: vec![
+                Command::TrimClip {
+                    id: ClipId(2),
+                    range: range(4 * SEC, 7 * SEC),
+                    source_offset: Time(3 * SEC),
+                },
+                final_edit,
+            ],
+        };
+        assert!(limits.guard(&project, &BTreeMap::new(), &command).is_err());
+    }
+    // Existing overlong media may still be split or held without extending it.
+    let mut overlong = project.clone();
+    Command::TrimClip {
+        id: ClipId(2),
+        range: range(4 * SEC, 7 * SEC),
+        source_offset: Time(3 * SEC),
+    }
+    .apply(&mut overlong)
+    .unwrap();
+    limits
+        .guard(
+            &overlong,
+            &BTreeMap::new(),
+            &Command::InsertFrameHold {
+                id: ClipId(2),
+                at: Time(4 * SEC),
+                frames: 30,
+            },
+        )
+        .unwrap();
+}
