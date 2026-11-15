@@ -124,8 +124,11 @@ fn add_track_button_is_reachable_at_720p_and_undoable(cx: &mut TestAppContext) {
     ui.click(bounds.center(), gpui::Modifiers::default());
     ui.read(|editor| {
         assert_eq!(editor.project.tracks().len(), before.tracks().len() + 1);
-        assert!(editor.project.tracks()[0].clips().is_empty());
-        assert_eq!(&editor.project.tracks()[1..], before.tracks());
+        assert!(editor.project.tracks().last().unwrap().clips().is_empty());
+        assert_eq!(
+            &editor.project.tracks()[..before.tracks().len()],
+            before.tracks()
+        );
     });
     let added = ui.read(|editor| editor.project.clone());
     ui.dispatch(Undo);

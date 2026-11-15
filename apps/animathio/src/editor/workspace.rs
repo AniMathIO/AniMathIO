@@ -148,7 +148,7 @@ impl Editor {
                                             .compact()
                                             .icon(icons::icon(IconName::Plus))
                                             .label("Add track")
-                                            .tooltip("Add an empty track above the existing layers")
+                                            .tooltip("Add an empty foreground track")
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.add_timeline_track(cx);
                                                 window.focus(&this.panel_focus[0], cx);

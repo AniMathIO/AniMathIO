@@ -11,7 +11,7 @@ use super::*;
 
 impl Editor {
     /// Expose the core's track creation in the timeline, including after the
-    /// last track was undone. New tracks sit above existing visual layers.
+    /// last track was undone. Later model tracks composite over earlier ones.
     pub(super) fn add_timeline_track(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self
             .project
@@ -29,7 +29,7 @@ impl Editor {
         self.execute(
             &Command::AddTrack {
                 track: Track::new(TrackId(id), format!("Track {id}")),
-                index: 0,
+                index: self.project.tracks().len(),
             },
             cx,
         );
