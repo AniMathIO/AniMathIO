@@ -1,0 +1,9 @@
+
+from manim import *
+
+class LatexScene(Scene):
+    def construct(self):
+        formula = MathTex(r"E = mc^2", color=YELLOW)
+        self.play(Write(formula), run_time=2)
+        self.play(FadeOut(formula), run_time=1)
+        self.wait(1)

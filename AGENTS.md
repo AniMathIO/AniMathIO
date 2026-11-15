@@ -139,6 +139,15 @@ CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c
 CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo test --workspace --locked
 ```
 
+Fuzzing untrusted-input parsers with cargo-fuzz (libFuzzer) lives in the standalone `fuzz/`
+workspace (own `[workspace]`, excluded from the main one, like `spikes/`). Targets:
+`project_json` (project JSON + migrations), `project_amio` (.amio container), `v1_import`
+(v1 importer), `manim_source` (Manim parser) and `media_probe` (media probe/open). Seeds are in
+`fuzz/corpus/<target>/`, minimized crash repros in `fuzz/regressions/<target>/`. Run a target
+for ~5 minutes with `nice -n 19 cargo +nightly fuzz run <target> -- -max_total_time=300`
+(nightly is required); CI runs each target for 60 seconds via the manual `workflow_dispatch`
+fuzz job.
+
 `core` owns the plain project model and command-only mutation API; `format` owns
 versioned JSON and `.amio` containers. `audio` owns decoded PCM pools, immutable
 resampled mixer snapshots, and cpal/rtrb playback; no audio resources live in

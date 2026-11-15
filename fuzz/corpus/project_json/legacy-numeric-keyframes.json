@@ -1,0 +1,79 @@
+{
+  "format": "animathio",
+  "schemaVersion": 1,
+  "frame_rate": {
+    "numerator": 30,
+    "denominator": 1
+  },
+  "tracks": [
+    {
+      "id": 1,
+      "name": "legacy",
+      "clips": {
+        "1": {
+          "id": 1,
+          "kind": {
+            "Plugin": {
+              "plugin_id": "legacy.plugin",
+              "params": {
+                "unknown": [
+                  "preserve",
+                  true
+                ]
+              }
+            }
+          },
+          "range": {
+            "start": 0,
+            "end": 100
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.5,
+            "y": 0.5,
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {
+            "gain": 0.25
+          },
+          "animations": [
+            {
+              "target": {
+                "Transform": "X"
+              },
+              "keys": {
+                "0": {
+                  "value": 0.2,
+                  "interpolation": "Linear"
+                },
+                "80": {
+                  "value": 0.8,
+                  "interpolation": "Linear"
+                }
+              }
+            },
+            {
+              "target": {
+                "Param": "gain"
+              },
+              "keys": {
+                "0": {
+                  "value": 0.0,
+                  "interpolation": "Linear"
+                },
+                "80": {
+                  "value": 1.0,
+                  "interpolation": "Hold"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "assets": {}
+}
