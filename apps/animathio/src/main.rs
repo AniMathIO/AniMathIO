@@ -38,6 +38,7 @@ mod style;
 mod subtitle_job;
 mod timecode;
 mod timeline;
+mod window_state;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -76,23 +77,23 @@ fn main() {
             })
             .detach();
 
-            let available = cx
-                .primary_display()
-                .map_or(size(px(1400.), px(900.)), |display| display.bounds().size);
-            let scale = style::ui_scale();
-            let bounds = Bounds::centered(
-                None,
-                size(
-                    px(1400. * scale).min(available.width * 0.95),
-                    px(900. * scale).min(available.height * 0.95),
-                ),
-                cx,
+            let display_bounds = cx.primary_display().map_or(
+                Bounds {
+                    origin: point(px(0.), px(0.)),
+                    size: size(px(2560.), px(1440.)),
+                },
+                |display| display.bounds(),
+            );
+            let window_bounds = window_state::initial_window_bounds(
+                window_state::WindowState::load(),
+                display_bounds,
+                window_state::MIN_WINDOW_SIZE,
             );
             editor::actions::init(cx);
             cx.open_window(
                 WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(900.), px(600.))),
+                    window_bounds: Some(window_bounds),
+                    window_min_size: Some(window_state::MIN_WINDOW_SIZE),
                     window_decorations: Some(WindowDecorations::Client),
                     ..gpui_component::TitleBar::window_options()
                 },

@@ -844,6 +844,7 @@ impl Editor {
         // A window-manager close asks before dropping unsaved work.
         let close_view = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
+            crate::window_state::WindowState::persist(window);
             close_view
                 .update(cx, |this, cx| {
                     if this.dirty {

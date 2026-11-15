@@ -53,6 +53,24 @@ fn sample_project_opens_on_the_headless_environment(cx: &mut TestAppContext) {
     });
 }
 
+/// The window state round-trips through the headless environment's config directory.
+#[gpui::test]
+fn window_state_persists_through_the_config_dir(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|_editor, window, _cx| {
+        crate::window_state::WindowState::persist(window);
+    });
+    let path = crate::editor_env::config_file(crate::window_state::FILE_NAME)
+        .expect("headless environment provides a config dir");
+    let state = crate::window_state::WindowState::load().expect("the persisted state reloads");
+    ui.update(|_editor, window, _cx| {
+        let captured = crate::window_state::WindowState::from_window(window);
+        assert_eq!(captured, state, "capturing twice gives the same geometry");
+    });
+    std::fs::remove_file(&path).ok();
+}
+
 #[gpui::test]
 fn start_screen_then_new_project(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
