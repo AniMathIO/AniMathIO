@@ -434,3 +434,10 @@ snippets, formula templates and a Write on preset. See the
 
 ![Math library](docs/screenshots/editor-math-panel.png)
 ![Math object editor](docs/screenshots/editor-math-dialog.png)
+
+## Reproducible math showcases
+
+[Three short math explainers](examples/showcase/README.md) exercise the public CLI/MCP
+authoring surface, CPU golden frames and H.264/AAC export offline. Each includes
+landscape and vertical layouts; the opt-in `scripts/showcase-export.sh` produces
+full deliveries using checksum-pinned public-domain recordings.
