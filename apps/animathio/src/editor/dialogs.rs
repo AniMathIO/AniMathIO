@@ -857,7 +857,7 @@ impl Editor {
                 .child(field("Ripple",Select::new(&ripple)))
                 .child(field("Ramp keys (frame:percent, …)",Input::new(&ramps)));
             dialog.title(heading(IconName::SlidersHorizontal,"Speed/Duration")).width(px(540.)).child(form)
-                .child(div().text_sm().child("Ramp keys override constant speed. Clear keys for constant speed or duration. Linked audio follows; pitch shifts. Keyframes keep their timeline times. Overlaps are rejected."))
+                .child(div().text_size(style::type_size::SM).child("Ramp keys override constant speed. Clear keys for constant speed or duration. Linked audio follows; pitch shifts. Keyframes keep their timeline times. Overlaps are rejected."))
                 .footer(footer("Apply",cx,move|_,window,cx| {
                     let result=(|| -> Result<Command,String> {
                         let speed=if selected(&mode,cx)=="Duration (frames)" {
@@ -890,7 +890,7 @@ impl Editor {
             let frames=frames.clone(); let editor=editor.clone();
             dialog.title(heading(IconName::SlidersHorizontal,"Insert frame hold segment"))
                 .child(field("Duration (project frames)",Input::new(&frames)))
-                .child("Inserts at the playhead and ripples unlocked trailing clips. Linked audio is silent during the hold.")
+                .child(div().text_size(style::type_size::SM).child("Inserts at the playhead and ripples unlocked trailing clips. Linked audio is silent during the hold."))
                 .footer(footer("Insert",cx,move|_,window,cx| {
                     let count=frames.read(cx).value().parse::<u32>().ok();
                     let applied=editor.update(cx,|this,cx| {

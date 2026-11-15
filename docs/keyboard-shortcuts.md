@@ -90,6 +90,7 @@ later clips on that track left. Markers follow the ripple setting.
 | DefaultAudioTransition (audio fade in/out) | `Ctrl-shift-d` |
 | DefaultTransitions (both kinds) | `shift-d` |
 | UnlinkClips (Link / Group: link or unlink the selection) | `Ctrl-l`, `Ctrl-g` |
+| SpeedDuration (Speed/Duration, Timeline) | `Ctrl-r` |
 | ToggleSnapping | `s` |
 | SelectAllClips | `Ctrl-a` |
 | ClearSelection | `escape` |

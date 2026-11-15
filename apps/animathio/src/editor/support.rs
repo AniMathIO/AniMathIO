@@ -1149,7 +1149,7 @@ pub(super) fn paint_safe_areas(bounds: Bounds<Pixels>, window: &mut Window, cx: 
     paint_frame(0.10); // title-safe
 }
 
-/// The locked track that a clip-mutating command would edit, if any.
+/// Timeline label including the clip's retiming summary.
 pub(super) fn clip_label(project: &Project, clip: &Clip) -> String {
     let kind = match &clip.kind {
         ClipKind::Video(id) | ClipKind::Image(id) | ClipKind::Audio(id) => {

@@ -1,5 +1,6 @@
 //! Speed/Duration inspector and exact parsing of frame-based ramp keys.
 use super::*;
+use crate::style;
 use animathio_core::{ClipSpeed, FrameRate, SpeedPoint};
 
 pub(super) fn percent(value: &str) -> Result<ClipSpeed, String> {
@@ -66,11 +67,16 @@ impl Editor {
             )
             .unwrap_or(0);
         if clip.time_map.hold {
-            return div().px_3().py_2().child(format!(
-                "Frame hold · {frames} frames. Trim edges to change duration; audio is silent."
-            ));
+            return div()
+                .text_size(style::type_size::SM)
+                .px_3()
+                .py_2()
+                .child(format!(
+                    "Frame hold · {frames} frames. Trim edges to change duration; audio is silent."
+                ));
         }
         div()
+            .text_size(style::type_size::SM)
             .flex()
             .flex_col()
             .gap_2()

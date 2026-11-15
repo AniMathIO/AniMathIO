@@ -12,6 +12,7 @@ const MAX_BATCH: usize = 1024;
 /// Exhaustive serializable edits. Applying one returns the exact inverse.
 /// A failed edit leaves the project unchanged. IDs are supplied by callers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)] // Keep clip payloads consistent with the public command API.
 pub enum Command {
     /// Set or clear a clip's companion group (unlink each member in a batch).
     SetClipLink {
@@ -990,7 +991,9 @@ impl Command {
                     .get_mut(id)
                     .expect("clip checked");
                 let previous = clip.clone();
-                if clip.time_map != crate::ClipTimeMap::default() {
+                if clip.time_map == crate::ClipTimeMap::default() {
+                    clip.source_offset = *source_offset;
+                } else {
                     // TrimClip's offset delta is expressed in timeline ticks by existing
                     // callers. Move the curve phase, keeping any additional slip delta.
                     let delta = range.start.0 - clip.range.start.0;
@@ -1007,8 +1010,6 @@ impl Command {
                             .checked_sub(delta)
                             .ok_or_else(|| invalid("trim source overflow"))?,
                     );
-                } else {
-                    clip.source_offset = *source_offset;
                 }
                 clip.range = *range;
                 Self::RestoreClips {

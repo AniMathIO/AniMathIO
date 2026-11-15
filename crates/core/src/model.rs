@@ -593,6 +593,7 @@ impl Project {
         )
     }
     /// Check identities, references, finite values and nonoverlapping half-open ranges.
+    #[allow(clippy::too_many_lines)] // Keep project invariants in one validation pass.
     pub fn validate(&self) -> Result<(), Error> {
         if self.width > 65_535 || self.height > 65_535 {
             return Err(invalid("invalid resolution"));

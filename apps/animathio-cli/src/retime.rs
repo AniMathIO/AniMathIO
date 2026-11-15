@@ -1,5 +1,5 @@
 //! File-based clip retiming through the same guarded commands as MCP/editor.
-use super::*;
+use super::{Args, Path, PathBuf, Result, Time, load, parse_time, save_amio};
 use animathio_core::{ClipId, ClipSpeed, Command, SpeedPoint};
 
 #[derive(Args)]
@@ -39,7 +39,7 @@ pub(crate) struct HoldArgs {
     #[arg(long)]
     overwrite: bool,
 }
-pub(crate) fn speed(args: SpeedArgs) -> Result<()> {
+pub(crate) fn speed(args: &SpeedArgs) -> Result<()> {
     let ramps: Vec<SpeedPoint> = args
         .ramps
         .as_deref()
@@ -50,7 +50,7 @@ pub(crate) fn speed(args: SpeedArgs) -> Result<()> {
         &args.project,
         &args.output,
         args.overwrite,
-        Command::SetClipSpeed {
+        &Command::SetClipSpeed {
             id: ClipId(args.clip),
             speed: args.speed,
             reverse: args.reverse,
@@ -59,25 +59,25 @@ pub(crate) fn speed(args: SpeedArgs) -> Result<()> {
         },
     )
 }
-pub(crate) fn hold(args: HoldArgs) -> Result<()> {
+pub(crate) fn hold(args: &HoldArgs) -> Result<()> {
     edit(
         &args.project,
         &args.output,
         args.overwrite,
-        Command::InsertFrameHold {
+        &Command::InsertFrameHold {
             id: ClipId(args.clip),
             at: args.at,
             frames: args.frames,
         },
     )
 }
-fn edit(input: &Path, output: &Path, overwrite: bool, command: Command) -> Result<()> {
+fn edit(input: &Path, output: &Path, overwrite: bool, command: &Command) -> Result<()> {
     if output.exists() && !overwrite {
         return Err("output exists; pass --overwrite".into());
     }
     let mut bundle = load(input)?;
     let mut limits = animathio_control::SourceLimits::new();
-    limits.guard(&bundle.project, &bundle.assets, &command)?;
+    limits.guard(&bundle.project, &bundle.assets, command)?;
     command.apply(&mut bundle.project)?;
     save_amio(output, &bundle.project, &bundle.assets)?;
     Ok(())

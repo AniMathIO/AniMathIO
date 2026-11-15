@@ -136,7 +136,7 @@ pub struct ClipTimeMap {
     pub reverse: bool,
     /// Ordered linear speed keys (at most 128).
     pub ramps: Vec<SpeedPoint>,
-    /// A frame hold reads only source_offset. Audio is silent during holds.
+    /// A frame hold reads only `source_offset`. Audio is silent during holds.
     pub hold: bool,
     /// Curve phase retained by splits; callers normally leave this zero.
     pub phase: Time,
@@ -398,7 +398,7 @@ pub fn freeze_frame_command(
                 };
                 hold.range = TimeRange::new(at, Time(at.0 + duration))?;
                 hold.link_group = original.link_group.map(|_| hold_group);
-                hold.animations = tail.animations.clone();
+                hold.animations.clone_from(&tail.animations);
                 let mut pieces = vec![hold, tail];
                 if at > clip.range.start {
                     let mut left = clip.clone();

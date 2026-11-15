@@ -594,3 +594,50 @@ fn clip_frame_holds_are_silent() {
             .all(|s| *s == 0.0)
     );
 }
+
+#[test]
+fn retimed_audio_aligns_at_long_timeline_and_trimmed_source_offsets() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let pcm = Pcm::new(rate, 1, (0..200).map(|i| i as f32 / 200.0).collect()).unwrap();
+    let start = 10_000_000 * TICKS_PER_SECOND + 17 * tick;
+    for (n, d) in [(1, 2), (2, 1)] {
+        for reverse in [false, true] {
+            let (mut p, pool) = project(&pcm, start, start + 100 * tick);
+            Command::TrimClip {
+                id: ClipId(0),
+                range: range(start, start + 100 * tick),
+                source_offset: Time(50 * tick),
+            }
+            .apply(&mut p)
+            .unwrap();
+            Command::SetClipSpeed {
+                id: ClipId(0),
+                speed: ClipSpeed::new(n, d).unwrap(),
+                reverse,
+                ramps: vec![],
+                ripple: false,
+            }
+            .apply(&mut p)
+            .unwrap();
+            let frames = 100 * d as usize / n as usize;
+            let end = p.tracks()[0].clips()[&ClipId(0)].range.end.0;
+            let output = pool
+                .mix(&p, range(start - 3 * tick, end + 3 * tick), rate, 1)
+                .unwrap();
+            assert_eq!(output.len(), frames + 6);
+            assert!(
+                output[..3]
+                    .iter()
+                    .chain(&output[frames + 3..])
+                    .all(|s| *s == 0.0)
+            );
+            for (i, sample) in output[3..frames + 3].iter().enumerate() {
+                let local = i as f64 * f64::from(n) / f64::from(d);
+                let position = if reverse { 149.0 - local } else { 50.0 + local };
+                let expected = position.clamp(50.0, 149.0) / 200.0;
+                assert!((f64::from(*sample) - expected).abs() < 0.00001);
+            }
+        }
+    }
+}

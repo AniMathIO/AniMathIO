@@ -294,8 +294,8 @@ fn main() -> ExitCode {
 #[allow(clippy::too_many_lines)]
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Action::SetClipSpeed { args } => retime::speed(args)?,
-        Action::FreezeFrame { args } => retime::hold(args)?,
+        Action::SetClipSpeed { args } => retime::speed(&args)?,
+        Action::FreezeFrame { args } => retime::hold(&args)?,
         Action::Templates {
             action: TemplateAction::List,
         } => {

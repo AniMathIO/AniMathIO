@@ -281,3 +281,65 @@ fn hold_at_start_and_retime_rollback_leave_no_orphaned_links() {
     assert!(command.apply(&mut p).is_err());
     assert_eq!(p, before);
 }
+
+#[test]
+fn fractional_decelerating_ramps_round_only_after_integrating() {
+    let clock = ClipTimeMap {
+        ramps: vec![
+            SpeedPoint {
+                time: Time(5),
+                speed: ClipSpeed::new(1, 2).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(12),
+                speed: ClipSpeed::new(3, 2).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(23),
+                speed: ClipSpeed::new(1, 4).unwrap(),
+            },
+        ],
+        ..Default::default()
+    };
+    clock.validate(100).unwrap();
+    for t in 0..100 {
+        // Independent analytic integrals, retaining fractional area across joins.
+        let expected = if t < 5 {
+            t / 2
+        } else if t < 12 {
+            let u = t - 5;
+            (35 + 7 * u + u * u) / 14
+        } else if t < 23 {
+            let u = t - 12;
+            (836 + 132 * u - 5 * u * u) / 88
+        } else {
+            (153 + 2 * (t - 23)) / 8
+        };
+        assert_eq!(clock.integrated(Time(t)), Time(expected), "tick {t}");
+    }
+    for source in 1..40 {
+        let duration = clock.duration_for(Time(source)).unwrap();
+        assert!(clock.integrated(duration) >= Time(source));
+        assert!(clock.integrated(Time(duration.0 - 1)) < Time(source));
+    }
+}
+
+#[test]
+fn retiming_keeps_automation_at_its_original_timeline_ticks() {
+    let mut p = project(false, false);
+    Command::AddKeyframe {
+        id: ClipId(1),
+        target: Target::Transform(TransformProperty::Opacity),
+        time: Time(800),
+        keyframe: Keyframe {
+            value: 0.5.into(),
+            interpolation: Interpolation::Linear,
+        },
+    }
+    .apply(&mut p)
+    .unwrap();
+    let original = clip(&p, 1).animations.clone();
+    exact(&mut p, speed(2, 1, true, false));
+    assert_eq!(clip(&p, 1).animations, original);
+    assert!(clip(&p, 1).range.end < Time(800));
+}

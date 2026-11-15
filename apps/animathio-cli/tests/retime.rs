@@ -78,11 +78,14 @@ fn speed_and_frame_hold_use_public_commands_and_refuse_overwrite() {
     );
     let held = load(&held);
     assert_eq!(held.tracks()[0].clips().len(), 3);
-    let hold = held.tracks()[0]
+    let segment = held.tracks()[0]
         .clips()
         .values()
         .find(|c| c.time_map.hold)
         .unwrap();
-    assert_eq!(hold.range.end.0 - hold.range.start.0, TICKS_PER_SECOND / 2);
+    assert_eq!(
+        segment.range.end.0 - segment.range.start.0,
+        TICKS_PER_SECOND / 2
+    );
     assert_eq!(std::fs::read(&input).unwrap(), original);
 }
