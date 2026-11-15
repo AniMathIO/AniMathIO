@@ -900,17 +900,25 @@ Detect hard scene changes, split clips or add markers
 Usage: animathio-cli scenes [OPTIONS] <PROJECT> <MODE>
 
 Arguments:
-  <PROJECT>  
-  <MODE>     [possible values: detect, split, markers]
+  <PROJECT>  Input project archive or JSON
+  <MODE>     Detect only, split linked clips, or add markers [possible values: detect, split, markers]
 
 Options:
-      --clip <CLIP>                                              
-      --track <TRACK>                                            
-      --sensitivity <SENSITIVITY>                                [default: 0.5]
-      --min-shot-frames <MIN_SHOT_FRAMES>                        [default: 6]
-      --delete-shorter-than-frames <DELETE_SHORTER_THAN_FRAMES>  [default: 0]
-  -o, --output <OUTPUT>                                          
-      --overwrite                                                
-  -h, --help                                                     Print help
+      --clip <CLIP>
+          Analyse this video clip
+      --track <TRACK>
+          Analyse all video on this track
+      --sensitivity <SENSITIVITY>
+          Sensitivity in 0..=1; higher detects smaller changes [default: 0.5]
+      --min-shot-frames <MIN_SHOT_FRAMES>
+          Minimum shot length in project frames [default: 6]
+      --delete-shorter-than-frames <DELETE_SHORTER_THAN_FRAMES>
+          Remove resulting short shots and linked companions, leaving gaps [default: 0]
+  -o, --output <OUTPUT>
+          Output archive, required for split and markers
+      --overwrite
+          Replace an existing output
+  -h, --help
+          Print help
 ```
 <!-- /help:scenes -->

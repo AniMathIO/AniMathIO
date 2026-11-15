@@ -147,41 +147,38 @@ impl Editor {
             for (label, value) in [("Low sensitivity", 0.25), ("Medium", 0.5), ("High", 0.75)] {
                 let mut params = panel.params.clone();
                 params.sensitivity = value;
-                view =
-                    view.child(
-                        Button::new(SharedString::from(label))
-                            .compact()
-                            .label(label)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.start_scenes(params.clone(), cx)
-                            })),
-                    );
+                view = view.child(
+                    Button::new(SharedString::from(label))
+                        .compact()
+                        .label(label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.start_scenes(params.clone(), cx);
+                        })),
+                );
             }
             for frames in [0, 6, 12, 24] {
                 let mut params = panel.params.clone();
                 params.delete_shorter_than_frames = frames;
-                view =
-                    view.child(
-                        Button::new(SharedString::from(format!("scene-delete-{frames}")))
-                            .compact()
-                            .label(format!("Delete shots under {frames} frames"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.start_scenes(params.clone(), cx)
-                            })),
-                    );
+                view = view.child(
+                    Button::new(SharedString::from(format!("scene-delete-{frames}")))
+                        .compact()
+                        .label(format!("Delete shots under {frames} frames"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.start_scenes(params.clone(), cx);
+                        })),
+                );
             }
             for frames in [1, 6, 12, 24] {
                 let mut params = panel.params.clone();
                 params.min_shot_frames = frames;
-                view =
-                    view.child(
-                        Button::new(SharedString::from(format!("scene-min-{frames}")))
-                            .compact()
-                            .label(format!("Minimum shot: {frames} frames"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.start_scenes(params.clone(), cx)
-                            })),
-                    );
+                view = view.child(
+                    Button::new(SharedString::from(format!("scene-min-{frames}")))
+                        .compact()
+                        .label(format!("Minimum shot: {frames} frames"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.start_scenes(params.clone(), cx);
+                        })),
+                );
             }
             if let Some(clip) = panel.params.clip {
                 let track = self
@@ -189,19 +186,18 @@ impl Editor {
                     .tracks()
                     .iter()
                     .find(|t| t.clips().contains_key(&clip))
-                    .map(|t| t.id());
+                    .map(animathio_core::Track::id);
                 let mut params = panel.params.clone();
                 params.clip = None;
                 params.track = track;
-                view =
-                    view.child(
-                        Button::new("scene-track")
-                            .compact()
-                            .label("Analyse all video on this track")
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.start_scenes(params.clone(), cx)
-                            })),
-                    );
+                view = view.child(
+                    Button::new("scene-track")
+                        .compact()
+                        .label("Analyse all video on this track")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.start_scenes(params.clone(), cx);
+                        })),
+                );
             }
         }
         if let Some(draft) = &panel.draft {

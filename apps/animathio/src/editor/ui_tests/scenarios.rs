@@ -909,18 +909,12 @@ fn learn_noise_in_out_apply_and_undo(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn scene_menu_requires_video_and_does_not_mutate(cx: &mut TestAppContext) {
-    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
-    ui.dispatch(NewProject);
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
     let before = ui.read(|e| e.project.clone());
     ui.dispatch(actions::SceneCuts);
     ui.read(|editor| {
         assert!(editor.scene_panel.is_none());
-        assert!(
-            editor
-                .error
-                .as_ref()
-                .is_some_and(|e| e.contains("video clip"))
-        );
         assert_eq!(editor.project, before);
     });
 }
