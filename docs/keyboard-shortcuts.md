@@ -7,6 +7,8 @@ Help → Keyboard shortcuts (Ctrl+Alt+K) opens a searchable dialog over the same
 table. Panel shortcuts pause while a text input has focus; menu bar, context
 menus and tooltips resolve their hints from the same action bindings. Actions
 Premiere does not have keep a sensible non-conflicting key.
+The transition shortcuts currently apply one-second fades at both clip edges;
+they do not create an overlapping two-clip crossfade.
 
 ## Tools (Timeline)
 
@@ -85,7 +87,7 @@ later clips on that track left. Markers follow the ripple setting.
 | Action | Shortcut |
 | --- | --- |
 | DefaultVideoTransition (Ctrl+D family: 1 s fades, both edges) | `Ctrl-d` |
-| DefaultAudioTransition (audio crossfade) | `Ctrl-shift-d` |
+| DefaultAudioTransition (audio fade in/out) | `Ctrl-shift-d` |
 | DefaultTransitions (both kinds) | `shift-d` |
 | UnlinkClips (Link / Group: link or unlink the selection) | `Ctrl-l`, `Ctrl-g` |
 | ToggleSnapping | `s` |
@@ -121,4 +123,4 @@ Deferred: rolling-edit, rate-stretch, slip, slide, zoom and track-select tools
 (we have no such tools yet); paste attributes and paste insert; lift/extract;
 maximize panel; match frame; a "classic AniMathIO" preset and user keymap
 files. Actions without a default shortcut stay available in menus, toolbars and
-toolbars. The searchable dialog lists actions with assigned keys.
+context menus. The searchable dialog lists actions with assigned keys.

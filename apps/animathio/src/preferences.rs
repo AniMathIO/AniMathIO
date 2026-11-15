@@ -123,9 +123,7 @@ fn windows_text_percent() -> Option<f32> {
 /// read straight from config files (no settings daemon).
 #[cfg(unix)]
 fn unix_text_percent() -> Option<f32> {
-    let Some(home) = std::env::var_os("HOME") else {
-        return None;
-    };
+    let home = std::env::var_os("HOME")?;
     let home = PathBuf::from(home);
     let config =
         std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| home.join(".config"), PathBuf::from);
