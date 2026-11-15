@@ -1,6 +1,9 @@
 //! Scenarios that drive real actions and assert on model and view state.
 
-use animathio_control::{CaptionStyleParams, MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style, math_object_range};
+use animathio_control::{
+    CaptionStyleParams, MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style,
+    math_object_range,
+};
 use animathio_core::{ClipSpeed, EffectId, EffectInstance};
 
 use super::fixtures::*;
@@ -12,10 +15,10 @@ use crate::editor::actions::{
     AddMarker, AutomaticCuts, DeleteSelection, NewProject, NextMarker, PreviousMarker, Redo,
     ShowEffects, ShowMarkers, SplitClip, ToggleInspector, Undo,
 };
+use crate::editor::caption_styles::LookChange;
 use crate::editor::math::MathEditor;
 use crate::editor::retime;
 use crate::editor::support::project_size;
-use crate::editor::caption_styles::LookChange;
 
 fn clip_count(editor: &Editor) -> usize {
     editor
@@ -600,7 +603,12 @@ fn speed_duration_change_ripples_and_undoes(cx: &mut TestAppContext) {
     ui.dispatch(Redo);
     ui.read(|e| {
         assert_eq!(
-            e.project.tracks()[0].clips().get(&PAIR_FIRST).unwrap().range.end,
+            e.project.tracks()[0]
+                .clips()
+                .get(&PAIR_FIRST)
+                .unwrap()
+                .range
+                .end,
             Time(1000 * MS)
         );
     });
@@ -619,7 +627,10 @@ fn markers_select_by_click_toggle_and_delete(cx: &mut TestAppContext) {
     let selection = |ui: &Ui| ui.read(|e| e.marker_selection.clone());
 
     // Clicking a marker on the ruler selects it and parks the playhead on it.
-    ui.click(ruler_point(&ui, Time(1000 * MS)), gpui::Modifiers::default());
+    ui.click(
+        ruler_point(&ui, Time(1000 * MS)),
+        gpui::Modifiers::default(),
+    );
     assert_eq!(selection(&ui), BTreeSet::from([ids[0]]));
     assert_eq!(ui.read(|e| e.position), Time(1000 * MS));
 
@@ -654,7 +665,11 @@ fn markers_select_by_click_toggle_and_delete(cx: &mut TestAppContext) {
     ui.dispatch(Undo);
     ui.read(|e| {
         assert_eq!(e.project.markers().len(), 2);
-        assert!(e.marker_selection.iter().all(|id| e.project.marker(*id).is_some()));
+        assert!(
+            e.marker_selection
+                .iter()
+                .all(|id| e.project.marker(*id).is_some())
+        );
     });
 }
 
@@ -675,9 +690,7 @@ fn math_dialog_adds_latex_onto_an_occupied_track_as_a_new_layer(cx: &mut TestApp
         let editor = cx.entity().downgrade();
         let session = e.project_session;
         let size = project_size(&e.project);
-        cx.new(|cx| {
-            MathEditor::new(draft, editor, session, range, None, false, size, window, cx)
-        })
+        cx.new(|cx| MathEditor::new(draft, editor, session, range, None, false, size, window, cx))
     });
     // Let the debounced live preview finish so Apply is enabled.
     ui.advance_clock(std::time::Duration::from_millis(400));
@@ -709,7 +722,17 @@ fn math_dialog_adds_latex_onto_an_occupied_track_as_a_new_layer(cx: &mut TestApp
         let session = e.project_session;
         let size = project_size(&e.project);
         cx.new(|cx| {
-            MathEditor::new(draft, editor, session, range, Some(added), false, size, window, cx)
+            MathEditor::new(
+                draft,
+                editor,
+                session,
+                range,
+                Some(added),
+                false,
+                size,
+                window,
+                cx,
+            )
         })
     });
     ui.advance_clock(std::time::Duration::from_millis(400));

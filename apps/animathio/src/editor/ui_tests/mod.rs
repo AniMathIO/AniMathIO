@@ -134,7 +134,11 @@ impl Ui {
     }
 
     /// Click at a window position: hit-tested and dispatched like a real mouse.
-    pub(super) fn click(&mut self, position: gpui::Point<gpui::Pixels>, modifiers: gpui::Modifiers) {
+    pub(super) fn click(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        modifiers: gpui::Modifiers,
+    ) {
         self.cx.simulate_click(position, modifiers);
         self.cx.run_until_parked();
     }

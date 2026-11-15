@@ -122,6 +122,10 @@ tests never open a window on the desktop, so they do not go through `scripts/vir
 - Scenarios that need first-party plugins call `require_plugins(..)` and skip when
   `scripts/build-plugins.sh` has not produced `target/plugins` (CI builds it before testing).
 - Windows are rendered whenever the editor is updated, so render panics surface too.
+- Coverage includes Premiere tool/split/ripple-trim keys and menu bindings, marker ruler
+  selection, speed changes with ripple and undo, and the Math dialog apply path on an
+  occupied layer. Some panel scenarios call shared handlers directly; they do not prove
+  that every form field or button is reachable by mouse or keyboard.
 
 ## Commands
 
