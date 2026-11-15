@@ -620,7 +620,7 @@ rendered off-thread and cached in editor session state by project canvas size.
   captions through one `Command::Batch` of `SetPluginParam`/`SetTransform` and bar add/remove
   commands. The editor's `caption_styles` module is the shared picker (Generate dialog and the
   caption inspector section). It offers free text/accent colour pickers and named user
-  presets saved under the editor config directory (`caption-presets`). Presets save,
+  presets saved under the editor config directory (caption-presets). Presets save,
   apply and delete looks without changing the project schema. Inspector caption text edits
   preserve timings of unchanged words and distribute inserted words between their
   neighbours, committing text and timings in one undoable batch.
