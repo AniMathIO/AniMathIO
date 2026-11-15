@@ -679,10 +679,10 @@ pub(super) fn paint_waveform(
     window: &mut Window,
     cx: &mut App,
 ) {
+    const STEP: f32 = 3.0;
     if clip.time_map.hold {
         return;
     }
-    const STEP: f32 = 3.0;
     let left = f32::from(x0 + px(4.)).max(f32::from(bounds.left()));
     let right = f32::from(x1 - px(2.)).min(f32::from(bounds.right()));
     // Short rows have no room for a header strip: the waveform fills the clip
