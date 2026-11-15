@@ -536,30 +536,87 @@ fn open_confined(
     Err(Confined::NotFile)
 }
 
-/// Non-Unix fallback: canonicalize, open, then check that the opened file is still the one
-/// the confined path named. Weaker than the Unix path (no handle-path API without extra
-/// dependencies); documented as a known gap.
-#[cfg(not(unix))]
+/// Windows walks opened components while retaining directory handles that deny
+/// write/delete sharing. Each handle is checked before any bytes are read.
+#[cfg(windows)]
 fn open_confined(
     dir: &Path,
     relative: &Path,
     before_open: &mut dyn FnMut(),
 ) -> Result<(std::fs::File, u64), Confined> {
-    let candidate = dir.join(relative).canonicalize().map_err(Confined::Io)?;
-    if !candidate.starts_with(dir) {
-        return Err(Confined::Escape);
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_READ, GetFinalPathNameByHandleW,
+    };
+    fn real_path(file: &std::fs::File) -> Result<PathBuf, Confined> {
+        use std::os::windows::ffi::OsStringExt;
+        let mut buf = vec![0u16; 32768];
+        // SAFETY: the file owns a live handle and buf is writable for its full length.
+        let n = unsafe {
+            GetFinalPathNameByHandleW(file.as_raw_handle(), buf.as_mut_ptr(), buf.len() as u32, 0)
+        };
+        if n == 0 {
+            return Err(Confined::Io(std::io::Error::last_os_error()));
+        }
+        if n as usize >= buf.len() {
+            return Err(Confined::Escape);
+        }
+        Ok(PathBuf::from(std::ffi::OsString::from_wide(
+            &buf[..n as usize],
+        )))
     }
-    before_open();
-    let file = std::fs::File::open(&candidate).map_err(Confined::Io)?;
-    let after = candidate.canonicalize().map_err(Confined::Io)?;
-    if after != candidate || !after.starts_with(dir) {
-        return Err(Confined::Escape);
+    fn open(path: &Path) -> Result<std::fs::File, Confined> {
+        use std::os::windows::fs::MetadataExt;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(Confined::Io)?;
+        if file.metadata().map_err(Confined::Io)?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT
+            != 0
+        {
+            return Err(Confined::Escape);
+        }
+        Ok(file)
     }
-    let meta = file.metadata().map_err(Confined::Io)?;
-    if !meta.is_file() {
-        return Err(Confined::NotFile);
+    let root = open(dir)?;
+    let base = real_path(&root)?;
+    let mut held = vec![root];
+    let mut path = base.clone();
+    let mut parts = relative.components().peekable();
+    while let Some(part) = parts.next() {
+        path.push(part.as_os_str());
+        before_open();
+        let file = open(&path)?;
+        let actual = real_path(&file)?;
+        if !actual.starts_with(&base) || actual != path {
+            return Err(Confined::Escape);
+        }
+        let meta = file.metadata().map_err(Confined::Io)?;
+        if parts.peek().is_none() {
+            if !meta.is_file() {
+                return Err(Confined::NotFile);
+            }
+            return Ok((file, meta.len()));
+        }
+        if !meta.is_dir() {
+            return Err(Confined::NotFile);
+        }
+        held.push(file);
     }
-    Ok((file, meta.len()))
+    Err(Confined::NotFile)
+}
+
+/// Unsupported hosts fail closed rather than use a path check/open race.
+#[cfg(not(any(unix, windows)))]
+fn open_confined(
+    _dir: &Path,
+    _relative: &Path,
+    _before_open: &mut dyn FnMut(),
+) -> Result<(std::fs::File, u64), Confined> {
+    Err(Confined::Escape)
 }
 
 /// Read at most `limit` bytes; `None` when the file grew past the limit meanwhile.
@@ -825,6 +882,70 @@ mod tests {
         });
         assert!(state.read_sibling("a.png".into()).is_err());
     }
+    #[cfg(windows)]
+    #[test]
+    fn windows_confined_open_checks_handles_and_reparse_points() {
+        use std::io::Read;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/ok"), b"inside").unwrap();
+        std::fs::write(outside.path().join("secret"), b"outside").unwrap();
+        let open = |rel: &str, hook: &mut dyn FnMut()| {
+            open_confined(&root, &sibling_path(rel).unwrap(), hook)
+        };
+        let (mut file, _) = open("sub/ok", &mut || {}).unwrap();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"inside");
+        drop(file);
+        assert!(matches!(open("sub", &mut || {}), Err(Confined::NotFile)));
+        // Junctions are reparse points and need no symlink privilege on Windows CI.
+        for (name, target) in [("outer", outside.path()), ("inner", root.as_path())] {
+            assert!(
+                std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J"])
+                    .arg(root.join(name))
+                    .arg(target)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            assert!(matches!(
+                open(&format!("{name}/secret"), &mut || {}),
+                Err(Confined::Escape)
+            ));
+        }
+        let mut calls = 0;
+        let result = open("sub/ok", &mut || {
+            calls += 1;
+            if calls == 2 {
+                // The parent is held without delete sharing: swapping it must fail.
+                assert!(std::fs::rename(root.join("sub"), root.join("moved")).is_err());
+            }
+        });
+        assert!(result.is_ok());
+        drop(result);
+        // A final component replaced before opening is rejected as a reparse point.
+        if std::os::windows::fs::symlink_file(outside.path().join("secret"), root.join("link"))
+            .is_ok()
+        {
+            assert!(matches!(open("link", &mut || {}), Err(Confined::Escape)));
+            let result = open("sub/ok", &mut || {
+                if root.join("sub/ok").is_file() {
+                    std::fs::remove_file(root.join("sub/ok")).unwrap();
+                    std::os::windows::fs::symlink_file(
+                        outside.path().join("secret"),
+                        root.join("sub/ok"),
+                    )
+                    .unwrap();
+                }
+            });
+            assert!(matches!(result, Err(Confined::Escape)));
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn confined_open_rejects_symlinks_and_races() {

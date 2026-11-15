@@ -565,8 +565,10 @@ interface importer {
   script's folder); paths are relative, `/`-separated, without `..`. On Unix the host
   opens each component with `openat(O_NOFOLLOW)` from the granted directory and reads
   through that handle, so a symlink swapped in at any moment cannot escape. Every
-  symlink is refused, including ones that stay inside the directory. Elsewhere the host
-  canonicalizes and re-checks after opening (a weaker guard against races). Each call has file-size, total-byte and
+  symlink is refused, including ones that stay inside the directory. On Windows the host
+  rejects reparse points, verifies opened handles with `GetFinalPathNameByHandleW`,
+  and holds parent directories without write/delete sharing during the walk.
+  Other platforms fail closed. Each call has file-size, total-byte and
   file-count budgets.
 - `commands` is a UTF-8 JSON document `{"version": 1, "commands": [...]}` of core
   `Command`s (`Project::rebuild_commands` produces one from a project). The host replays
@@ -1021,7 +1023,7 @@ by older projects.
 
 ### Graph styling
 
-The bundled `org.animathio.graph` plugin (1.3.0, plugin API 1.1) accepts
+The bundled `org.animathio.graph` plugin (1.4.0, plugin API 1.1) accepts
 `stroke_width` (0.1–64, default 2) in reference pixels at a 540-pixel short edge,
 scaled by the same factor as the existing axes for plots, segments, circles
 and vectors. The existing `axis_color` and `grid_color` parameters accept RGBA
@@ -1040,10 +1042,18 @@ Both expressions accept the existing function grammar, with `t` as the parameter
 reversed or nonfinite domains (including an overflowing span) omit the item.
 The animatable `draw` parameter reveals a fraction of the domain, so its sampled
 endpoint follows the same curve. Sampling
-uses 256 intervals; nonfinite evaluations or canvas coordinates break the path.
+uses 256 base intervals with at most four subdivision levels; nonfinite
+evaluations or unresolved discontinuities break the path.
 This remains plugin data and needs no project schema change.
 The [showcase builders](../examples/showcase/README.md) exercise this with a unit
 circle, independent function-chart axes and a subdued grid.
+
+Function plots are clipped to the graph viewport. Adaptive subdivision breaks
+intervals that cannot resolve a discontinuity, so poles are not connected across
+the viewport. Sampling is bounded; features below that resolution can be omitted. Parametric
+domains with endpoints beyond ±1e12 are omitted to bound trigonometric range
+reduction costs inside the sandbox.
+
 
 LaTeX 1.2.1 fills revealed contours together so glyph counters retain their holes.
 

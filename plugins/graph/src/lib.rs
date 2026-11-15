@@ -610,6 +610,85 @@ fn polyline(points: &[(f64, f64)], bounds: (f64, f64, f64, f64), size: Size) -> 
     verbs
 }
 
+// Subdivide until the midpoint follows the chord in viewport coordinates.
+// Unresolved intervals are discarded, never bridged across a pole or a hole.
+fn plot_path(
+    evaluate: &dyn Fn(f64) -> (f64, f64),
+    from: f64,
+    to: f64,
+    bounds: (f64, f64, f64, f64),
+    size: Size,
+) -> Vec<PathVerb> {
+    fn normalized(x: f64, y: f64, b: (f64, f64, f64, f64)) -> (f64, f64) {
+        ((x - b.0) / (b.1 - b.0), (y - b.2) / (b.3 - b.2))
+    }
+    fn segment(a: (f64, f64), b: (f64, f64), size: Size, path: &mut Vec<PathVerb>) {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        if !dx.is_finite() || !dy.is_finite() {
+            return;
+        }
+        let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+        for (p, q) in [(-dx, a.0), (dx, 1.0 - a.0), (-dy, a.1), (dy, 1.0 - a.1)] {
+            if p == 0.0 {
+                if q < 0.0 {
+                    return;
+                }
+            } else if p < 0.0 {
+                lo = lo.max(q / p);
+            } else {
+                hi = hi.min(q / p);
+            }
+        }
+        if lo > hi {
+            return;
+        }
+        let point = |t: f64| Point {
+            x: ((a.0 + t * dx).clamp(0.0, 1.0) * f64::from(size.width)) as f32,
+            y: ((1.0 - (a.1 + t * dy).clamp(0.0, 1.0)) * f64::from(size.height)) as f32,
+        };
+        let start = point(lo);
+        let connected =
+            matches!(path.last(), Some(PathVerb::LineTo(p)) if p.x == start.x && p.y == start.y);
+        if !connected {
+            path.push(PathVerb::MoveTo(start));
+        }
+        path.push(PathVerb::LineTo(point(hi)));
+    }
+    fn interval(
+        evaluate: &dyn Fn(f64) -> (f64, f64),
+        x0: f64,
+        x1: f64,
+        bounds: (f64, f64, f64, f64),
+        size: Size,
+        depth: u8,
+        path: &mut Vec<PathVerb>,
+    ) {
+        let mid = x0 + (x1 - x0) / 2.0;
+        let (ax, ay) = evaluate(x0);
+        let a = normalized(ax, ay, bounds);
+        let (bx, by) = evaluate(x1);
+        let b = normalized(bx, by, bounds);
+        let (mx, my) = evaluate(mid);
+        let m = normalized(mx, my, bounds);
+        let finite = [a.0, a.1, b.0, b.1, m.0, m.1].iter().all(|v| v.is_finite());
+        let error_y = (m.1 - (a.1 / 2.0 + b.1 / 2.0)).abs() * f64::from(size.height);
+        let error_x = (m.0 - (a.0 / 2.0 + b.0 / 2.0)).abs() * f64::from(size.width);
+        if finite && error_x.max(error_y) <= 0.25 {
+            segment(a, b, size, path);
+        } else if depth > 0 {
+            interval(evaluate, x0, mid, bounds, size, depth - 1, path);
+            interval(evaluate, mid, x1, bounds, size, depth - 1, path);
+        }
+    }
+    let mut path = Vec::new();
+    for i in 0..256 {
+        let x0 = from + (to - from) * (i as f64 / 256.0);
+        let x1 = from + (to - from) * ((i + 1) as f64 / 256.0);
+        interval(evaluate, x0, x1, bounds, size, 4, &mut path);
+    }
+    path
+}
+
 fn circle_verbs(
     cx: f64,
     cy: f64,
@@ -734,7 +813,7 @@ impl Guest for GraphPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "graph".to_string(),
-            version: "1.3.0".to_string(),
+            version: "1.4.0".to_string(),
             description: "Mafs-like coordinate plane with plots and shapes".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -917,7 +996,12 @@ impl Guest for GraphPlugin {
             }
         }
 
-        if x_max <= x_min || y_max <= y_min {
+        if ![x_min, x_max, y_min, y_max, x_max - x_min, y_max - y_min]
+            .iter()
+            .all(|v| v.is_finite())
+            || x_max <= x_min
+            || y_max <= y_min
+        {
             return Ok(Scene {
                 coordinate_space: CoordinateSpace::Canvas,
                 elements: Vec::new(),
@@ -1060,29 +1144,18 @@ impl Guest for GraphPlugin {
                     to,
                     color,
                 } => {
-                    let samples = 256;
-                    let mut path = Vec::with_capacity(samples + 1);
-                    let mut connected = false;
-                    for i in 0..=samples {
-                        let fraction = draw * (i as f64 / samples as f64);
-                        let t = from + (to - from) * fraction;
-                        let (x, y) = (eval(x, t), eval(y, t));
-                        let point = map_point(x, y, bounds, size);
-                        if x.is_finite()
-                            && y.is_finite()
-                            && point.x.is_finite()
-                            && point.y.is_finite()
-                        {
-                            path.push(if connected {
-                                PathVerb::LineTo(point)
-                            } else {
-                                PathVerb::MoveTo(point)
-                            });
-                            connected = true;
-                        } else {
-                            connected = false;
-                        }
+                    // Huge trigonometric arguments exhaust the sandbox during range
+                    // reduction and cannot be sampled meaningfully at this resolution.
+                    if from.abs().max(to.abs()) > 1.0e12 {
+                        continue;
                     }
+                    let path = plot_path(
+                        &|t| (eval(x, t), eval(y, t)),
+                        *from,
+                        from + (to - from) * draw,
+                        bounds,
+                        size,
+                    );
                     elements.push(DrawCommand::StrokePath((
                         path,
                         StrokeStyle {
@@ -1094,28 +1167,16 @@ impl Guest for GraphPlugin {
                     )));
                 }
                 GraphItem::Plot { expr, color } => {
-                    let samples = 256;
                     let x_end = x_min + (x_max - x_min) * draw;
-                    let mut points = Vec::with_capacity(samples + 1);
-                    for i in 0..=samples {
-                        let t = i as f64 / samples as f64;
-                        let x = x_min + (x_end - x_min) * t;
-                        let y = eval(expr, x);
-                        if y.is_finite() {
-                            points.push((x, y));
-                        }
-                    }
-                    if points.len() >= 2 {
-                        elements.push(DrawCommand::StrokePath((
-                            polyline(&points, bounds, size),
-                            StrokeStyle {
-                                width: stroke_width,
-                                color: *color,
-                                cap: StrokeCap::Round,
-                                join: StrokeJoin::Round,
-                            },
-                        )));
-                    }
+                    elements.push(DrawCommand::StrokePath((
+                        plot_path(&|x| (x, eval(expr, x)), x_min, x_end, bounds, size),
+                        StrokeStyle {
+                            width: stroke_width,
+                            color: *color,
+                            cap: StrokeCap::Round,
+                            join: StrokeJoin::Round,
+                        },
+                    )));
                 }
                 GraphItem::Point { x, y, color } => {
                     let p = map_point(*x, *y, bounds, size);
