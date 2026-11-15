@@ -514,7 +514,10 @@ pub(crate) struct AutoDuck {
     #[serde(default)]
     voice_tracks: Vec<u64>,
     /// Music track ids; every audio clip on them gets gain keyframes.
+    #[serde(default)]
     music_tracks: Vec<u64>,
+    #[serde(default)]
+    music_clips: Vec<u64>,
     /// How far the music drops under speech, in dB (default 12).
     depth_db: Option<f64>,
     /// Ramp down finishing when the voice starts, in milliseconds (default 300).
@@ -2067,7 +2070,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Auto-duck music under speech. Detects voice activity in the voice clips/tracks (silence detector with hysteresis on the dry mix), bridges short gaps, and writes linear gain keyframes on every audio clip of the music tracks: the music ramps down over attack_ms finishing as the voice starts, holds depth_db below its own gain, and ramps up over release_ms after the voice ends. One undo step. With dry_run=true only the proposal is returned (voice and ducked ranges in ticks, per-clip keyframes). Clips that already have gain keyframes are an error unless replace_existing is true."
+        description = "Auto-duck music under speech. Detects voice activity in the voice clips/tracks (silence detector with hysteresis on the dry mix), bridges short gaps, and writes linear gain keyframes on the chosen music_clips and every audio clip of the music_tracks: the music ramps down over attack_ms finishing as the voice starts, holds depth_db below its own gain, and ramps up over release_ms after the voice ends. One undo step. With dry_run=true only the proposal is returned (voice and ducked ranges in ticks, per-clip keyframes). Clips that already have gain keyframes are an error unless replace_existing is true."
     )]
     async fn auto_duck(
         &self,
@@ -2086,6 +2089,7 @@ impl McpServer {
             voice_clips: p.voice_clips.into_iter().map(ClipId).collect(),
             voice_tracks: p.voice_tracks.into_iter().map(TrackId).collect(),
             music_tracks: p.music_tracks.into_iter().map(TrackId).collect(),
+            music_clips: p.music_clips.into_iter().map(ClipId).collect(),
             depth_db: p.depth_db.unwrap_or(defaults.depth_db),
             attack: p.attack_ms.map_or(Ok(defaults.attack), ms_to_ticks)?,
             release: p.release_ms.map_or(Ok(defaults.release), ms_to_ticks)?,

@@ -703,7 +703,8 @@ analysis, sliders, per-cut toggles and timeline overlays.
 Auto-ducking (`crates/control/src/ducking.rs`) is control-layer analysis shared by the
 editor, CLI (`duck`) and MCP (`auto_duck`): voice activity from the autocut silence detector
 over the dry transcription mix, merged regions, then clip-local `gain` keyframes applied as
-one `Command::Batch` (see [Auto-ducking](mcp.md#auto-ducking)). The editor's `ducking` module owns
+one `Command::Batch`, targeting the union of selected audio clips and whole music tracks
+(see [Auto-ducking](mcp.md#auto-ducking)). The editor's `ducking` module owns
 the ephemeral review state (voice/music pickers, sliders, background analysis, timeline overlay of
 the ducked spans). The `denoise` audio effect is
 streaming spectral gating inside `org.animathio.audio-basic`; its noise profile is a

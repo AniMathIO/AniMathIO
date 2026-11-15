@@ -75,7 +75,7 @@ fn gain_keys(project: &Project) -> usize {
 }
 
 #[test]
-fn dry_run_apply_output_protection_and_required_music_track() {
+fn dry_run_apply_output_protection_and_required_music_target() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("input.amio");
     let output = dir.path().join("ducked.amio");
@@ -87,7 +87,7 @@ fn dry_run_apply_output_protection_and_required_music_track() {
         c.arg("duck").arg(&input);
         c
     };
-    // A music track and an explicit mode are required.
+    // A music target and an explicit mode are required.
     assert!(
         !cli()
             .args(["--voice-track", "1", "--dry-run"])
@@ -105,7 +105,7 @@ fn dry_run_apply_output_protection_and_required_music_track() {
             .success()
     );
     let dry = cli()
-        .args(["--voice-track", "1", "--music-track", "2", "--dry-run"])
+        .args(["--voice-track", "1", "--music-clip", "2", "--dry-run"])
         .output()
         .unwrap();
     assert!(
@@ -188,11 +188,11 @@ fn mcp_auto_duck_dry_run_apply_and_undo() {
     let original = tool("get_project_state", json!({}))["project"].clone();
     let proposal = tool(
         "auto_duck",
-        json!({"voice_tracks":[1],"music_tracks":[2],"dry_run":true,"depth_db":15}),
+        json!({"voice_tracks":[1],"music_clips":[2],"dry_run":true,"depth_db":15}),
     );
     assert_eq!(proposal["voice"].as_array().unwrap().len(), 2);
     assert_eq!(tool("get_project_state", json!({}))["project"], original);
-    let applied = tool("auto_duck", json!({"voice_tracks":[1],"music_tracks":[2]}));
+    let applied = tool("auto_duck", json!({"voice_tracks":[1],"music_clips":[2]}));
     assert_eq!(applied["clips"], 1);
     assert_ne!(tool("get_project_state", json!({}))["project"], original);
     assert_eq!(tool("undo", json!({}))["undone"], true);

@@ -685,7 +685,7 @@ Options:
 
 Lower music under speech. Exactly one of `--dry-run` or `--apply` is required. The voice
 is given with `--voice-clip` and/or `--voice-track` (repeatable) and the music with one or
-more `--music-track`. Dry runs print the JSON proposal (voice regions, ducked spans and the
+more `--music-track` or `--music-clip` targets. Dry runs print the JSON proposal (voice regions, ducked spans and the
 per-clip gain keyframes in ticks) and leave the input untouched; `--apply` saves it
 atomically, or to `--output` (`--overwrite` replaces an existing archive). Clips that
 already carry gain keyframes are an error unless `--replace` is given. See

@@ -424,3 +424,32 @@ fn many_phrases_are_chunked_into_one_valid_batch() {
     assert!(history.undo(&mut project).unwrap());
     assert_eq!(project, original);
 }
+
+#[test]
+fn clip_targets_union_with_tracks_and_undo_once() {
+    let (mut project, assets) = session();
+    let before = project.clone();
+    let mut params = options();
+    params.music_tracks.clear();
+    params.music_clips = vec![ClipId(2), ClipId(2)];
+    let proposal = propose_duck(&project, &assets, &params).unwrap();
+    assert_eq!(proposal.clips.len(), 1);
+    assert_eq!(proposal.clips[0].clip, ClipId(2));
+    let mut history = History::default();
+    apply_duck(&mut project, &mut history, &proposal).unwrap();
+    assert_ne!(project, before);
+    history.undo(&mut project).unwrap();
+    assert_eq!(project, before);
+    params.music_tracks = vec![TrackId(2)];
+    assert_eq!(
+        propose_duck(&project, &assets, &params)
+            .unwrap()
+            .clips
+            .len(),
+        1
+    );
+    params.music_clips = vec![ClipId(999)];
+    assert!(propose_duck(&project, &assets, &params).is_err());
+    params.music_clips = vec![ClipId(1)];
+    assert!(propose_duck(&project, &assets, &params).is_err());
+}

@@ -36,6 +36,8 @@ pub struct DuckParams {
     pub voice_tracks: Vec<TrackId>,
     /// Music tracks: every audio clip on them receives gain keyframes.
     pub music_tracks: Vec<TrackId>,
+    /// Individual audio clips to duck, unioned with the track targets.
+    pub music_clips: Vec<ClipId>,
     /// How far the music drops under speech, in dB (0..=60; 12 means -12 dB).
     pub depth_db: f64,
     /// Ramp down, finishing when the voice starts.
@@ -60,6 +62,7 @@ impl Default for DuckParams {
             voice_clips: Vec::new(),
             voice_tracks: Vec::new(),
             music_tracks: Vec::new(),
+            music_clips: Vec::new(),
             depth_db: 12.0,
             attack: Time(300 * MS),
             release: Time(500 * MS),
@@ -147,8 +150,8 @@ fn validate(params: &DuckParams) -> Result<(), ControlError> {
     if params.voice_clips.is_empty() && params.voice_tracks.is_empty() {
         return Err(invalid("choose a voice clip or track"));
     }
-    if params.music_tracks.is_empty() {
-        return Err(invalid("choose at least one music track"));
+    if params.music_tracks.is_empty() && params.music_clips.is_empty() {
+        return Err(invalid("choose at least one music track or clip"));
     }
     Ok(())
 }
@@ -331,7 +334,11 @@ fn voice_regions(
             .iter()
             .find(|t| resolved.clip.is_some_and(|c| t.clips().contains_key(&c)))
             .map(animathio_core::Track::id);
-        if owner.is_some_and(|t| params.music_tracks.contains(&t)) {
+        if owner.is_some_and(|t| params.music_tracks.contains(&t))
+            || resolved
+                .clip
+                .is_some_and(|c| params.music_clips.contains(&c))
+        {
             return Err(invalid("a voice clip is on a music track"));
         }
         sources.push(Selection {
@@ -385,6 +392,19 @@ pub fn propose_duck(
             return Err(invalid("a track cannot be both voice and music"));
         }
     }
+    for id in &params.music_clips {
+        let track = project
+            .tracks()
+            .iter()
+            .find(|t| t.clips().contains_key(id))
+            .ok_or_else(|| invalid("music clip missing"))?;
+        if track.is_locked() || !matches!(track.clips()[id].kind, ClipKind::Audio(_)) {
+            return Err(invalid("music clip must be audio on an unlocked track"));
+        }
+        if params.voice_clips.contains(id) || params.voice_tracks.contains(&track.id()) {
+            return Err(invalid("a clip cannot be both voice and music"));
+        }
+    }
     let voice = voice_regions(project, assets, params)?;
     if voice.len() > MAX_REGIONS {
         return Err(invalid("too many voice regions; analyse a shorter range"));
@@ -400,16 +420,11 @@ pub fn propose_duck(
     ducked.sort_by_key(|r| r.start);
     let mut clips = Vec::new();
     let mut existing = Vec::new();
-    for track in project
-        .tracks()
-        .iter()
-        .filter(|t| params.music_tracks.contains(&t.id()))
-    {
-        for clip in track
-            .clips()
-            .values()
-            .filter(|c| matches!(c.kind, ClipKind::Audio(_)))
-        {
+    for track in project.tracks().iter() {
+        for clip in track.clips().values().filter(|c| {
+            matches!(c.kind, ClipKind::Audio(_))
+                && (params.music_tracks.contains(&track.id()) || params.music_clips.contains(&c.id))
+        }) {
             let keys = clip_keys(clip, &points);
             if keys.is_empty() {
                 continue;
