@@ -13,9 +13,10 @@
 //!
 //! Everything is `f32` in the state blob and `f64` in the arithmetic, and the stream is
 //! processed one frame at a time, so the output is bit-identical however the signal is
-//! cut into blocks. The effect has a fixed latency of 512 frames (the audio is delayed
-//! by that much, and the last 512 frames of a clip are cut off by the mixer's clip
-//! window).
+//! cut into blocks. The effect has a fixed latency of 512 frames: the audio is delayed
+//! by that much. The host declares this to the mixer (a first-party table; the ABI cannot
+//! carry it), which compensates it, so clips stay aligned with the timeline and the tail
+//! is not lost.
 
 use super::{Processor, Reader, Writer};
 use std::f64::consts::PI;

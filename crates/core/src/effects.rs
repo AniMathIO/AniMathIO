@@ -184,4 +184,18 @@ pub trait AudioEffectProcessor: Send + Sync {
         block: &AudioBlock<'_>,
         state: &[u8],
     ) -> Result<AudioBlockOutput, String>;
+
+    /// The processing latency `effect` declares, in frames: how many frames `process`
+    /// delays the signal, so that its output sample `q` is the input sample `q - latency`.
+    /// The mixer compensates declared latency, keeping chain output aligned with the
+    /// timeline and the last frames of a clip audible instead of stuck in the delay line.
+    /// Effects without a declared latency (the default) pass through uncompensated.
+    ///
+    /// ABI 1.x descriptors cannot carry a latency field (records are frozen; see
+    /// `docs/plugins.md`), so hosts table their own first-party effects here; a plugin
+    /// that is not loaded declares no latency.
+    fn latency(&self, effect: &EffectInstance) -> u64 {
+        let _ = effect;
+        0
+    }
 }

@@ -754,3 +754,44 @@ fn math_dialog_adds_latex_onto_an_occupied_track_as_a_new_layer(cx: &mut TestApp
     ui.dispatch(Undo);
     assert_eq!(ui.read(|e| e.project.clone()), added_state);
 }
+
+#[gpui::test]
+fn caption_custom_colour_and_preset_undo(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let command = caption_command(&project);
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| {
+        assert!(editor.try_execute(&command, cx));
+    });
+    let before = ui.read(|e| e.project.clone());
+    let track = before
+        .tracks()
+        .iter()
+        .find(|t| t.name() == "Subtitles")
+        .unwrap()
+        .id();
+    let caption = before
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips().values())
+        .find(|c| clip_caption_style(c).is_some())
+        .unwrap()
+        .id;
+    ui.update(|editor, _, cx| editor.select_only(caption, cx));
+    let custom = [17, 83, 149, 255];
+    ui.update(|editor, _, cx| {
+        editor.apply_look_change(LookChange::Text(custom), Some(track), cx);
+    });
+    assert_eq!(ui.read(|e| e.caption_look.color), Some(custom));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    let mut look = ui.read(|e| e.caption_look.clone());
+    look.style = "karaoke".into();
+    look.accent = Some(custom);
+    ui.update(|editor, _, cx| {
+        editor.apply_look_change(LookChange::Preset(look.clone()), Some(track), cx);
+    });
+    assert_eq!(ui.read(|e| e.caption_look.clone()), look);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}

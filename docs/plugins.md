@@ -467,7 +467,13 @@ independent, deterministic):
 | `gate` | `threshold_db` (−50), `attack_ms` (2), `hold_ms` (50), `release_ms` (150), `range_db` (60) | Starts open; closes to `−range_db` below the threshold after the hold. |
 | `highpass` | `frequency` (80 Hz, 10…2000) | 2nd-order Butterworth, 12 dB/octave. |
 | `voice_cleanup` | `highpass_hz` (80), `gate_threshold_db` (−55), `deess_freq` (6.5 kHz), `deess_threshold_db` (−30), `deess_amount` (0.5) | Preset: high-pass, gentle 12 dB gate, then a split-band de-esser (Linkwitz-Riley crossover; only the band above `deess_freq` is attenuated). No spectral processing. |
-| `denoise` | `strength` (0.7, 0…1), `sensitivity_db` (6, 0…18), `smoothing` (0.6, 0…1) | Streaming spectral gating: 512-point STFT (hop 128, sqrt-Hann), noise profile learned continuously from the quietest frames (per-bin minimum of the smoothed power over the last ~1 s, no noise sample needed). A bin is attenuated by up to `40 dB × strength` while its power stays within `sensitivity_db` of that profile; the gain mask is smoothed across bins and in time (`smoothing` sets how slowly it closes) to avoid musical noise, and is shared by all channels. Latency is 512 frames: the signal is delayed by that much and the mixer's clip window cuts the last 512 frames of a clip. Up to 8 channels (state blob stays under 64 KiB). Silence stays exactly silent; `strength` 0 only delays. Needs about 125 ms of audio before it acts. |
+| `denoise` | `strength` (0.7, 0…1), `sensitivity_db` (6, 0…18), `smoothing` (0.6, 0…1) | Streaming spectral gating: 512-point STFT (hop 128, sqrt-Hann), noise profile learned continuously from the quietest frames (per-bin minimum of the smoothed power over the last ~1 s, no noise sample needed). A bin is attenuated by up to `40 dB × strength` while its power stays within `sensitivity_db` of that profile; the gain mask is smoothed across bins and in time (`smoothing` sets how slowly it closes) to avoid musical noise, and is shared by all channels. Latency is 512 frames; the mixer compensates it (see [latency compensation](#latency-compensation)), so the audio stays aligned with the timeline and the clip's tail is not lost. Up to 8 channels (state blob stays under 64 KiB). Silence stays exactly silent; `strength` 0 only delays. Needs about 125 ms of audio before it acts. |
+
+### Latency compensation
+
+Some filters are inherently delayed: `denoise`'s STFT holds back the last 512 frames, so its output sample `q` is its input sample `q − 512`. The mixer compensates declared latency so that delayed effects stay aligned with the timeline (and with sped-up or reversed playback, whose source mapping happens before the chain) and a clip's last frames are not lost inside the delay line: a chain's output is read `latency` frames ahead of the timeline frame it is needed for, and the blocks past the clip window still run — fed with silence — to flush the tail. Chain latency is additive (one `delay` of 300 plus one of 212 is compensated as 512).
+
+The ABI cannot carry a latency field: 1.x minors may not add fields to existing records (see [API versions and compatibility policy](#api-versions-and-compatibility-policy)), so effects do not declare latency in their descriptors. Instead the host tables its own first-party effects (`AudioEffectProcessor::latency` in `animathio-core`, implemented by the plugin host); third-party effects report none and pass through uncompensated until a future ABI adds a declared field. A plugin that is not loaded declares no latency, so a lenient passthrough mix is never shifted. Effect parameters are still evaluated on the block lattice, so automated parameters of a delayed effect lead the heard audio by its latency (≈11 ms for `denoise`).
 
 ## Animation-preset plugins
 
@@ -959,8 +965,13 @@ ticks, one per whitespace-separated word of `text`, relative to the clip's sourc
 `fit_height` set). The active word is the last one whose start time has passed; the scene is a
 pure function of the clip's source time, so preview and export match. `classic` renders exactly
 like the plain fitted title; when the edited text no longer has as many words as `words`, the
-timings are spread over the stored span. The editor and `subtitles.generate` write these
-parameters; see `docs/mcp.md` for `subtitles.style`.
+timings are spread over the stored span. When caption text is edited in the editor, unchanged
+words retain their timings and inserted words share the gap between their neighbours
+(weighted by character count); text and timings undo together. A full gap leaves inserted
+words with zero duration rather than moving existing anchors. Malformed timing data is
+replaced by timings spread over the clip. The editor and `subtitles.generate` write these
+parameters; see `docs/mcp.md` for `subtitles.style`. The caption picker offers text and
+accent swatches plus free colour pickers in the inspector and Generate subtitles dialog.
 The LaTeX plugin also accepts `units`: `pixels` preserves existing projects;
 `percent` reads `size` as a percentage of the shorter render-canvas edge (so a formula
 looks the same on 16:9 and 9:16) and only shrinks a formula that would leave the frame

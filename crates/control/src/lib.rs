@@ -68,9 +68,11 @@ pub use title_presets::{
 };
 
 pub use captions::{
-    CaptionPosition, CaptionStyleInfo, CaptionStyleParams, SubtitleStyleParams,
-    SubtitleStyleResult, apply_caption_style, caption_style_command, caption_styles,
-    clip_caption_style, parse_caption_color,
+    CaptionPosition, CaptionPreset, CaptionStyleInfo, CaptionStyleParams, SubtitleStyleParams,
+    SubtitleStyleResult, apply_caption_style, caption_preset_dir, caption_presets,
+    caption_presets_at, caption_style_command, caption_styles, caption_text_edit_command,
+    clip_caption_style, delete_caption_preset, delete_caption_preset_at, parse_caption_color,
+    save_caption_preset, save_caption_preset_at,
 };
 pub use subtitles::{
     ProgressFn, SUBTITLE_TRACK, SubtitleCueInfo, SubtitleDraft, SubtitleExportParams,

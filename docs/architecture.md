@@ -619,7 +619,11 @@ rendered off-thread and cached in editor session state by project canvas size.
   (`subtitles.style`, `set_caption_style`) and the editor's caption picker restyle existing
   captions through one `Command::Batch` of `SetPluginParam`/`SetTransform` and bar add/remove
   commands. The editor's `caption_styles` module is the shared picker (Generate dialog and the
-  caption inspector section).
+  caption inspector section). It offers free text/accent colour pickers and named user
+  presets saved under the editor config directory (caption-presets). Presets save,
+  apply and delete looks without changing the project schema. Inspector caption text edits
+  preserve timings of unchanged words and distribute inserted words between their
+  neighbours, committing text and timings in one undoable batch.
 - **Threading:** the whole job is blocking and CPU-bound. The editor runs it on a worker
   thread (the app's `subtitle_job` module, with the `subtitles` editor module for the dialog,
   popover and control calls) with a progress phase and a cancel flag
@@ -705,7 +709,10 @@ the ducked spans). The `denoise` audio effect is
 streaming spectral gating inside `org.animathio.audio-basic`; its noise profile is a
 per-bin minimum over ~1 s of smoothed power, so its memory is about as long as the mixer's
 state warm-up; whatever the warm-up leaves, the output stays a pure function of the project.
-It adds 512 frames of latency.
+It adds 512 frames of latency, which the mixer compensates for clip and track chains
+(declared through a host-side first-party table, since ABI 1.x descriptors cannot carry
+latency; see `docs/plugins.md`), so delayed audio stays aligned with the timeline and no
+tail is lost at clip ends.
 
 ## Auto-reframe
 

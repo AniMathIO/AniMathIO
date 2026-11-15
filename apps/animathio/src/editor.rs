@@ -574,6 +574,9 @@ pub(crate) struct Editor {
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
     /// Remembered caption look: used for new subtitles and by the caption inspector.
     caption_look: animathio_control::CaptionStyleParams,
+    /// Named user caption presets from the user data directory (lazily loaded).
+    caption_presets: Vec<animathio_control::CaptionPreset>,
+    caption_presets_loaded: bool,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
     duck_review: Option<ducking::DuckReview>,
@@ -745,6 +748,8 @@ impl Editor {
             export_queue_open: false,
             subtitle_job: None,
             caption_look: animathio_control::CaptionStyleParams::default(),
+            caption_presets: Vec::new(),
+            caption_presets_loaded: false,
             subtitle_panel_open: false,
             autocut_review: None,
             duck_review: None,
