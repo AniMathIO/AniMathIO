@@ -7,7 +7,7 @@ use gpui_component::input::{Input, InputState, NumberInput};
 use gpui_component::select::{Select, SelectState};
 use gpui_component::{IndexPath, WindowExt};
 
-fn heading(icon: IconName, title: &'static str) -> Div {
+pub(super) fn heading(icon: IconName, title: &'static str) -> Div {
     div()
         .flex()
         .items_center()
@@ -19,7 +19,11 @@ fn heading(icon: IconName, title: &'static str) -> Div {
 }
 
 type Choices = Entity<SelectState<Vec<String>>>;
-fn input(value: impl Into<SharedString>, window: &mut Window, cx: &mut App) -> Entity<InputState> {
+pub(super) fn input(
+    value: impl Into<SharedString>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<InputState> {
     cx.new(|cx| InputState::new(window, cx).default_value(value))
 }
 fn choices(items: Vec<String>, selected: usize, window: &mut Window, cx: &mut App) -> Choices {
@@ -28,10 +32,10 @@ fn choices(items: Vec<String>, selected: usize, window: &mut Window, cx: &mut Ap
 fn selected(state: &Choices, cx: &App) -> String {
     state.read(cx).selected_value().cloned().unwrap_or_default()
 }
-fn field(label: &'static str, child: impl IntoElement) -> FormField {
+pub(super) fn field(label: &'static str, child: impl IntoElement) -> FormField {
     FormField::new().label(label).child(child)
 }
-fn footer(
+pub(super) fn footer(
     label: &'static str,
     app: &App,
     callback: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,

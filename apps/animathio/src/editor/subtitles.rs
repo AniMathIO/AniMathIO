@@ -92,6 +92,8 @@ impl Editor {
             ranges.push("In/out range".to_owned());
         }
         let range_default = usize::from(clip_range);
+        self.ensure_caption_presets();
+        let presets = self.caption_presets.clone();
         let range = cx.new(|cx| {
             SelectState::new(
                 ranges,
@@ -187,6 +189,7 @@ impl Editor {
                             &look,
                             None,
                             color_pickers,
+                            &presets,
                         )),
                 )
                 .footer(

@@ -10,12 +10,14 @@
 
 use crate::{ControlError, TitleAddParams, subtitles::SUBTITLE_TRACK, title_preset_command};
 use animathio_core::{
-    Clip, ClipId, ClipKind, Command, ParamValue, Project, Time, TimeRange, Track, TrackId,
+    AssetId, Clip, ClipId, ClipKind, Command, ParamValue, Project, Time, TimeRange, Track,
+    TrackId,
 };
 use animathio_transcribe::Cue;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 /// Plugin that renders caption text.
 const TEXT_PLUGIN: &str = "org.animathio.text";
@@ -790,6 +792,174 @@ fn bar_clip_commands(
         }
     }
     Ok(out)
+}
+
+/// A named caption look saved in the user data directory (see [`caption_presets`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CaptionPreset {
+    /// Library identity (`user-` + 32 hex digits).
+    pub id: String,
+    /// Display name, unique in the library.
+    pub name: String,
+    /// The look the preset applies.
+    #[serde(flatten)]
+    pub params: CaptionStyleParams,
+}
+
+/// Directory holding the user's caption presets: `<user data dir>/caption-presets`.
+///
+/// # Errors
+/// [`ControlError::InvalidParams`] when the platform has no user data directory.
+pub fn caption_preset_dir() -> Result<PathBuf, ControlError> {
+    directories::ProjectDirs::from("org", "animathio", "animathio")
+        .map(|d| d.data_dir().join("caption-presets"))
+        .ok_or_else(|| ControlError::InvalidParams("user data directory unavailable".into()))
+}
+
+/// Saved presets, sorted by name. Broken entries are skipped, not fatal.
+///
+/// # Errors
+/// [`ControlError::InvalidParams`] when the user data directory is unavailable.
+pub fn caption_presets() -> Result<Vec<CaptionPreset>, ControlError> {
+    caption_presets_at(&caption_preset_dir()?)
+}
+
+fn caption_presets_at(directory: &std::path::Path) -> Result<Vec<CaptionPreset>, ControlError> {
+    let mut presets = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(directory) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json")
+                && let Ok(text) = std::fs::read_to_string(&path)
+                && let Ok(preset) = serde_json::from_str::<CaptionPreset>(&text)
+                && valid_preset_id(&preset.id)
+                && !preset.name.trim().is_empty()
+            {
+                presets.push(preset);
+            }
+        }
+    }
+    presets.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(presets)
+}
+
+/// Save `params` as a named preset, replacing any earlier preset of the same name.
+/// Returns the preset id.
+///
+/// # Errors
+/// [`ControlError::InvalidParams`] for an unusable name or an unavailable user data
+/// directory; I/O errors surface as [`ControlError::Io`] where the error type carries them.
+pub fn save_caption_preset(
+    name: &str,
+    params: &CaptionStyleParams,
+) -> Result<String, ControlError> {
+    let directory = caption_preset_dir()?;
+    save_caption_preset_at(name, params, &directory)
+}
+
+fn save_caption_preset_at(
+    name: &str,
+    params: &CaptionStyleParams,
+    directory: &std::path::Path,
+) -> Result<String, ControlError> {
+    let name = name.trim();
+    if name.is_empty()
+        || name.chars().count() > 48
+        || name.chars().any(|c| c.is_control() || c == '/')
+    {
+        return Err(ControlError::InvalidParams(
+            "preset name must be 1-48 characters without controls or '/'".into(),
+        ));
+    }
+    std::fs::create_dir_all(directory)?;
+    // One library entry per name: drop an earlier preset of the same name.
+    for preset in caption_presets_at(directory).unwrap_or_default() {
+        if preset.name == name {
+            let _ = std::fs::remove_file(directory.join(format!("{}.json", preset.id)));
+        }
+    }
+    let mut random = [0_u8; 16];
+    getrandom::fill(&mut random).map_err(|e| ControlError::InvalidParams(e.to_string()))?;
+    let id = format!("user-{}", &AssetId::of(&random).as_str()[..32]);
+    let preset = CaptionPreset {
+        id: id.clone(),
+        name: name.to_owned(),
+        params: params.clone(),
+    };
+    let path = directory.join(format!("{id}.json"));
+    let text = serde_json::to_string_pretty(&preset)
+        .map_err(|e| ControlError::InvalidParams(e.to_string()))?;
+    std::fs::write(&path, text)?;
+    Ok(id)
+}
+
+/// Delete a saved preset by id. Only library entries (`user-` + 32 hex digits) are removed.
+///
+/// # Errors
+/// [`ControlError::InvalidParams`] for a foreign id or a missing preset.
+pub fn delete_caption_preset(id: &str) -> Result<(), ControlError> {
+    if !valid_preset_id(id) {
+        return Err(ControlError::InvalidParams(
+            "not a caption preset identity".into(),
+        ));
+    }
+    let path = caption_preset_dir()?.join(format!("{id}.json"));
+    if !path.exists() {
+        return Err(ControlError::InvalidParams("no such caption preset".into()));
+    }
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+fn valid_preset_id(id: &str) -> bool {
+    id.len() == 37 && id.starts_with("user-") && id[5..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod preset_tests {
+    use super::*;
+
+    #[test]
+    fn save_list_replace_and_validate_presets() {
+        let directory = tempfile::tempdir().unwrap();
+        let look = CaptionStyleParams {
+            style: "karaoke".into(),
+            color: Some([1, 2, 3, 4]),
+            accent: Some([5, 6, 7, 8]),
+            font_size: Some(0.08),
+            position: Some(CaptionPosition::Middle),
+            max_words: Some(3),
+            outline: None,
+        };
+        let id = save_caption_preset_at("My Look", &look, directory.path()).unwrap();
+        assert!(valid_preset_id(&id));
+        let listed = caption_presets_at(directory.path()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "My Look");
+        assert_eq!(listed[0].id, id);
+        assert_eq!(listed[0].params, look);
+
+        // Saving the same name again replaces the entry instead of duplicating it.
+        let replacement = CaptionStyleParams::named("pop");
+        let id2 =
+            save_caption_preset_at("  My Look  ", &replacement, directory.path()).unwrap();
+        assert_ne!(id, id2);
+        let listed = caption_presets_at(directory.path()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].params, replacement);
+        assert!(!directory.path().join(format!("{id}.json")).exists());
+
+        // Presets are listed by name; broken or foreign entries are skipped.
+        save_caption_preset_at("A first", &look, directory.path()).unwrap();
+        std::fs::write(directory.path().join("broken.json"), "{ not json").unwrap();
+        let listed = caption_presets_at(directory.path()).unwrap();
+        assert_eq!
+            (listed.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["A first", "My Look"]);
+
+        for bad in ["", "  ", "a/b", "\u{7}", &"x".repeat(49)] {
+            assert!(save_caption_preset_at(bad, &look, directory.path()).is_err(), "{bad:?}");
+        }
+    }
 }
 
 #[cfg(test)]

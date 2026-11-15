@@ -5,9 +5,12 @@
 use super::*;
 use crate::style::{color, hex};
 use animathio_control::{
-    CaptionPosition, CaptionStyleParams, SubtitleStyleParams, caption_style_command,
-    caption_styles, clip_caption_style,
+    CaptionPosition, CaptionPreset, CaptionStyleParams, SubtitleStyleParams,
+    caption_style_command, caption_styles, clip_caption_style,
 };
+use gpui_component::WindowExt;
+use gpui_component::form::Form;
+use gpui_component::input::Input;
 
 /// Accent swatches for the active word.
 const ACCENTS: [(&str, [u8; 4]); 6] = [
@@ -35,6 +38,8 @@ pub(super) enum LookChange {
     WordsDelta(i32),
     Accent([u8; 4]),
     Text([u8; 4]),
+    /// Adopt a saved user preset wholesale.
+    Preset(CaptionStyleParams),
 }
 
 fn style_info(id: &str) -> &'static animathio_control::CaptionStyleInfo {
@@ -86,6 +91,7 @@ pub(super) fn caption_style_picker(
     look: &CaptionStyleParams,
     target: Option<TrackId>,
     color_pickers: [Div; 2],
+    presets: &[CaptionPreset],
 ) -> Div {
     let info = style_info(active_style);
     let font = look.font_size.unwrap_or(info.font_size);
@@ -179,6 +185,53 @@ pub(super) fn caption_style_picker(
     let [text_picker, accent_picker] = color_pickers;
     texts = texts.child(text_picker);
     accents = accents.child(accent_picker);
+    // Named user presets from the user data directory: click applies the look, the
+    // trailing icon deletes the preset, and the bookmark button saves the current
+    // look under a chosen name.
+    let mut preset_row = div().flex().flex_wrap().items_center().gap_1();
+    for preset in presets {
+        let remove_id = preset.id.clone();
+        let remove = Button::new(SharedString::from(format!(
+            "{prefix}-preset-remove-{}",
+            preset.id
+        )))
+        .ghost()
+        .compact()
+        .icon(icons::icon(IconName::X).xsmall())
+        .tooltip("Delete preset")
+        .on_click({
+            let editor = editor.clone();
+            move |_, _, cx| {
+                editor.update(cx, |this, cx| this.remove_caption_preset(&remove_id, cx));
+            }
+        });
+        preset_row = preset_row.child(
+            div()
+                .flex()
+                .items_center()
+                .child(choose(
+                    format!("{prefix}-preset-{}", preset.id),
+                    preset.name.clone(),
+                    false,
+                    LookChange::Preset(preset.params.clone()),
+                ))
+                .child(remove),
+        );
+    }
+    preset_row = preset_row.child(
+        Button::new(SharedString::from(format!("{prefix}-preset-save")))
+            .ghost()
+            .compact()
+            .icon(icons::icon(IconName::Bookmark).xsmall())
+            .label("Save preset")
+            .tooltip("Save the current look as a named preset")
+            .on_click({
+                let editor = editor.clone();
+                move |_, window, cx| {
+                    editor.update(cx, |this, cx| this.open_save_caption_preset(window, cx));
+                }
+            }),
+    );
     let words_label = if words == 0 {
         "Auto".to_owned()
     } else {
@@ -189,6 +242,14 @@ pub(super) fn caption_style_picker(
         .flex_col()
         .gap_2()
         .child(styles)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(label("Presets"))
+                .child(preset_row),
+        )
         .child(
             div()
                 .text_size(crate::style::type_size::XS)
@@ -248,6 +309,69 @@ pub(super) fn caption_style_picker(
 }
 
 impl Editor {
+    /// Refresh the named-preset list from the user data directory.
+    pub(super) fn refresh_caption_presets(&mut self) {
+        self.caption_presets_loaded = true;
+        match animathio_control::caption_presets() {
+            Ok(presets) => self.caption_presets = presets,
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    pub(super) fn ensure_caption_presets(&mut self) {
+        if !self.caption_presets_loaded {
+            self.refresh_caption_presets();
+        }
+    }
+
+    /// Delete a saved preset and refresh the list.
+    pub(super) fn remove_caption_preset(&mut self, id: &str, cx: &mut Context<Self>) {
+        match animathio_control::delete_caption_preset(id) {
+            Ok(()) => self.refresh_caption_presets(),
+            Err(error) => self.error = Some(error.to_string()),
+        }
+        cx.notify();
+    }
+
+    /// Ask for a name and save the current look under it.
+    pub(super) fn open_save_caption_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = super::dialogs::input("", window, cx);
+        let editor = cx.entity();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let name_submit = name.clone();
+            dialog
+                .title(super::dialogs::heading(
+                    IconName::Bookmark,
+                    "Save caption preset",
+                ))
+                .child(
+                    Form::new().child(super::dialogs::field(
+                        "Preset name",
+                        Input::new(&name),
+                    )),
+                )
+                .footer(super::dialogs::footer("Save", cx, move |_, window, cx| {
+                    let value = name_submit.read(cx).value().trim().to_owned();
+                    let saved = editor.update(cx, |this, cx| {
+                        let look = this.caption_look.clone();
+                        match animathio_control::save_caption_preset(&value, &look) {
+                            Ok(_) => {
+                                this.refresh_caption_presets();
+                                true
+                            }
+                            Err(error) => {
+                                this.error = Some(error.to_string());
+                                false
+                            }
+                        }
+                    });
+                    if saved {
+                        window.close_dialog(cx);
+                    }
+                }))
+        });
+    }
+
     /// Update the remembered look; with a `target`, restyle the existing captions too.
     pub(super) fn apply_look_change(
         &mut self,
@@ -280,6 +404,7 @@ impl Editor {
             }
             LookChange::Accent(rgba) => look.accent = Some(rgba),
             LookChange::Text(rgba) => look.color = Some(rgba),
+            LookChange::Preset(params) => look.clone_from(&params),
         }
         if let Some(track) = target {
             let params = SubtitleStyleParams {
@@ -327,6 +452,7 @@ impl Editor {
             self.caption_look.font_size = None;
             self.caption_look.max_words = None;
         }
+        self.ensure_caption_presets();
         let color_pickers = [
             self.caption_color_control(
                 format!("c{}:caption-text:{}", id.0, track.0),
@@ -351,6 +477,7 @@ impl Editor {
             &self.caption_look,
             Some(track),
             color_pickers,
+            &self.caption_presets.clone(),
         );
         Some(self.section(
             "caption-style",
