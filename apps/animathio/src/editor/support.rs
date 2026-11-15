@@ -887,7 +887,7 @@ pub(super) fn paint_ruler(
     }
 }
 
-/// Choose a "nice" ruler interval so major ticks stay at least 64px apart.
+/// Choose a ruler interval with room for a full timecode at the current UI scale.
 pub(super) fn ruler_step(duration: i64, pixels_per_tick: f64, rate: FrameRate) -> i64 {
     let tps = TICKS_PER_SECOND as f64;
     let fps = f64::from(timecode::frames_per_second(rate)).max(1.0);
@@ -909,7 +909,7 @@ pub(super) fn ruler_step(duration: i64, pixels_per_tick: f64, rate: FrameRate) -
     ];
     let step = candidates
         .into_iter()
-        .find(|candidate| candidate * pixels_per_tick >= 96.0)
+        .find(|candidate| candidate * pixels_per_tick >= 120.0 * f64::from(style::ui_scale()))
         .unwrap_or(tps * 300.0);
     (step as i64).clamp(1, duration.max(1))
 }

@@ -70,7 +70,7 @@ later clips on that track left. Markers follow the ripple setting.
 | --- | --- |
 | ZoomIn (timeline) | `=` |
 | ZoomOut (timeline) | `-` |
-| ZoomToFit (timeline) | `\\` |
+| ZoomToFit (timeline) | `\` |
 | LargerTracks | `Ctrl-alt-=` |
 | SmallerTracks | `Ctrl-alt--` |
 | FocusLibrary (Premiere's Projects panel) | `shift-1` |
@@ -121,4 +121,4 @@ Deferred: rolling-edit, rate-stretch, slip, slide, zoom and track-select tools
 (we have no such tools yet); paste attributes and paste insert; lift/extract;
 maximize panel; match frame; a "classic AniMathIO" preset and user keymap
 files. Actions without a default shortcut stay available in menus, toolbars and
-the searchable shortcuts dialog.
+toolbars. The searchable dialog lists actions with assigned keys.

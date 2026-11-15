@@ -792,7 +792,8 @@ impl Editor {
                             rows.iter()
                                 .filter(|(label, keys, _, _)| {
                                     label.to_lowercase().contains(&query.replace(' ', ""))
-                                        || keys.contains(&query)
+                                        || keys.replace("secondary", "ctrl").contains(&query)
+                                        || keys.replace("secondary", "cmd").contains(&query)
                                 })
                                 .map(|(label, _, action, context)| {
                                     div()
