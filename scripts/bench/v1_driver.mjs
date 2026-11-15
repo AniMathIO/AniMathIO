@@ -16,7 +16,7 @@
 //
 // Every command prints one JSON object on stdout. Timestamps are `Date.now()` epoch
 // milliseconds so the harness can subtract its own launch time from the same clock.
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const argv = process.argv.slice(2);
@@ -115,12 +115,45 @@ if (cmd === "wait") {
 } else if (cmd === "export") {
   const { client } = await connectWithRetry(60_000);
   const state = await tool(client, "get_project_state");
-  const timeout = Math.ceil(state.maxTimeMs * 3 + 300_000);
+  const timeout = Math.ceil(state.maxTimeMs * 4 + 420_000);
+  const path = need("path");
   const started = Date.now();
-  await tool(client, "export_video", { path: need("path") }, Number(flags.timeout ?? timeout));
-  const finished = Date.now();
-  console.log(JSON.stringify({ started, finished, seconds: (finished - started) / 1000, maxTimeMs: state.maxTimeMs }));
-  await client.close();
+  // Node's fetch has a fixed 5-minute headers timeout; a 60-second project's
+  // real-time capture plus ffmpeg.wasm conversion can exceed it under load. The
+  // app keeps exporting regardless (the renderer promise is independent of the
+  // HTTP request), so on any transport error we fall back to polling the output
+  // file, which writeVideoFile creates only once it is fully written.
+  let toolFinished = null;
+  try {
+    await tool(client, "export_video", { path }, Number(flags.timeout ?? timeout));
+    toolFinished = Date.now();
+  } catch {
+    await client.close().catch(() => {});
+  }
+  const deadline = started + Number(flags.timeout ?? timeout) + 60_000;
+  let lastSize = -1;
+  let stableSince = 0;
+  for (;;) {
+    if (Date.now() > deadline) {
+      throw new Error(`export never produced ${path} (waited ${Math.round((Date.now() - started) / 1000)}s)`);
+    }
+    if (toolFinished !== null) break; // the tool reported completion itself
+    try {
+      const size = statSync(path).size;
+      if (size > 0 && size === lastSize) {
+        if (Date.now() - stableSince > 2000) break; // written in one pass; stable
+      } else {
+        stableSince = Date.now();
+      }
+      lastSize = size;
+    } catch {
+      stableSince = Date.now();
+    }
+    await sleep(250);
+  }
+  const finished = toolFinished ?? Date.now();
+  console.log(JSON.stringify({ started, finished, seconds: (finished - started) / 1000, maxTimeMs: state.maxTimeMs, via: toolFinished !== null ? "tool" : "file-poll" }));
+  await client.close().catch(() => {});
 } else if (cmd === "seek") {
   // Scrub: ask the renderer to seek to a deterministic pseudo-random time at `hz` requests per
   // second. Each call round-trips main -> renderer -> main, so the latency below is the time the

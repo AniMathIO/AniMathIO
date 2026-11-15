@@ -268,7 +268,7 @@ def author_v1_scene(bench: Bench, steps_file: Path, project_out: str) -> dict:
     try:
         state = v1_wait_usable(bench)
         result = bench.driver(["call", "--script", str(steps_file)], timeout=600)
-        return {"project": project_out, "authored_from_elements": len(state["elements"]), "steps": len(result)}
+        return {"project": project_out, "authored_from_elements": state["elements"], "steps": len(result)}
     finally:
         Bench.stop(proc)
 
@@ -467,7 +467,8 @@ def main() -> None:
     scene10_amio = fixtures / "scene-10.amio"
     scene60_amio = fixtures / "scene-60.amio"
     medium_amio = fixtures / "medium.amio"
-    for p in (scene10, scene60, medium, scene10_amio, scene60_amio, medium_amio):
+    for p in (bench.raw.parent / "fixtures" / "v1-seed.animathio", scene10_amio, scene60_amio, medium_amio,
+              fixtures / "steps-v1-scene-10.json", fixtures / "steps-v1-scene-60.json", fixtures / "steps-v1-medium.json"):
         if not p.exists():
             raise SystemExit(f"missing fixture: {p} (run the setup phase first)")
 
