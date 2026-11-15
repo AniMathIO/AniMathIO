@@ -124,7 +124,7 @@ impl Editor {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .text_size(px(16.))
+                        .text_size(crate::style::type_size::LG)
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(
                             icons::icon(IconName::Captions)
@@ -136,7 +136,7 @@ impl Editor {
                 .child(
                     div()
                         .mb_3()
-                        .text_size(px(12.))
+                        .text_size(crate::style::type_size::SM)
                         .text_color(style::hex(style::color::TEXT_SECONDARY))
                         .child(note),
                 )
@@ -158,7 +158,7 @@ impl Editor {
                         .gap_2()
                         .child(
                             div()
-                                .text_size(px(13.))
+                                .text_size(crate::style::type_size::SM)
                                 .font_weight(FontWeight::MEDIUM)
                                 .child("Caption style"),
                         )
@@ -371,7 +371,7 @@ impl Editor {
                 .items_center()
                 .gap_1()
                 .px_2()
-                .h(px(22.))
+                .h(gpui::rems(1.467))
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(style::hex(style::color::PANEL))
@@ -458,7 +458,7 @@ impl Editor {
             )
             .child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.muted_foreground)
                     .child(detail),
             );
@@ -472,7 +472,7 @@ impl Editor {
         if let State::Failed(error) = &job.state {
             row = row.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.danger)
                     .child(error.clone()),
             );

@@ -104,12 +104,12 @@ impl Editor {
                             .child(img("brand.svg").size(px(44.)))
                             .child(
                                 div()
-                                    .text_size(px(15.))
+                                    .text_size(crate::style::type_size::BASE)
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("AniMathIO")
                                     .child(
                                         div()
-                                            .text_size(px(10.))
+                                            .text_size(crate::style::type_size::XS)
                                             .text_color(style::hex(color::TEXT_SECONDARY))
                                             .child("THE CREATIVE WORKSPACE"),
                                     ),
@@ -117,13 +117,13 @@ impl Editor {
                     )
                     .child(
                         div()
-                            .text_size(px(38.))
+                            .text_size(crate::style::type_size::DISPLAY)
                             .font_weight(FontWeight::SEMIBOLD)
                             .child("Make ideas move."),
                     )
                     .child(
                         div()
-                            .text_size(px(14.))
+                            .text_size(crate::style::type_size::BASE)
                             .text_color(style::hex(color::TEXT_SECONDARY))
                             .child("A clear canvas for your next great explanation."),
                     )
@@ -133,7 +133,7 @@ impl Editor {
                             .items_center()
                             .gap_2()
                             .mt_1()
-                            .text_size(px(11.))
+                            .text_size(crate::style::type_size::XS)
                             .text_color(style::hex(color::TEXT_SECONDARY))
                             .child(icons::icon(IconName::Layers).small())
                             .child("Compose")
@@ -148,7 +148,7 @@ impl Editor {
             .child(
                 div()
                     .relative()
-                    .w(px(300.))
+                    .w(gpui::rems(20.0))
                     .flex_shrink_0()
                     .flex()
                     .flex_col()
@@ -161,7 +161,7 @@ impl Editor {
                     .shadow_lg()
                     .child(
                         div()
-                            .h(px(116.))
+                            .h(gpui::rems(7.733))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -274,7 +274,7 @@ impl Editor {
                             .active(|this| this.bg(style::hex(color::HOVER)))
                             .child(
                                 div()
-                                    .h(px(96.))
+                                    .h(gpui::rems(6.4))
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -315,7 +315,7 @@ impl Editor {
                                     .child(
                                         div()
                                             .font_weight(FontWeight::SEMIBOLD)
-                                            .text_size(px(14.))
+                                            .text_size(crate::style::type_size::BASE)
                                             .child(label),
                                     )
                                     .child(
@@ -324,7 +324,7 @@ impl Editor {
                                             .py_px()
                                             .rounded_full()
                                             .bg(style::hexa(color::ACCENT, 0.14))
-                                            .text_size(px(10.))
+                                            .text_size(crate::style::type_size::XS)
                                             .font_family(cx.theme().mono_font_family.clone())
                                             .text_color(style::hex(color::ACCENT))
                                             .child(match preset {
@@ -338,7 +338,7 @@ impl Editor {
                             .child(
                                 div()
                                     .mt_1()
-                                    .text_size(px(11.))
+                                    .text_size(crate::style::type_size::XS)
                                     .text_color(style::hex(color::TEXT_SECONDARY))
                                     .child(format!("{detail} / 30 fps")),
                             )
@@ -377,7 +377,7 @@ impl Editor {
                                 .child("Your next project starts here.")
                                 .child(
                                     div()
-                                        .text_size(px(11.))
+                                        .text_size(crate::style::type_size::XS)
                                         .mt_1()
                                         .text_color(style::hex(color::TEXT_MUTED))
                                         .child(
@@ -446,14 +446,14 @@ impl Editor {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(11.))
+                                    .text_size(crate::style::type_size::XS)
                                     .text_color(style::hex(color::TEXT_SECONDARY))
                                     .child(path.display().to_string()),
                             )
                             .child(
                                 div()
                                     .mt_1()
-                                    .text_size(px(10.))
+                                    .text_size(crate::style::type_size::XS)
                                     .text_color(style::hex(color::TEXT_MUTED))
                                     .child(modified),
                             )
@@ -494,13 +494,13 @@ impl Editor {
                                 .justify_between()
                                 .child(
                                     div()
-                                        .text_size(px(16.))
+                                        .text_size(crate::style::type_size::LG)
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .child("Choose your canvas"),
                                 )
                                 .child(
                                     div()
-                                        .text_size(px(11.))
+                                        .text_size(crate::style::type_size::XS)
                                         .text_color(style::hex(color::TEXT_SECONDARY))
                                         .child("A fresh start, in any format"),
                                 ),
@@ -514,7 +514,7 @@ impl Editor {
                                 .justify_between()
                                 .child(
                                     div()
-                                        .text_size(px(16.))
+                                        .text_size(crate::style::type_size::LG)
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .child("Pick up where you left off"),
                                 )
@@ -557,7 +557,7 @@ impl Editor {
                                 .items_center()
                                 .justify_center()
                                 .gap_3()
-                                .h(px(92.))
+                                .h(gpui::rems(6.133))
                                 .rounded(px(style::radius::PANEL))
                                 .border_1()
                                 .border_dashed()
@@ -584,7 +584,7 @@ impl Editor {
                                 .child(
                                     div().child("Drop media anywhere to start").child(
                                         div()
-                                            .text_size(px(11.))
+                                            .text_size(crate::style::type_size::XS)
                                             .text_color(style::hex(color::TEXT_MUTED))
                                             .child(
                                                 "Video, images and audio. Your story, your tools.",

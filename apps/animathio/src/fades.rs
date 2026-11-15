@@ -2,8 +2,10 @@
 //! level (`gain` for audio, opacity for everything else), so it stays visible and
 //! editable in the keyframe UI and renders/mixes with no extra engine support.
 
+use std::collections::BTreeSet;
+
 use animathio_core::{Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Target, Time};
-use animathio_core::{ParamValue, Project, TransformProperty};
+use animathio_core::{ParamValue, Project, TICKS_PER_SECOND, TransformProperty};
 
 /// Which end of the clip a fade belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,6 +13,9 @@ pub(crate) enum FadeEdge {
     In,
     Out,
 }
+
+/// Length of the "default transition" (Premiere's Ctrl+D family).
+pub(crate) const DEFAULT_TRANSITION_TICKS: i64 = TICKS_PER_SECOND;
 
 /// The property a fade animates for this clip.
 pub(crate) fn fade_target(clip: &Clip) -> Target {
@@ -153,21 +158,74 @@ pub(crate) fn fade_command(clip: &Clip, edge: FadeEdge, ticks: i64) -> Option<Co
     Some(Command::Batch { commands })
 }
 
+/// Which clips a "default transition" covers: `Some(true)` the audio clips
+/// (Premiere's audio crossfade, Ctrl+Shift+D), `Some(false)` the visual ones
+/// (Ctrl+D) and `None` both (Shift+D).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TransitionKind {
+    Video,
+    Audio,
+    Both,
+}
+
+impl TransitionKind {
+    fn covers(self, clip: &Clip) -> bool {
+        let audio = matches!(clip.kind, ClipKind::Audio(_));
+        match self {
+            Self::Audio => audio,
+            Self::Video => !audio,
+            Self::Both => true,
+        }
+    }
+}
+
+/// Apply the default transition — a one-second fade in and out, Premiere's
+/// Ctrl+D family — to every clip of `ids` that `kind` covers, as one undo step.
+/// `None` when no clip changes. A command that cannot apply (e.g. a locked
+/// track) is still returned so executing it reports the error.
+pub(crate) fn default_transition_command(
+    project: &Project,
+    ids: &BTreeSet<ClipId>,
+    kind: TransitionKind,
+) -> Option<Command> {
+    let mut scratch = project.clone();
+    let mut commands = Vec::new();
+    for id in crate::selection::existing(project, ids) {
+        for edge in [FadeEdge::In, FadeEdge::Out] {
+            let Some(clip) = project_find(&scratch, id) else {
+                continue;
+            };
+            if !kind.covers(&clip) {
+                continue;
+            }
+            if let Some(command) = fade_command(&clip, edge, DEFAULT_TRANSITION_TICKS) {
+                let applied = command.apply(&mut scratch).is_ok();
+                commands.push(command);
+                if !applied {
+                    break;
+                }
+            }
+        }
+    }
+    (!commands.is_empty()).then_some(Command::Batch { commands })
+}
+
+fn project_find(project: &Project, id: ClipId) -> Option<Clip> {
+    project
+        .tracks()
+        .iter()
+        .find_map(|track| track.clips().get(&id).cloned())
+}
+
 /// Remove both fades of clip `id` as one command (one undo step). The fade-out
 /// is planned on the clip as it is after the fade-in was removed. `None` when
 /// there is nothing to clear; a command that cannot apply (e.g. a locked track)
 /// is still returned so executing it reports the error.
 pub(crate) fn clear_fades_command(project: &Project, id: ClipId) -> Option<Command> {
-    let find = |project: &Project| {
-        project
-            .tracks()
-            .iter()
-            .find_map(|track| track.clips().get(&id).cloned())
-    };
     let mut scratch = project.clone();
     let mut commands = Vec::new();
     for edge in [FadeEdge::In, FadeEdge::Out] {
-        if let Some(command) = fade_command(&find(&scratch)?, edge, 0) {
+        if let Some(command) = fade_command(&project_find(&scratch, id)?, edge, 0) {
             let applied = command.apply(&mut scratch).is_ok();
             commands.push(command);
             if !applied {
@@ -236,6 +294,65 @@ mod tests {
         assert!(history.undo(&mut project).unwrap());
         assert_eq!(project, faded);
         assert!(clear_fades_command(&Project::default(), ClipId(1)).is_none());
+    }
+
+    #[test]
+    fn default_transition_applies_fades_per_kind_in_one_step() {
+        let (mut project, _) = project_with(ClipKind::Video(AssetId::of(b"v")));
+        Command::AddAsset {
+            id: AssetId::of(b"a"),
+            asset: animathio_core::Asset {
+                name: "a.wav".into(),
+                media_type: "audio/wav".into(),
+            },
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: TrackId(1),
+            clip: Clip::new(
+                ClipId(2),
+                ClipKind::Audio(AssetId::of(b"a")),
+                TimeRange::new(Time(4 * TICKS_PER_SECOND), Time(8 * TICKS_PER_SECOND)).unwrap(),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let clip = |project: &Project, id: u64| project.tracks()[0].clips()[&ClipId(id)].clone();
+        let ids: BTreeSet<ClipId> = [1, 2].into_iter().map(ClipId).collect();
+
+        let before = project.clone();
+        let mut history = History::default();
+        let video = default_transition_command(&project, &ids, TransitionKind::Video).unwrap();
+        history.execute(&mut project, &video).unwrap();
+        assert_eq!(
+            fade_len(&clip(&project, 1), FadeEdge::In),
+            DEFAULT_TRANSITION_TICKS
+        );
+        assert_eq!(fade_len(&clip(&project, 2), FadeEdge::In), 0);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before);
+
+        default_transition_command(&project, &ids, TransitionKind::Audio)
+            .unwrap()
+            .apply(&mut project)
+            .unwrap();
+        assert_eq!(fade_len(&clip(&project, 1), FadeEdge::In), 0);
+        assert_eq!(
+            fade_len(&clip(&project, 2), FadeEdge::Out),
+            DEFAULT_TRANSITION_TICKS
+        );
+
+        default_transition_command(&project, &ids, TransitionKind::Both)
+            .unwrap()
+            .apply(&mut project)
+            .unwrap();
+        assert_eq!(
+            fade_len(&clip(&project, 1), FadeEdge::Out),
+            DEFAULT_TRANSITION_TICKS
+        );
+        // Every clip already carries the default: nothing left to do.
+        assert!(default_transition_command(&project, &ids, TransitionKind::Both).is_none());
     }
 
     #[test]

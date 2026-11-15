@@ -583,7 +583,7 @@ impl Editor {
                 .size_full(),
             );
         let header = div()
-            .h(px(38.))
+            .h(gpui::rems(2.533))
             .px_3()
             .flex()
             .items_center()
@@ -600,7 +600,7 @@ impl Editor {
                 div()
                     .flex_1()
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(format!(
                         "{} x {}  {:.0}%",
@@ -682,7 +682,7 @@ impl Editor {
                     .bg(hexa(color::RAISED, 0.95))
                     .border_1()
                     .border_color(hex(color::BORDER))
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(format!(
@@ -703,11 +703,12 @@ impl Editor {
 
     #[allow(clippy::unused_self)]
     pub(super) fn viewer_menu(&self, cx: &mut Context<Self>) -> Div {
+        let scale = crate::style::ui_scale();
         let mut menu = div()
             .absolute()
-            .top(px(38.))
-            .right(px(104.))
-            .w(px(140.))
+            .top(gpui::rems(2.533))
+            .right(px(104. * scale))
+            .w(px(140. * scale))
             .rounded(px(6.))
             .bg(hex(color::RAISED))
             .border_1()

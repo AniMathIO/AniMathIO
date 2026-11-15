@@ -183,11 +183,13 @@ impl Editor {
                     .child(icons::icon(IconName::Scan))
                     .child("Auto reframe"),
             )
-            .child(div().text_xs().child(if panel.params.clips.is_empty() {
-                "All video clips"
-            } else {
-                "Selected video clips"
-            }));
+            .child(div().text_size(crate::style::type_size::XS).child(
+                if panel.params.clips.is_empty() {
+                    "All video clips"
+                } else {
+                    "Selected video clips"
+                },
+            ));
         let mut aspects = div().flex().gap_2();
         for aspect in ["9:16", "1:1", "4:5"] {
             aspects = aspects.child(
@@ -209,12 +211,16 @@ impl Editor {
         }
         view = view
             .child(aspects)
-            .child(div().text_xs().child(format!(
+            .child(div().text_size(crate::style::type_size::XS).child(format!(
                 "Tracking smoothness: {:.0}%",
                 panel.params.smoothness * 100.
             )))
             .when(!busy, |v| v.child(Slider::new(&panel.slider).horizontal()))
-            .child(div().text_xs().child(panel.message.clone()));
+            .child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .child(panel.message.clone()),
+            );
         if busy {
             view = view.child(Progress::new("reframe-progress").value(f32::from(
                 u8::try_from(panel.progress.load(Ordering::Relaxed)).unwrap_or(100),

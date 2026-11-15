@@ -203,7 +203,7 @@ impl Editor {
                     .child(icons::icon(IconName::Volume2).small())
                     .child("Auto duck"),
             )
-            .child(div().text_xs().text_color(theme.muted_foreground).child(
+            .child(div().text_size(crate::style::type_size::XS).text_color(theme.muted_foreground).child(
                 "Lower the music under speech. Pick where the voice is and which tracks to duck.",
             ));
         let audio_tracks: Vec<(TrackId, String)> = self
@@ -257,7 +257,11 @@ impl Editor {
                 );
             }
             panel
-                .child(div().text_xs().child(title.to_owned()))
+                .child(
+                    div()
+                        .text_size(crate::style::type_size::XS)
+                        .child(title.to_owned()),
+                )
                 .child(row)
         };
         panel = chips(panel, "Voice tracks", false, cx);
@@ -302,7 +306,7 @@ impl Editor {
         ];
         for (label, state) in labels.into_iter().zip(&review.sliders) {
             panel = panel
-                .child(div().text_xs().child(label))
+                .child(div().text_size(crate::style::type_size::XS).child(label))
                 .child(Slider::new(state).horizontal());
         }
         let replace = review.params.replace_existing;
@@ -325,7 +329,7 @@ impl Editor {
         if !review.ready() {
             panel = panel.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.muted_foreground)
                     .child("Choose a voice source and at least one music track."),
             );
@@ -333,17 +337,21 @@ impl Editor {
         if let Some(error) = &review.error {
             panel = panel.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.danger)
                     .child(error.clone()),
             );
         }
         if review.busy {
-            panel = panel.child(div().text_xs().child("Analysing audio..."));
+            panel = panel.child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .child("Analysing audio..."),
+            );
         }
         if let Some(proposal) = &review.proposal {
             let keyframes: usize = proposal.clips.iter().map(|c| c.keys.len()).sum();
-            panel = panel.child(div().text_xs().child(format!(
+            panel = panel.child(div().text_size(crate::style::type_size::XS).child(format!(
                 "{} voice regions / {} music clips / {} keyframes",
                 proposal.voice.len(),
                 proposal.clips.len(),
@@ -363,7 +371,7 @@ impl Editor {
                         .flex()
                         .gap_1()
                         .items_center()
-                        .child(div().text_xs().child(format!(
+                        .child(div().text_size(crate::style::type_size::XS).child(format!(
                             "{} - {}",
                             timecode(range.start),
                             timecode(range.end)

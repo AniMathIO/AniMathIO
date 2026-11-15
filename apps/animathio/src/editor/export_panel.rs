@@ -34,7 +34,7 @@ impl Editor {
             .items_center()
             .gap_1()
             .px_2()
-            .h(px(22.))
+            .h(gpui::rems(1.467))
             .border_1()
             .border_color(cx.theme().border)
             .bg(crate::style::hex(crate::style::color::PANEL))
@@ -244,7 +244,7 @@ impl Editor {
             )
             .child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.muted_foreground)
                     .child(detail),
             );
@@ -259,7 +259,7 @@ impl Editor {
         if let JobState::Failed(error) = &job.state {
             row = row.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.danger)
                     .child(error.clone()),
             );

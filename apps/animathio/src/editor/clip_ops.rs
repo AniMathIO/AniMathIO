@@ -101,11 +101,6 @@ impl Editor {
         cx.notify();
     }
 
-    /// Whether the timeline (not the viewer or an input) currently has focus.
-    pub(super) fn timeline_focused(&self, window: &Window, cx: &App) -> bool {
-        self.panel_focus[0].contains_focused(window, cx)
-    }
-
     // ---- clipboard -------------------------------------------------------
 
     /// Copy the selection to the in-app clipboard and the system clipboard.

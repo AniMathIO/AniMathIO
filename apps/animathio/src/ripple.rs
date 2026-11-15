@@ -200,6 +200,96 @@ pub(crate) fn trim_command(
     batch(commands)
 }
 
+/// Which side of the playhead a ripple trim closes: the previous edit (Premiere's
+/// Q) or the next one (W).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrimSide {
+    Previous,
+    Next,
+}
+
+/// Ripple-trim to the playhead, Premiere's Q/W, on one track: the selected clip's
+/// (the "targeted" track), else the first track the playhead is inside, else the
+/// first track that can trim. With the playhead inside a clip the edge under it
+/// is trimmed with the usual ripple semantics; in a gap the segment between the
+/// playhead and the neighbouring edit closes, sliding later clips left.
+pub(crate) fn trim_to_playhead_command(
+    project: &Project,
+    selected: Option<ClipId>,
+    at: Time,
+    side: TrimSide,
+    markers: MarkerRipple,
+) -> Option<Command> {
+    fn covering(track: &Track, at: Time) -> Option<&Clip> {
+        track
+            .clips()
+            .values()
+            .find(|clip| clip.range.start < at && at < clip.range.end)
+    }
+    let can_trim = |track: &Track| {
+        track.clips().values().any(|clip| match side {
+            TrimSide::Previous => clip.range.start < at,
+            TrimSide::Next => clip.range.end > at,
+        })
+    };
+    let track = selected
+        .and_then(|id| crate::selection::track_of(project, id))
+        .or_else(|| {
+            project
+                .tracks()
+                .iter()
+                .find(|track| covering(track, at).is_some())
+                .or_else(|| project.tracks().iter().find(|track| can_trim(track)))
+        })?;
+    if let Some(clip) = covering(track, at) {
+        let edge = match side {
+            TrimSide::Previous => TrimEdge::Left,
+            TrimSide::Next => TrimEdge::Right,
+        };
+        return trim_command(project, clip.id, edge, at, RippleScope::ThisTrack, markers);
+    }
+    let previous_end = track
+        .clips()
+        .values()
+        .filter(|clip| clip.range.end <= at)
+        .map(|clip| clip.range.end.0)
+        .max()?;
+    let next_start = track
+        .clips()
+        .values()
+        .filter(|clip| clip.range.start >= at)
+        .map(|clip| clip.range.start.0)
+        .min()?;
+    let (removed_start, removed_end) = match side {
+        TrimSide::Previous => (previous_end, at.0),
+        TrimSide::Next => (at.0, next_start),
+    };
+    let delta = removed_end.saturating_sub(removed_start);
+    if delta <= 0 {
+        return None;
+    }
+    let mut commands: Vec<Command> = track
+        .clips()
+        .values()
+        .filter(|clip| clip.range.start >= at)
+        .map(|clip| Command::MoveClip {
+            id: clip.id,
+            track: track.id(),
+            start: Time(clip.range.start.0 - delta),
+        })
+        .collect();
+    if commands.is_empty() {
+        return None;
+    }
+    let affected = vec![track.id()];
+    if markers.rides(project, Time(removed_start), Some(&affected))
+        && let Some(gap) = TimeRange::new(Time(removed_start), Time(removed_end)).ok()
+    {
+        commands.extend(ripple_marker_commands(project, &[gap]));
+    }
+    batch(commands)
+}
+
 fn trim_tracks(
     project: &Project,
     id: ClipId,
@@ -629,5 +719,117 @@ mod tests {
         .unwrap();
         lengthen.apply(&mut project).unwrap();
         assert_eq!(marker_times(&project), [4, 8, 19]);
+    }
+
+    #[test]
+    fn trim_to_playhead_trims_the_clip_under_the_playhead() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..])]);
+        // Playhead inside clip 1: Q ripple-trims its head, W its tail.
+        let mut project = base.clone();
+        let q = trim_to_playhead_command(
+            &project,
+            None,
+            Time(6),
+            TrimSide::Previous,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        run(&mut project, &q);
+        assert_eq!(starts(&project), vec![(1, 0, 4), (2, 8, 14)]);
+        let w =
+            trim_to_playhead_command(&project, None, Time(2), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 2), (2, 6, 12)]);
+    }
+
+    #[test]
+    fn trim_to_playhead_closes_gaps_to_the_playhead() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..])]);
+        // Q closes [10, 12): everything from the playhead slides left.
+        let mut project = base.clone();
+        let q = trim_to_playhead_command(
+            &project,
+            None,
+            Time(12),
+            TrimSide::Previous,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        run(&mut project, &q);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 12, 18)]);
+        // W closes [12, 14): the next clip starts at the playhead.
+        let mut project = base.clone();
+        let w =
+            trim_to_playhead_command(&project, None, Time(12), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 12, 18)]);
+        // On an edit point Q has nothing before it to remove; W closes the
+        // whole gap after the playhead.
+        assert!(
+            trim_to_playhead_command(
+                &base,
+                Some(ClipId(1)),
+                Time(10),
+                TrimSide::Previous,
+                MarkerRipple::Auto
+            )
+            .is_none()
+        );
+        let mut project = base;
+        let w =
+            trim_to_playhead_command(&project, None, Time(10), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 10, 16)]);
+    }
+
+    #[test]
+    fn trim_to_playhead_targets_the_selected_track_first() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..]), (2, &[(3, 0, 20)][..])]);
+        // The selected clip's track wins even though track 1 also covers the playhead.
+        let mut project = base;
+        let w = trim_to_playhead_command(
+            &project,
+            Some(ClipId(3)),
+            Time(12),
+            TrimSide::Next,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 14, 20), (3, 0, 12)]);
+    }
+
+    #[test]
+    fn trim_to_playhead_moves_markers_over_removed_gaps() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..])]);
+        let mut project = base;
+        with_markers(&mut project, &[11, 16]);
+        let before = project.clone();
+        let q = trim_to_playhead_command(
+            &project,
+            None,
+            Time(12),
+            TrimSide::Previous,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &q).unwrap();
+        assert_eq!(marker_times(&project), [10, 14]);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before);
+    }
+    #[test]
+    fn trim_to_playhead_prefers_covering_track_over_earlier_gap() {
+        let mut project =
+            project_with(&[(1, &[(1, 0, 4), (2, 14, 20)][..]), (2, &[(3, 0, 20)][..])]);
+        let command =
+            trim_to_playhead_command(&project, None, Time(10), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &command);
+        assert_eq!(starts(&project), vec![(1, 0, 4), (2, 14, 20), (3, 0, 10)]);
     }
 }

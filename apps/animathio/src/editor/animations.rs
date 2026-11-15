@@ -171,7 +171,7 @@ impl Editor {
             return vec![
                 div()
                     .px_3()
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .text_color(hex(color::TEXT_MUTED))
                     .child("No animation plugins loaded"),
             ];
@@ -217,7 +217,7 @@ impl Editor {
                                 .child(
                                     div()
                                         .flex_1()
-                                        .text_size(px(11.))
+                                        .text_size(crate::style::type_size::XS)
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(hex(color::TEXT_SECONDARY))
                                         .child(label),
@@ -237,7 +237,7 @@ impl Editor {
                                 .child(
                                     div()
                                         .min_w(px(64.))
-                                        .text_size(px(11.))
+                                        .text_size(crate::style::type_size::XS)
                                         .text_color(hex(color::TEXT_MUTED))
                                         .child(self.duration_label(role)),
                                 )
@@ -278,7 +278,7 @@ impl Editor {
                     .px_2()
                     .pt_2()
                     .pb_1()
-                    .text_size(px(11.))
+                    .text_size(crate::style::type_size::XS)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(hex(color::TEXT_MUTED))
                     .child(label)

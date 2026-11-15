@@ -73,8 +73,12 @@ pub(crate) use support::{
     color_from_json, load_plugins, point_from_json, read_project_with_recovery,
 };
 
-const RULER_H: f32 = 28.0;
-const HEADER_W: f32 = 240.0;
+fn ruler_height() -> f32 {
+    28. * crate::style::ui_scale()
+}
+fn track_header_width() -> f32 {
+    240. * crate::style::ui_scale()
+}
 const MAX_RECENT: usize = 10;
 const DEFAULT_MEDIA_TICKS: i64 = TICKS_PER_SECOND * 2;
 /// Peaks kept per decoded audio asset for timeline waveforms.

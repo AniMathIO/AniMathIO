@@ -268,20 +268,23 @@ impl Editor {
                     .child(icons::icon(IconName::Scissors).small())
                     .child("Automatic cuts"),
             )
-            .child(div().text_xs().text_color(theme.muted_foreground).child(
-                if review.params.clip.is_some() {
-                    "Selected clip and linked companions"
-                } else if review.params.track.is_some() {
-                    "Selected track mix and linked companions"
-                } else {
-                    "Mixed project audio / in-out range"
-                },
-            ));
+            .child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .text_color(theme.muted_foreground)
+                    .child(if review.params.clip.is_some() {
+                        "Selected clip and linked companions"
+                    } else if review.params.track.is_some() {
+                        "Selected track mix and linked companions"
+                    } else {
+                        "Mixed project audio / in-out range"
+                    }),
+            );
         if self.selected.is_some() {
             let current = Scope::of(&review.params);
             let mut picker = div().flex().flex_row().gap_1().items_center().child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.muted_foreground)
                     .child("Analyse"),
             );
@@ -313,7 +316,7 @@ impl Editor {
         ];
         for (label, state) in labels.into_iter().zip(&review.sliders) {
             panel = panel
-                .child(div().text_xs().child(label))
+                .child(div().text_size(crate::style::type_size::XS).child(label))
                 .child(Slider::new(state).horizontal());
         }
         let keep = review.params.keep_short_pauses;
@@ -393,20 +396,24 @@ impl Editor {
         if fillers && !animathio_transcribe::engine_available() {
             panel = panel.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .child("This build has no speech engine. Rebuild with the whisper feature."),
             );
         }
         if let Some(error) = &review.error {
             panel = panel.child(
                 div()
-                    .text_xs()
+                    .text_size(crate::style::type_size::XS)
                     .text_color(theme.danger)
                     .child(error.clone()),
             );
         }
         if review.busy {
-            panel = panel.child(div().text_xs().child("Analysing audio..."));
+            panel = panel.child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .child("Analysing audio..."),
+            );
         }
         if let Some(proposal) = &review.proposal {
             let enabled: Vec<_> = proposal.cuts.iter().filter(|c| c.enabled).collect();
@@ -416,7 +423,7 @@ impl Editor {
                     .map(|c| c.range.end.0 - c.range.start.0)
                     .sum(),
             );
-            panel = panel.child(div().text_xs().child(format!(
+            panel = panel.child(div().text_size(crate::style::type_size::XS).child(format!(
                 "{} of {} cuts / {} saved",
                 enabled.len(),
                 proposal.cuts.len(),

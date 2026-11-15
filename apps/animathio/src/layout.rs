@@ -14,12 +14,13 @@ pub enum TrackHeight {
     Large,
 }
 impl TrackHeight {
-    pub const fn pixels(self) -> f32 {
-        match self {
+    pub fn pixels(self) -> f32 {
+        let height = match self {
             Self::Small => 28.,
             Self::Medium => 44.,
             Self::Large => 72.,
-        }
+        };
+        height * crate::style::ui_scale()
     }
     pub const fn larger(self) -> Self {
         match self {
