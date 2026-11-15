@@ -150,8 +150,11 @@ impl Editor {
         }
         let time = timeline::drop_start(&layout, &self.project, x, self.position, self.snapping);
         let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
-        let track = selection::track_at(&self.project, row)
-            .or_else(|| timeline::display_tracks(&self.project).first().map(|t| t.id()));
+        let track = selection::track_at(&self.project, row).or_else(|| {
+            timeline::display_tracks(&self.project)
+                .first()
+                .map(|t| t.id())
+        });
         if let PoolDrag::Math(kind) = &drag {
             self.add_math_default(*kind, time, cx);
             return;

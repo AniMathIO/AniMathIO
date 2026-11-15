@@ -1,5 +1,6 @@
 use animathio_core::{
-    ClipId, ClipKind, FrameRate, MarkerId, Project, Rounding, TICKS_PER_SECOND, Time, Track, TrackId,
+    ClipId, ClipKind, FrameRate, MarkerId, Project, Rounding, TICKS_PER_SECOND, Time, Track,
+    TrackId,
 };
 
 /// Timeline presentation order: foreground first, with audio-only tracks below
@@ -20,7 +21,7 @@ pub(crate) fn is_audio_only(track: &Track) -> bool {
         && track
             .clips()
             .values()
-            .all(|clip| matches!(clip.kind, ClipKind::Audio { .. }))
+            .all(|clip| matches!(clip.kind, ClipKind::Audio(_)))
 }
 
 /// Pixel geometry shared by timeline painting and hit-testing. All coordinates are
@@ -527,7 +528,7 @@ mod tests {
         let layout = TimelineLayout::zoomed(100., 28., 44., 1000, 2., 50.);
         assert_eq!(
             drop_placement(&layout, &project, 50., 73., Time(0), false),
-            Some((TrackId(2), Time(500)))
+            Some((TrackId(1), Time(500)))
         );
         assert_eq!(
             drop_placement(&layout, &project, 50., 27., Time(0), false),
@@ -539,7 +540,7 @@ mod tests {
         );
         assert_eq!(
             drop_placement(&layout, &project, 50., 73., Time(510), true),
-            Some((TrackId(2), Time(510)))
+            Some((TrackId(1), Time(510)))
         );
     }
 

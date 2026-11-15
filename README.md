@@ -313,14 +313,18 @@ separately from projects. Interface → UI scale defaults to the desktop's text 
 (KDE forceFontDPI/Xft.dpi, GNOME text-scaling-factor, Windows text-size slider), can be
 set to 80–200% in 10% steps and applies live; `ANIMATHIO_UI_SCALE=150` overrides it for
 a run.
-Enter in Preferences saves the form, just like **Save**; invalid autosave values
-keep it open and show an error.
+In custom dialogs, Enter runs the primary action and Escape cancels. Invalid values
+keep the form open and show an error inside it. Math source fields accept
+Shift+Enter for a new line.
 
 **Import media** (Ctrl/Cmd+I or the library's plus button) adds files to the library
 without inserting clips or changing the playhead. Drag a library card onto a timeline
 track to place it, or click it to add at the playhead. Use **Add track** in the timeline
-header to create an empty foreground layer; adding a track is undoable. Tracks later
-in the timeline list composite over earlier tracks.
+header to create an empty foreground layer at the top; adding a track is undoable.
+Foreground visual tracks appear above background tracks, with audio-only tracks below.
+Track headers, drops, selection and reorder gestures use this same display order; the
+project file keeps its existing back-to-front layer order. The ruler and marker lane
+stay fixed while track rows scroll vertically.
 Drop OS media files on the pool to import assets, or on a timeline track to import
 and place them at that position. Multiple files are placed consecutively. The Plugins
 tab's **Write on…** action replaces a selected LaTeX clip's reveal animation with
@@ -337,8 +341,10 @@ text fields. All layers move together and insertion undoes in one step.
 Thumbnails render on the CPU in the background and are cached per canvas size.
 Text/shapes plugins are required; math titles also need the LaTeX plugin.
 
-The launcher, project settings and export dialog share 1080p, 4K, 9:16, square and
-4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
+New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
+launcher. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
+another tile starts that format. The launcher, project settings and export dialog
+share 1080p, 4K, 9:16, square and 4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
 and `fields`; see [the control guide](docs/mcp.md#title-preset-library).
 
 ### The CLI
@@ -430,7 +436,12 @@ Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto d
 tune depth and attack/release, and review the ducked spans on the timeline first; see the
 [CLI reference](docs/cli.md#duck) and [rules](docs/mcp.md#auto-ducking).
 Only audio/video selections default to the voice source. The review panel scrolls
-in shorter windows so its actions stay reachable.
+in shorter windows so its actions stay reachable. Clip targets show the asset name,
+track name and start timecode, so repeated uses of the same asset remain identifiable.
+
+In clip and track audio-effect cards, Denoise keeps its sixteen learned noise-band
+controls in an **Advanced** section, collapsed initially. Expanding it preserves the
+usual parameter editing and keyframe controls.
 
 The launcher lists five bundled project templates and saved user templates, with CPU
 thumbnail cards. Creating one opens Fill placeholders for text and picked media;

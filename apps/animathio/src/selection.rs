@@ -223,7 +223,8 @@ pub(crate) fn move_command(
         return None;
     }
     let mut commands = Vec::new();
-    for (row, track) in timeline::display_tracks(project).into_iter().enumerate() {
+    let tracks = timeline::display_tracks(project);
+    for (row, track) in tracks.iter().enumerate() {
         let mut members = track
             .clips()
             .values()
@@ -232,7 +233,7 @@ pub(crate) fn move_command(
         if members.peek().is_none() {
             continue;
         }
-        let destination = timeline::display_tracks(project)[row.checked_add_signed(row_delta)?].id();
+        let destination = tracks.get(row.checked_add_signed(row_delta)?)?.id();
         for clip in members {
             commands.push(Command::MoveClip {
                 id: clip.id,
@@ -310,7 +311,9 @@ pub(crate) fn shifted_row(row: usize, row_delta: isize, rows: usize) -> usize {
 
 /// The track a row index resolves to, if any.
 pub(crate) fn track_at(project: &Project, row: usize) -> Option<TrackId> {
-    timeline::display_tracks(project).get(row).map(|track| track.id())
+    timeline::display_tracks(project)
+        .get(row)
+        .map(|track| track.id())
 }
 
 #[cfg(test)]
@@ -497,13 +500,13 @@ pub(crate) mod tests {
         // Rows: 20..60, 60..100, 100..140.
         assert_eq!(
             marquee(&layout, &project, (150.0, 30.0), (210.0, 80.0)),
-            set(&[2, 3])
+            set(&[3, 4])
         );
         assert_eq!(
-            marquee(&layout, &project, (110.0, 110.0), (120.0, 130.0)),
-            set(&[4])
+            marquee(&layout, &project, (50.0, 110.0), (60.0, 130.0)),
+            set(&[1])
         );
-        assert!(marquee(&layout, &project, (110.0, 30.0), (190.0, 50.0)).is_empty());
+        assert!(marquee(&layout, &project, (110.0, 110.0), (190.0, 130.0)).is_empty());
         assert!(marquee(&layout, &project, (0.0, 0.0), (300.0, 15.0)).is_empty());
     }
 
@@ -526,13 +529,13 @@ pub(crate) mod tests {
         history.execute(&mut project, &command).unwrap();
         assert_eq!(starts(&project), [(1, 1, 0), (2, 1, 20), (3, 2, 2)]);
         history.undo(&mut project).unwrap();
-        // Moving down rows keeps the stack in bounds for the lowest clip.
+        // Moving up rows keeps the stack in bounds for the highest clip.
         let mut roomy = project_with(&[
             (1, &[(1, 10, 20), (2, 30, 40)][..]),
             (2, &[(3, 50, 60)][..]),
         ]);
         let roomy_original = roomy.clone();
-        let command = move_command(&roomy, &set(&[1, 2]), 0, 5).unwrap();
+        let command = move_command(&roomy, &set(&[1, 2]), 0, -5).unwrap();
         history.execute(&mut roomy, &command).unwrap();
         assert_eq!(starts(&roomy), [(1, 2, 10), (2, 2, 30), (3, 2, 50)]);
         assert!(history.undo(&mut roomy).unwrap());

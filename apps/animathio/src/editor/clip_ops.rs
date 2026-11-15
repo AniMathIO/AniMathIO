@@ -467,7 +467,7 @@ impl Editor {
 
 /// The inclusive display-row bounds of the section containing `row`: video rows stay above
 /// the first audio-only row, audio rows below it.
-fn display_section(tracks: &[&Track], row: usize) -> (usize, usize) {
+pub(super) fn display_section(tracks: &[&Track], row: usize) -> (usize, usize) {
     let boundary = tracks
         .iter()
         .position(|track| timeline::is_audio_only(track))

@@ -296,7 +296,10 @@ impl Editor {
         x: f32,
         y: f32,
     ) -> Option<(ClipId, FadeEdge)> {
-        for (row, track) in timeline::display_tracks(&self.project).into_iter().enumerate() {
+        for (row, track) in timeline::display_tracks(&self.project)
+            .into_iter()
+            .enumerate()
+        {
             let top = layout.ruler_height + row as f32 * layout.row_height + 3.0;
             if (y - (top + FADE_HANDLE_INSET)).abs() > 7.0 {
                 continue;
@@ -1125,12 +1128,15 @@ impl Editor {
 
     /// The interactive surface shared by the ruler and the track canvas: both route pointer
     /// gestures to the same handlers, which map positions through `timeline_relative`.
-    fn timeline_surface(&self, cx: &mut Context<Self>) -> Div {
+    fn timeline_surface(cx: &mut Context<Self>) -> Div {
         div()
             .flex_1()
             .h_full()
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_timeline_mouse_down))
-            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_timeline_context_menu))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(Self::on_timeline_context_menu),
+            )
             .on_mouse_move(cx.listener(Self::on_timeline_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
             // Releasing past the canvas (track headers, the empty space below the last
@@ -1436,7 +1442,7 @@ impl Editor {
                             .border_b_1()
                             .border_color(cx.theme().border),
                     )
-                    .child(self.timeline_surface(cx).child(
+                    .child(Self::timeline_surface(cx).child(
                         canvas(
                             move |bounds, _window, cx| {
                                 let _ = weak_ruler.update(cx, |this, cx| {
@@ -1487,7 +1493,7 @@ impl Editor {
                                     .flex()
                                     .flex_row()
                                     .child(self.track_header(cx))
-                                    .child(self.timeline_surface(cx).child(canvas(
+                                    .child(Self::timeline_surface(cx).child(canvas(
                                         move |bounds, _window, cx| {
                                             let _ = weak.update(cx, |this, cx| {
                                                 let top = f32::from(bounds.origin.y);

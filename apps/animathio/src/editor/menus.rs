@@ -343,6 +343,8 @@ impl Editor {
 
     pub(super) fn flush_notices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(error) = self.error.take() {
+            self.error_sequence = self.error_sequence.wrapping_add(1);
+            self.last_error = Some(error.clone());
             self.notices.push(style::Toast::error(error));
         }
         for notice in self.notices.drain(..) {
@@ -431,10 +433,10 @@ impl Editor {
                 }
             }
             ContextMenu::Track { id } => {
-                let count = self.project.tracks().len();
-                let position = timeline::display_tracks(&self.project)
-                    .into_iter()
-                    .position(|track| track.id() == id);
+                let tracks = timeline::display_tracks(&self.project);
+                let position = tracks.iter().position(|track| track.id() == id);
+                let (first, last) =
+                    position.map_or((0, 0), |row| super::clip_ops::display_section(&tracks, row));
                 let actions: Vec<(IconName, &str, bool, TrackMenuAction)> = vec![
                     (
                         IconName::AudioWaveform,
@@ -454,13 +456,13 @@ impl Editor {
                     (
                         IconName::ArrowUp,
                         "Move up",
-                        position.is_some_and(|index| index > 0),
+                        position.is_some_and(|index| index > first),
                         Box::new(move |this, _, cx| this.move_track_by(id, -1, cx)),
                     ),
                     (
                         IconName::ArrowDown,
                         "Move down",
-                        position.is_some_and(|index| index + 1 < count),
+                        position.is_some_and(|index| index < last),
                         Box::new(move |this, _, cx| this.move_track_by(id, 1, cx)),
                     ),
                 ];

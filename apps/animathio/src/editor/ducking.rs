@@ -8,6 +8,15 @@ use gpui_component::{
     slider::{Slider, SliderEvent, SliderState},
 };
 
+pub(super) fn duck_clip_label(project: &Project, track: &Track, clip: &Clip) -> String {
+    format!(
+        "{} / {} ({})",
+        clip_label(project, clip),
+        track.name(),
+        crate::timecode::format_timecode(clip.range.start, project.frame_rate())
+    )
+}
+
 pub(super) struct DuckReview {
     identity: Arc<()>,
     pub(super) params: DuckParams,
@@ -343,7 +352,9 @@ impl Editor {
                 clip_targets = clip_targets.child(
                     Button::new(("duck-music-clip", id.0 as usize))
                         .compact()
-                        .label(format!("Clip {}", id.0))
+                        .debug_selector(move || format!("duck-target-{}", id.0))
+                        .label(duck_clip_label(&self.project, track, clip))
+                        .tooltip(format!("Clip {}", id.0))
                         .icon(icons::icon(if on {
                             IconName::Check
                         } else {

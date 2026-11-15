@@ -33,6 +33,7 @@ impl Editor {
         self.fields = fields::FieldPool::default();
         self.waveforms.borrow_mut().clear();
         self.audio_inspector_track = None;
+        self.audio_advanced.clear();
         self.selected = None;
         self.selection.clear();
         self.selected_field = None;
@@ -57,6 +58,10 @@ impl Editor {
         let _ = self.clock.pause();
         self.reset_project_session();
         self.project = Project::new(self.project.frame_rate());
+        animathio_control::ExportPreset::Youtube1080p
+            .command(&self.project)
+            .and_then(|command| command.apply(&mut self.project).map_err(Into::into))
+            .expect("default 1080p canvas");
         if with_track {
             Command::AddTrack {
                 track: Track::new(TrackId(1), "Video 1"),

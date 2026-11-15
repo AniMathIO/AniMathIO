@@ -346,7 +346,7 @@ impl Editor {
         let color = cx.new(|_| marker.color);
         let editor = cx.entity();
         let rate = self.project.frame_rate();
-        window.open_dialog(cx, move |dialog, window, cx| {
+        super::dialogs::open_dialog(window, cx, move |dialog, window, cx| {
             if !focused.replace(true) {
                 let focus = name.read(cx).focus_handle(cx);
                 window.focus(&focus, cx);
@@ -355,28 +355,30 @@ impl Editor {
                 (name.clone(), note.clone(), color.clone(), editor.clone());
             let editor_delete = editor.clone();
             // The primary button and Enter share one save action.
-            let save_marker: super::dialogs::Submit = std::rc::Rc::new(move |cx: &mut gpui::App| {
-                let name = name_save.read(cx).value().trim().to_owned();
-                let note = note_save.read(cx).value().trim().to_owned();
-                let color = *color_save.read(cx);
-                editor_save.update(cx, |this, cx| {
-                    if let Some(mut updated) = this.project.marker(id).cloned() {
+            let save_marker: super::dialogs::Submit =
+                std::rc::Rc::new(move |cx: &mut gpui::App| {
+                    let name = name_save.read(cx).value().trim().to_owned();
+                    let note = note_save.read(cx).value().trim().to_owned();
+                    let color = *color_save.read(cx);
+                    editor_save.update(cx, |this, cx| {
+                        let Some(mut updated) = this.project.marker(id).cloned() else {
+                            return false;
+                        };
                         updated.name = name;
                         updated.note = note;
                         updated.color = color;
-                        if this.project.marker(id) != Some(&updated) {
-                            this.execute(
-                                &Command::UpdateMarker {
-                                    id,
-                                    marker: updated,
-                                },
-                                cx,
-                            );
+                        if this.project.marker(id) == Some(&updated) {
+                            return true;
                         }
-                    }
+                        this.try_execute(
+                            &Command::UpdateMarker {
+                                id,
+                                marker: updated,
+                            },
+                            cx,
+                        )
+                    })
                 });
-                true
-            });
             let enter_save = save_marker.clone();
             let current = *color.read(cx);
             let swatches = MarkerColor::ALL.into_iter().enumerate().map(|(i, option)| {
@@ -409,7 +411,10 @@ impl Editor {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(Input::new(&name))
+                        .child(super::dialogs::tagged_input(
+                            "marker-name",
+                            Input::new(&name),
+                        ))
                         .child(div().flex().gap_2().children(swatches))
                         .child(Input::new(&note)),
                 )
@@ -438,17 +443,14 @@ impl Editor {
                             style::primary_button("marker-save", cx)
                                 .label("Save")
                                 .on_click(move |_, window, cx| {
-                                    save_marker(cx);
-                                    window.close_dialog(cx);
+                                    if save_marker(cx) {
+                                        window.close_dialog(cx);
+                                    }
                                 }),
                         ),
                 );
             // Enter saves the marker, like the primary button.
-            super::dialogs::on_enter(dialog, move |window, cx| {
-                enter_save(cx);
-                window.close_dialog(cx);
-                true
-            })
+            super::dialogs::on_enter(dialog, move |_, cx| enter_save(cx))
         });
     }
 

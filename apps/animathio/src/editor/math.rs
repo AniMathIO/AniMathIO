@@ -168,7 +168,7 @@ impl Editor {
         let panel = cx
             .new(|cx| MathEditor::new(draft, editor, session, range, edit, true, size, window, cx));
         let width = (720. * style::ui_scale()).min(f32::from(window.viewport_size().width) - 32.);
-        window.open_dialog(cx, move |dialog, _, _| {
+        super::dialogs::open_dialog(window, cx, move |dialog, _, _| {
             dialog
                 .title(if edit.is_some() {
                     "Edit math object"
@@ -177,6 +177,13 @@ impl Editor {
                 })
                 .width(px(width))
                 .child(panel.clone())
+                .on_ok({
+                    let panel = panel.clone();
+                    move |_, window, cx| {
+                        panel.update(cx, |panel, cx| panel.apply(window, cx));
+                        false
+                    }
+                })
         });
     }
     pub(super) fn edit_math(
@@ -409,6 +416,7 @@ impl MathEditor {
             if spec.id == "source" {
                 let state = cx.new(|cx| {
                     TextareaState::new(window, cx)
+                        .submit_on_enter(dialog)
                         .auto_grow(3, 5)
                         .default_value(value)
                 });
@@ -427,19 +435,12 @@ impl MathEditor {
                 subscriptions.push(cx.subscribe_in(
                     &state,
                     window,
-                    move |this, state, event: &InputEvent, window, cx| {
-                        match event {
-                            InputEvent::Change => {
-                                this.draft
-                                    .fields
-                                    .insert(key.into(), state.read(cx).value().to_string());
-                                this.schedule_preview(cx);
-                            }
-                            // Enter submits the dialog from any single-line field.
-                            InputEvent::PressEnter { .. } if this.dialog => {
-                                this.apply(window, cx);
-                            }
-                            _ => {}
+                    move |this, state, event: &InputEvent, _window, cx| {
+                        if matches!(event, InputEvent::Change) {
+                            this.draft
+                                .fields
+                                .insert(key.into(), state.read(cx).value().to_string());
+                            this.schedule_preview(cx);
                         }
                     },
                 ));

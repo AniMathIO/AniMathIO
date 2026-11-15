@@ -104,7 +104,7 @@ impl Editor {
         });
         let editor = cx.entity();
         let engine = animathio_transcribe::engine_available();
-        window.open_dialog(cx, move |dialog, window, cx| {
+        super::dialogs::open_dialog(window, cx, move |dialog, window, cx| {
             let look = editor.read(cx).caption_look.clone();
             let (editor, model, language, range) = (
                 editor.clone(),
@@ -147,27 +147,20 @@ impl Editor {
                     editor.clone(),
                 );
                 std::rc::Rc::new(move |cx: &mut gpui::App| {
+                    if !engine {
+                        return false;
+                    }
                     let size = ModelSize::ALL
                         .get(model.read(cx).selected_index(cx).map_or(1, |i| i.row))
                         .copied()
                         .unwrap_or_default();
                     let code = LANGUAGES
-                        .get(
-                            language
-                                .read(cx)
-                                .selected_index(cx)
-                                .map_or(0, |i| i.row),
-                        )
+                        .get(language.read(cx).selected_index(cx).map_or(0, |i| i.row))
                         .map_or("auto", |(code, _)| code);
-                    let choice = range
-                        .read(cx)
-                        .selected_value()
-                        .cloned()
-                        .unwrap_or_default();
+                    let choice = range.read(cx).selected_value().cloned().unwrap_or_default();
                     editor.update(cx, |this, cx| {
-                        this.start_subtitles_from_dialog(size, code, &choice, cx);
-                    });
-                    true
+                        this.start_subtitles_from_dialog(size, code, &choice, cx)
+                    })
                 })
             };
             let dialog = dialog
@@ -241,18 +234,15 @@ impl Editor {
                                 .on_click({
                                     let generate = generate.clone();
                                     move |_, window, cx| {
-                                        generate(cx);
-                                        window.close_dialog(cx);
+                                        if generate(cx) {
+                                            window.close_dialog(cx);
+                                        }
                                     }
                                 }),
                         ),
                 );
             // Enter generates, like the primary button.
-            super::dialogs::on_enter(dialog, move |window, cx| {
-                generate(cx);
-                window.close_dialog(cx);
-                true
-            })
+            super::dialogs::on_enter(dialog, move |_, cx| generate(cx))
         });
     }
 
@@ -262,7 +252,7 @@ impl Editor {
         language: &str,
         range_choice: &str,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let mut params = SubtitleGenerateParams {
             model: size.info().name.to_owned(),
             language: (language != "auto").then(|| language.to_owned()),
@@ -288,10 +278,14 @@ impl Editor {
                 .find(|(code, _)| *code == language)
                 .map_or("auto-detect", |(_, name)| name)
         );
-        if let Err(error) = self.start_subtitle_job(params, label, None, cx) {
-            self.error = Some(error);
+        match self.start_subtitle_job(params, label, None, cx) {
+            Ok(()) => true,
+            Err(error) => {
+                self.error = Some(error);
+                cx.notify();
+                false
+            }
         }
-        cx.notify();
     }
 
     /// Start the worker. `reply` is a control client waiting for the result.

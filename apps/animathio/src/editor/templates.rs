@@ -257,7 +257,7 @@ impl Editor {
         let media = cx.new(|_| FillDraft::default());
         let editor = cx.entity();
         let template = Arc::new(template);
-        window.open_dialog(cx, move |dialog, _, cx| {
+        super::dialogs::open_dialog(window, cx, move |dialog, _, cx| {
             // The Apply button and Enter share one action.
             let apply_fill: super::dialogs::Submit = {
                 let (rows, media, editor, template) = (
@@ -279,14 +279,12 @@ impl Editor {
                     if text.is_empty() && media.is_empty() {
                         return true;
                     }
-                    editor.update(cx, |this, cx| {
-                        match template.fill(&text, &media) {
-                            Ok(fill) => this.apply_template_fill(fill, cx),
-                            Err(error) => {
-                                this.error = Some(error.to_string());
-                                cx.notify();
-                                false
-                            }
+                    editor.update(cx, |this, cx| match template.fill(&text, &media) {
+                        Ok(fill) => this.apply_template_fill(fill, cx),
+                        Err(error) => {
+                            this.error = Some(error.to_string());
+                            cx.notify();
+                            false
                         }
                     })
                 })
@@ -458,12 +456,7 @@ impl Editor {
                         ),
                 );
             // Enter applies the template, like the primary button.
-            super::dialogs::on_enter(dialog, move |window, cx| {
-                if apply_fill(cx) {
-                    window.close_dialog(cx);
-                }
-                true
-            })
+            super::dialogs::on_enter(dialog, move |_, cx| apply_fill(cx))
         });
     }
 
@@ -479,7 +472,7 @@ impl Editor {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Template name"));
         let category = cx.new(|cx| InputState::new(window, cx).default_value("My templates"));
         let editor = cx.entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        super::dialogs::open_dialog(window, cx, move |dialog, _, _| {
             let n = name.clone();
             let c = category.clone();
             let editor = editor.clone();
@@ -533,7 +526,10 @@ impl Editor {
             };
             let dialog = dialog
                 .title("Save as template")
-                .child(Input::new(&name))
+                .child(super::dialogs::tagged_input(
+                    "template-name",
+                    Input::new(&name),
+                ))
                 .child(Input::new(&category))
                 .child("Selected clips become labelled placeholders.")
                 .child(
@@ -549,12 +545,7 @@ impl Editor {
                         }),
                 );
             // Enter saves the template.
-            super::dialogs::on_enter(dialog, move |window, cx| {
-                if save_template(cx) {
-                    window.close_dialog(cx);
-                }
-                true
-            })
+            super::dialogs::on_enter(dialog, move |_, cx| save_template(cx))
         });
     }
 }
