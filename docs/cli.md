@@ -33,6 +33,7 @@ Commands:
   animations      List or apply animation presets from the loaded animation-preset plugins
   transcribe      Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
   autocut         Propose or apply silence and optional filler cuts as one ripple edit
+  learn-noise     Learn a denoise profile from a noise-only timeline interval
   duck            Lower music under speech with gain keyframes, as one undoable edit
   markers         List, add or remove timeline markers
   beats           Detect tempo and beats offline; optionally add markers at the beats
@@ -700,7 +701,7 @@ animathio-cli duck talk.amio --voice-track 1 --music-track 2 --depth-db 15 --app
 ```text
 Lower music under speech with gain keyframes, as one undoable edit
 
-Usage: animathio-cli duck [OPTIONS] --music-track <MUSIC_TRACKS> <PROJECT>
+Usage: animathio-cli duck [OPTIONS] <PROJECT>
 
 Arguments:
   <PROJECT>  Input project archive or project.json
@@ -708,7 +709,8 @@ Arguments:
 Options:
       --voice-clip <VOICE_CLIPS>       Voice clip id; may be repeated (a video clip resolves its linked audio)
       --voice-track <VOICE_TRACKS>     Voice track id; may be repeated
-      --music-track <MUSIC_TRACKS>     Music track id to duck; may be repeated, at least one is required
+      --music-track <MUSIC_TRACKS>     Music track id to duck; may be repeated
+      --music-clip <MUSIC_CLIPS>       Individual music audio clip id to duck; may be repeated
       --depth-db <DEPTH_DB>            How far the music drops under speech, in dB [default: 12]
       --attack <ATTACK>                Ramp down, finishing when the voice starts (seconds or Nticks) [default: 0.3]
       --release <RELEASE>              Ramp up, starting when the voice ends (seconds or Nticks) [default: 0.5]
@@ -853,3 +855,29 @@ Kinds: `latex`, `text`, `point`, `line`, `vector`, `polygon`, `plot`, `circle`,
 Write on uses the animation plugin's typewriter entrance preset and is available
 for LaTeX. Parametric curves are deferred; plots currently use the graph plugin's
 function-of-X expression language.
+
+## `learn-noise`
+
+`animathio-cli learn-noise input.amio --clip 2 --effect 88 --from 0 --to 0.5 -o learned.amio`
+learns a persistent profile from noise only. The audio clip must already have that denoise
+instance. The output must be a new path. The interval is in timeline time, lies inside the
+clip, and is limited to 30 seconds.
+
+<!-- help:learn-noise -->
+```text
+Learn a denoise profile from a noise-only timeline interval
+
+Usage: animathio-cli learn-noise --clip <CLIP> --effect <EFFECT> --from <FROM> --to <TO> --output <OUTPUT> <PROJECT>
+
+Arguments:
+  <PROJECT>  Input archive or project JSON
+
+Options:
+      --clip <CLIP>      Audio clip id
+      --effect <EFFECT>  Existing denoise instance id
+      --from <FROM>      Inclusive timeline start (seconds or Nticks)
+      --to <TO>          Exclusive timeline end (seconds or Nticks)
+  -o, --output <OUTPUT>  Output archive (must not exist)
+  -h, --help             Print help
+```
+<!-- /help:learn-noise -->

@@ -317,7 +317,7 @@ impl Editor {
                 })),
         );
         panel = chips(panel, "Music tracks to duck", true, cx);
-        let mut clips = div().flex().flex_wrap().gap_1();
+        let mut clip_targets = div().flex().flex_wrap().gap_1();
         for track in self.project.tracks() {
             for clip in track
                 .clips()
@@ -326,7 +326,7 @@ impl Editor {
             {
                 let id = clip.id;
                 let on = review.params.music_clips.contains(&id);
-                clips = clips.child(
+                clip_targets = clip_targets.child(
                     Button::new(("duck-music-clip", id.0 as usize))
                         .compact()
                         .label(format!("Clip {}", id.0))
@@ -354,7 +354,7 @@ impl Editor {
                     .text_size(crate::style::type_size::XS)
                     .child("Music clips to duck"),
             )
-            .child(clips);
+            .child(clip_targets);
         let labels = [
             format!("Duck depth: -{:.1} dB", review.params.depth_db),
             format!("Attack: {}", timecode(review.params.attack)),

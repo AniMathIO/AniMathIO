@@ -429,6 +429,42 @@ impl Editor {
     }
 }
 
+impl Editor {
+    pub(super) fn learn_noise(&mut self, cx: &mut Context<Self>) {
+        let result = (|| {
+            let id = self
+                .selected
+                .ok_or_else(|| "Select an audio clip with a denoise effect".to_owned())?;
+            let clip = self
+                .find_clip(id)
+                .ok_or_else(|| "Clip missing".to_owned())?;
+            let effect = clip
+                .audio_effects
+                .iter()
+                .find(|e| e.plugin == "org.animathio.audio-basic" && e.effect == "denoise")
+                .ok_or_else(|| "Add a denoise effect first".to_owned())?
+                .id;
+            let range = self
+                .marks
+                .range(animathio_export::duration(&self.project).0)
+                .ok_or_else(|| {
+                    "Set In and Out around noise only (at most 30 seconds)".to_owned()
+                })?;
+            animathio_control::learn_noise_command(&self.project, &self.assets, id, effect, range)
+                .map_err(|e| e.to_string())
+        })();
+        match result {
+            Ok(command) => {
+                self.execute(&command, cx);
+            }
+            Err(error) => {
+                self.error = Some(error);
+                cx.notify();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -529,41 +565,5 @@ mod tests {
         assert!(second.bypassed && second.plugin_missing);
         assert_eq!(second.params.len(), 1);
         assert_eq!(second.params[0].name, "wet");
-    }
-}
-
-impl Editor {
-    pub(super) fn learn_noise(&mut self, cx: &mut Context<Self>) {
-        let result = (|| {
-            let id = self
-                .selected
-                .ok_or_else(|| "Select an audio clip with a denoise effect".to_owned())?;
-            let clip = self
-                .find_clip(id)
-                .ok_or_else(|| "Clip missing".to_owned())?;
-            let effect = clip
-                .audio_effects
-                .iter()
-                .find(|e| e.plugin == "org.animathio.audio-basic" && e.effect == "denoise")
-                .ok_or_else(|| "Add a denoise effect first".to_owned())?
-                .id;
-            let range = self
-                .marks
-                .range(animathio_export::duration(&self.project).0)
-                .ok_or_else(|| {
-                    "Set In and Out around noise only (at most 30 seconds)".to_owned()
-                })?;
-            animathio_control::learn_noise_command(&self.project, &self.assets, id, effect, range)
-                .map_err(|e| e.to_string())
-        })();
-        match result {
-            Ok(command) => {
-                self.execute(&command, cx);
-            }
-            Err(error) => {
-                self.error = Some(error);
-                cx.notify();
-            }
-        }
     }
 }
