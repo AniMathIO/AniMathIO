@@ -866,3 +866,43 @@ fn slide_tool(cx: &mut TestAppContext) {
 fn rolling_tool(cx: &mut TestAppContext) {
     additional_tool_scenario(cx, "n", Tool::Rolling);
 }
+#[gpui::test]
+fn learn_noise_in_out_apply_and_undo(cx: &mut TestAppContext) {
+    let (mut project, assets) = voice_and_music();
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(MUSIC_CLIP),
+        index: 0,
+        effect: EffectInstance {
+            id: EffectId(777),
+            plugin: "org.animathio.audio-basic".into(),
+            effect: "denoise".into(),
+            params: BTreeMap::new(),
+            bypass: false,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.select_only(MUSIC_CLIP, cx);
+        e.marks.set_in(Time(0));
+        e.marks.set_out(Time(100 * MS));
+    });
+    ui.dispatch(actions::LearnNoise);
+    ui.read(|e| {
+        assert_eq!(
+            e.project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .find(|c| c.id == MUSIC_CLIP)
+                .unwrap()
+                .audio_effects[0]
+                .params["noise_profile"],
+            1.0
+        );
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}

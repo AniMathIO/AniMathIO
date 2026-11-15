@@ -441,11 +441,9 @@ fn clip_targets_union_with_tracks_and_undo_once() {
     history.undo(&mut project).unwrap();
     assert_eq!(project, before);
     params.music_clips = vec![ClipId(3)];
-    assert!(
-        propose_duck(&project, &assets, &params)
-            .unwrap()
-            .clips
-            .is_empty()
+    assert_eq!(
+        propose_duck(&project, &assets, &params).unwrap().clips,
+        Vec::new()
     );
     params.music_clips = vec![ClipId(2)];
     params.music_tracks = vec![TrackId(2)];

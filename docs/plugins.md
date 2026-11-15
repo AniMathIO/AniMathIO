@@ -1043,3 +1043,11 @@ The [showcase builders](../examples/showcase/README.md) exercise this with a uni
 circle, independent function-chart axes and a subdued grid.
 
 LaTeX 1.2.1 fills revealed contours together so glyph counters retain their holes.
+
+
+Audio-basic 1.2.0 adds optional denoise parameters without changing ABI 1.1 or the project
+schema: `noise_profile` enables a learned profile (default 0 keeps adaptive tracking);
+`noise_0` through `noise_15` hold nonnegative power densities in 500 Hz bands. The last
+band extends to Nyquist. Profiles come from a noise-only selection via the shared control
+analysis. They are project parameters, survive bounded mixer warm-up and save/reload,
+and apply at any output sample rate. Existing projects keep adaptive behaviour.

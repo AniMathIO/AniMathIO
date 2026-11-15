@@ -420,7 +420,7 @@ pub fn propose_duck(
     ducked.sort_by_key(|r| r.start);
     let mut clips = Vec::new();
     let mut existing = Vec::new();
-    for track in project.tracks().iter() {
+    for track in project.tracks() {
         for clip in track.clips().values().filter(|c| {
             matches!(c.kind, ClipKind::Audio(_))
                 && (params.music_tracks.contains(&track.id()) || params.music_clips.contains(&c.id))

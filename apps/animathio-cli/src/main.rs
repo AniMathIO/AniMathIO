@@ -178,12 +178,12 @@ enum Action {
         #[command(flatten)]
         args: autocut::AutocutArgs,
     },
-    /// Lower music under speech with gain keyframes, as one undoable edit.
     /// Learn a denoise profile from a noise-only timeline interval.
     LearnNoise {
         #[command(flatten)]
         args: noise::NoiseArgs,
     },
+    /// Lower music under speech with gain keyframes, as one undoable edit.
     Duck {
         #[command(flatten)]
         args: duck::DuckArgs,

@@ -741,7 +741,7 @@ impl Processor for VoiceCleanup {
 }
 
 fn build(effect: &Resolved<'_>, rate: f64, channels: usize) -> Box<dyn Processor> {
-    let v = |id| effect.get(id);
+    let v = |id: &str| effect.get(id);
     match effect.def.id {
         "gain" => Box::new(Gain(db_to_lin(v("gain_db")))),
         "eq3" => Box::new(Eq3 {

@@ -147,7 +147,20 @@ fn mcp_auto_duck_dry_run_apply_and_undo() {
     use std::process::Stdio;
     let dir = tempdir().unwrap();
     let input = dir.path().join("input.amio");
-    let (project, assets) = source();
+    let (mut project, assets) = source();
+    Command::AddAudioEffect {
+        chain: animathio_core::AudioChain::Clip(ClipId(2)),
+        index: 0,
+        effect: animathio_core::EffectInstance {
+            id: animathio_core::EffectId(88),
+            plugin: "org.animathio.audio-basic".into(),
+            effect: "denoise".into(),
+            params: BTreeMap::new(),
+            bypass: false,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
     save_amio(&input, &project, &assets).unwrap();
     let mut child = Process::new(env!("CARGO_BIN_EXE_animathio-cli"))
         .args(["mcp", "--project"])
@@ -186,6 +199,13 @@ fn mcp_auto_duck_dry_run_apply_and_undo() {
             .unwrap()
     };
     let original = tool("get_project_state", json!({}))["project"].clone();
+    tool(
+        "learn_noise",
+        json!({"clip":2,"effect":88,"from_ms":0,"to_ms":100}),
+    );
+    assert_ne!(tool("get_project_state", json!({}))["project"], original);
+    tool("undo", json!({}));
+    assert_eq!(tool("get_project_state", json!({}))["project"], original);
     let proposal = tool(
         "auto_duck",
         json!({"voice_tracks":[1],"music_clips":[2],"dry_run":true,"depth_db":15}),
@@ -200,4 +220,46 @@ fn mcp_auto_duck_dry_run_apply_and_undo() {
     assert_eq!(tool("undo", json!({}))["undone"], false);
     child.kill().unwrap();
     child.wait().unwrap();
+}
+
+#[test]
+fn learn_noise_cli_persists_profile() {
+    use animathio_core::{AudioChain, EffectId, EffectInstance};
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("noise.amio");
+    let output = dir.path().join("learned.amio");
+    let (mut project, assets) = source();
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(ClipId(2)),
+        index: 0,
+        effect: EffectInstance {
+            id: EffectId(88),
+            plugin: "org.animathio.audio-basic".into(),
+            effect: "denoise".into(),
+            params: BTreeMap::new(),
+            bypass: false,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    save_amio(&input, &project, &assets).unwrap();
+    let result = Process::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .arg("learn-noise")
+        .arg(&input)
+        .args([
+            "--clip", "2", "--effect", "88", "--from", "0", "--to", "0.1", "-o",
+        ])
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let bundle = read_amio(fs::File::open(&output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(
+        bundle.project.tracks()[1].clips()[&ClipId(2)].audio_effects[0].params["noise_profile"],
+        1.0
+    );
 }

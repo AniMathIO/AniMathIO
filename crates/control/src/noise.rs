@@ -41,8 +41,15 @@ pub fn learn_noise_command(
             "noise selection must lie inside the clip and be at most 30 seconds",
         ));
     }
+    // Clip effects run before track gain. Analyse at the same level as their input.
+    let mut analysis = project.clone();
+    Command::SetTrackGain {
+        id: track.id(),
+        gain: 1.0,
+    }
+    .apply(&mut analysis)?;
     let (samples, _) = mix_selection(
-        project,
+        &analysis,
         assets,
         Selection {
             clip: Some(clip),
@@ -73,6 +80,7 @@ pub fn learn_noise_command(
 
 /// Deterministic periodic sqrt-Hann periodogram at 16 kHz, averaged over complete frames.
 #[allow(clippy::cast_precision_loss)]
+#[must_use]
 pub fn noise_bands(samples: &[f32]) -> Option<[f64; 16]> {
     let mut bands = [0.0; 16];
     let mut counts = [0_u32; 16];

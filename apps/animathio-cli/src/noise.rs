@@ -6,13 +6,18 @@ use std::path::PathBuf;
 
 #[derive(Args)]
 pub(crate) struct NoiseArgs {
+    /// Input archive or project JSON.
     project: PathBuf,
+    /// Audio clip id.
     #[arg(long)]
     clip: u64,
+    /// Existing denoise instance id.
     #[arg(long)]
     effect: u64,
+    /// Inclusive timeline start (seconds or Nticks).
     #[arg(long, value_parser = parse_time)]
     from: Time,
+    /// Exclusive timeline end (seconds or Nticks).
     #[arg(long, value_parser = parse_time)]
     to: Time,
     /// Output archive (must not exist).
