@@ -77,23 +77,36 @@ fn main() {
             })
             .detach();
 
-            let display_bounds = cx.primary_display().map_or(
-                Bounds {
+            // Restore on the display the saved geometry overlaps (a secondary monitor's
+            // position is valid); when none overlaps, or on the first run, the primary.
+            let displays: Vec<Bounds<Pixels>> = cx
+                .displays()
+                .iter()
+                .map(|display| display.visible_bounds())
+                .collect();
+            let saved = window_state::WindowState::load();
+            let display_bounds = saved
+                .as_ref()
+                .and_then(|state| {
+                    window_state::largest_overlap(state.bounds(), &displays)
+                        .map(|index| displays[index])
+                })
+                .or_else(|| cx.primary_display().map(|display| display.visible_bounds()))
+                .unwrap_or(Bounds {
                     origin: point(px(0.), px(0.)),
                     size: size(px(2560.), px(1440.)),
-                },
-                |display| display.bounds(),
-            );
-            let window_bounds = window_state::initial_window_bounds(
-                window_state::WindowState::load(),
-                display_bounds,
-                window_state::MIN_WINDOW_SIZE,
-            );
+                });
+            // The native minimum never exceeds the selected display's usable area, so a
+            // small display still gets a usable window (smaller than 1280x720 there).
+            let min_size =
+                window_state::min_size_for_display(window_state::MIN_WINDOW_SIZE, display_bounds);
+            let window_bounds =
+                window_state::initial_window_bounds(saved, display_bounds, min_size);
             editor::actions::init(cx);
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(window_bounds),
-                    window_min_size: Some(window_state::MIN_WINDOW_SIZE),
+                    window_min_size: Some(min_size),
                     window_decorations: Some(WindowDecorations::Client),
                     ..gpui_component::TitleBar::window_options()
                 },

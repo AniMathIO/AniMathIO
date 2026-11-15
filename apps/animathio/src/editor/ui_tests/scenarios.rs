@@ -53,21 +53,33 @@ fn sample_project_opens_on_the_headless_environment(cx: &mut TestAppContext) {
     });
 }
 
-/// The window state round-trips through the headless environment's config directory.
+/// The window state is tracked from real window geometry, debounced-saves through the
+/// headless environment's config directory, and reloads with the tracked geometry.
 #[gpui::test]
 fn window_state_persists_through_the_config_dir(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
-    ui.update(|_editor, window, _cx| {
-        crate::window_state::WindowState::persist(window);
-    });
+    // The editor observed the window's bounds when it was built.
+    let initial = ui.read(|editor| editor.window_tracker.state());
+    assert!(
+        initial.width > 0. && initial.height > 0.,
+        "observed geometry"
+    );
+    assert!(
+        !initial.maximized,
+        "the headless platform window is windowed"
+    );
+
     let path = crate::editor_env::config_file(crate::window_state::FILE_NAME)
         .expect("headless environment provides a config dir");
-    let state = crate::window_state::WindowState::load().expect("the persisted state reloads");
-    ui.update(|_editor, window, _cx| {
-        let captured = crate::window_state::WindowState::from_window(window);
-        assert_eq!(captured, state, "capturing twice gives the same geometry");
-    });
+    // A geometry change schedules the debounced save; the file only appears once the
+    // debounce settles.
+    ui.update(|editor, _window, cx| editor.schedule_window_state_save(cx));
+    assert!(!path.exists(), "the debounced save has not fired yet");
+    ui.advance_clock(crate::window_state::SAVE_DEBOUNCE);
+    let saved =
+        crate::window_state::WindowState::load().expect("the debounced save wrote the state");
+    assert_eq!(saved, initial, "the tracked geometry is what lands on disk");
     std::fs::remove_file(&path).ok();
 }
 

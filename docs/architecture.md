@@ -141,8 +141,9 @@ dialogs use gpui-component forms; export works on an immutable snapshot, so sele
 a delivery preset does not change the open project. `control::ExportPreset` is the
 shared table for editor, CLI and MCP. Preferences persist under the application
 config directory (`preferences.json`, renderer selection in `preview.json`), the
-main-window geometry (`window-state.json`, restored clamped to the current
-display) and never enter project serialization.
+main-window geometry (`window-state.json`, written atomically from a debounced
+save, restored on the display its saved bounds overlap and clamped to that
+display's usable area) and never enter project serialization.
 
 The `actions` module registers GPUI actions and a contextual keymap (`Editor`,
 `Timeline`, `Viewer`, `Inspector`, `MediaPool`). `secondary-` bindings are resolved
