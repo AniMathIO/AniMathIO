@@ -5,8 +5,8 @@
 use super::*;
 use crate::style::{color, hex};
 use animathio_control::{
-    CaptionPosition, CaptionPreset, CaptionStyleParams, SubtitleStyleParams,
-    caption_style_command, caption_styles, clip_caption_style,
+    CaptionPosition, CaptionPreset, CaptionStyleParams, SubtitleStyleParams, caption_style_command,
+    caption_styles, clip_caption_style,
 };
 use gpui_component::WindowExt;
 use gpui_component::form::Form;
@@ -308,11 +308,16 @@ pub(super) fn caption_style_picker(
         )
 }
 
+fn caption_library() -> std::path::PathBuf {
+    crate::editor_env::config_file("caption-presets")
+        .unwrap_or_else(|| crate::editor_env::plugin_cache_dir().join("caption-presets"))
+}
+
 impl Editor {
     /// Refresh the named-preset list from the user data directory.
     pub(super) fn refresh_caption_presets(&mut self) {
         self.caption_presets_loaded = true;
-        match animathio_control::caption_presets() {
+        match animathio_control::caption_presets_at(&caption_library()) {
             Ok(presets) => self.caption_presets = presets,
             Err(error) => self.error = Some(error.to_string()),
         }
@@ -326,7 +331,7 @@ impl Editor {
 
     /// Delete a saved preset and refresh the list.
     pub(super) fn remove_caption_preset(&mut self, id: &str, cx: &mut Context<Self>) {
-        match animathio_control::delete_caption_preset(id) {
+        match animathio_control::delete_caption_preset_at(id, &caption_library()) {
             Ok(()) => self.refresh_caption_presets(),
             Err(error) => self.error = Some(error.to_string()),
         }
@@ -335,26 +340,27 @@ impl Editor {
 
     /// Ask for a name and save the current look under it.
     pub(super) fn open_save_caption_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure_caption_presets();
         let name = super::dialogs::input("", window, cx);
         let editor = cx.entity();
         window.open_dialog(cx, move |dialog, _, cx| {
             let name_submit = name.clone();
+            let editor = editor.clone();
             dialog
                 .title(super::dialogs::heading(
                     IconName::Bookmark,
                     "Save caption preset",
                 ))
-                .child(
-                    Form::new().child(super::dialogs::field(
-                        "Preset name",
-                        Input::new(&name),
-                    )),
-                )
+                .child(Form::new().child(super::dialogs::field("Preset name", Input::new(&name))))
                 .footer(super::dialogs::footer("Save", cx, move |_, window, cx| {
                     let value = name_submit.read(cx).value().trim().to_owned();
-                    let saved = editor.update(cx, |this, cx| {
+                    let saved = editor.update(cx, |this, _cx| {
                         let look = this.caption_look.clone();
-                        match animathio_control::save_caption_preset(&value, &look) {
+                        match animathio_control::save_caption_preset_at(
+                            &value,
+                            &look,
+                            &caption_library(),
+                        ) {
                             Ok(_) => {
                                 this.refresh_caption_presets();
                                 true

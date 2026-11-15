@@ -1,3 +1,4 @@
+#![allow(clippy::cast_sign_loss)]
 //! Audio-effect chains in the mixer, against a mock processor: signal flow, bypass,
 //! determinism across arbitrary mix ranges, the block cache and error handling.
 #![allow(
@@ -584,7 +585,10 @@ fn impulse_project(frames: usize, impulses: &[usize]) -> (Project, Mixer, i64) {
             clip: Clip::new(
                 ClipId(0),
                 ClipKind::Audio(id.clone()),
-                range(offset * tick, (offset + frames as i64) * tick),
+                range(
+                    offset * tick,
+                    (offset + i64::try_from(frames).unwrap()) * tick,
+                ),
             ),
         },
     ] {
@@ -593,7 +597,7 @@ fn impulse_project(frames: usize, impulses: &[usize]) -> (Project, Mixer, i64) {
     let mut pool = AudioPool::default();
     pool.insert(id, &pcm).unwrap();
     // Hear past the clip end, so a lost tail shows up as a missing impulse.
-    let end = offset + frames as i64 + 4 * i64::from(RATE) / 1000;
+    let end = offset + i64::try_from(frames).unwrap() + 4 * i64::from(RATE) / 1000;
     (project, pool.prepare(RATE, 1).unwrap(), end)
 }
 
@@ -617,7 +621,7 @@ fn declared_latency_keeps_impulses_aligned_and_the_tail_audible() {
     let raw = mixed(&mixer, &project, 0, end * tick);
     assert!(impulse_at(&raw, 333 + 700 + 512));
     assert!(!impulse_at(&raw, 333 + 700));
-    assert!(!raw[333 + 4999..333 + 5000].iter().any(|&x| x == 1.0));
+    assert!(!raw[333 + 4999..333 + 5000].contains(&1.0));
 
     // Declared: the whole mix is bit-identical to the dry one (alignment and tail).
     Command::SetAudioEffectParam {

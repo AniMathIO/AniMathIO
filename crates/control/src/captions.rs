@@ -10,8 +10,7 @@
 
 use crate::{ControlError, TitleAddParams, subtitles::SUBTITLE_TRACK, title_preset_command};
 use animathio_core::{
-    AssetId, Clip, ClipId, ClipKind, Command, ParamValue, Project, Time, TimeRange, Track,
-    TrackId,
+    AssetId, Clip, ClipId, ClipKind, Command, ParamValue, Project, Time, TimeRange, Track, TrackId,
 };
 use animathio_transcribe::Cue;
 use serde::{Deserialize, Serialize};
@@ -430,6 +429,7 @@ pub fn clip_caption_style(clip: &Clip) -> Option<String> {
 /// Exact unchanged words retain their timings (longest common subsequence); new words
 /// share the available interval between their neighbours, weighted by character count.
 /// Returns `None` for ordinary text clips.
+#[must_use]
 pub fn caption_text_edit_command(clip: &Clip, text: &str) -> Option<Command> {
     if !is_caption_text(clip) {
         return None;
@@ -538,9 +538,13 @@ fn resync_words(old: &str, new: &str, stored: &str, duration: i64) -> String {
         let total: usize = new[start..end].iter().map(|w| w.chars().count()).sum();
         let mut done = 0;
         for i in start..end {
-            let a = from + ((to - from) as i128 * done as i128 / total as i128) as i64;
+            let a = from
+                + i64::try_from(i128::from(to - from) * done as i128 / total as i128)
+                    .expect("fraction is bounded by the timing interval");
             done += new[i].chars().count();
-            let b = from + ((to - from) as i128 * done as i128 / total as i128) as i64;
+            let b = from
+                + i64::try_from(i128::from(to - from) * done as i128 / total as i128)
+                    .expect("fraction is bounded by the timing interval");
             result[i] = Some((a, b));
         }
         start = end;
@@ -824,7 +828,11 @@ pub fn caption_presets() -> Result<Vec<CaptionPreset>, ControlError> {
     caption_presets_at(&caption_preset_dir()?)
 }
 
-fn caption_presets_at(directory: &std::path::Path) -> Result<Vec<CaptionPreset>, ControlError> {
+/// Read presets from an explicitly selected library directory.
+///
+/// # Errors
+/// Returns filesystem errors while reading the library.
+pub fn caption_presets_at(directory: &std::path::Path) -> Result<Vec<CaptionPreset>, ControlError> {
     let mut presets = Vec::new();
     if let Ok(entries) = std::fs::read_dir(directory) {
         for entry in entries.flatten() {
@@ -857,7 +865,11 @@ pub fn save_caption_preset(
     save_caption_preset_at(name, params, &directory)
 }
 
-fn save_caption_preset_at(
+/// Save a named look in an explicitly selected library directory.
+///
+/// # Errors
+/// Returns an error for invalid names or failed filesystem operations.
+pub fn save_caption_preset_at(
     name: &str,
     params: &CaptionStyleParams,
     directory: &std::path::Path,
@@ -872,12 +884,10 @@ fn save_caption_preset_at(
         ));
     }
     std::fs::create_dir_all(directory)?;
-    // One library entry per name: drop an earlier preset of the same name.
-    for preset in caption_presets_at(directory).unwrap_or_default() {
-        if preset.name == name {
-            let _ = std::fs::remove_file(directory.join(format!("{}.json", preset.id)));
-        }
-    }
+    let previous: Vec<_> = caption_presets_at(directory)?
+        .into_iter()
+        .filter(|preset| preset.name == name)
+        .collect();
     let mut random = [0_u8; 16];
     getrandom::fill(&mut random).map_err(|e| ControlError::InvalidParams(e.to_string()))?;
     let id = format!("user-{}", &AssetId::of(&random).as_str()[..32]);
@@ -890,6 +900,10 @@ fn save_caption_preset_at(
     let text = serde_json::to_string_pretty(&preset)
         .map_err(|e| ControlError::InvalidParams(e.to_string()))?;
     std::fs::write(&path, text)?;
+    // Preserve the previous look if writing the replacement fails.
+    for preset in previous {
+        std::fs::remove_file(directory.join(format!("{}.json", preset.id)))?;
+    }
     Ok(id)
 }
 
@@ -898,12 +912,20 @@ fn save_caption_preset_at(
 /// # Errors
 /// [`ControlError::InvalidParams`] for a foreign id or a missing preset.
 pub fn delete_caption_preset(id: &str) -> Result<(), ControlError> {
+    delete_caption_preset_at(id, &caption_preset_dir()?)
+}
+
+/// Delete a preset from an explicitly selected library directory.
+///
+/// # Errors
+/// Returns an error for an invalid identity or a failed file removal.
+pub fn delete_caption_preset_at(id: &str, directory: &std::path::Path) -> Result<(), ControlError> {
     if !valid_preset_id(id) {
         return Err(ControlError::InvalidParams(
             "not a caption preset identity".into(),
         ));
     }
-    let path = caption_preset_dir()?.join(format!("{id}.json"));
+    let path = directory.join(format!("{id}.json"));
     if !path.exists() {
         return Err(ControlError::InvalidParams("no such caption preset".into()));
     }
@@ -941,8 +963,7 @@ mod preset_tests {
 
         // Saving the same name again replaces the entry instead of duplicating it.
         let replacement = CaptionStyleParams::named("pop");
-        let id2 =
-            save_caption_preset_at("  My Look  ", &replacement, directory.path()).unwrap();
+        let id2 = save_caption_preset_at("  My Look  ", &replacement, directory.path()).unwrap();
         assert_ne!(id, id2);
         let listed = caption_presets_at(directory.path()).unwrap();
         assert_eq!(listed.len(), 1);
@@ -953,11 +974,16 @@ mod preset_tests {
         save_caption_preset_at("A first", &look, directory.path()).unwrap();
         std::fs::write(directory.path().join("broken.json"), "{ not json").unwrap();
         let listed = caption_presets_at(directory.path()).unwrap();
-        assert_eq!
-            (listed.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["A first", "My Look"]);
+        assert_eq!(
+            listed.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["A first", "My Look"]
+        );
 
         for bad in ["", "  ", "a/b", "\u{7}", &"x".repeat(49)] {
-            assert!(save_caption_preset_at(bad, &look, directory.path()).is_err(), "{bad:?}");
+            assert!(
+                save_caption_preset_at(bad, &look, directory.path()).is_err(),
+                "{bad:?}"
+            );
         }
     }
 }
