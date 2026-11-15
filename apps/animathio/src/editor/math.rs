@@ -1,6 +1,6 @@
 //! Math library and a reusable, draft-based object editor. Preview never mutates the project.
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{self, color, hex};
 use animathio_control::{
     LATEX_SNIPPETS, LATEX_TEMPLATES, MathObjectDraft, MathObjectKind, math_object_command,
     math_object_draft, math_object_range,
@@ -167,6 +167,7 @@ impl Editor {
         let size = project_size(&self.project);
         let panel = cx
             .new(|cx| MathEditor::new(draft, editor, session, range, edit, true, size, window, cx));
+        let width = (720. * style::ui_scale()).min(f32::from(window.viewport_size().width) - 32.);
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
                 .title(if edit.is_some() {
@@ -174,7 +175,7 @@ impl Editor {
                 } else {
                     "Add math object"
                 })
-                .width(px(720.))
+                .width(px(width))
                 .child(panel.clone())
         });
     }
@@ -232,7 +233,7 @@ impl Editor {
         let mut cards = div().flex().flex_wrap().gap_2().p_2().child(
             div()
                 .w_full()
-                .text_size(px(11.))
+                .text_size(style::type_size::XS)
                 .text_color(hex(color::TEXT_SECONDARY))
                 .child(
                     "Choose an object to configure. + adds defaults; drag a preview to the timeline.",
@@ -302,7 +303,7 @@ impl Editor {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .text_size(px(11.))
+                                    .text_size(style::type_size::XS)
                                     .child(kind.label()),
                             )
                             .child(
@@ -714,7 +715,8 @@ impl Render for MathEditor {
             .max_h(px(if self.dialog {
                 // Leave room for the preview and footer, while showing the complete
                 // LaTeX palette without scrolling on normal desktop windows.
-                (f32::from(window.viewport_size().height) - 380.).clamp(120., 440.)
+                (f32::from(window.viewport_size().height) - 380. * style::ui_scale())
+                    .clamp(120., 440. * style::ui_scale())
             } else {
                 360.
             }))
@@ -723,7 +725,7 @@ impl Render for MathEditor {
             .flex_col()
             .gap_2()
             .p_2()
-            .text_size(px(12.))
+            .text_size(style::type_size::SM)
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
@@ -863,7 +865,7 @@ impl Render for MathEditor {
             .child(image)
             .child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(style::type_size::XS)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(if self.busy {
                         "Updating preview…"

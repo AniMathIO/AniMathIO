@@ -831,6 +831,8 @@ never mutate the project until Add or Apply. The LaTeX editor inserts snippets
 at the caret and offers six formula templates, colour, relative font size and a
 Write on toggle for new clips, using the animation plugin's typewriter entrance
 preset. Plugin errors appear inline and disable Add/Apply.
+The cards and fields follow the interface text scale; the dialog widens with UI
+scale and bounds its scrolling form to leave the preview and action buttons visible.
 
 ![Math library](screenshots/editor-math-panel.png)
 ![Math object dialog](screenshots/editor-math-dialog.png)
