@@ -9,8 +9,10 @@ impl Editor {
         // Include visibility in the ID: a reopened panel starts from its saved
         // size rather than inheriting the slot of a different hidden panel.
         let id = SharedString::from(format!(
-            "workspace-{}-{}",
-            self.dock.left_open, self.dock.right_open
+            "workspace-{}-{}-{}",
+            self.dock.left_open,
+            self.dock.right_open,
+            style::ui_scale()
         ));
         let mut middle = h_resizable(id).on_resize(cx.listener(
             |this, state: &Entity<gpui_component::resizable::ResizableState>, _, cx| {

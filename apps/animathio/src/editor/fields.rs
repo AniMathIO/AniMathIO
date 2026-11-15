@@ -1337,7 +1337,12 @@ impl Editor {
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(div().w(gpui::rems(4.667)).text_color(muted).child(label.to_owned()))
+                .child(
+                    div()
+                        .w(gpui::rems(4.667))
+                        .text_color(muted)
+                        .child(label.to_owned()),
+                )
                 .child(div().flex_1().min_w_0().truncate().child(value))
         };
         let header = div()

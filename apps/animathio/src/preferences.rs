@@ -100,9 +100,12 @@ fn windows_text_percent() -> Option<f32> {
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let raw = text
-        .lines()
-        .find_map(|line| line.split_whitespace().last())?;
+    let raw = text.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        (fields.next()? == "TextScaleFactor")
+            .then(|| fields.last())
+            .flatten()
+    })?;
     let percent = if let Some(hex) = raw.strip_prefix("0x") {
         i32::from_str_radix(hex, 16).ok()?
     } else {

@@ -198,7 +198,11 @@ pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("w", Box::new(RippleTrimNext), "Timeline"),
         ("w", Box::new(RippleTrimNext), "Viewer"),
         ("secondary-d", Box::new(DefaultVideoTransition), "Timeline"),
-        ("secondary-shift-d", Box::new(DefaultAudioTransition), "Timeline"),
+        (
+            "secondary-shift-d",
+            Box::new(DefaultAudioTransition),
+            "Timeline",
+        ),
         ("shift-d", Box::new(DefaultTransitions), "Timeline"),
         ("space", Box::new(TogglePlayback), "Viewer"),
         ("space", Box::new(TogglePlayback), "Timeline"),

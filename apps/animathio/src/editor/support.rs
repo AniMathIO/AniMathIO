@@ -861,7 +861,8 @@ pub(super) fn paint_ruler(
     for tick in timeline::ruler_ticks(layout, minor) {
         let x = bounds.origin.x + px(timeline::time_to_x(layout, Time(tick)));
         let is_major = tick % step == 0;
-        let mark_top = bounds.origin.y + px(if is_major { 19.0 } else { 24.0 });
+        let mark_top =
+            bounds.origin.y + px((if is_major { 19.0 } else { 24.0 }) * style::ui_scale());
         let mark = Bounds::from_corners(
             point(x, mark_top),
             point(x + px(1.0), bounds.origin.y + px(ruler_height())),

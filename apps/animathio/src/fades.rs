@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 
 use animathio_core::{Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, Target, Time};
-use animathio_core::{ParamValue, Project, TransformProperty, TICKS_PER_SECOND};
+use animathio_core::{ParamValue, Project, TICKS_PER_SECOND, TransformProperty};
 
 /// Which end of the clip a fade belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -313,11 +313,7 @@ mod tests {
             clip: Clip::new(
                 ClipId(2),
                 ClipKind::Audio(AssetId::of(b"a")),
-                TimeRange::new(
-                    Time(4 * TICKS_PER_SECOND),
-                    Time(8 * TICKS_PER_SECOND),
-                )
-                .unwrap(),
+                TimeRange::new(Time(4 * TICKS_PER_SECOND), Time(8 * TICKS_PER_SECOND)).unwrap(),
             ),
         }
         .apply(&mut project)
