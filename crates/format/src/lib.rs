@@ -126,7 +126,7 @@ fn decode_json(
         } else if version == 4 {
             legacy::migrate_markers(value)
         } else if version == 5 {
-            legacy::migrate_fit(value)
+            legacy::migrate_fit(value)?
         } else if version == 6 {
             value["schemaVersion"] = Value::from(7);
             value // serde defaults supply the identity source clock.

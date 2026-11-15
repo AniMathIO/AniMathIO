@@ -347,3 +347,18 @@ fn oversized_and_nonfinite_encoder_inputs_return_errors() {
         assert!(Mp4Encoder::new(EncoderConfig::video_only(config)).is_err());
     }
 }
+
+/// cargo-fuzz reproducer (ADTS length overflow in symphonia): a clean error, not a panic.
+#[test]
+fn fuzz_adts_overflow_probe_is_a_clean_error() {
+    let bytes: Arc<[u8]> = Arc::from(
+        &include_bytes!(
+            "../../../fuzz/regressions/media_probe/minimized-from-07d4521a29799ea3cfb2722a70fe006cb0a28a1f"
+        )[..],
+    );
+    let result = std::panic::catch_unwind(|| {
+        let backend = FilmCraftBackend::new();
+        let _ = backend.probe_bytes("media", bytes.clone());
+    });
+    assert!(result.is_ok());
+}

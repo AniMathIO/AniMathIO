@@ -528,12 +528,27 @@ struct Decoded {
     /// Frames in `scratch`.
     frames: usize,
 }
+/// Third-party demuxers and codecs can panic on hostile input (for example an arithmetic
+/// overflow in an ADTS length estimate). Turn that into an ordinary error. The closure only
+/// touches its own `Stream`, which the caller drops after an error, and no lock is held.
+fn guard_codec<T>(f: impl FnOnce() -> Result<T, Error>) -> Result<T, Error> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .unwrap_or_else(|_| Err(Error::Invalid("unsupported or corrupt media".into())))
+}
 enum FrameDecoder {
     Symphonia(Box<dyn Decoder>),
     Opus(filmcraft_opus::Decoder),
 }
 impl Stream {
     fn open(
+        origin: &Origin,
+        extension: Option<&str>,
+        spec: Option<(u32, u16, ChannelLayout)>,
+    ) -> Result<Self, Error> {
+        guard_codec(|| Self::open_unguarded(origin, extension, spec))
+    }
+
+    fn open_unguarded(
         origin: &Origin,
         extension: Option<&str>,
         spec: Option<(u32, u16, ChannelLayout)>,
@@ -622,6 +637,10 @@ impl Stream {
 
     /// Consume `ordinal` packets of the track without decoding them.
     fn skip(&mut self, ordinal: u64) -> Result<(), Error> {
+        guard_codec(|| self.skip_unguarded(ordinal))
+    }
+
+    fn skip_unguarded(&mut self, ordinal: u64) -> Result<(), Error> {
         while self.ordinal < ordinal {
             let packet = self.format.next_packet().map_err(decode_error)?;
             if packet.track_id() == self.track_id {
@@ -635,6 +654,10 @@ impl Stream {
     /// fails to decode before frame `tolerate_before` (the discarded pre-roll of a segment) is
     /// replaced by silence of its duration, so the position stays right.
     fn next(&mut self, tolerate_before: u64) -> Result<Option<Decoded>, Error> {
+        guard_codec(|| self.next_unguarded(tolerate_before))
+    }
+
+    fn next_unguarded(&mut self, tolerate_before: u64) -> Result<Option<Decoded>, Error> {
         loop {
             let packet = match self.format.next_packet() {
                 Ok(packet) => packet,
