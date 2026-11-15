@@ -1559,6 +1559,8 @@ impl Editor {
             .p_1()
             .pb_3()
             .bg(hex(color::PANEL));
+        let speed_rows = self.speed_rows(id, cx);
+        body = body.child(self.section("speed", "Speed", speed_rows, cx));
         if visual {
             let transform_rows = self.transform_rows(id, window, cx);
             body = body.child(self.section(

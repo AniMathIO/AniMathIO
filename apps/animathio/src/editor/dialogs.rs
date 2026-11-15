@@ -792,3 +792,113 @@ impl Editor {
         });
     }
 }
+
+impl Editor {
+    pub(super) fn open_speed_duration(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.or_else(|| self.selection.first().copied()) else {
+            return;
+        };
+        let Some(clip) = self.find_clip(id).cloned() else {
+            return;
+        };
+        let rate = self.project.frame_rate();
+        let percent = input(format!("{:.4}", clip.time_map.speed.percent()), window, cx);
+        let frames = rate
+            .time_to_frame(
+                Time(clip.range.end.0 - clip.range.start.0),
+                Rounding::Nearest,
+            )
+            .unwrap_or(1);
+        let duration = input(frames.to_string(), window, cx);
+        let mode = choices(
+            vec!["Speed (%)".into(), "Duration (frames)".into()],
+            0,
+            window,
+            cx,
+        );
+        let reverse = choices(
+            vec!["Forward".into(), "Reverse".into()],
+            usize::from(clip.time_map.reverse),
+            window,
+            cx,
+        );
+        let ripple = choices(
+            vec![
+                "Leave trailing clips in place".into(),
+                "Ripple trailing clips".into(),
+            ],
+            0,
+            window,
+            cx,
+        );
+        let ramp_text = clip
+            .time_map
+            .ramps
+            .iter()
+            .map(|p| {
+                format!(
+                    "{}:{:.4}",
+                    rate.time_to_frame(p.time, Rounding::Nearest).unwrap_or(0),
+                    p.speed.percent()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ramps = input(ramp_text.clone(), window, cx);
+        let original_ramps = clip.time_map.ramps.clone();
+        let editor = cx.entity();
+        window.open_dialog(cx,move|dialog,_,cx| {
+            let (percent,duration,mode,reverse,ripple,ramps)=(percent.clone(),duration.clone(),mode.clone(),reverse.clone(),ripple.clone(),ramps.clone());
+            let editor=editor.clone(); let ramp_text=ramp_text.clone(); let original_ramps=original_ramps.clone(); let clip=clip.clone();
+            let form=Form::new().child(field("Change",Select::new(&mode)))
+                .child(field("Speed (%)",Input::new(&percent)))
+                .child(field("Duration (frames)",Input::new(&duration)))
+                .child(field("Direction",Select::new(&reverse)))
+                .child(field("Ripple",Select::new(&ripple)))
+                .child(field("Ramp keys (frame:percent, …)",Input::new(&ramps)));
+            dialog.title(heading(IconName::SlidersHorizontal,"Speed/Duration")).width(px(540.)).child(form)
+                .child(div().text_size(style::type_size::SM).child("Ramp keys override constant speed. Clear keys for constant speed or duration. Linked audio follows; pitch shifts. Keyframes keep their timeline times. Overlaps are rejected."))
+                .footer(footer("Apply",cx,move|_,window,cx| {
+                    let result=(|| -> Result<Command,String> {
+                        let speed=if selected(&mode,cx)=="Duration (frames)" {
+                            if !ramps.read(cx).value().trim().is_empty() {return Err("Clear ramp keys before setting duration".into());}
+                            let count=duration.read(cx).value().parse::<i64>().map_err(|_|"Enter a positive frame count")?;
+                            if count<=0 {return Err("Enter a positive frame count".into());}
+                            let target=rate.frame_to_time(count,Rounding::Nearest).map_err(|e|e.0)?.0;
+                            if target <= 0 { return Err("Duration must span at least one tick".into()); }
+                            let (a,b)=clip.source_bounds();
+                            // Quantize the requested ratio to the model's millionth lattice.
+                            let units=(i128::from(b.0-a.0)*1_000_000+i128::from(target)/2)/i128::from(target);
+                            animathio_core::ClipSpeed::new(u32::try_from(units).map_err(|_|"Duration is outside the speed limits")?,1_000_000).map_err(|e|e.0)?
+                        }else{retime::percent(&percent.read(cx).value())?};
+                        let keys=if ramps.read(cx).value().as_str()==ramp_text {original_ramps.clone()}else{retime::ramps(&ramps.read(cx).value(),rate)?};
+                        Ok(Command::SetClipSpeed{id,speed,reverse:selected(&reverse,cx)=="Reverse",ramps:keys,ripple:selected(&ripple,cx)=="Ripple trailing clips"})
+                    })();
+                    let applied=editor.update(cx,|this,cx|match &result {Ok(command)=>this.try_execute(command,cx),Err(error)=>{this.error=Some(error.clone());cx.notify();false}});
+                    if applied {window.close_dialog(cx);}
+                }))
+        });
+    }
+    pub(super) fn open_frame_hold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected.or_else(|| self.selection.first().copied()) else {
+            return;
+        };
+        let at = self.position;
+        let frames = input("30", window, cx);
+        let editor = cx.entity();
+        window.open_dialog(cx,move|dialog,_,cx| {
+            let frames=frames.clone(); let editor=editor.clone();
+            dialog.title(heading(IconName::SlidersHorizontal,"Insert frame hold segment"))
+                .child(field("Duration (project frames)",Input::new(&frames)))
+                .child(div().text_size(style::type_size::SM).child("Inserts at the playhead and ripples unlocked trailing clips. Linked audio is silent during the hold."))
+                .footer(footer("Insert",cx,move|_,window,cx| {
+                    let count=frames.read(cx).value().parse::<u32>().ok();
+                    let applied=editor.update(cx,|this,cx| {
+                        if let Some(frames)=count {this.try_execute(&Command::InsertFrameHold{id,at,frames},cx)}
+                        else{this.error=Some("Enter a positive frame count".into());cx.notify();false}
+                    });
+                    if applied{window.close_dialog(cx);}
+                }))
+        });
+    }
+}

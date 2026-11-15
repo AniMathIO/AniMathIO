@@ -46,6 +46,8 @@ actions!(
         NextMarker,
         ShowMarkers,
         AutoReframe,
+        SpeedDuration,
+        InsertFrameHold,
         NewProject,
         SaveTemplate,
         OpenProject,
@@ -147,6 +149,7 @@ pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("shift-4", Box::new(FocusViewer), "Editor"),
         ("shift-5", Box::new(FocusInspector), "Editor"),
         ("shift-7", Box::new(FocusEffects), "Editor"),
+        ("secondary-r", Box::new(SpeedDuration), "Timeline"),
         ("j", Box::new(ShuttleReverse), "Timeline"),
         ("j", Box::new(ShuttleReverse), "Viewer"),
         ("k", Box::new(ShuttleStop), "Timeline"),
@@ -720,6 +723,12 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &ImportManim, window, cx| this.open_manim_import(window, cx)))
     .on_action(cx.listener(|this, _: &WriteOn, window, cx| this.open_write_on(window, cx)))
+    .on_action(
+        cx.listener(|this, _: &SpeedDuration, window, cx| this.open_speed_duration(window, cx)),
+    )
+    .on_action(
+        cx.listener(|this, _: &InsertFrameHold, window, cx| this.open_frame_hold(window, cx)),
+    )
     .on_action(cx.listener(|this, _: &AutoReframe, _, cx| this.open_reframe(cx)))
     .on_action(cx.listener(|this, _: &AutomaticCuts, _, cx| this.open_autocut(cx)))
     .on_action(cx.listener(|this, _: &AutoDuck, _, cx| this.open_duck(cx)))

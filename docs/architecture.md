@@ -9,7 +9,7 @@ the render/audio/export data flow. The authority for these rules is
 | Crate | Owns |
 | --- | --- |
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
-| `format` | Versioned `project.json` (schema version 6) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
+| `format` | Versioned `project.json` (schema version 7) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
 | `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, and cpal/rtrb device playback. No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
@@ -748,3 +748,58 @@ step, failed files report an error, and an entirely failed import adds no track.
 K release is captured before focused inputs can consume it; leaving the editor focus
 subtree or deactivating its window clears the held-key state. The MCP status chip distinguishes disabled control from startup failure and shows
 the failure in a tooltip; startup errors are also logged.
+
+
+## Clip retiming
+
+Schema 7 adds `Clip::time_map` (`ClipTimeMap`); schema 6 migrates to an identity
+clock through serde defaults. `ClipSpeed` stores reduced rationals exactly on a
+millionth-speed lattice, bounded to 1/16–16x. `SpeedPoint` keys use local timeline
+ticks, ordered strictly, at most 128. A linear rate curve holds its first/last
+rate outside the keys. Its trapezoid integral uses i128 integers, with a single
+floor to source ticks at lookup; duration is the first timeline tick whose
+integral consumes the original source span. Nonidentity clocks have a maximum
+seven-day timeline/curve span to bound arithmetic. No floating-point time enters
+the mapping. Percent is only a display conversion.
+
+`Command::SetClipSpeed` preserves each linked clip's half-open source interval
+and changes its timeline duration. Animation keys remain at their existing local
+timeline times (keys beyond a shortened end are retained). `Clip::source_time`
+is used by evaluation, so CPU/GPU preview, exports and `FrameSource` all read the
+same clock. Reverse starts at the exclusive source end minus one tick. Splits
+and head trims retain the original curve phase, so their source samples stay
+continuous; merge accepts true split pairs only. The source-limit guards use
+mapped source bounds. Extending a retimed clip past its retained source interval
+is rejected; reset/retime the interval instead. Retimed transition handles clamp
+to the retained interval.
+
+Linked companions receive the same speed/direction/curve. With `ripple: false`,
+trailing clips stay in place and any overlap rejects the whole transaction. With
+`ripple: true`, clips starting at or after the old end shift on every unlocked
+track. Misaligned companions whose durations would change by different amounts
+reject a ripple retime. Locked companions block either edit; locked unrelated
+tracks stay fixed. Markers and explicit project duration stay fixed. Existing
+transitions must remain valid or the edit is rejected. Undo restores complete
+clip snapshots, including source clocks and automation.
+
+`Command::InsertFrameHold` builds `freeze_frame_command`, one `Command::Batch`
+that splits at a playhead inside the clip (including its start), inserts N project
+frames reading that source frame, and ripples the tail and unlocked trailing
+clips. Each linked pair gets independently linked head, hold and tail segments.
+Audio holds are silent. Other clips spanning the insertion point are unchanged.
+
+The mixer samples the same source clock on its existing output block lattice,
+with linear sample interpolation for retimed audio, in either direction. This is
+**varispeed**: pitch changes with speed. Maintain-pitch stretching and antialias
+filtering for large speedups are deferred. Identity clocks keep the existing
+bit-exact mixer path. Clip effects run after retiming; track effects run after
+mixing, and all output remains independent of seek order.
+
+The editor's `retime` module provides the Speed inspector section and exact
+percentage/frame-key parsing. The Speed/Duration dialog accepts constant speed,
+duration or ramp keys; editing duration quantizes the implied ratio to a millionth
+(and may differ by a tick/frame boundary). Existing subframe ramp keys survive an
+unchanged dialog submission. Ctrl+R opens the dialog from the timeline; the Rate
+Stretch tool and graphical ramp handles are deferred. The CLI's
+`animathio-cli set-clip-speed` and `animathio-cli freeze-frame` and the MCP tools
+route through the shared commands and source-limit guards.

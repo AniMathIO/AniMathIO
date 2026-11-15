@@ -94,6 +94,38 @@ impl McpServer {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct SetClipSpeed {
+    #[serde(deserialize_with = "lenient_id")]
+    clip_id: String,
+    /// Rational speed numerator, 1/16x to 16x at millionth precision.
+    numerator: u32,
+    denominator: u32,
+    #[serde(default)]
+    reverse: bool,
+    /// Linear speed keys in local timeline ticks; empty means constant speed.
+    #[serde(default)]
+    ramps: Vec<RampPoint>,
+    /// Shift trailing clips on unlocked tracks; false rejects overlaps.
+    #[serde(default)]
+    ripple: bool,
+}
+#[derive(Deserialize, JsonSchema)]
+struct RampPoint {
+    time: i64,
+    numerator: u32,
+    denominator: u32,
+}
+#[derive(Deserialize, JsonSchema)]
+struct FreezeFrame {
+    #[serde(deserialize_with = "lenient_id")]
+    clip_id: String,
+    /// Absolute timeline ticks inside the clip.
+    at: i64,
+    /// Positive number of project frames to insert.
+    frames: u32,
+}
+
 // ---- tool parameter schemas (schemars) -----------------------------------
 
 #[derive(Deserialize, JsonSchema)]
@@ -1371,6 +1403,58 @@ impl McpServer {
     }
 
     #[tool(
+        description = "Set clip speed, reverse and linear speed ramps, preserving the source range. Linked audio follows (pitch-shifting varispeed). Optional ripple shifts trailing clips on unlocked tracks. One undo step."
+    )]
+    async fn set_clip_speed(
+        &self,
+        Parameters(p): Parameters<SetClipSpeed>,
+    ) -> Result<CallToolResult, McpError> {
+        let speed = animathio_core::ClipSpeed::new(p.numerator, p.denominator)
+            .map_err(|e| invalid(&e.0))?;
+        let ramps = p
+            .ramps
+            .into_iter()
+            .map(|r| {
+                Ok(animathio_core::SpeedPoint {
+                    time: Time(r.time),
+                    speed: animathio_core::ClipSpeed::new(r.numerator, r.denominator)
+                        .map_err(|e| invalid(&e.0))?,
+                })
+            })
+            .collect::<Result<Vec<_>, McpError>>()?;
+        self.backend
+            .lock()
+            .await
+            .command_apply(Command::SetClipSpeed {
+                id: parse_clip_id(&p.clip_id)?,
+                speed,
+                reverse: p.reverse,
+                ramps,
+                ripple: p.ripple,
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({"clip_id":p.clip_id}))
+    }
+    #[tool(
+        description = "Insert a frame hold at an absolute timeline tick inside a clip. Splits and ripples the tail and linked companions as one undo step; companion audio is silent during the hold."
+    )]
+    async fn freeze_frame(
+        &self,
+        Parameters(p): Parameters<FreezeFrame>,
+    ) -> Result<CallToolResult, McpError> {
+        self.backend
+            .lock()
+            .await
+            .command_apply(Command::InsertFrameHold {
+                id: parse_clip_id(&p.clip_id)?,
+                at: Time(p.at),
+                frames: p.frames,
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({"clip_id":p.clip_id}))
+    }
+
+    #[tool(
         description = "Update placement (pixels, origin top-left), time frame (milliseconds), or image/video fit (fit, fill, stretch, none). One undo step."
     )]
     async fn update_element(
@@ -1784,7 +1868,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Describe the timeline as concise text: resolution, frame rate, duration, then every track with its clips (id, start - end in HH:MM:SS.mmm, kind, name, source offset) and the gaps between them. Call this first, and again after edits, to reason about the timeline. Other tools take milliseconds: 00:01:02.500 is 62500 ms."
+        description = "Describe the timeline as concise text: resolution, frame rate, duration, then every track with its clips (id, start - end in HH:MM:SS.mmm, kind, name, source offset) and the gaps between them. Call this first, and again after edits, to reason about the timeline. Most editing tools take milliseconds: 00:01:02.500 is 62500 ms. Speed ramp keys and freeze_frame use integer ticks."
     )]
     async fn describe_timeline(&self) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
@@ -2596,7 +2680,7 @@ impl ServerHandler for McpServer {
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(
                 "AniMathIO v2 control surface over MCP. Mutations are applied as commands with \
-                 undo/redo; times are milliseconds and coordinates are canvas pixels (origin \
+                 undo/redo; times are milliseconds unless a tool explicitly specifies ticks, and coordinates are canvas pixels (origin \
                  top-left)."
                     .to_owned(),
             )
@@ -2708,5 +2792,91 @@ mod fit_tests {
                 before
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod retime_tests {
+    use super::*;
+    #[tokio::test]
+    async fn retime_and_freeze_tools_are_atomic_and_undo_exactly() {
+        let mut backend = HeadlessHandler::new();
+        backend
+            .command_apply(Command::Batch {
+                commands: vec![
+                    Command::AddTrack {
+                        track: Track::new(TrackId(1), "video"),
+                        index: 0,
+                    },
+                    Command::AddClip {
+                        track: TrackId(1),
+                        clip: Clip::new(
+                            ClipId(1),
+                            animathio_core::ClipKind::Error("fixture".into()),
+                            TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+                        ),
+                    },
+                ],
+            })
+            .unwrap();
+        let server = McpServer::new(Box::new(backend));
+        let before = server.backend.lock().await.project_get().unwrap().project;
+        server
+            .set_clip_speed(Parameters(
+                serde_json::from_value(
+                    json!({"clip_id":1,"numerator":2,"denominator":1,"reverse":true}),
+                )
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let retimed = server.backend.lock().await.project_get().unwrap().project;
+        assert_eq!(
+            retimed.tracks()[0].clips()[&ClipId(1)].range.end,
+            Time(TICKS_PER_SECOND / 2)
+        );
+        server
+            .freeze_frame(Parameters(
+                serde_json::from_value(json!({"clip_id":"1","at":TICKS_PER_SECOND/4,"frames":30}))
+                    .unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            server
+                .backend
+                .lock()
+                .await
+                .project_get()
+                .unwrap()
+                .project
+                .tracks()[0]
+                .clips()
+                .len(),
+            3
+        );
+        server.backend.lock().await.history_undo().unwrap();
+        assert_eq!(
+            server.backend.lock().await.project_get().unwrap().project,
+            retimed
+        );
+        server.backend.lock().await.history_undo().unwrap();
+        assert_eq!(
+            server.backend.lock().await.project_get().unwrap().project,
+            before
+        );
+        assert!(
+            server
+                .set_clip_speed(Parameters(
+                    serde_json::from_value(json!({"clip_id":"1","numerator":1,"denominator":0}))
+                        .unwrap()
+                ))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            server.backend.lock().await.project_get().unwrap().project,
+            before
+        );
     }
 }

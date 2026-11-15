@@ -318,6 +318,9 @@ impl Editor {
 
                 self.check_effect_params(&command)
                     .map_err(ControlError::InvalidParams)?;
+                self.source_limits
+                    .guard(&self.project, &self.assets, &command)
+                    .map_err(ControlError::InvalidParams)?;
                 self.history
                     .execute(&mut self.project, &command)
                     .map_err(|error| ControlError::Other(error.0))?;

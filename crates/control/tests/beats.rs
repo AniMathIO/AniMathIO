@@ -674,3 +674,120 @@ fn the_control_handler_rejects_trims_past_the_end_of_the_media() {
     handler.handle(trim(10 * SEC, 0)).unwrap();
     handler.handle(trim(12 * SEC, 0)).unwrap();
 }
+
+#[test]
+fn retiming_uses_mapped_source_limits_and_head_trim_keeps_phase() {
+    use animathio_core::ClipSpeed;
+    let (mut project, mut limits) = limited_session();
+    let command = Command::SetClipSpeed {
+        id: ClipId(2),
+        speed: ClipSpeed::new(1, 2).unwrap(),
+        reverse: false,
+        ramps: vec![],
+        ripple: false,
+    };
+    limits.guard(&project, &BTreeMap::new(), &command).unwrap();
+    command.apply(&mut project).unwrap();
+    let clip = &project.tracks()[0].clips()[&ClipId(2)];
+    assert_eq!(clip.range.end, Time(8 * SEC)); // four timeline seconds still use only two source seconds.
+    assert_eq!(limits.max_end(&project, clip), Some(Time(8 * SEC)));
+    let before = SourceLimits::snapshot(&project, &[ClipId(2)]);
+    Command::TrimClip {
+        id: ClipId(2),
+        range: range(5 * SEC, 8 * SEC),
+        source_offset: Time(4 * SEC),
+    }
+    .apply(&mut project)
+    .unwrap();
+    limits.verify(&project, &before).unwrap();
+    let clip = &project.tracks()[0].clips()[&ClipId(2)];
+    assert_eq!(clip.source_time(Time(0)), Time(7 * SEC / 2));
+    let invalid = Command::TrimClip {
+        id: ClipId(2),
+        range: range(5 * SEC, 9 * SEC),
+        source_offset: clip.source_offset,
+    };
+    let previous = project.clone();
+    assert!(invalid.apply(&mut project).is_err());
+    assert_eq!(project, previous);
+}
+
+#[test]
+fn a_hold_or_split_cannot_hide_a_source_overrun_in_the_same_batch() {
+    let (project, mut limits) = limited_session();
+    for final_edit in [
+        Command::InsertFrameHold {
+            id: ClipId(2),
+            at: Time(4 * SEC),
+            frames: 30,
+        },
+        Command::SplitClip {
+            id: ClipId(2),
+            right_id: ClipId(3),
+            at: Time(5 * SEC),
+        },
+    ] {
+        let command = Command::Batch {
+            commands: vec![
+                Command::TrimClip {
+                    id: ClipId(2),
+                    range: range(4 * SEC, 7 * SEC),
+                    source_offset: Time(3 * SEC),
+                },
+                final_edit,
+            ],
+        };
+        assert!(limits.guard(&project, &BTreeMap::new(), &command).is_err());
+    }
+    // Existing overlong media may still be split or held without extending it.
+    let mut overlong = project.clone();
+    Command::TrimClip {
+        id: ClipId(2),
+        range: range(4 * SEC, 7 * SEC),
+        source_offset: Time(3 * SEC),
+    }
+    .apply(&mut overlong)
+    .unwrap();
+    limits
+        .guard(
+            &overlong,
+            &BTreeMap::new(),
+            &Command::InsertFrameHold {
+                id: ClipId(2),
+                at: Time(4 * SEC),
+                frames: 30,
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn reverse_tail_trim_limit_uses_the_lower_source_boundary_after_a_slip() {
+    let (mut p, mut limits) = limited_session();
+    Command::SetClipSpeed {
+        id: ClipId(2),
+        speed: animathio_core::ClipSpeed::default(),
+        reverse: true,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::TrimClip {
+        id: ClipId(2),
+        range: range(5 * SEC, 6 * SEC),
+        source_offset: Time(4 * SEC),
+    }
+    .apply(&mut p)
+    .unwrap();
+    let slip = Command::TrimClip {
+        id: ClipId(2),
+        range: range(5 * SEC, 6 * SEC),
+        source_offset: Time(4 * SEC),
+    };
+    limits.guard(&p, &BTreeMap::new(), &slip).unwrap();
+    slip.apply(&mut p).unwrap();
+    let clip = &p.tracks()[0].clips()[&ClipId(2)];
+    assert_eq!(clip.source_bounds(), (Time(4 * SEC), Time(5 * SEC)));
+    assert_eq!(limits.max_end(&p, clip), Some(Time(6 * SEC)));
+}

@@ -306,6 +306,9 @@ pub struct Clip {
     pub range: TimeRange,
     /// Source offset at the clip's start (also used by plugins).
     pub source_offset: Time,
+    /// Exact timeline-to-source playback mapping.
+    #[serde(default)]
+    pub time_map: crate::ClipTimeMap,
     /// Base transform.
     pub transform: Transform,
     /// Placement of an image or video source inside the frame; new clips default to contain.
@@ -340,6 +343,7 @@ impl Clip {
             kind,
             range,
             source_offset: Time(0),
+            time_map: crate::ClipTimeMap::default(),
             transform: Transform::default(),
             fit,
             params: BTreeMap::new(),
@@ -589,6 +593,7 @@ impl Project {
         )
     }
     /// Check identities, references, finite values and nonoverlapping half-open ranges.
+    #[allow(clippy::too_many_lines)] // Keep project invariants in one validation pass.
     pub fn validate(&self) -> Result<(), Error> {
         if self.width > 65_535 || self.height > 65_535 {
             return Err(invalid("invalid resolution"));
@@ -635,12 +640,26 @@ impl Project {
                     return Err(invalid("duplicate or mismatched clip id"));
                 }
                 clip.range.validate()?;
-                if clip.source_offset.0 < 0
-                    || clip
-                        .source_offset
+                clip.time_map
+                    .validate(clip.range.end.0 - clip.range.start.0)?;
+                let (source_start, source_end) = clip.source_bounds();
+                let source_span = if clip.time_map.hold {
+                    1
+                } else if let Some(length) = clip.time_map.source_length {
+                    length.0
+                } else if clip.time_map == crate::ClipTimeMap::default() {
+                    clip.range.end.0 - clip.range.start.0
+                } else {
+                    clip.time_map
+                        .integrated(Time(
+                            clip.time_map.phase.0 + clip.range.end.0 - clip.range.start.0,
+                        ))
                         .0
-                        .checked_add(clip.range.end.0 - clip.range.start.0)
-                        .is_none()
+                };
+                if clip.source_offset.0 < 0
+                    || source_start.0 < 0
+                    || source_end < source_start
+                    || clip.source_offset.0.checked_add(source_span).is_none()
                 {
                     return Err(invalid("invalid source time range"));
                 }
@@ -756,7 +775,7 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                 track: track.id,
                 id: clip.id,
                 kind: clip.kind.clone(),
-                source_time: Time((clip.source_offset.0 + local_time.0).max(0)),
+                source_time: Time(clip.source_time(local_time).0.max(0)),
                 transform: clip.transform,
                 fit: clip.fit,
                 params: clip.params.clone(),

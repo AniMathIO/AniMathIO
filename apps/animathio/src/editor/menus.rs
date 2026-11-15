@@ -196,6 +196,9 @@ impl Editor {
                     .disabled(none_selected),
                 MenuItem::action("Ripple trim previous edit to playhead", RippleTrimPrevious),
                 MenuItem::action("Ripple trim next edit to playhead", RippleTrimNext),
+                MenuItem::action("Speed/Duration…", SpeedDuration).disabled(none_selected),
+                MenuItem::action("Insert frame hold segment…", InsertFrameHold)
+                    .disabled(none_selected),
                 MenuItem::action("Add effect", ShowEffects),
                 MenuItem::action("Ripple delete selection or range", RippleDelete),
                 MenuItem::action("Write on…", WriteOn),

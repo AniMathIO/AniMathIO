@@ -55,6 +55,7 @@ mod menus;
 mod playback_glue;
 mod project_io;
 mod reframe;
+mod retime;
 mod start_screen;
 mod subtitles;
 mod support;
@@ -387,6 +388,8 @@ struct KeyframePaint {
 }
 
 struct ClipPaint {
+    id: ClipId,
+    time_map: animathio_core::ClipTimeMap,
     effect_warning: bool,
     thumbnail_first: usize,
     row: usize,

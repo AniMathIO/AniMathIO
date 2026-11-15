@@ -337,13 +337,9 @@ pub fn analyse_reframe(
         let mut points = Vec::new();
         for t in times {
             cancelled(cancel)?;
-            let source = clip
-                .source_offset
-                .0
-                .checked_add(t)
-                .ok_or_else(|| invalid("source time overflow"))?;
+            let source = clip.source_time(Time(t));
             let frame = decoder
-                .frame_at(Time(source))
+                .frame_at(source)
                 .map_err(|e| ControlError::Other(e.to_string()))?;
             cancelled(cancel)?;
             let point = tracker.sample(thumbnail(&frame), Time(t), crop, params.smoothness);

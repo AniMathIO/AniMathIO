@@ -113,7 +113,7 @@ Without `--project`, the server connects to the editor via
 you to pass `--project`. With `--project`, it drives the file through the same
 `ControlHandler` trait, so tools behave identically either way.
 
-Times are milliseconds; coordinates are canvas pixels with the origin top-left.
+Times are milliseconds unless a tool explicitly specifies integer ticks (speed ramps, frame holds and core command batches); coordinates are canvas pixels with the origin top-left.
 Clip and track ids may be passed as strings (`"3"`) or numbers (`3`), matching
 how `describe_timeline` prints them.
 Timeline edits are applied as `Command`s and are undoable; replacing a project
@@ -129,6 +129,8 @@ clears its undo history.
 | `add_graph` | Add an `org.animathio.graph` plugin clip | bounds (always fully visible; the plane is scaled uniformly so circles stay round on any canvas aspect), newline-separated `items`, `show_grid`/`show_axes`/`show_labels`, `color`, `x`/`y`, `start_ms`, `duration_ms`, `draw_duration_ms` |
 | `add_media` | Import image/video/audio by absolute path, add a clip (one undo step); audio starts with animatable gain/mute defaults | |
 | `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction` |
+| `set_clip_speed` | Set exact rational speed, reverse and linear ramps in one undo step | `clip_id`, `numerator`, `denominator`, `reverse?`, `ramps?: [{time, numerator, denominator}]`, `ripple?`; ramp times are local ticks; linked audio follows with pitch shift |
+| `freeze_frame` | Insert a frame hold segment and ripple unlocked trailing clips | `clip_id`, `at` (absolute ticks), `frames` (positive project frames); linked audio holds are silent; one undo step |
 | `update_element` | Update placement, visible time frame or image/video fit | |
 | `remove_element` | Remove a clip by id | |
 | `set_canvas` | Canvas width/height, background color, duration | `background_color`: `#RRGGBB`/`#RRGGBBAA`; `max_time_ms`: duration in ms |
@@ -527,3 +529,26 @@ nested batches. `MergeClip` requires adjacent timeline ranges, continuous source
 time, identical settings (including fit and effects), and automation matching a
 split at the join. It refuses a merge that would discard the right clip's edits;
 undo restores both clips exactly.
+
+
+## Clip speed and freeze frames
+
+`set_clip_speed` accepts `{clip_id, numerator, denominator, reverse?, ramps?, ripple?}`.
+Rates are positive, exactly representable millionth rationals within 1/16–16x.
+Each ramp point is `{time, numerator, denominator}`, with strictly increasing local
+integer tick times. Outside the points the nearest rate holds. Empty ramps use
+constant speed. Reverse and ripple default to false. The source interval stays
+fixed and linked audio follows with pitch shift; maintain-pitch is unavailable.
+Ripple shifts clips starting at/after the old end on unlocked tracks; otherwise
+they stay fixed and overlaps fail atomically. Locked companions fail atomically.
+
+`freeze_frame` accepts `{clip_id, at, frames}`: `at` is an absolute timeline tick
+inside the clip and `frames` is a positive number of project frames. This inserts
+a held source frame and silent linked audio, rippling the tail and unlocked
+trailing clips, as one undo step. `undo` restores the complete original clips.
+
+Both tools use `command.apply`: `Command::SetClipSpeed` has fields
+`id`, `speed: {numerator, denominator}`, `reverse`, `ramps: [{time, speed}]`,
+and `ripple`; `Command::InsertFrameHold` has `id`, `at` and `frames`.
+See [retiming semantics](architecture.md#clip-retiming) for bounds, ripple,
+transitions and automation behavior.

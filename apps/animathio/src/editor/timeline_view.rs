@@ -855,10 +855,12 @@ impl Editor {
                                     < timeline::time_to_x(&layout, end)
                             })
                             .map(|index| {
-                                let tick = clip.source_offset.0
-                                    + (index as f64 * f64::from(tile_width)
-                                        / layout.pixels_per_tick)
-                                        as i64;
+                                let local = (index as f64 * f64::from(tile_width)
+                                    / layout.pixels_per_tick)
+                                    as i64
+                                    + start.0
+                                    - clip.range.start.0;
+                                let tick = clip.source_time(Time(local)).0;
                                 self.thumbnails.borrow_mut().get(
                                     asset,
                                     Time(tick),
@@ -871,7 +873,16 @@ impl Editor {
                     }
                     _ => Vec::new(),
                 };
+                let mut time_map = clip.time_map.clone();
+                let mut source_offset = clip.source_offset.0;
+                if time_map == animathio_core::ClipTimeMap::default() {
+                    source_offset += start.0 - clip.range.start.0;
+                } else {
+                    time_map.phase.0 += start.0 - clip.range.start.0;
+                }
                 clips.push(ClipPaint {
+                    id: clip.id,
+                    time_map,
                     fit: clip.fit,
                     transform: clip.transform,
                     canvas: project_size(&self.project),
@@ -894,7 +905,7 @@ impl Editor {
                     icon: icons::kind_icon(&clip.kind),
                     keyframes,
                     waveform,
-                    source_offset: clip.source_offset.0,
+                    source_offset,
                     fade_levels: [FadeEdge::In, FadeEdge::Out].map(|edge| {
                         let length = if edge == FadeEdge::In {
                             fade_in

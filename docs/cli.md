@@ -17,27 +17,29 @@ AniMathIO headless CPU renderer
 Usage: animathio-cli <COMMAND>
 
 Commands:
-  templates     List the bundled project templates
-  new           Create a project from a bundled template
-  render        Render one frame to PNG
-  render-seq    Render [from, to) frame indices to `frame_000000.png`, etc
-  export        Export an offline H.264 + AAC MP4
-  validate      Check model invariants and all asset content hashes
-  import-media  Import media into a new project, including linked companion audio
-  media-fit     Set one image/video clip's fit and save an edited project archive
-  import-v1     Convert a v1 `.animathio` project to a `.amio` archive
-  import-manim  Convert a Manim Community scene script to a `.amio` archive
-  animations    List or apply animation presets from the loaded animation-preset plugins
-  transcribe    Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
-  autocut       Propose or apply silence and optional filler cuts as one ripple edit
-  duck          Lower music under speech with gain keyframes, as one undoable edit
-  markers       List, add or remove timeline markers
-  beats         Detect tempo and beats offline; optionally add markers at the beats
-  reframe       Reframe video to portrait or square with offline subject tracking
-  models        List or download the local Whisper speech models
-  new-sample    Write a three-second animated image/text/shape demo archive
-  mcp           Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
-  help          Print this message or the help of the given subcommand(s)
+  set-clip-speed  Change a clip's speed/reverse/ramp, preserving its source interval and linked audio
+  freeze-frame    Insert a frame hold at the playhead and ripple trailing clips
+  templates       List the bundled project templates
+  new             Create a project from a bundled template
+  render          Render one frame to PNG
+  render-seq      Render [from, to) frame indices to `frame_000000.png`, etc
+  export          Export an offline H.264 + AAC MP4
+  validate        Check model invariants and all asset content hashes
+  import-media    Import media into a new project, including linked companion audio
+  media-fit       Set one image/video clip's fit and save an edited project archive
+  import-v1       Convert a v1 `.animathio` project to a `.amio` archive
+  import-manim    Convert a Manim Community scene script to a `.amio` archive
+  animations      List or apply animation presets from the loaded animation-preset plugins
+  transcribe      Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
+  autocut         Propose or apply silence and optional filler cuts as one ripple edit
+  duck            Lower music under speech with gain keyframes, as one undoable edit
+  markers         List, add or remove timeline markers
+  beats           Detect tempo and beats offline; optionally add markers at the beats
+  reframe         Reframe video to portrait or square with offline subject tracking
+  models          List or download the local Whisper speech models
+  new-sample      Write a three-second animated image/text/shape demo archive
+  mcp             Run an MCP stdio server: connects to a running editor, or drives a project file headlessly when `--project` is given
+  help            Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help
@@ -752,3 +754,65 @@ Options:
   -h, --help             Print help
 ```
 <!-- /help:media-fit -->
+
+
+## `set-clip-speed`
+
+Retimes a clip and linked companions while keeping their source ranges. Speed is
+an exact decimal or rational multiplier, 1/16–16x at millionth precision. Optional
+linear ramp keys use local timeline ticks. Audio uses pitch-shifting varispeed.
+Without ripple, overlapping results fail; ripple shifts unlocked trailing clips.
+
+```sh
+animathio-cli set-clip-speed input.amio --clip 1 --speed 2 --reverse --ripple -o retimed.amio
+animathio-cli set-clip-speed input.amio --clip 1 --speed 1 --ramps '[{"time":0,"speed":{"numerator":1,"denominator":2}},{"time":705600000,"speed":{"numerator":2,"denominator":1}}]' -o ramp.amio
+```
+
+<!-- help:set-clip-speed -->
+```text
+Change a clip's speed/reverse/ramp, preserving its source interval and linked audio
+
+Usage: animathio-cli set-clip-speed [OPTIONS] --clip <CLIP> --speed <SPEED> --output <OUTPUT> <PROJECT>
+
+Arguments:
+  <PROJECT>  Input .amio project archive
+
+Options:
+      --clip <CLIP>      Clip identity
+      --speed <SPEED>    Exact multiplier: 0.5, 2 or 3/2 (1/16..16, millionth precision)
+      --reverse          Play the source interval backwards
+      --ramps <RAMPS>    JSON array of {"time": ticks, "speed": {"numerator": n, "denominator": d}}
+      --ripple           Shift trailing clips on all unlocked tracks. Otherwise reject overlaps
+  -o, --output <OUTPUT>  Destination .amio archive
+      --overwrite        Replace an existing output archive
+  -h, --help             Print help
+```
+<!-- /help:set-clip-speed -->
+
+## `freeze-frame`
+
+Inserts a frame hold at an absolute timeline position inside a clip; linked audio
+is silent during the hold. Splits and ripples unlocked trailing clips as one edit.
+
+```sh
+animathio-cli freeze-frame input.amio --clip 1 --at 0.5 --frames 30 -o held.amio
+```
+
+<!-- help:freeze-frame -->
+```text
+Insert a frame hold at the playhead and ripple trailing clips
+
+Usage: animathio-cli freeze-frame [OPTIONS] --clip <CLIP> --at <AT> --frames <FRAMES> --output <OUTPUT> <PROJECT>
+
+Arguments:
+  <PROJECT>  Input .amio project archive
+
+Options:
+      --clip <CLIP>      Clip identity
+      --at <AT>          Timeline playhead, decimal seconds or Nticks
+      --frames <FRAMES>  Positive hold duration in project frames; inserts and ripples the tail
+  -o, --output <OUTPUT>  Destination .amio archive
+      --overwrite        Replace an existing output archive
+  -h, --help             Print help
+```
+<!-- /help:freeze-frame -->

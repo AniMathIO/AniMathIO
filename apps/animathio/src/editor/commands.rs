@@ -87,6 +87,7 @@ impl Editor {
         self.invalidate_autocut();
         self.invalidate_duck();
         self.invalidate_beats();
+        self.waveform_paths.borrow_mut().clear();
         self.dirty = true;
         self.next_id = self.next_id.max(next_id(&self.project));
         self.prune_selection();
