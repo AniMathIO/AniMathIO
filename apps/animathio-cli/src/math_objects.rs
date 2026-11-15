@@ -1,5 +1,8 @@
 //! CLI access to the same mathematical-object definitions as the editor.
-use super::*;
+use super::{
+    BTreeMap, PathBuf, Result, Subcommand, TICKS_PER_SECOND, Time, load, parse_time, plugin_host,
+    save_amio,
+};
 use animathio_control::{MathObjectDraft, MathObjectKind, math_object_command};
 
 #[derive(Subcommand)]
@@ -72,7 +75,7 @@ pub(super) fn run(action: MathAction) -> Result<()> {
                 bundle.project.width().max(1),
                 bundle.project.height().max(1),
             ))?;
-            if kind == MathObjectKind::Latex {
+            if matches!(kind, MathObjectKind::Latex | MathObjectKind::Plot) {
                 params["strict_errors"] = serde_json::json!(true);
             }
             host.render_clip(

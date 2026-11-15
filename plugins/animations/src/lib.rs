@@ -232,7 +232,7 @@ fn catalog() -> Vec<PresetDescriptor> {
                 &format!("typewriter-{verb}"),
                 &format!("Typewriter {suffix}"),
                 &format!(
-                    "{} the text one character at a time",
+                    "{} text characters or formula outlines in order",
                     if role == Entrance { "Write" } else { "Erase" }
                 ),
                 role,

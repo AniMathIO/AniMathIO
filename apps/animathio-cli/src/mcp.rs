@@ -1249,7 +1249,10 @@ impl McpServer {
         let mut host = super::plugin_host().map_err(|e| invalid(&e.to_string()))?;
         let size = (state.project.width().max(1), state.project.height().max(1));
         let (plugin, mut params) = draft.parameters(size).map_err(mcp_error)?;
-        if kind == animathio_control::MathObjectKind::Latex {
+        if matches!(
+            kind,
+            animathio_control::MathObjectKind::Latex | animathio_control::MathObjectKind::Plot
+        ) {
             params["strict_errors"] = serde_json::json!(true);
         }
         host.render_clip(

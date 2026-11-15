@@ -4,6 +4,7 @@ use animathio_control::{
     MathObjectDraft, MathObjectKind, math_object_command, math_object_draft, math_object_range,
 };
 use animathio_core::{Command, History, Project, Time};
+use std::collections::BTreeMap;
 
 #[test]
 fn every_object_maps_to_a_centered_clip_and_undoes_exactly() {
@@ -109,7 +110,6 @@ fn formula_palette_typesets_and_write_preset_is_atomic() {
         AnimationApplyParams, LATEX_SNIPPETS, LATEX_TEMPLATES, animation_preset_command,
     };
     use animathio_core::TICKS_PER_SECOND;
-    use std::collections::BTreeMap;
     let mut host = animathio_plugin_host::test_support::host();
     for &(label, source) in LATEX_SNIPPETS.iter().chain(LATEX_TEMPLATES) {
         let mut draft = MathObjectDraft::new(MathObjectKind::Latex);
@@ -210,10 +210,10 @@ fn every_object_renders_real_ink_in_landscape_and_portrait() {
         for kind in MathObjectKind::ALL {
             let draft = MathObjectDraft::new(kind);
             let (plugin, mut params) = draft.parameters(size).unwrap();
-            if kind == MathObjectKind::Latex {
+            if matches!(kind, MathObjectKind::Latex | MathObjectKind::Plot) {
                 params["strict_errors"] = serde_json::json!(true);
             }
-            host.render_clip(&plugin, &Default::default(), &params, 0, size)
+            host.render_clip(&plugin, &BTreeMap::new(), &params, 0, size)
                 .unwrap_or_else(|e| panic!("{kind:?} {size:?}: {e}"));
             let mut project = Project::default();
             Command::SetSettings {
@@ -231,11 +231,15 @@ fn every_object_renders_real_ink_in_landscape_and_portrait() {
                 .apply(&mut project)
                 .unwrap();
             let scene = host.resolve(&animathio_core::evaluate(&project, Time(0)), size);
-            let frame = animathio_render::render(&scene, &mut Default::default(), size).unwrap();
+            let frame =
+                animathio_render::render(&scene, &mut animathio_render::RenderCtx::default(), size)
+                    .unwrap();
             assert!(
                 frame
                     .pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .any(|p| p[0] != 0 || p[1] != 0 || p[2] != 0),
                 "{kind:?} {size:?} must produce visible ink"
             );
@@ -249,11 +253,50 @@ fn invalid_latex_reports_an_error_in_strict_preview_but_legacy_render_still_work
     let mut draft = MathObjectDraft::new(MathObjectKind::Latex);
     draft.fields.insert("source".into(), r"\frac{".into());
     let (plugin, mut params) = draft.parameters((640, 360)).unwrap();
-    host.render_clip(&plugin, &Default::default(), &params, 0, (640, 360))
+    host.render_clip(&plugin, &BTreeMap::new(), &params, 0, (640, 360))
         .unwrap();
     params["strict_errors"] = serde_json::json!(true);
     assert!(
-        host.render_clip(&plugin, &Default::default(), &params, 0, (640, 360))
+        host.render_clip(&plugin, &BTreeMap::new(), &params, 0, (640, 360))
+            .is_err()
+    );
+}
+
+#[test]
+fn legacy_latex_uses_effective_units_and_leaves_typst_in_its_own_editor() {
+    use animathio_core::{Clip, ClipId, ClipKind, ParamValue};
+    let mut clip = Clip::new(
+        ClipId(1),
+        ClipKind::Plugin {
+            plugin_id: "org.animathio.latex".into(),
+            params: serde_json::json!({"source":"x", "mode":"latex", "size":48}),
+        },
+        math_object_range(Time(0)).unwrap(),
+    );
+    let draft = math_object_draft(&clip, (1920, 1080)).unwrap();
+    let size = draft.fields["size"].parse::<f64>().unwrap();
+    assert!((size - 48. / 1080. * 100.).abs() < 1e-8);
+    clip.params
+        .insert("units".into(), ParamValue::Enum("percent".into()));
+    clip.params.insert("size".into(), ParamValue::Number(7.));
+    assert_eq!(
+        math_object_draft(&clip, (1920, 1080)).unwrap().fields["size"],
+        "7"
+    );
+    clip.params
+        .insert("mode".into(), ParamValue::Enum("typst".into()));
+    assert!(math_object_draft(&clip, (1920, 1080)).is_none());
+}
+
+#[test]
+fn invalid_plot_expression_is_reported_by_real_plugin_validation() {
+    let mut host = animathio_plugin_host::test_support::host();
+    let mut draft = MathObjectDraft::new(MathObjectKind::Plot);
+    draft.fields.insert("expression".into(), "sin(".into());
+    let (plugin, mut params) = draft.parameters((640, 360)).unwrap();
+    params["strict_errors"] = serde_json::json!(true);
+    assert!(
+        host.render_clip(&plugin, &BTreeMap::new(), &params, 0, (640, 360))
             .is_err()
     );
 }

@@ -375,6 +375,12 @@ impl MathObjectDraft {
                         ]);
                     }
                 }
+                if self.kind == K::Cartesian {
+                    params["axis_color"] = json!(color);
+                    let mut grid_color = color;
+                    grid_color[3] = color[3] / 3;
+                    params["grid_color"] = json!(grid_color);
+                }
                 params["stroke_width"] = json!(short / f64::from(size.0.max(1)) * 0.0015);
             }
         }
@@ -444,11 +450,11 @@ pub fn math_object_draft(clip: &Clip, canvas: (u32, u32)) -> Option<MathObjectDr
     if plugin_id != "org.animathio.latex" {
         return None;
     }
-    if params
-        .get("mode")
-        .and_then(Value::as_str)
-        .is_some_and(|m| m != "latex")
-    {
+    let string_param = |name: &str| match clip.params.get(name) {
+        Some(ParamValue::String(value) | ParamValue::Enum(value)) => Some(value.as_str()),
+        _ => params.get(name).and_then(Value::as_str),
+    };
+    if string_param("mode").is_some_and(|mode| mode != "latex") {
         return None;
     }
     let mut draft = MathObjectDraft::new(MathObjectKind::Latex);
@@ -462,10 +468,7 @@ pub fn math_object_draft(clip: &Clip, canvas: (u32, u32)) -> Option<MathObjectDr
         _ => params.get("size").and_then(Value::as_f64).unwrap_or(48.),
     };
     // Translate legacy sizes into the dialog's percentage of the actual short edge.
-    let units = params
-        .get("units")
-        .and_then(Value::as_str)
-        .unwrap_or("pixels");
+    let units = string_param("units").unwrap_or("pixels");
     draft.fields.insert(
         "size".into(),
         (match units {

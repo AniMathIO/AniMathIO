@@ -684,11 +684,40 @@ impl Guest for GraphPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "graph".to_string(),
-            version: "1.1.0".to_string(),
+            version: "1.2.0".to_string(),
             description: "Mafs-like coordinate plane with plots and shapes".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
             params: vec![
+                ParamSpec {
+                    id: "strict_errors".into(),
+                    label: "Return plot expression errors".into(),
+                    kind: ParamKind::Bool(BoolParam { default: false }),
+                },
+                ParamSpec {
+                    id: "grid_color".into(),
+                    label: "Grid colour".into(),
+                    kind: ParamKind::Color(ColorParam {
+                        default: Color {
+                            r: 120,
+                            g: 130,
+                            b: 150,
+                            a: 90,
+                        },
+                    }),
+                },
+                ParamSpec {
+                    id: "axis_color".into(),
+                    label: "Axes and labels colour".into(),
+                    kind: ParamKind::Color(ColorParam {
+                        default: Color {
+                            r: 200,
+                            g: 205,
+                            b: 220,
+                            a: 255,
+                        },
+                    }),
+                },
                 ParamSpec {
                     id: "x_min".to_string(),
                     label: "X Min".to_string(),
@@ -801,6 +830,23 @@ impl Guest for GraphPlugin {
             },
         );
         let items_text = get_string(&params, "items", "plot y=x^2");
+        if get_bool(&params, "strict_errors", false) {
+            for line in items_text
+                .lines()
+                .filter(|line| line.trim_start().starts_with("plot "))
+            {
+                let fields = split_assignments(line);
+                let expression = fields
+                    .iter()
+                    .find(|(key, _)| *key == "y")
+                    .map(|(_, value)| *value)
+                    .unwrap_or("0");
+                parse_expression(expression).map_err(|message| Diagnostic {
+                    code: "invalid-expression".into(),
+                    message,
+                })?;
+            }
+        }
 
         if x_max <= x_min || y_max <= y_min {
             return Ok(Scene {
@@ -822,18 +868,26 @@ impl Guest for GraphPlugin {
         let bounds = (x_min, x_max, y_min, y_max);
 
         let mut elements = Vec::new();
-        let grid_color = Color {
-            r: 120,
-            g: 130,
-            b: 150,
-            a: 90,
-        };
-        let axis_color = Color {
-            r: 200,
-            g: 205,
-            b: 220,
-            a: 255,
-        };
+        let grid_color = get_color(
+            &params,
+            "grid_color",
+            Color {
+                r: 120,
+                g: 130,
+                b: 150,
+                a: 90,
+            },
+        );
+        let axis_color = get_color(
+            &params,
+            "axis_color",
+            Color {
+                r: 200,
+                g: 205,
+                b: 220,
+                a: 255,
+            },
+        );
         let stroke = StrokeStyle {
             width: (1.5 * px) as f32,
             color: axis_color,
@@ -919,7 +973,9 @@ impl Guest for GraphPlugin {
                     for contour in host::shape_text(&label, label_size)? {
                         let offset: Vec<PathVerb> = contour
                             .iter()
-                            .map(|verb| offset_verb(verb, p.x - (18.0 * px) as f32, p.y - (6.0 * px) as f32))
+                            .map(|verb| {
+                                offset_verb(verb, p.x - (18.0 * px) as f32, p.y - (6.0 * px) as f32)
+                            })
                             .collect();
                         elements.push(DrawCommand::FillPath((offset, axis_color)));
                     }

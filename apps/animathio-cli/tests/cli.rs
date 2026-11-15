@@ -676,7 +676,7 @@ fn math_catalog_adds_every_kind_and_rejects_invalid_latex_without_saving() {
             draft.kind
         );
         if kind == "latex" {
-            assert!(!clip.animations.is_empty());
+            assert_eq!(clip.animations.len(), 1);
         }
     }
     let output = dir.path().join("invalid.amio");

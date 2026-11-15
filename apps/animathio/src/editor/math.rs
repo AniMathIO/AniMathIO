@@ -40,7 +40,7 @@ fn preview(
     host: &mut PluginHost,
 ) -> Result<Arc<RenderImage>, String> {
     let (plugin, mut params) = draft.parameters(size).map_err(|e| e.to_string())?;
-    if draft.kind == MathObjectKind::Latex {
+    if matches!(draft.kind, MathObjectKind::Latex | MathObjectKind::Plot) {
         params["strict_errors"] = serde_json::json!(true);
     }
     host.render_clip(&plugin, &BTreeMap::new(), &params, 0, size)
@@ -251,7 +251,7 @@ impl Editor {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, _, cx| {
-                                    this.arm_pool_drag(PoolDrag::Math(kind), cx)
+                                    this.arm_pool_drag(PoolDrag::Math(kind), cx);
                                 }),
                             ),
                     )
@@ -330,7 +330,7 @@ pub(super) struct MathEditor {
     source: Option<Entity<TextareaState>>,
     vertices: Vec<[Entity<InputState>; 2]>,
     color: Entity<ColorPickerState>,
-    _subscriptions: Vec<Subscription>,
+    subscriptions: Vec<Subscription>,
     editor: WeakEntity<Editor>,
     session: u64,
     range: TimeRange,
@@ -358,6 +358,9 @@ impl MathEditor {
         let mut subscriptions = Vec::new();
         let mut source = None;
         for spec in draft.specs() {
+            if spec.id == "vertices" {
+                continue;
+            }
             let value = draft
                 .fields
                 .get(spec.id)
@@ -453,7 +456,7 @@ impl MathEditor {
             source,
             vertices: Vec::new(),
             color,
-            _subscriptions: subscriptions,
+            subscriptions,
             editor,
             session,
             range,
@@ -485,13 +488,13 @@ impl MathEditor {
         let states =
             values.map(|v| cx.new(|cx| InputState::new(window, cx).default_value(v.to_owned())));
         for state in &states {
-            self._subscriptions
+            self.subscriptions
                 .push(cx.subscribe(state, |this, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Change) {
                         this.sync_vertices(cx);
                     }
                 }));
-            self._subscriptions.push(cx.subscribe_in(
+            self.subscriptions.push(cx.subscribe_in(
                 state,
                 window,
                 |this, state, event: &NumberInputEvent, window, cx| {
@@ -503,7 +506,7 @@ impl MathEditor {
                             -0.1
                         };
                     state.update(cx, |s, cx| {
-                        s.set_value(fields::format_number(value), window, cx)
+                        s.set_value(fields::format_number(value), window, cx);
                     });
                     this.sync_vertices(cx);
                 },
@@ -759,7 +762,7 @@ impl Render for MathEditor {
                             .small()
                             .label(label)
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                this.snippet(value, replace, window, cx)
+                                this.snippet(value, replace, window, cx);
                             })),
                     );
                 }
