@@ -237,10 +237,14 @@ impl Editor {
                                 color::TEXT_SECONDARY
                             }))
                             .hover(|this| this.bg(style::hexa(color::HOVER, 0.7)))
-                            .when(self.dock.left_width >= 360., |tab| {
-                                tab.child(icons::icon(icon).small())
+                            .when(
+                                self.dock.left_width < 240. || self.dock.left_width >= 360.,
+                                |tab| tab.child(icons::icon(icon).small()),
+                            )
+                            .when(self.dock.left_width >= 240., |tab| tab.child(label))
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(label).build(window, cx)
                             })
-                            .child(label)
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.select_left_tab(tab, cx)),
                             )

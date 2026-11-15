@@ -294,7 +294,9 @@ impl Editor {
         let draft = self
             .find_clip(id)
             .and_then(|clip| math_object_draft(clip, project_size(&self.project)))?;
-        let signature = serde_json::to_string(&draft).ok()?;
+        let signature =
+            serde_json::to_string(&(self.project_session, project_size(&self.project), &draft))
+                .ok()?;
         if self
             .math_inspector
             .as_ref()
