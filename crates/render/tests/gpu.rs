@@ -149,3 +149,18 @@ fn gpu_composites_cpu_effect_layers() {
     let actual = render(&scene, &mut ctx(&assets, Some(gpu)), (64, 64)).unwrap();
     compare("effect-blur", &expected, &actual);
 }
+
+#[test]
+fn gpu_matches_cpu_glyph_counters() {
+    let Some(gpu) = gpu() else { return };
+    let mut gpu_ctx = ctx(&BTreeMap::new(), Some(gpu));
+    let mut cpu_ctx = ctx(&BTreeMap::new(), None);
+    for kind in ["normalized", "canvas", "classic", "title"] {
+        let scene = common::glyphs::scene(kind);
+        for size in [(480, 270), (481, 271)] {
+            let cpu = render(&scene, &mut cpu_ctx, size).unwrap();
+            let gpu = render(&scene, &mut gpu_ctx, size).unwrap();
+            compare(kind, &cpu, &gpu);
+        }
+    }
+}
