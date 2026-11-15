@@ -85,7 +85,7 @@ impl Guest for LatexPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "latex".to_string(),
-            version: "1.2.0".to_string(),
+            version: "1.2.1".to_string(),
             description: "LaTeX/Typst math typeset by the host into vector outlines".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],

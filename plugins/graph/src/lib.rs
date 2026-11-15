@@ -734,7 +734,7 @@ impl Guest for GraphPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "graph".to_string(),
-            version: "1.2.0".to_string(),
+            version: "1.3.0".to_string(),
             description: "Mafs-like coordinate plane with plots and shapes".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -861,20 +861,6 @@ impl Guest for GraphPlugin {
                         max: 64.0,
                         default: 2.0,
                         step: 0.1,
-                    }),
-                },
-                ParamSpec {
-                    id: "axis_color".into(),
-                    label: "Axis Color".into(),
-                    kind: ParamKind::Color(ColorParam {
-                        default: AXIS_COLOR,
-                    }),
-                },
-                ParamSpec {
-                    id: "grid_color".into(),
-                    label: "Grid Color".into(),
-                    kind: ParamKind::Color(ColorParam {
-                        default: GRID_COLOR,
                     }),
                 },
                 ParamSpec {

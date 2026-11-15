@@ -378,6 +378,14 @@ fn graph_styles_survive_the_component_boundary() {
     let tmp = tempfile::tempdir().unwrap();
     let mut host = PluginHost::new(tmp.path()).unwrap();
     let graph = load_plugin(&mut host, "graph");
+    let manifest = &host.get_plugin(&graph).unwrap().wit_manifest;
+    let ids: std::collections::BTreeSet<_> =
+        manifest.params.iter().map(|param| &param.id).collect();
+    assert_eq!(
+        ids.len(),
+        manifest.params.len(),
+        "duplicate inspector fields"
+    );
     let scene = host
         .render_clip(
             &graph,

@@ -116,7 +116,7 @@ the complete file with FFmpeg's fatal-error mode. The full 1080p deliveries are 
   separately sampled tracing point are synchronized by this script. A graph item
   exposing an evaluated endpoint for attachment, or a combined math-plugin rig
   driven by one phase parameter, would keep them exact together.
-- **Graph axes styling:** this change exposes plot stroke width and grid/axis colors.
+- **Graph axes styling:** v2 already exposes grid/axis colors; this change adds plot stroke width.
   Tick placement/formatting, axis widths and arrowheads remain fixed. These examples
   suppress numeric labels and add text where needed. Expose normalized axis styles
   and π-aware tick formatting in the graph plugin.
