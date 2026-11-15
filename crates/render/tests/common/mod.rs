@@ -10,3 +10,6 @@ pub fn render(
         size,
     )
 }
+
+#[allow(dead_code)]
+pub mod glyphs;

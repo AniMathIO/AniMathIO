@@ -90,6 +90,12 @@ fn offset_verb(v: &PathVerb, ox: f32, oy: f32) -> PathVerb {
     }
 }
 
+/// Preserve contour winding and subpath boundaries in one non-zero fill. Filling
+/// contours separately paints over counters; this also serves captions and titles.
+fn fill_contours(contours: impl IntoIterator<Item = Vec<PathVerb>>, color: Color) -> DrawCommand {
+    DrawCommand::FillPath((contours.into_iter().flatten().collect(), color))
+}
+
 // Fitted titles use a real clip-local box, so the editor's transform handles and
 // safe-area coordinates describe the visible composition rather than an empty
 // full-canvas text source. Ordinary normalized text keeps the wrapped TextRun path.
@@ -138,8 +144,8 @@ fn fitted_text(
             x: (p.x + ox) / box_width,
             y: (p.y + oy) / box_height,
         };
-        for contour in contours {
-            let path = contour
+        let paths = contours.into_iter().map(|contour| {
+            contour
                 .into_iter()
                 .map(|verb| match verb {
                     PathVerb::MoveTo(p) => PathVerb::MoveTo(point(p)),
@@ -150,9 +156,9 @@ fn fitted_text(
                     }
                     PathVerb::Close => PathVerb::Close,
                 })
-                .collect();
-            elements.push(DrawCommand::FillPath((path, color)));
-        }
+                .collect()
+        });
+        elements.push(fill_contours(paths, color));
     }
     Ok(Scene {
         coordinate_space: CoordinateSpace::Normalized,
@@ -381,7 +387,7 @@ impl Canvas {
             })
             .collect();
         if !path.is_empty() {
-            self.elements.push(DrawCommand::FillPath((path, color)));
+            self.elements.push(fill_contours([path], color));
         }
     }
 
@@ -720,7 +726,7 @@ impl Guest for TextPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "text".to_string(),
-            version: "1.1.0".to_string(),
+            version: "1.2.0".to_string(),
             description:
                 "Host-shaped text with size, colour, alignment and animated caption styles"
                     .to_string(),
@@ -950,14 +956,13 @@ impl Guest for TextPlugin {
         } - min_x;
         let y_offset = size.height as f32 * 0.5;
 
-        let mut elements = Vec::with_capacity(contours.len());
-        for contour in contours {
-            let offset: Vec<PathVerb> = contour
+        let paths = contours.into_iter().map(|contour| {
+            contour
                 .iter()
                 .map(|v| offset_verb(v, x_offset, y_offset))
-                .collect();
-            elements.push(DrawCommand::FillPath((offset, color)));
-        }
+                .collect()
+        });
+        let elements = vec![fill_contours(paths, color)];
 
         Ok(Scene {
             coordinate_space: CoordinateSpace::Canvas,

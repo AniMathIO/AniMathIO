@@ -956,7 +956,10 @@ expressed as fractions of the full canvas. In that mode the plugin emits normali
 glyph outlines sized for a clip with the matching width/height scale, centres explicit
 lines in the box, and shrinks long text to fit. Title presets use this mode to keep
 edited fields and transform handles inside safe areas.
-Caption styles (text plugin 1.1.0, ABI unchanged) add optional parameters that are ignored
+Text plugin 1.2.0 fills shaped glyph contours together with their original winding,
+preserving counters in canvas text, fitted titles and Classic captions. Normalized
+text runs use the renderer’s shared embedded-font shaping on CPU and GPU.
+Caption styles (introduced in text plugin 1.1.0, ABI unchanged) add optional parameters that are ignored
 when `caption_style` is absent or `off`: `caption_style` (`off`, `classic`, `"word-highlight"`,
 `karaoke`, `pop`, `"one-word"`, `"bold-outline"`), `words` (space-separated `start:end` pairs in
 ticks, one per whitespace-separated word of `text`, relative to the clip's source time),

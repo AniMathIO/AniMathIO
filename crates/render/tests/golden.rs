@@ -86,3 +86,31 @@ fn sample_half_open_end() {
 fn video_and_missing_plugin_placeholders() {
     golden("media.json", 15, "media-placeholders");
 }
+
+#[test]
+fn glyph_counters() {
+    for kind in ["normalized", "canvas", "classic", "title"] {
+        let actual = render(
+            &common::glyphs::scene(kind),
+            &mut RenderCtx::default(),
+            (480, 270),
+        )
+        .unwrap();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(format!("glyph-counters-{kind}.png"));
+        if std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1") {
+            actual.save_png(&path).unwrap();
+        }
+        let expected = image::open(path).unwrap().to_rgba8();
+        assert_eq!(expected.dimensions(), actual.size);
+        assert!(
+            expected
+                .as_raw()
+                .iter()
+                .zip(&actual.pixels)
+                .all(|(a, b)| a.abs_diff(*b) <= 2),
+            "{kind}: glyph counters changed"
+        );
+    }
+}
