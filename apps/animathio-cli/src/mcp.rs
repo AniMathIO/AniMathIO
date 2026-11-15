@@ -1409,8 +1409,8 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<SetClipSpeed>,
     ) -> Result<CallToolResult, McpError> {
-        let speed =
-            animathio_core::ClipSpeed::new(p.numerator, p.denominator).map_err(mcp_error)?;
+        let speed = animathio_core::ClipSpeed::new(p.numerator, p.denominator)
+            .map_err(|e| invalid(&e.0))?;
         let ramps = p
             .ramps
             .into_iter()
@@ -1418,7 +1418,7 @@ impl McpServer {
                 Ok(animathio_core::SpeedPoint {
                     time: Time(r.time),
                     speed: animathio_core::ClipSpeed::new(r.numerator, r.denominator)
-                        .map_err(mcp_error)?,
+                        .map_err(|e| invalid(&e.0))?,
                 })
             })
             .collect::<Result<Vec<_>, McpError>>()?;
@@ -1868,7 +1868,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Describe the timeline as concise text: resolution, frame rate, duration, then every track with its clips (id, start - end in HH:MM:SS.mmm, kind, name, source offset) and the gaps between them. Call this first, and again after edits, to reason about the timeline. Other tools take milliseconds: 00:01:02.500 is 62500 ms."
+        description = "Describe the timeline as concise text: resolution, frame rate, duration, then every track with its clips (id, start - end in HH:MM:SS.mmm, kind, name, source offset) and the gaps between them. Call this first, and again after edits, to reason about the timeline. Most editing tools take milliseconds: 00:01:02.500 is 62500 ms. Speed ramp keys and freeze_frame use integer ticks."
     )]
     async fn describe_timeline(&self) -> Result<CallToolResult, McpError> {
         let mut backend = self.backend.lock().await;
@@ -2680,7 +2680,7 @@ impl ServerHandler for McpServer {
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(
                 "AniMathIO v2 control surface over MCP. Mutations are applied as commands with \
-                 undo/redo; times are milliseconds and coordinates are canvas pixels (origin \
+                 undo/redo; times are milliseconds unless a tool explicitly specifies ticks, and coordinates are canvas pixels (origin \
                  top-left)."
                     .to_owned(),
             )

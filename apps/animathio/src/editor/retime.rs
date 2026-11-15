@@ -105,7 +105,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[core::prelude::v1::test]
     fn percent_and_ramp_input_stay_exact() {
         assert_eq!(percent("6.25").unwrap(), ClipSpeed::new(1, 16).unwrap());
         assert_eq!(percent("150%").unwrap(), ClipSpeed::new(3, 2).unwrap());

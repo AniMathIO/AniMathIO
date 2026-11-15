@@ -79,6 +79,14 @@ impl SourceLimits {
         if clip.time_map.hold {
             return None;
         }
+        if clip.time_map.reverse {
+            // Extending a reverse tail reads toward the source start. An unused
+            // prefix of a split clock may lie beyond the asset, so only the retained
+            // clock's lower boundary limits this trim, not limit - source_offset.
+            let length = clip.time_map.source_length?;
+            let duration = clip.time_map.duration_for(length).ok()?.0 - clip.time_map.phase.0;
+            return Some(Time(clip.range.start.0.saturating_add(duration.max(0))));
+        }
         let room = limit.0 - clip.source_offset.0;
         let duration = if clip.time_map == animathio_core::ClipTimeMap::default() {
             room.max(0)

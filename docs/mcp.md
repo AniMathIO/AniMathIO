@@ -113,7 +113,7 @@ Without `--project`, the server connects to the editor via
 you to pass `--project`. With `--project`, it drives the file through the same
 `ControlHandler` trait, so tools behave identically either way.
 
-Times are milliseconds; coordinates are canvas pixels with the origin top-left.
+Times are milliseconds unless a tool explicitly specifies integer ticks (speed ramps, frame holds and core command batches); coordinates are canvas pixels with the origin top-left.
 Clip and track ids may be passed as strings (`"3"`) or numbers (`3`), matching
 how `describe_timeline` prints them.
 Timeline edits are applied as `Command`s and are undoable; replacing a project

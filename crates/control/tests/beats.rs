@@ -760,3 +760,34 @@ fn a_hold_or_split_cannot_hide_a_source_overrun_in_the_same_batch() {
         )
         .unwrap();
 }
+
+#[test]
+fn reverse_tail_trim_limit_uses_the_lower_source_boundary_after_a_slip() {
+    let (mut p, mut limits) = limited_session();
+    Command::SetClipSpeed {
+        id: ClipId(2),
+        speed: animathio_core::ClipSpeed::default(),
+        reverse: true,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::TrimClip {
+        id: ClipId(2),
+        range: range(5 * SEC, 6 * SEC),
+        source_offset: Time(4 * SEC),
+    }
+    .apply(&mut p)
+    .unwrap();
+    let slip = Command::TrimClip {
+        id: ClipId(2),
+        range: range(5 * SEC, 6 * SEC),
+        source_offset: Time(4 * SEC),
+    };
+    limits.guard(&p, &BTreeMap::new(), &slip).unwrap();
+    slip.apply(&mut p).unwrap();
+    let clip = &p.tracks()[0].clips()[&ClipId(2)];
+    assert_eq!(clip.source_bounds(), (Time(4 * SEC), Time(5 * SEC)));
+    assert_eq!(limits.max_end(&p, clip), Some(Time(6 * SEC)));
+}
