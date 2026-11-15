@@ -200,30 +200,43 @@ pub(super) fn migrate_markers(mut value: serde_json::Value) -> serde_json::Value
 
 /// Schema 6 adds per-clip fitting. Explicitly mark old clips as stretch, while
 /// promoting the earlier template `media_fit` parameter to the same typed field.
-pub(super) fn migrate_fit(mut value: serde_json::Value) -> serde_json::Value {
-    if let Some(tracks) = value["tracks"].as_array_mut() {
+pub(super) fn migrate_fit(mut value: serde_json::Value) -> Result<serde_json::Value, Error> {
+    if let Some(tracks) = value
+        .get_mut("tracks")
+        .and_then(serde_json::Value::as_array_mut)
+    {
         for track in tracks {
-            if let Some(clips) = track["clips"].as_object_mut() {
-                for clip in clips.values_mut() {
-                    clip["fit"] = serde_json::json!("stretch");
-                    if clip["kind"].get("Image").is_none() && clip["kind"].get("Video").is_none() {
-                        continue;
-                    }
+            let Some(clips) = track
+                .get_mut("clips")
+                .and_then(serde_json::Value::as_object_mut)
+            else {
+                continue;
+            };
+            for clip in clips.values_mut() {
+                let clip = clip
+                    .as_object_mut()
+                    .ok_or_else(|| invalid("clip must be an object"))?;
+                let is_media = clip
+                    .get("kind")
+                    .is_some_and(|k| k.get("Image").is_some() || k.get("Video").is_some());
+                let mut fit = "stretch";
+                if is_media {
                     // Templates in schema 5 used a typed string parameter. Promote it
                     // to the same model field as ordinary image/video fitting.
-                    let legacy = clip["params"]
-                        .as_object_mut()
+                    let legacy = clip
+                        .get_mut("params")
+                        .and_then(serde_json::Value::as_object_mut)
                         .and_then(|p| p.remove("media_fit"));
-                    let mode = legacy.as_ref().and_then(|v| v["String"].as_str());
-                    clip["fit"] = serde_json::json!(match mode {
+                    fit = match legacy.as_ref().and_then(|v| v.get("String")?.as_str()) {
                         Some("contain") => "contain",
                         Some("cover") => "cover",
                         _ => "stretch",
-                    });
+                    };
                 }
+                clip.insert("fit".to_owned(), serde_json::json!(fit));
             }
         }
     }
     value["schemaVersion"] = serde_json::json!(6);
-    value
+    Ok(value)
 }

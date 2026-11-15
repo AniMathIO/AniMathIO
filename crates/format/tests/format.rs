@@ -572,3 +572,23 @@ fn schema_six_migrates_to_identity_speed_and_seven_roundtrips() {
     );
     assert_eq!(read_json(bytes.as_slice()).unwrap(), project);
 }
+
+/// Minimized cargo-fuzz reproducers: malformed legacy projects are errors, never panics.
+#[test]
+fn fuzz_regressions_reject_malformed_legacy_json() {
+    for bytes in [
+        &include_bytes!(
+            "../../../fuzz/regressions/project_json/minimized-from-04541f12aac167628b9b67d9ccd1e49acfc0992a"
+        )[..],
+        &include_bytes!(
+            "../../../fuzz/regressions/project_json/minimized-from-497d5c65db5b2e4d1f081411b442b18ff5b62a1f"
+        )[..],
+        br#"{"schemaVersion":5,"tracks":[1,{"clips":{"1":7}}]}"#,
+        br#"{"schemaVersion":1,"tracks":[{"clips":{"1":7}}]}"#,
+    ] {
+        let result = std::panic::catch_unwind(|| {
+            animathio_format::read_json_with_migration(bytes, |_, v| Ok(v))
+        });
+        assert!(result.expect("must not panic").is_err());
+    }
+}

@@ -754,3 +754,15 @@ fn one_hour_waveform_is_a_bounded_streaming_pass() {
     assert!(stats.max_request.load(Ordering::Relaxed) <= 1 << 16);
     assert_eq!(stats.served.load(Ordering::Relaxed), 3600 * 48_000);
 }
+
+/// cargo-fuzz reproducer: an ADTS length estimate overflows inside symphonia-codec-aac.
+/// It must surface as an error, not a panic.
+#[test]
+fn fuzz_adts_overflow_is_a_clean_error() {
+    let bytes = include_bytes!(
+        "../../../fuzz/regressions/media_probe/minimized-from-07d4521a29799ea3cfb2722a70fe006cb0a28a1f"
+    );
+    let result =
+        std::panic::catch_unwind(|| animathio_audio::SymphoniaSource::from_bytes(bytes.to_vec()));
+    assert!(result.expect("must not panic").is_err());
+}
