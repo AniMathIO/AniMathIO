@@ -55,6 +55,7 @@ mod menus;
 mod playback_glue;
 mod project_io;
 mod reframe;
+mod retime;
 mod start_screen;
 mod subtitles;
 mod support;

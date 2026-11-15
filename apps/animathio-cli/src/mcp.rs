@@ -94,6 +94,36 @@ impl McpServer {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct SetClipSpeed {
+    clip_id: String,
+    /// Rational speed numerator, 1/16x to 16x at millionth precision.
+    numerator: u32,
+    denominator: u32,
+    #[serde(default)]
+    reverse: bool,
+    /// Linear speed keys in local timeline ticks; empty means constant speed.
+    #[serde(default)]
+    ramps: Vec<RampPoint>,
+    /// Shift trailing clips on unlocked tracks; false rejects overlaps.
+    #[serde(default)]
+    ripple: bool,
+}
+#[derive(Deserialize, JsonSchema)]
+struct RampPoint {
+    time: i64,
+    numerator: u32,
+    denominator: u32,
+}
+#[derive(Deserialize, JsonSchema)]
+struct FreezeFrame {
+    clip_id: String,
+    /// Absolute timeline ticks inside the clip.
+    at: i64,
+    /// Positive number of project frames to insert.
+    frames: u32,
+}
+
 // ---- tool parameter schemas (schemars) -----------------------------------
 
 #[derive(Deserialize, JsonSchema)]
@@ -1368,6 +1398,58 @@ impl McpServer {
             }
         }
         tool_text(json!({"clip_id": clip_id.0}))
+    }
+
+    #[tool(
+        description = "Set clip speed, reverse and linear speed ramps, preserving the source range. Linked audio follows (pitch-shifting varispeed). Optional ripple shifts trailing clips on unlocked tracks. One undo step."
+    )]
+    async fn set_clip_speed(
+        &self,
+        Parameters(p): Parameters<SetClipSpeed>,
+    ) -> Result<CallToolResult, McpError> {
+        let speed =
+            animathio_core::ClipSpeed::new(p.numerator, p.denominator).map_err(mcp_error)?;
+        let ramps = p
+            .ramps
+            .into_iter()
+            .map(|r| {
+                Ok(animathio_core::SpeedPoint {
+                    time: Time(r.time),
+                    speed: animathio_core::ClipSpeed::new(r.numerator, r.denominator)
+                        .map_err(mcp_error)?,
+                })
+            })
+            .collect::<Result<Vec<_>, McpError>>()?;
+        self.backend
+            .lock()
+            .await
+            .command_apply(Command::SetClipSpeed {
+                id: parse_clip_id(&p.clip_id)?,
+                speed,
+                reverse: p.reverse,
+                ramps,
+                ripple: p.ripple,
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({"clip_id":p.clip_id}))
+    }
+    #[tool(
+        description = "Insert a frame hold at an absolute timeline tick inside a clip. Splits and ripples the tail and linked companions as one undo step; companion audio is silent during the hold."
+    )]
+    async fn freeze_frame(
+        &self,
+        Parameters(p): Parameters<FreezeFrame>,
+    ) -> Result<CallToolResult, McpError> {
+        self.backend
+            .lock()
+            .await
+            .command_apply(Command::InsertFrameHold {
+                id: parse_clip_id(&p.clip_id)?,
+                at: Time(p.at),
+                frames: p.frames,
+            })
+            .map_err(mcp_error)?;
+        tool_text(json!({"clip_id":p.clip_id}))
     }
 
     #[tool(

@@ -522,3 +522,75 @@ fn mp4_companion_decodes_audio_instead_of_default_video_track() {
     assert!(source.info().frames > 0);
     assert!(source.decode_all().unwrap().frames() > 0);
 }
+
+#[test]
+fn clip_varispeed_length_alignment_reverse_and_block_independence() {
+    for rate in [44_100, 48_000] {
+        let pcm = Pcm::new(rate, 1, (0..rate).map(|i| i as f32 / rate as f32).collect()).unwrap();
+        let tick = TICKS_PER_SECOND / i64::from(rate);
+        for (n, d) in [(1, 2), (2, 1)] {
+            for reverse in [false, true] {
+                let (mut p, pool) = project(&pcm, 0, TICKS_PER_SECOND);
+                Command::SetClipSpeed {
+                    id: ClipId(0),
+                    speed: ClipSpeed::new(n, d).unwrap(),
+                    reverse,
+                    ramps: vec![],
+                    ripple: false,
+                }
+                .apply(&mut p)
+                .unwrap();
+                let end = p.tracks()[0].clips()[&ClipId(0)].range.end;
+                let output = pool.mix(&p, range(0, end.0), rate, 1).unwrap();
+                assert_eq!(output.len(), rate as usize * d as usize / n as usize);
+                for (i, sample) in output.iter().enumerate() {
+                    let position = i as f64 * f64::from(n) / f64::from(d);
+                    let position = if reverse {
+                        f64::from(rate) - 1.0 - position
+                    } else {
+                        position
+                    };
+                    // The half-speed last half-sample holds the boundary sample.
+                    let expected = position.clamp(0.0, f64::from(rate) - 1.0) / f64::from(rate);
+                    assert!(
+                        (f64::from(*sample) - expected).abs() < 0.0001,
+                        "{n}/{d}, reverse={reverse}, sample {i}"
+                    );
+                }
+                let cut = 1234 * tick;
+                let mut pieces = pool.mix(&p, range(0, cut), rate, 1).unwrap();
+                pieces.extend(pool.mix(&p, range(cut, end.0), rate, 1).unwrap());
+                assert_eq!(pieces, output);
+                assert!(
+                    pool.mix(&p, range(end.0, end.0 + tick * 10), rate, 1)
+                        .unwrap()
+                        .iter()
+                        .all(|s| *s == 0.0)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn clip_frame_holds_are_silent() {
+    let (mut p, pool) = project(&sine(48_000), 0, TICKS_PER_SECOND);
+    Command::InsertFrameHold {
+        id: ClipId(0),
+        at: Time(TICKS_PER_SECOND / 2),
+        frames: 3,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let hold = p.tracks()[0]
+        .clips()
+        .values()
+        .find(|c| c.time_map.hold)
+        .unwrap();
+    assert!(
+        pool.mix(&p, hold.range, 48_000, 1)
+            .unwrap()
+            .iter()
+            .all(|s| *s == 0.0)
+    );
+}

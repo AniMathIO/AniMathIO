@@ -457,7 +457,7 @@ fn schema_five_media_clips_keep_stretching_after_the_fit_migration() {
     // New media clips default to contain, which is written out and read back.
     assert_eq!(clip(&project, 1).fit, Fit::Contain);
     let value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
-    assert_eq!(value["schemaVersion"], 6);
+    assert_eq!(value["schemaVersion"], SCHEMA_VERSION);
     assert_eq!(value["tracks"][0]["clips"]["1"]["fit"], "contain");
     // Explicit stretch survives the next schema-6 save/load, whose new default is contain.
     assert_eq!(value["tracks"][1]["clips"]["2"]["fit"], "stretch");
@@ -510,4 +510,65 @@ fn schema_five_template_fit_is_promoted_without_changing_placement() {
         assert!(!String::from_utf8_lossy(&saved).contains("media_fit"));
         assert_eq!(read_json(saved.as_slice()).unwrap(), loaded);
     }
+}
+
+#[test]
+fn schema_six_migrates_to_identity_speed_and_seven_roundtrips() {
+    use animathio_core::{ClipSpeed, ClipTimeMap, SpeedPoint};
+    let mut project = Project::default();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "test"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(
+            ClipId(1),
+            ClipKind::Error("source".into()),
+            TimeRange::new(Time(0), Time(1000)).unwrap(),
+        ),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut bytes = Vec::new();
+    write_json(&mut bytes, &project).unwrap();
+    let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    json["schemaVersion"] = 6.into();
+    json["tracks"][0]["clips"]["1"]
+        .as_object_mut()
+        .unwrap()
+        .remove("time_map");
+    let migrated = read_json(serde_json::to_vec(&json).unwrap().as_slice()).unwrap();
+    assert_eq!(migrated, project);
+    assert_eq!(
+        migrated.tracks()[0].clips()[&ClipId(1)].time_map,
+        ClipTimeMap::default()
+    );
+    Command::SetClipSpeed {
+        id: ClipId(1),
+        speed: ClipSpeed::new(2, 1).unwrap(),
+        reverse: true,
+        ramps: vec![
+            SpeedPoint {
+                time: Time(0),
+                speed: ClipSpeed::new(1, 2).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(1000),
+                speed: ClipSpeed::new(2, 1).unwrap(),
+            },
+        ],
+        ripple: false,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut bytes = Vec::new();
+    write_json(&mut bytes, &project).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["schemaVersion"],
+        7
+    );
+    assert_eq!(read_json(bytes.as_slice()).unwrap(), project);
 }

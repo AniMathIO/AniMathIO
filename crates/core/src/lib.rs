@@ -6,8 +6,8 @@ mod keyframes;
 mod marker;
 mod model;
 mod params;
-mod time;
 mod speed;
+mod time;
 mod transition;
 mod vector;
 
@@ -17,8 +17,8 @@ pub use keyframes::*;
 pub use marker::*;
 pub use model::*;
 pub use params::*;
-pub use time::*;
 pub use speed::*;
+pub use time::*;
 pub use transition::*;
 pub use vector::*;
 

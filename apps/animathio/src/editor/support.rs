@@ -1145,7 +1145,31 @@ pub(super) fn clip_label(project: &Project, clip: &Clip) -> String {
         }
         _ => None,
     };
-    kind.unwrap_or_else(|| kind_label(&clip.kind))
+    let name = kind.unwrap_or_else(|| kind_label(&clip.kind));
+    if clip.time_map.hold {
+        format!("{name} [Hold]")
+    } else if !clip.time_map.ramps.is_empty() {
+        format!(
+            "{name} [Ramp{}]",
+            if clip.time_map.reverse {
+                ", reverse"
+            } else {
+                ""
+            }
+        )
+    } else if clip.time_map.speed != animathio_core::ClipSpeed::default() || clip.time_map.reverse {
+        format!(
+            "{name} [{:.2}%{}]",
+            clip.time_map.speed.percent(),
+            if clip.time_map.reverse {
+                ", reverse"
+            } else {
+                ""
+            }
+        )
+    } else {
+        name
+    }
 }
 
 /// Clip title: the asset or kind name, or (on short rows without a body

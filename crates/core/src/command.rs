@@ -984,15 +984,38 @@ impl Command {
                 range,
                 source_offset,
             } => {
-                let clip = clip_mut(project, *id)?;
-                let inverse = Self::TrimClip {
-                    id: *id,
-                    range: clip.range,
-                    source_offset: clip.source_offset,
-                };
+                let index = clip_track_index(project, *id)?;
+                let clip = project.tracks[index]
+                    .clips
+                    .get_mut(id)
+                    .expect("clip checked");
+                let previous = clip.clone();
+                if clip.time_map != crate::ClipTimeMap::default() {
+                    // TrimClip's offset delta is expressed in timeline ticks by existing
+                    // callers. Move the curve phase, keeping any additional slip delta.
+                    let delta = range.start.0 - clip.range.start.0;
+                    clip.time_map.phase = Time(
+                        clip.time_map
+                            .phase
+                            .0
+                            .checked_add(delta)
+                            .ok_or_else(|| invalid("trim phase overflow"))?,
+                    );
+                    clip.source_offset = Time(
+                        source_offset
+                            .0
+                            .checked_sub(delta)
+                            .ok_or_else(|| invalid("trim source overflow"))?,
+                    );
+                } else {
+                    clip.source_offset = *source_offset;
+                }
                 clip.range = *range;
-                clip.source_offset = *source_offset;
-                inverse
+                Self::RestoreClips {
+                    track: project.tracks[index].id,
+                    ids: vec![*id],
+                    clips: vec![previous],
+                }
             }
             Self::RestoreClips { track, ids, clips } => {
                 let unique: std::collections::BTreeSet<_> = ids.iter().collect();
@@ -1117,8 +1140,15 @@ impl Command {
                 clip.transform = *transform;
                 inverse
             }
-            Self::SetClipSpeed { id, speed, reverse, ramps, ripple } => {
-                let commands = crate::speed::speed_commands(project, *id, *speed, *reverse, ramps, *ripple)?;
+            Self::SetClipSpeed {
+                id,
+                speed,
+                reverse,
+                ramps,
+                ripple,
+            } => {
+                let commands =
+                    crate::speed::speed_commands(project, *id, *speed, *reverse, ramps, *ripple)?;
                 apply_generated(project, &commands)?
             }
             Self::InsertFrameHold { id, at, frames } => {
@@ -1754,9 +1784,20 @@ pub(crate) fn split_right(clip: &Clip, at: Time, id: ClipId) -> Result<Clip, Err
     right.id = id;
     right.range = TimeRange::new(at, clip.range.end)?;
     if clip.time_map == crate::ClipTimeMap::default() {
-        right.source_offset = Time(clip.source_offset.0.checked_add(duration).ok_or_else(|| invalid("source offset overflow"))?);
+        right.source_offset = Time(
+            clip.source_offset
+                .0
+                .checked_add(duration)
+                .ok_or_else(|| invalid("source offset overflow"))?,
+        );
     } else {
-        right.time_map.phase = Time(clip.time_map.phase.0.checked_add(duration).ok_or_else(|| invalid("curve phase overflow"))?);
+        right.time_map.phase = Time(
+            clip.time_map
+                .phase
+                .0
+                .checked_add(duration)
+                .ok_or_else(|| invalid("curve phase overflow"))?,
+        );
     }
     for animation in &mut right.animations {
         let boundary = animation.keys.sample(Time(duration));

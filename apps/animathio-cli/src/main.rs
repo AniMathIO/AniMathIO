@@ -4,6 +4,7 @@ mod duck;
 mod markers;
 mod mcp;
 mod reframe;
+mod retime;
 mod transcribe;
 
 use animathio_core::{AssetId, Project, Rounding, TICKS_PER_SECOND, Time, evaluate};
@@ -29,6 +30,10 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Action {
+    /// Change a clip's speed/reverse/ramp, preserving its source interval and linked audio.
+    SetClipSpeed(retime::SpeedArgs),
+    /// Insert a frame hold at the playhead and ripple trailing clips.
+    FreezeFrame(retime::HoldArgs),
     /// List the bundled project templates.
     Templates {
         #[command(subcommand)]
@@ -283,6 +288,8 @@ fn main() -> ExitCode {
 #[allow(clippy::too_many_lines)]
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Action::SetClipSpeed(args) => retime::speed(args)?,
+        Action::FreezeFrame(args) => retime::hold(args)?,
         Action::Templates {
             action: TemplateAction::List,
         } => {

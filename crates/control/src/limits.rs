@@ -74,11 +74,18 @@ impl SourceLimits {
     #[must_use]
     pub fn max_end(&self, _project: &Project, clip: &animathio_core::Clip) -> Option<Time> {
         let limit = self.duration_of(&clip.kind)?;
-        if clip.time_map.hold { return None; }
-        if clip.time_map.reverse { return Some(clip.range.end); }
+        if clip.time_map.hold {
+            return None;
+        }
+        if clip.time_map.reverse {
+            return Some(clip.range.end);
+        }
         let room = limit.0 - clip.source_offset.0;
-        let duration = if clip.time_map == animathio_core::ClipTimeMap::default() { room.max(0) }
-            else { clip.time_map.duration_for(Time(room.max(1))).ok()?.0 - clip.time_map.phase.0 };
+        let duration = if clip.time_map == animathio_core::ClipTimeMap::default() {
+            room.max(0)
+        } else {
+            clip.time_map.duration_for(Time(room.max(1))).ok()?.0 - clip.time_map.phase.0
+        };
         Some(Time(clip.range.start.0.saturating_add(duration.max(0))))
     }
 
@@ -162,7 +169,9 @@ fn source_end(clip: &animathio_core::Clip) -> i64 {
 
 fn trimmed_ids(command: &Command, out: &mut Vec<ClipId>) {
     match command {
-        Command::TrimClip { id, .. } | Command::SetClipSpeed { id, .. } | Command::InsertFrameHold { id, .. } => out.push(*id),
+        Command::TrimClip { id, .. }
+        | Command::SetClipSpeed { id, .. }
+        | Command::InsertFrameHold { id, .. } => out.push(*id),
         Command::Batch { commands } => commands.iter().for_each(|c| trimmed_ids(c, out)),
         _ => {}
     }

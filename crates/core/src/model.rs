@@ -639,12 +639,20 @@ impl Project {
                     return Err(invalid("duplicate or mismatched clip id"));
                 }
                 clip.range.validate()?;
-                clip.time_map.validate(clip.range.end.0 - clip.range.start.0)?;
+                clip.time_map
+                    .validate(clip.range.end.0 - clip.range.start.0)?;
+                let (source_start, source_end) = clip.source_bounds();
                 if clip.source_offset.0 < 0
+                    || source_start.0 < 0
+                    || source_end < source_start
                     || clip
                         .source_offset
                         .0
-                        .checked_add(clip.range.end.0 - clip.range.start.0)
+                        .checked_add(
+                            clip.time_map
+                                .source_length
+                                .map_or(clip.range.end.0 - clip.range.start.0, |length| length.0),
+                        )
                         .is_none()
                 {
                     return Err(invalid("invalid source time range"));
