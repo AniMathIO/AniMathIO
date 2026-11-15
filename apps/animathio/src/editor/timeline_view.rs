@@ -32,6 +32,14 @@ impl Editor {
             return String::new();
         };
         let (a, b) = c.source_bounds();
+        let delta = if t.tool == Tool::RateStretch {
+            match t.edge {
+                TrimEdge::Left => c.range.start.0 - t.origin_start.0,
+                TrimEdge::Right => c.range.end.0 - t.origin_end.0,
+            }
+        } else {
+            delta
+        };
         format!(
             "Delta {:+} ticks | {:.2}% | source {} – {}",
             delta,
