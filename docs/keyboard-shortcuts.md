@@ -17,6 +17,10 @@ they do not create an overlapping two-clip crossfade.
 | SelectTool | `v` |
 | BladeTool (razor) | `c` |
 | RippleTool (ripple edit) | `b` |
+| RateStretchTool | `r` |
+| SlipTool | `y` |
+| SlideTool | `u` |
+| RollingTool | `n` |
 | HandTool | `h` |
 
 ## Edits
@@ -120,8 +124,23 @@ Alt+L keeps AniMathIO's loop shortcut (Premiere reuses Ctrl+L for Loop, which
 here is Link). Mark Clip sets in/out from the first clip under the playhead in
 track order; the marks are editor state.
 
-Deferred: rolling-edit, rate-stretch, slip, slide, zoom and track-select tools
-(we have no such tools yet); paste attributes and paste insert; lift/extract;
+Deferred: zoom and track-select tools; paste attributes and paste insert; lift/extract;
 maximize panel; match frame; a "classic AniMathIO" preset and user keymap
 files. Actions without a default shortcut stay available in menus, toolbars and
 context menus. The searchable dialog lists actions with assigned keys.
+
+### Additional timeline tools
+
+| Shortcut | Tool |
+| --- | --- |
+| R | Rate Stretch: drag either edge to change speed, preserving the source interval |
+| Y | Slip: drag the clip body to shift its source interval |
+| U | Slide: drag the clip body between two touching neighbours |
+| N | Rolling Edit: drag a shared edge to trim both sides |
+
+These gestures snap to timeline targets and commit one undo step on release.
+Source bounds, linked companions, locked tracks and the 1/16–16x speed limits
+constrain the drag. Rate Stretch converts ramps to a constant speed. Slide requires
+touching neighbours on both sides; Rolling Edit requires a touching neighbour at
+the dragged edge. The floating timeline readout shows the delta in ticks, speed and
+source bounds.

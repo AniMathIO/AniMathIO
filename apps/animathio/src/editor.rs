@@ -321,6 +321,8 @@ struct KeyframeSelection {
 }
 
 struct TrimDrag {
+    tool: Tool,
+    pointer_origin: Time,
     clip_id: ClipId,
     edge: TrimEdge,
     origin_start: Time,

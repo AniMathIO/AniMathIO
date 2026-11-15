@@ -3,6 +3,44 @@
 use super::*;
 
 impl Editor {
+    pub(super) fn edit_tool_feedback(&self) -> String {
+        let Some(TimelineGesture::Trim(t)) = &self.gesture else {
+            return String::new();
+        };
+        if !matches!(
+            t.tool,
+            Tool::RateStretch | Tool::Slip | Tool::Slide | Tool::Rolling
+        ) {
+            return String::new();
+        }
+        let origin = match t.edge {
+            TrimEdge::Left => t.origin_start,
+            TrimEdge::Right => t.origin_end,
+        };
+        let delta = t.current.0 - origin.0;
+        let mut candidate = self.project.clone();
+        if let Some((cmd, _)) =
+            editing::tool_command(&self.project, t.clip_id, t.tool, t.edge, delta)
+        {
+            let _ = cmd.apply(&mut candidate);
+        }
+        let Some(c) = candidate
+            .tracks()
+            .iter()
+            .find_map(|track| track.clips().get(&t.clip_id))
+        else {
+            return String::new();
+        };
+        let (a, b) = c.source_bounds();
+        format!(
+            "Delta {:+} ticks | {:.2}% | source {} – {}",
+            delta,
+            c.time_map.speed.percent(),
+            timecode::format_timecode(a, self.project.frame_rate()),
+            timecode::format_timecode(b, self.project.frame_rate())
+        )
+    }
+
     pub(super) fn on_timeline_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -97,6 +135,25 @@ impl Editor {
         {
             return;
         }
+        if matches!(self.tool, Tool::Slip | Tool::Slide)
+            && let Some(hit) = timeline::hit_test(&layout, &self.project, x, y)
+            && let Some(clip) = self.find_clip(hit.clip).cloned()
+        {
+            self.select_only(hit.clip, cx);
+            self.gesture = Some(TimelineGesture::Trim(TrimDrag {
+                tool: self.tool,
+                pointer_origin: timeline::x_to_time(&layout, x),
+                clip_id: hit.clip,
+                edge: TrimEdge::Right,
+                origin_start: clip.range.start,
+                origin_end: clip.range.end,
+                origin_source_offset: clip.source_offset,
+                current: clip.range.end,
+                ripple: false,
+            }));
+            cx.notify();
+            return;
+        }
         if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
             self.select_only(clip_id, cx);
             self.selected_field = None;
@@ -139,6 +196,8 @@ impl Editor {
             self.select_only(hit.clip, cx);
             self.selected_field = None;
             self.gesture = Some(TimelineGesture::Trim(TrimDrag {
+                tool: self.tool,
+                pointer_origin: timeline::x_to_time(&layout, x),
                 clip_id: hit.clip,
                 edge,
                 origin_start: clip.range.start,
@@ -439,6 +498,43 @@ impl Editor {
                 } else {
                     None
                 };
+                if matches!(
+                    trim.tool,
+                    Tool::RateStretch | Tool::Slip | Tool::Slide | Tool::Rolling
+                ) {
+                    let origin = if matches!(trim.tool, Tool::Slip | Tool::Slide) {
+                        trim.pointer_origin
+                    } else {
+                        match trim.edge {
+                            TrimEdge::Left => trim.origin_start,
+                            TrimEdge::Right => trim.origin_end,
+                        }
+                    };
+                    if let Some((_, delta)) = editing::tool_command_guarded(
+                        &self.project,
+                        trim.clip_id,
+                        trim.tool,
+                        trim.edge,
+                        snapped.0 - origin.0,
+                        |cmd| {
+                            self.source_limits
+                                .guard(&self.project, &self.assets, cmd)
+                                .is_ok()
+                        },
+                    ) {
+                        if delta != snapped.0 - origin.0 {
+                            self.snap_line = None;
+                        }
+                        trim.current = Time(
+                            match trim.edge {
+                                TrimEdge::Left => trim.origin_start.0,
+                                TrimEdge::Right => trim.origin_end.0,
+                            } + delta,
+                        );
+                    }
+                    cx.notify();
+                    return;
+                }
                 trim.current = match trim.edge {
                     TrimEdge::Left => Time(snapped.0.clamp(
                         (trim.origin_start.0 - trim.origin_source_offset.0).max(0),
@@ -546,7 +642,27 @@ impl Editor {
                 }
             }
             Some(TimelineGesture::Trim(trim)) => {
-                let command = if trim.ripple {
+                let command = if matches!(
+                    trim.tool,
+                    Tool::RateStretch | Tool::Slip | Tool::Slide | Tool::Rolling
+                ) {
+                    let origin = match trim.edge {
+                        TrimEdge::Left => trim.origin_start,
+                        TrimEdge::Right => trim.origin_end,
+                    };
+                    (trim.current != origin)
+                        .then(|| {
+                            editing::tool_command(
+                                &self.project,
+                                trim.clip_id,
+                                trim.tool,
+                                trim.edge,
+                                trim.current.0 - origin.0,
+                            )
+                        })
+                        .flatten()
+                        .map(|(cmd, _)| cmd)
+                } else if trim.ripple {
                     ripple::trim_command(
                         &self.project,
                         trim.clip_id,
@@ -760,7 +876,39 @@ impl Editor {
         let rows = self.project.tracks().len();
         let loaded_effects = self.loaded_effect_ids();
         let any_solo = self.project.tracks().iter().any(Track::is_solo);
-        for (row, track) in self.project.tracks().iter().enumerate() {
+        let mut preview = None;
+        if let Some(TimelineGesture::Trim(t)) = &self.gesture
+            && matches!(
+                t.tool,
+                Tool::RateStretch | Tool::Slip | Tool::Slide | Tool::Rolling
+            )
+        {
+            let origin = match t.edge {
+                TrimEdge::Left => t.origin_start,
+                TrimEdge::Right => t.origin_end,
+            };
+            if t.current != origin
+                && let Some((cmd, _)) = editing::tool_command(
+                    &self.project,
+                    t.clip_id,
+                    t.tool,
+                    t.edge,
+                    t.current.0 - origin.0,
+                )
+            {
+                let mut candidate = self.project.clone();
+                if cmd.apply(&mut candidate).is_ok() {
+                    preview = Some(candidate);
+                }
+            }
+        }
+        for (row, track) in preview
+            .as_ref()
+            .unwrap_or(&self.project)
+            .tracks()
+            .iter()
+            .enumerate()
+        {
             let silenced = track.is_muted() || (any_solo && !track.is_solo());
             for transition in track.transitions() {
                 if let Some(from) = track.clips().get(&transition.from) {
@@ -784,6 +932,10 @@ impl Editor {
                     )
                 } else if let Some(TimelineGesture::Trim(trim)) = &self.gesture
                     && trim.clip_id == clip.id
+                    && !matches!(
+                        trim.tool,
+                        Tool::RateStretch | Tool::Slip | Tool::Slide | Tool::Rolling
+                    )
                 {
                     match trim.edge {
                         TrimEdge::Left => (trim.current, trim.origin_end),
@@ -1021,6 +1173,30 @@ impl Editor {
                                 IconName::FoldHorizontal,
                                 "Ripple trim (B)",
                                 "tool-ripple",
+                            ),
+                            (
+                                Tool::RateStretch,
+                                IconName::Gauge,
+                                "Rate Stretch (R)",
+                                "tool-rate-stretch",
+                            ),
+                            (
+                                Tool::Slip,
+                                IconName::ArrowLeftRight,
+                                "Slip (Y)",
+                                "tool-slip",
+                            ),
+                            (
+                                Tool::Slide,
+                                IconName::MoveHorizontal,
+                                "Slide (U)",
+                                "tool-slide",
+                            ),
+                            (
+                                Tool::Rolling,
+                                IconName::FoldHorizontal,
+                                "Rolling Edit (N)",
+                                "tool-rolling",
                             ),
                             (Tool::Hand, IconName::Hand, "Pan (H)", "tool-hand"),
                         ]
@@ -1317,6 +1493,19 @@ impl Editor {
                                     ),
                             ),
                     )
+                    .when(!self.edit_tool_feedback().is_empty(), |view| {
+                        view.child(
+                            div()
+                                .absolute()
+                                .top_1()
+                                .left(px(180.))
+                                .px_2()
+                                .py_1()
+                                .bg(cx.theme().popover)
+                                .text_size(crate::style::type_size::XS)
+                                .child(self.edit_tool_feedback()),
+                        )
+                    })
                     .child(gpui_component::scroll::Scrollbar::vertical(
                         &self.timeline_scroll_handle,
                     )),

@@ -19,6 +19,10 @@ actions!(
         SelectTool,
         BladeTool,
         RippleTool,
+        RateStretchTool,
+        SlipTool,
+        SlideTool,
+        RollingTool,
         HandTool,
         RippleDelete,
         RippleTrimPrevious,
@@ -174,6 +178,10 @@ pub(super) fn keymap() -> Vec<(&'static str, Box<dyn Action>, &'static str)> {
         ("v", Box::new(SelectTool), "Timeline"),
         ("c", Box::new(BladeTool), "Timeline"),
         ("b", Box::new(RippleTool), "Timeline"),
+        ("r", Box::new(RateStretchTool), "Timeline"),
+        ("y", Box::new(SlipTool), "Timeline"),
+        ("u", Box::new(SlideTool), "Timeline"),
+        ("n", Box::new(RollingTool), "Timeline"),
         ("h", Box::new(HandTool), "Timeline"),
         ("shift-delete", Box::new(RippleDelete), "Timeline"),
         ("alt-backspace", Box::new(RippleDelete), "Timeline"),
@@ -637,6 +645,42 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
             return;
         }
         this.tool = Tool::Ripple;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &RateStretchTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::RateStretch;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &SlipTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::Slip;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &SlideTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::Slide;
+        this.snap_line = None;
+        cx.notify();
+    }))
+    .on_action(cx.listener(|this, _: &RollingTool, window, cx| {
+        if this.fields.any_focused(window, cx) {
+            cx.propagate();
+            return;
+        }
+        this.tool = Tool::Rolling;
         this.snap_line = None;
         cx.notify();
     }))

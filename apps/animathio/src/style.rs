@@ -27,6 +27,8 @@ pub mod color {
     /// Primary-action gradient start and end.
     pub const ACCENT_FROM: u32 = 0x7C5CFF;
     pub const ACCENT_TO: u32 = 0x22D3EE;
+    /// Timeline snapping guide.
+    pub const SNAP: u32 = 0xFACC15;
     pub const PLAYHEAD: u32 = 0xFF4D6D;
     pub const SUCCESS: u32 = 0x22C55E;
     pub const WARNING: u32 = 0xF59E0B;

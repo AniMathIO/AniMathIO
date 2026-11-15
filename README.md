@@ -270,10 +270,13 @@ a neighbouring clip; locked tracks stay put.
 
 I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Ctrl/Cmd+Shift+X clears them. The ruler highlights
 the range; looping uses it and export defaults to it. Select (V), Blade (C), Ripple
-trim (B) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
+trim (B), Rate Stretch (R), Slip (Y), Slide (U), Rolling Edit (N) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
 splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later clips
 on the same track as one undo step. S toggles snapping and an engaged snap draws an
-accent line. Equals/minus zooms and backslash fits the timeline.
+yellow line. The additional edit tools preserve source intervals (Rate Stretch),
+shift source in/out (Slip), compensate touching neighbours (Slide) or move a shared
+edit point (Rolling Edit). Each drag is one undo step; the floating readout shows
+the delta, speed and source timecodes. Equals/minus zooms and backslash fits the timeline.
 Shift+Left/Right steps the playhead five frames; Ctrl/Cmd+Shift+K adds edits on all unlocked tracks.
 Q and W ripple-trim the previous/next edit to the playhead, Ctrl/Cmd+D applies the default
 transition (1 s fades) to the selection, Ctrl/Cmd+Shift+D to audio clips and Shift+D to both,
