@@ -705,7 +705,10 @@ the ducked spans). The `denoise` audio effect is
 streaming spectral gating inside `org.animathio.audio-basic`; its noise profile is a
 per-bin minimum over ~1 s of smoothed power, so its memory is about as long as the mixer's
 state warm-up; whatever the warm-up leaves, the output stays a pure function of the project.
-It adds 512 frames of latency.
+It adds 512 frames of latency, which the mixer compensates for clip and track chains
+(declared through a host-side first-party table, since ABI 1.x descriptors cannot carry
+latency; see `docs/plugins.md`), so delayed audio stays aligned with the timeline and no
+tail is lost at clip ends.
 
 ## Auto-reframe
 

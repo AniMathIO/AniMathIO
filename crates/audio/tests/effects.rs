@@ -8,6 +8,7 @@
 )]
 use animathio_audio::{AudioPool, EffectWarnings, Mixer, Pcm};
 use animathio_core::*;
+use std::collections::VecDeque;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -74,7 +75,41 @@ impl AudioEffectProcessor for Mock {
                     state: Vec::new(),
                 })
             }
+            "delay" => {
+                // Pure delay of `frames` frames per channel, carrying the ring between
+                // blocks as the state. With `declare` set, the mock reports the same
+                // number as its latency, so the mixer's compensation can be checked
+                // against the dry signal exactly.
+                let frames = effect.params.get("frames").copied().unwrap_or(512.0) as usize;
+                let mut ring: VecDeque<f32> = if state.is_empty() {
+                    vec![0.0; frames * channels].into()
+                } else {
+                    state
+                        .chunks_exact(4)
+                        .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                        .collect()
+                };
+                let mut out = Vec::with_capacity(block.samples.len());
+                for frame in block.samples.chunks_exact(channels) {
+                    for sample in frame {
+                        out.push(ring.pop_front().unwrap());
+                        ring.push_back(*sample);
+                    }
+                }
+                Ok(AudioBlockOutput {
+                    samples: out,
+                    state: ring.iter().flat_map(|y| y.to_le_bytes()).collect(),
+                })
+            }
             _ => Err("mock failure".to_owned()),
+        }
+    }
+
+    fn latency(&self, effect: &EffectInstance) -> u64 {
+        if effect.effect == "delay" && effect.params.get("declare").copied().unwrap_or(0.0) != 0.0 {
+            effect.params.get("frames").copied().unwrap_or(512.0) as u64
+        } else {
+            0
         }
     }
 }
@@ -518,4 +553,148 @@ fn lenient_mixers_pass_audio_through_with_a_warning_and_strict_ones_fail_clearly
             .iter()
             .any(|w| w.contains("effect processor"))
     );
+}
+
+/// A project whose clip plays `frames` frames of mostly-silence with unit impulses at
+/// `impulses` (source frame indices), starting at an unaligned timeline offset.
+fn impulse_project(frames: usize, impulses: &[usize]) -> (Project, Mixer, i64) {
+    let id = AssetId::of(b"impulses");
+    let mut pcm = vec![0.0_f32; frames];
+    for &at in impulses {
+        pcm[at] = 1.0;
+    }
+    let pcm = Pcm::new(RATE, 1, pcm).unwrap();
+    let tick = TICKS_PER_SECOND / i64::from(RATE);
+    let offset = 333;
+    let mut project = Project::default();
+    for command in [
+        Command::AddAsset {
+            id: id.clone(),
+            asset: Asset {
+                name: "impulses".into(),
+                media_type: "audio/wav".into(),
+            },
+        },
+        Command::AddTrack {
+            track: Track::new(TrackId(0), "audio"),
+            index: 0,
+        },
+        Command::AddClip {
+            track: TrackId(0),
+            clip: Clip::new(
+                ClipId(0),
+                ClipKind::Audio(id.clone()),
+                range(offset * tick, (offset + frames as i64) * tick),
+            ),
+        },
+    ] {
+        command.apply(&mut project).unwrap();
+    }
+    let mut pool = AudioPool::default();
+    pool.insert(id, &pcm).unwrap();
+    // Hear past the clip end, so a lost tail shows up as a missing impulse.
+    let end = offset + frames as i64 + 4 * i64::from(RATE) / 1000;
+    (project, pool.prepare(RATE, 1).unwrap(), end)
+}
+
+/// Declared latency is compensated: impulses stay exactly on their timeline frames, the
+/// delay line's tail is not lost at the clip end, and chain latency is additive.
+#[test]
+fn declared_latency_keeps_impulses_aligned_and_the_tail_audible() {
+    let (mut project, dry, end) = impulse_project(5000, &[700, 4999]);
+    let tick = TICKS_PER_SECOND / i64::from(RATE);
+    let plain = mixed(&dry, &project, 0, end * tick);
+    let impulse_at = |mix: &[f32], frame: usize| mix[frame] == 1.0;
+
+    // Without compensation the signal arrives 512 frames late and the last impulse
+    // (in the clip's final frame) never leaves the delay line.
+    add(
+        &mut project,
+        AudioChain::Clip(ClipId(0)),
+        fx(1, "delay", &[("frames", 512.0)]),
+    );
+    let mixer = dry.clone().with_effect_processor(Arc::new(Mock::default()));
+    let raw = mixed(&mixer, &project, 0, end * tick);
+    assert!(impulse_at(&raw, 333 + 700 + 512));
+    assert!(!impulse_at(&raw, 333 + 700));
+    assert!(!raw[333 + 4999..333 + 5000].iter().any(|&x| x == 1.0));
+
+    // Declared: the whole mix is bit-identical to the dry one (alignment and tail).
+    Command::SetAudioEffectParam {
+        chain: AudioChain::Clip(ClipId(0)),
+        effect: EffectId(1),
+        name: "declare".into(),
+        value: Some(1.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mixer = dry.clone().with_effect_processor(Arc::new(Mock::default()));
+    assert_eq!(mixed(&mixer, &project, 0, end * tick), plain);
+
+    // Latency is additive along the chain: 300 + 212 = 512, still exactly aligned.
+    Command::SetAudioEffectParam {
+        chain: AudioChain::Clip(ClipId(0)),
+        effect: EffectId(1),
+        name: "frames".into(),
+        value: Some(300.0),
+    }
+    .apply(&mut project)
+    .unwrap();
+    add(
+        &mut project,
+        AudioChain::Clip(ClipId(0)),
+        fx(2, "delay", &[("frames", 212.0), ("declare", 1.0)]),
+    );
+    let mixer = dry.clone().with_effect_processor(Arc::new(Mock::default()));
+    assert_eq!(mixed(&mixer, &project, 0, end * tick), plain);
+
+    // Compensation holds whatever range is requested (block-lattice determinism).
+    let mid = mixed(&mixer, &project, 1234 * tick, 4400 * tick);
+    assert_eq!(mid, plain[1234..4400]);
+}
+
+/// Compensation is content-level, so it holds for retimed clips: the chain still emits
+/// exactly the dry signal of a sped-up or reversed clip.
+#[test]
+fn declared_latency_is_compensated_for_sped_up_and_reversed_clips() {
+    let tick = TICKS_PER_SECOND / i64::from(RATE);
+    for (n, d, reverse) in [(1, 2, false), (2, 1, false), (1, 1, true)] {
+        let (mut project, dry, _) = impulse_project(4000, &[1500, 3999]);
+        let mut mixer = dry.clone();
+        Command::SetClipSpeed {
+            id: ClipId(0),
+            speed: ClipSpeed::new(n, d).unwrap(),
+            reverse,
+            ramps: vec![],
+            ripple: false,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let end = project.tracks()[0].clips()[&ClipId(0)].range.end.0;
+        let plain = mixed(&dry, &project, 0, end + 4 * i64::from(RATE) * tick);
+        add(
+            &mut project,
+            AudioChain::Clip(ClipId(0)),
+            fx(1, "delay", &[("frames", 512.0), ("declare", 1.0)]),
+        );
+        mixer = mixer.with_effect_processor(Arc::new(Mock::default()));
+        let out = mixed(&mixer, &project, 0, end + 4 * i64::from(RATE) * tick);
+        assert_eq!(out.len(), plain.len(), "{n}/{d} reverse={reverse}");
+        assert_eq!(out, plain, "{n}/{d} reverse={reverse}");
+    }
+}
+
+/// A track chain's declared latency is compensated the same way.
+#[test]
+fn declared_track_chain_latency_is_compensated() {
+    let (mut project, dry, end) = impulse_project(5000, &[700, 4999]);
+    let tick = TICKS_PER_SECOND / i64::from(RATE);
+    let plain = mixed(&dry, &project, 0, end * tick);
+    add(
+        &mut project,
+        AudioChain::Track(TrackId(0)),
+        fx(1, "delay", &[("frames", 512.0), ("declare", 1.0)]),
+    );
+    let mixer = dry.with_effect_processor(Arc::new(Mock::default()));
+    assert_eq!(mixed(&mixer, &project, 0, end * tick), plain);
 }

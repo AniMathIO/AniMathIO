@@ -137,6 +137,31 @@ impl AudioRuntime {
             .collect()
     }
 
+    /// Processing latency of `effect` in frames, from the host-side first-party table.
+    ///
+    /// ABI 1.x freezes the `audio-effect-descriptor` record (see "API versions and
+    /// compatibility policy" in `docs/plugins.md`), so effects cannot declare latency in
+    /// their descriptors yet; the host tables its own plugins instead. A plugin that is
+    /// not loaded declares no latency, so lenient passthrough stays unshifted.
+    pub(crate) fn latency(&self, effect: &EffectInstance) -> u64 {
+        let latency = match (effect.plugin.as_str(), effect.effect.as_str()) {
+            // The STFT delay of `denoise`: N = 512 frames at any rate (see
+            // plugins/audio-basic/src/dsp/denoise.rs).
+            ("org.animathio.audio-basic", "denoise") => 512,
+            _ => 0,
+        };
+        if latency > 0
+            && !self
+                .plugins
+                .read()
+                .expect("audio registry lock")
+                .contains_key(&effect.plugin)
+        {
+            return 0;
+        }
+        latency
+    }
+
     fn limiter(&self, samples: usize) -> StoreLimits {
         let memory = (AUDIO_BASE_MEMORY + AUDIO_MEMORY_PER_SAMPLE * samples)
             .min(self.limits.audio_memory_bytes);
@@ -322,5 +347,9 @@ impl AudioEffectProcessor for AudioEffectHandle {
         state: &[u8],
     ) -> Result<AudioBlockOutput, String> {
         self.runtime.process(effect, block, state)
+    }
+
+    fn latency(&self, effect: &EffectInstance) -> u64 {
+        self.runtime.latency(effect)
     }
 }

@@ -1,6 +1,8 @@
 //! Audio-effect plugins through the real sandbox: discovery, per-effect behaviour, state carried
 //! between blocks, host-enforced limits and warm-instance reuse.
-use animathio_core::{AudioBlock, AudioEffectProcessor, EffectId, EffectInstance, Time};
+use animathio_core::{
+    AudioBlock, AudioEffectProcessor, EffectId, EffectInstance, TICKS_PER_SECOND, Time,
+};
 use animathio_plugin_api::{PluginManifestToml, PluginPackage};
 use animathio_plugin_host::{PluginHost, SandboxLimits, test_support};
 use std::collections::BTreeMap;
@@ -358,5 +360,55 @@ fn bench_audio() {
         run();
         let per_second = start.elapsed().as_secs_f64() * 1000.0 / seconds as f64;
         println!("{id:>14}: {per_second:7.2} ms per second of 48 kHz stereo");
+    }
+}
+
+#[test]
+fn denoise_declares_its_latency_and_delays_by_exactly_that() {
+    let handle = handle();
+    // The host-side first-party table: `denoise` delays by 512 frames, other effects
+    // and plugins that are not loaded declare none (see docs/plugins.md).
+    assert_eq!(handle.latency(&effect("denoise", &[])), 512);
+    assert_eq!(handle.latency(&effect("gain", &[])), 0);
+    let mut missing = effect("denoise", &[]);
+    missing.plugin = "org.example.missing".into();
+    assert_eq!(handle.latency(&missing), 0);
+
+    // A burst train through the real sandbox: every burst reappears exactly `latency`
+    // frames later, whatever the block boundaries, and the gaps stay attenuated.
+    let period = 2048;
+    let bursts = 8;
+    let mut input = vec![0.0_f32; bursts * period];
+    for burst in 0..bursts {
+        for n in 0..128 {
+            input[burst * period + n] =
+                0.8 * (2.0 * PI * 1000.0 * n as f64 / f64::from(RATE)).sin() as f32;
+        }
+    }
+    let fx = effect("denoise", &[]);
+    let mut out = Vec::new();
+    let mut state = Vec::new();
+    for (index, chunk) in input.chunks(1500).enumerate() {
+        let start = (index * 1500) as i64 * TICKS_PER_SECOND / i64::from(RATE);
+        let processed = handle
+            .process(&fx, &block(chunk, 1, start), &state)
+            .unwrap();
+        out.extend(processed.samples);
+        state = processed.state;
+    }
+    assert_eq!(out.len(), input.len());
+    for burst in 0..bursts {
+        let at = burst * period;
+        let peak = out[at + 512..at + 512 + 128]
+            .iter()
+            .fold(0.0_f32, |a, &x| a.max(x.abs()));
+        assert!(peak > 0.3, "burst {burst} lost: peak {peak}");
+        let before = out[at..at + 512 - 16]
+            .iter()
+            .fold(0.0_f32, |a, &x| a.max(x.abs()));
+        assert!(
+            before < 0.2 * peak,
+            "burst {burst} leads its compensated position: {before} vs {peak}"
+        );
     }
 }

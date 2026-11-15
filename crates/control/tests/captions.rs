@@ -350,9 +350,12 @@ fn text_edits_keep_anchors_spread_insertions_and_undo_together() {
         .into_iter()
         .find(|c| c.id == id)
         .unwrap();
+    let ParamValue::String(words) = clip.params.get("words").unwrap() else {
+        panic!("words should be a string");
+    };
     assert_eq!(
-        plugin_param(clip, "words"),
-        format!(
+        words,
+        &format!(
             "0:{} {}:{} {}:{} {}:{}",
             500 * MS,
             500 * MS,

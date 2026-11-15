@@ -164,7 +164,10 @@ impl EffectWarnings {
 /// never in the device callback. They need an [`AudioEffectProcessor`] set with
 /// [`Mixer::with_effect_processor`]; a project without active effects never touches it. Effect
 /// state is defined on a fixed block lattice with bounded warm-up, so the result for any frame
-/// is a pure function of the project, whatever ranges were mixed before. A small cache of
+/// is a pure function of the project, whatever ranges were mixed before. Effects that declare
+/// processing latency (see [`AudioEffectProcessor::latency`]) are compensated: the chain's
+/// output is read that many frames ahead, so the audio stays aligned with the timeline and the
+/// delay line's tail is not cut off at a clip's end. A small cache of
 /// processed blocks (shared between clones) makes sequential playback and export cost one
 /// pass of each chain instead of one pass per requested range.
 #[derive(Clone)]
@@ -183,6 +186,22 @@ pub struct Mixer {
     cache: Arc<Mutex<EffectCache>>,
 }
 impl Mixer {
+    /// Total processing latency a chain's active effects declare, in frames. The mixer
+    /// compensates it by reading a chain's output `latency` frames ahead of the timeline
+    /// frame it is needed for, so delayed effects stay aligned with the timeline (and with
+    /// sped-up or reversed playback, which is mapped to source frames before the chain) and
+    /// the delay line's tail is still emitted after a clip's last frame. Chains without a
+    /// processor, and effects that declare none, pass through unshifted.
+    fn chain_latency<'a>(&self, effects: impl Iterator<Item = &'a EffectInstance>) -> usize {
+        let Some(processor) = &self.effects else {
+            return 0;
+        };
+        effects
+            .map(|effect| processor.latency(effect))
+            .sum::<u64>()
+            .min(usize::MAX as u64) as usize
+    }
+
     /// Output frames per second.
     #[must_use]
     pub fn rate(&self) -> u32 {
@@ -324,12 +343,18 @@ impl Mixer {
         let mut cursor = source.cursor();
         if chain_active {
             // The chain output is per block; blocks are cached and shared across calls.
+            // Declared effect latency delays the chain's stream, so the timeline frame
+            // `f` is read from chain position `f + latency`: the content stays aligned
+            // with the timeline and the clip's last frames are not lost in the delay
+            // line (the blocks past the clip window carry them, fed with silence).
             let key = clip_key(self, clip, play);
             let block_frames = EFFECT_BLOCK_FRAMES;
-            for block in from / block_frames..=(to - 1) / block_frames {
+            let shift = self.chain_latency(clip.audio_effects.iter().filter(|e| !e.bypass));
+            for block in (from + shift) / block_frames..=(to - 1 + shift) / block_frames {
                 let entry = self.clip_chain_block(clip, source, play, key, block)?;
                 let base = block * block_frames;
-                for frame in from.max(base)..to.min(base + block_frames) {
+                for position in (from + shift).max(base)..(to + shift).min(base + block_frames) {
+                    let frame = position - shift;
                     let now = frame_ticks(frame, self.rate)?;
                     let gain = track_gain
                         * crossfade(fade_in, clip.range.start, now, |(_, gain)| gain)
@@ -339,8 +364,8 @@ impl Mixer {
                     }
                     for channel in 0..channels {
                         out[(frame - out_first) * channels + channel] +=
-                            (f64::from(entry.samples[(frame - base) * channels + channel]) * gain)
-                                as f32;
+                            (f64::from(entry.samples[(position - base) * channels + channel])
+                                * gain) as f32;
                     }
                 }
             }
@@ -472,13 +497,17 @@ impl Mixer {
                 .collect())
         };
         let start_time = |block: usize| frame_ticks(block * EFFECT_BLOCK_FRAMES, self.rate);
+        let shift = self.chain_latency(track.audio_effects().iter().filter(|e| !e.bypass));
         let mut output = vec![0.0_f32; (end - first) * channels];
-        for block in first / EFFECT_BLOCK_FRAMES..=(end - 1) / EFFECT_BLOCK_FRAMES {
+        for block in (first + shift) / EFFECT_BLOCK_FRAMES..=(end - 1 + shift) / EFFECT_BLOCK_FRAMES
+        {
             let entry =
                 self.chain_block(key, block, 0, chain_len, &input, &effects_at, &start_time)?;
             let base = block * EFFECT_BLOCK_FRAMES;
-            for frame in first.max(base)..end.min(base + EFFECT_BLOCK_FRAMES) {
-                let (from, to) = ((frame - base) * channels, (frame - first) * channels);
+            for position in (first + shift).max(base)..(end + shift).min(base + EFFECT_BLOCK_FRAMES)
+            {
+                let frame = position - shift;
+                let (from, to) = ((position - base) * channels, (frame - first) * channels);
                 output[to..to + channels].copy_from_slice(&entry.samples[from..from + channels]);
             }
         }
