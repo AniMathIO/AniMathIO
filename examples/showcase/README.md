@@ -92,7 +92,8 @@ python3 examples/showcase/test.py --update-golden --output target/showcase-revie
 ```
 
 CI builds all six projects with click audio, checks model structure, beat
-boundaries and vector/tracing-point connections at every authored sample,
+boundaries, vector/tracing-point/graph connections at every authored sample,
+and congruent proof triangles with the final uncovered square regions,
 renders four PNGs per layout (including an equation/graph transition),
 and compares every RGBA channel with maximum absolute error 2 (the renderer's existing golden policy). It exports
 seconds 8–10 at 12 fps per project, then checks H.264/AAC, dimensions, duration,

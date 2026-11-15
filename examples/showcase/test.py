@@ -151,6 +151,7 @@ def check_structure(session, data, vertical):
     boundaries = {c["range"]["start"] for c in rail["clips"].values()}
     assert {ticks(ms / 1000) for ms in data["beats_ms"]} <= boundaries
     check_motion(project)
+    check_dissection(project)
 
 
 def check_motion(project):
@@ -161,8 +162,7 @@ def check_motion(project):
 
     def clips_named(name):
         return [
-            c for t in tracks if t["name"].startswith(name)
-            for c in t["clips"].values()
+            c for t in tracks if t["name"].startswith(name) for c in t["clips"].values()
         ]
 
     def keys(clip, property):
@@ -182,9 +182,16 @@ def check_motion(project):
         )
         assert vectors
         projection = next(
-            c for c in clips_named("Height projection")
-            if c["range"] == point["range"]
+            c for c in clips_named("Height projection") if c["range"] == point["range"]
         )
+        plot = next(
+            c
+            for c in clips_named("Function plot")
+            if c["range"] == point["range"]
+            and c["kind"]["Plugin"]["params"]["color"] == [94, 228, 187, 255]
+        )
+        placement = plot["transform"]
+        unit_circle = any(t["name"] == "Unit circle" for t in tracks)
         px, py = keys(point, "X"), keys(point, "Y")
         for time in px:
             end = None
@@ -194,7 +201,10 @@ def check_motion(project):
                     number(keys(vector, "Y"), time) * height,
                 )
                 if end is not None:
-                    assert math.dist(center, end) < 0.01, ("disconnected epicycle", time)
+                    assert math.dist(center, end) < 0.01, (
+                        "disconnected epicycle",
+                        time,
+                    )
                 rotation = keys(vector, "Rotation")
                 finish = max(rotation, key=int)
                 angle = number(rotation, finish) * int(time) / int(finish)
@@ -209,7 +219,129 @@ def check_motion(project):
                 number(keys(projection, "X"), time) * width,
                 number(keys(projection, "Y"), time) * height,
             )
-            assert math.dist(source, tracer) < 0.01, ("projection detached from tracer", time)
+            assert math.dist(source, tracer) < 0.01, (
+                "projection detached from tracer",
+                time,
+            )
+            # The other endpoint must reach the drawn graph, including its different
+            # physical height in the vertical layout.
+            progress = int(time) / int(max(px, key=int))
+            theta = 2 * math.pi * progress
+            amplitude = (
+                math.sin(2 * theta)
+                if unit_circle
+                else sum(
+                    4 / (math.pi * n) * math.sin(n * theta)
+                    for n in range(1, len(vectors) * 2, 2)
+                )
+            )
+            expected = (
+                (placement["x"] + placement["scale_x"] * (progress - 0.5)) * width,
+                (placement["y"] - placement["scale_y"] * amplitude / 3) * height,
+            )
+            length = number(keys(projection, "ScaleX"), time) * width
+            angle = number(keys(projection, "Rotation"), time)
+            endpoint = (
+                source[0] + length * math.cos(angle),
+                source[1] + length * math.sin(angle),
+            )
+            assert math.dist(endpoint, expected) < 0.01, (
+                "projection misses graph",
+                time,
+            )
+
+
+def check_dissection(project):
+    """The proof must preserve four 3-4-5 triangles and leave two final squares."""
+    triangles = [
+        c
+        for t in project["tracks"]
+        if t["name"].startswith("Congruent triangle")
+        for c in t["clips"].values()
+    ]
+    if not triangles:
+        return
+    assert len(triangles) == 4
+    outer = next(
+        c
+        for t in project["tracks"]
+        if t["name"] == "Outer square"
+        for c in t["clips"].values()
+    )["transform"]
+    width, height = project["width"], project["height"]
+    side = outer["scale_x"] * width
+    assert abs(side - outer["scale_y"] * height) < 1e-6
+
+    def vertices(clip, final):
+        placement = clip["transform"].copy()
+        for curve in clip["animations"]:
+            field = {"X": "x", "Y": "y", "Rotation": "rotation"}[
+                curve["target"]["Transform"]
+            ]
+            time = (max if final else min)(curve["keys"], key=int)
+            placement[field] = curve["keys"][time]["value"]["Number"]
+        angle = placement["rotation"]
+        result = []
+        for verb in json.loads(clip["kind"]["Plugin"]["params"]["path"]):
+            if verb == "Close":
+                continue
+            x, y = next(iter(verb.values()))
+            dx, dy = (x - 0.5) * placement["scale_x"] * width, (y - 0.5) * placement[
+                "scale_y"
+            ] * height
+            result.append(
+                (
+                    (
+                        placement["x"] * width
+                        + dx * math.cos(angle)
+                        - dy * math.sin(angle)
+                        - outer["x"] * width
+                    )
+                    / side
+                    + 0.5,
+                    (
+                        placement["y"] * height
+                        + dx * math.sin(angle)
+                        + dy * math.cos(angle)
+                        - outer["y"] * height
+                    )
+                    / side
+                    + 0.5,
+                )
+            )
+        assert len(result) == 3
+        lengths = sorted(
+            math.dist(result[i], result[(i + 1) % 3]) * 7 for i in range(3)
+        )
+        assert all(abs(a - b) < 1e-6 for a, b in zip(lengths, [3, 4, 5]))
+        assert all(-1e-6 <= value <= 1 + 1e-6 for point in result for value in point)
+        return result
+
+    for final in [False, True]:
+        polygons = [vertices(c, final) for c in triangles]
+        # Sample away from all edges. No overlap is allowed; after rearranging,
+        # precisely the 3² and 4² corner squares must remain uncovered.
+        for ix in range(70):
+            for iy in range(70):
+                p = ((ix + 0.37) / 70, (iy + 0.61) / 70)
+                inside = []
+                for polygon in polygons:
+                    cross = [
+                        (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+                        for a, b in zip(polygon, polygon[1:] + polygon[:1])
+                    ]
+                    inside.append(
+                        all(c > 1e-9 for c in cross) or all(c < -1e-9 for c in cross)
+                    )
+                assert sum(inside) <= 1, ("overlapping proof triangles", final, p)
+                if final:
+                    square = (p[0] < 3 / 7 and p[1] < 3 / 7) or (
+                        p[0] > 3 / 7 and p[1] > 3 / 7
+                    )
+                    assert (not any(inside)) == square, (
+                        "incorrect uncovered squares",
+                        p,
+                    )
 
 
 def main():
@@ -230,7 +362,9 @@ def main():
     args = parser.parse_args()
     update = args.update_golden or os.environ.get("UPDATE_GOLDEN") == "1"
     if args.render_only and (not args.output or update):
-        parser.error("--render-only requires --output and conflicts with golden updates")
+        parser.error(
+            "--render-only requires --output and conflicts with golden updates"
+        )
     with contextlib.ExitStack() as stack:
         output = (
             args.output.resolve()
