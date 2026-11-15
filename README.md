@@ -304,6 +304,8 @@ separately from projects. Interface → UI scale defaults to the desktop's text 
 (KDE forceFontDPI/Xft.dpi, GNOME text-scaling-factor, Windows text-size slider), can be
 set to 80–200% in 10% steps and applies live; `ANIMATHIO_UI_SCALE=150` overrides it for
 a run.
+Enter in Preferences saves the form, just like **Save**; invalid autosave values
+keep it open and show an error.
 
 **Import media** (Ctrl/Cmd+I or the library's plus button) adds files to the library
 without inserting clips or changing the playhead. Drag a library card onto a timeline

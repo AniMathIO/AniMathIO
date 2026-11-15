@@ -138,6 +138,43 @@ fn add_track_button_is_reachable_at_720p_and_undoable(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn preferences_enter_saves_and_invalid_input_keeps_the_dialog_open(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let original = ui.read(|editor| editor.preferences.clone());
+    let edit_autosave = |ui: &mut Ui, text: &str| {
+        let bounds = ui
+            .cx
+            .debug_bounds("preferences-autosave")
+            .unwrap_or_else(|| panic!("Autosave input missing before entering {text}"));
+        ui.click(bounds.center(), gpui::Modifiers::default());
+        ui.press("secondary-a");
+        ui.cx.simulate_input(text);
+    };
+    ui.update(Editor::open_preferences);
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    edit_autosave(&mut ui, "17");
+    ui.press("enter");
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    assert_eq!(ui.read(|editor| editor.preferences.autosave_seconds), 17);
+    assert_eq!(crate::preferences::Preferences::load().autosave_seconds, 17);
+    assert!(ui.cx.debug_bounds("preferences-autosave").is_none());
+
+    ui.update(Editor::open_preferences);
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    edit_autosave(&mut ui, "-1");
+    ui.press("enter");
+    assert_eq!(ui.read(|editor| editor.preferences.autosave_seconds), 17);
+    assert!(ui.cx.debug_bounds("preferences-autosave").is_some());
+    edit_autosave(&mut ui, "23");
+    let save = ui.cx.debug_bounds("dialog-apply").unwrap();
+    ui.click(save.center(), gpui::Modifiers::default());
+    assert_eq!(ui.read(|editor| editor.preferences.autosave_seconds), 23);
+    assert_eq!(crate::preferences::Preferences::load().autosave_seconds, 23);
+    original.save().unwrap();
+}
+
+#[gpui::test]
 fn split_undo_redo_through_actions(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);

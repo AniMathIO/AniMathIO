@@ -51,6 +51,7 @@ pub(super) fn footer(
         )
         .child(
             style::primary_button("dialog-apply", app)
+                .debug_selector(|| "dialog-apply".into())
                 .label(label)
                 .on_click(callback),
         )
@@ -645,6 +646,62 @@ impl Editor {
             let gpu_submit = gpu.clone();
             let density_submit = density.clone();
             let editor = editor.clone();
+            let submit = std::rc::Rc::new(move |cx: &mut App| {
+                let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
+                    editor.update(cx, |this, cx| {
+                        this.error =
+                            Some("Enter whole seconds for autosave (0 disables it)".into());
+                        cx.notify();
+                    });
+                    return false;
+                };
+                let folder = PathBuf::from(folder_submit.read(cx).value().to_string());
+                let gpu = selected(&gpu_submit, cx) == "GPU";
+                let compact = selected(&density_submit, cx) == "Compact";
+                let reduce_motion = selected(&motion_submit, cx) == "Reduce motion";
+                editor.update(cx, |this, cx| {
+                    let preferences = crate::preferences::Preferences {
+                        autosave_seconds: seconds,
+                        export_folder: folder,
+                        compact,
+                        ui_scale: selected(&scale_submit, cx)
+                            .trim_end_matches('%')
+                            .parse()
+                            .ok(),
+                        reduce_motion,
+                    };
+                    if let Err(error) = preferences.save() {
+                        this.error = Some(error);
+                        cx.notify();
+                        return false;
+                    }
+                    this.preferences = preferences;
+                    if gpu != this.preview.gpu {
+                        this.toggle_gpu_preview(cx);
+                    }
+                    style::set_ui_scale(this.preferences.effective_scale());
+                    cx.set_reduce_motion(reduce_motion);
+                    gpui_component::Theme::update(cx, |theme| {
+                        theme.font_size =
+                            px((if compact { 15. } else { 16. })
+                                * this.preferences.effective_scale());
+                        theme.motion.duration_fast = Duration::from_millis(if reduce_motion {
+                            0
+                        } else {
+                            style::motion::FAST_MS
+                        });
+                        theme.motion.duration_normal = Duration::from_millis(if reduce_motion {
+                            0
+                        } else {
+                            style::motion::BASE_MS
+                        });
+                        theme.motion.duration_slow = theme.motion.duration_normal;
+                    });
+                    cx.notify();
+                    true
+                })
+            });
+            let keyboard_submit = submit.clone();
             dialog
                 .title(heading(IconName::SlidersHorizontal, "Preferences"))
                 .child(
@@ -652,63 +709,19 @@ impl Editor {
                         .child(field("Preview renderer", Select::new(&gpu)))
                         .child(field(
                             "Autosave seconds (0 disables)",
-                            NumberInput::new(&autosave),
+                            div()
+                                .id("preferences-autosave")
+                                .debug_selector(|| "preferences-autosave".into())
+                                .child(NumberInput::new(&autosave)),
                         ))
                         .child(field("Default export folder", Input::new(&folder)))
                         .child(field("Interface: UI scale", Select::new(&scale)))
                         .child(field("Theme density", Select::new(&density)))
                         .child(field("Motion", Select::new(&motion))),
                 )
+                .on_ok(move |_, _, cx| keyboard_submit(cx))
                 .footer(footer("Save", cx, move |_, window, cx| {
-                    let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
-                        return;
-                    };
-                    let folder = PathBuf::from(folder_submit.read(cx).value().to_string());
-                    let gpu = selected(&gpu_submit, cx) == "GPU";
-                    let compact = selected(&density_submit, cx) == "Compact";
-                    let reduce_motion = selected(&motion_submit, cx) == "Reduce motion";
-                    let saved = editor.update(cx, |this, cx| {
-                        let preferences = crate::preferences::Preferences {
-                            autosave_seconds: seconds,
-                            export_folder: folder,
-                            compact,
-                            ui_scale: selected(&scale_submit, cx)
-                                .trim_end_matches('%')
-                                .parse()
-                                .ok(),
-                            reduce_motion,
-                        };
-                        if let Err(error) = preferences.save() {
-                            this.error = Some(error);
-                            cx.notify();
-                            return false;
-                        }
-                        this.preferences = preferences;
-                        if gpu != this.preview.gpu {
-                            this.toggle_gpu_preview(cx);
-                        }
-                        style::set_ui_scale(this.preferences.effective_scale());
-                        cx.set_reduce_motion(reduce_motion);
-                        gpui_component::Theme::update(cx, |theme| {
-                            theme.font_size = px((if compact { 15. } else { 16. })
-                                * this.preferences.effective_scale());
-                            theme.motion.duration_fast = Duration::from_millis(if reduce_motion {
-                                0
-                            } else {
-                                style::motion::FAST_MS
-                            });
-                            theme.motion.duration_normal =
-                                Duration::from_millis(if reduce_motion {
-                                    0
-                                } else {
-                                    style::motion::BASE_MS
-                                });
-                            theme.motion.duration_slow = theme.motion.duration_normal;
-                        });
-                        cx.notify();
-                        true
-                    });
-                    if saved {
+                    if submit(cx) {
                         window.close_dialog(cx);
                     }
                 }))
