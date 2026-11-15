@@ -275,7 +275,8 @@ splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later
 on the same track as one undo step. S toggles snapping and an engaged snap draws an
 yellow line. The additional edit tools preserve source intervals (Rate Stretch),
 shift source in/out (Slip), compensate touching neighbours (Slide) or move a shared
-edit point (Rolling Edit). Each drag is one undo step; the floating readout shows
+edit point (Rolling Edit). These edge tools also work at the fade-handle corners.
+Each drag is one undo step; the floating readout shows
 the delta, speed and source timecodes. Equals/minus zooms and backslash fits the timeline.
 Shift+Left/Right steps the playhead five frames; Ctrl/Cmd+Shift+K adds edits on all unlocked tracks.
 Q and W ripple-trim the previous/next edit to the playhead, Ctrl/Cmd+D applies the default
@@ -414,9 +415,11 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 ![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
 
 Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto duck…,
-`animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks,
+`animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks or clips,
 tune depth and attack/release, and review the ducked spans on the timeline first; see the
 [CLI reference](docs/cli.md#duck) and [rules](docs/mcp.md#auto-ducking).
+Only audio/video selections default to the voice source. The review panel scrolls
+in shorter windows so its actions stay reachable.
 
 The launcher lists five bundled project templates and saved user templates, with CPU
 thumbnail cards. Creating one opens Fill placeholders for text and picked media;

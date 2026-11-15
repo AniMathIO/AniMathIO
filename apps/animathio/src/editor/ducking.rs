@@ -40,7 +40,15 @@ impl Editor {
     pub(super) fn open_duck(&mut self, cx: &mut Context<Self>) {
         let defaults = DuckParams::default();
         let params = DuckParams {
-            voice_clips: self.selected.into_iter().collect(),
+            voice_clips: self
+                .selected
+                .filter(|id| {
+                    self.find_clip(*id).is_some_and(|clip| {
+                        matches!(clip.kind, ClipKind::Audio(_) | ClipKind::Video(_))
+                    })
+                })
+                .into_iter()
+                .collect(),
             range: self
                 .marks
                 .range(animathio_export::duration(&self.project).0),
@@ -192,7 +200,11 @@ impl Editor {
             .collect()
     }
 
-    pub(super) fn duck_panel(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn duck_panel(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         let review = self.duck_review.as_ref()?;
         if self.is_start_screen() {
             return None;
@@ -200,10 +212,13 @@ impl Editor {
         let theme = cx.theme().clone();
         let mut panel = div()
             .id("duck-review")
+            .debug_selector(|| "duck-review".into())
             .absolute()
             .left(px(12.))
             .top(px(56.))
             .w(px(400.))
+            .max_h((window.viewport_size().height - px(68.)).max(px(100.)))
+            .overflow_y_scroll()
             .p_3()
             .flex()
             .flex_col()
@@ -389,7 +404,7 @@ impl Editor {
                 div()
                     .text_size(crate::style::type_size::XS)
                     .text_color(theme.muted_foreground)
-                    .child("Choose a voice source and at least one music track."),
+                    .child("Choose a voice source and at least one music track or clip."),
             );
         }
         if let Some(error) = &review.error {
@@ -468,6 +483,7 @@ impl Editor {
                 )
                 .child(
                     Button::new("duck-cancel")
+                        .debug_selector(|| "duck-cancel".into())
                         .compact()
                         .label("Cancel")
                         .on_click(cx.listener(|this, _, _, cx| {
