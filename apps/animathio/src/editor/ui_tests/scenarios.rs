@@ -76,7 +76,12 @@ fn library_import_at_an_occupied_playhead_leaves_the_timeline_alone(cx: &mut Tes
     ui.update(|editor, _, cx| editor.import_paths(&[path], None, cx));
     ui.read(|editor| {
         assert_eq!(editor.project.tracks(), before.tracks());
-        assert!(editor.project.assets().contains_key(&animathio_core::AssetId::of(&bytes)));
+        assert!(
+            editor
+                .project
+                .assets()
+                .contains_key(&animathio_core::AssetId::of(&bytes))
+        );
     });
     let imported = ui.read(|editor| editor.project.clone());
     ui.dispatch(Undo);
@@ -107,9 +112,13 @@ fn add_track_button_is_reachable_at_720p_and_undoable(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let before = project.clone();
     let mut ui = Ui::open(cx, project, assets);
-    ui.cx.simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
     ui.settle();
-    let bounds = ui.cx.debug_bounds("timeline-add-track").expect("visible Add track button");
+    let bounds = ui
+        .cx
+        .debug_bounds("timeline-add-track")
+        .expect("visible Add track button");
     assert!(bounds.bottom() <= gpui::px(720.));
     assert!(bounds.right() <= gpui::px(1280.));
     ui.click(bounds.center(), gpui::Modifiers::default());

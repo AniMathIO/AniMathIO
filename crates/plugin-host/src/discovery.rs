@@ -148,6 +148,7 @@ mod tests {
         ));
         let plugins = root.join("plugins");
         std::fs::create_dir_all(&plugins).unwrap();
+        let canonical_plugins = plugins.canonicalize().unwrap();
         let dirs = search_dirs(
             Some(root.join("plugins/../plugins")),
             Some(&root.join("animathio")),
@@ -155,7 +156,7 @@ mod tests {
         );
         assert_eq!(
             dirs.iter()
-                .filter(|dir| dir.path.canonicalize().ok().as_ref() == Some(&plugins))
+                .filter(|dir| dir.path.canonicalize().ok().as_ref() == Some(&canonical_plugins))
                 .count(),
             1
         );
