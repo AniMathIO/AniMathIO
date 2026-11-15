@@ -57,3 +57,6 @@ required-features = ["test-support"]
 [[test]]
 name = "worlds_1_1"
 required-features = ["test-support"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
