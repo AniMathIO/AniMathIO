@@ -58,6 +58,7 @@ mod playback_glue;
 mod project_io;
 mod reframe;
 mod retime;
+mod scenes;
 mod start_screen;
 mod subtitles;
 mod support;
@@ -584,6 +585,7 @@ pub(crate) struct Editor {
     duck_review: Option<ducking::DuckReview>,
     /// The markers and beat-sync panel (see `editor/markers.rs`).
     marker_panel: Option<markers::Panel>,
+    scene_panel: Option<scenes::ScenePanel>,
     reframe_panel: Option<reframe::ReframePanel>,
     /// A queued-export spec waiting for the user to confirm replacing its file.
     pending_export: Option<(crate::export_queue::JobSpec, bool)>,
@@ -756,6 +758,7 @@ impl Editor {
             autocut_review: None,
             duck_review: None,
             marker_panel: None,
+            scene_panel: None,
             reframe_panel: None,
             pending_export: None,
             last_export_tick: Instant::now(),
@@ -874,7 +877,8 @@ impl Editor {
                         // Background-job progress is redrawn at 4 Hz, not every frame.
                         if (this.pump_export_queue()
                             || (this.export_queue.is_busy()
-                                || this.reframe_panel.as_ref().is_some_and(|p| p.busy))
+                                || this.reframe_panel.as_ref().is_some_and(|p| p.busy)
+                                || this.scene_panel.as_ref().is_some_and(|p| p.busy))
                                 && this.last_export_tick.elapsed() >= Duration::from_millis(250))
                             && !this.is_start_screen()
                         {
@@ -987,6 +991,9 @@ impl Render for Editor {
             .child(workspace);
         root = root.child(self.status_line(cx));
         if let Some(panel) = self.export_queue_panel(cx) {
+            root = root.child(panel);
+        }
+        if let Some(panel) = self.scene_view(cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.reframe_view(cx) {

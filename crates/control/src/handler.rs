@@ -249,7 +249,22 @@ pub trait ControlHandler {
         from_value(self.handle(Call::TrimSilence { params })?)
     }
 
-    /// Reframe video clips as one undo step; returns clip count.
+    /// Analyse scene changes without mutating the project.
+    fn detect_scenes(
+        &mut self,
+        params: crate::SceneParams,
+    ) -> Result<crate::SceneDraft, ControlError> {
+        from_value(self.handle(Call::DetectScenes { params })?)
+    }
+    /// Apply a reviewed scene proposal atomically.
+    fn split_at_scenes(
+        &mut self,
+        draft: crate::SceneDraft,
+        markers: bool,
+    ) -> Result<Value, ControlError> {
+        self.handle(Call::SplitAtScenes { draft, markers })
+    }
+    /// Reframe video clips as one undo step.
     fn auto_reframe(&mut self, params: crate::ReframeParams) -> Result<usize, ControlError> {
         from_value(self.handle(Call::AutoReframe { params })?)
     }

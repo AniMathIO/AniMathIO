@@ -37,6 +37,7 @@ Commands:
   duck            Lower music under speech with gain keyframes, as one undoable edit
   markers         List, add or remove timeline markers
   beats           Detect tempo and beats offline; optionally add markers at the beats
+  scenes          Detect hard scene changes, split clips or add markers
   reframe         Reframe video to portrait or square with offline subject tracking
   models          List or download the local Whisper speech models
   new-sample      Write a three-second animated image/text/shape demo archive
@@ -881,3 +882,43 @@ Options:
   -h, --help             Print help
 ```
 <!-- /help:learn-noise -->
+
+## `scenes`
+
+Detect hard cuts, split linked video/audio, or add markers. Select `--clip` or `--track`. `--sensitivity` defaults to 0.5 and `--min-shot-frames` to 6. `--delete-shorter-than-frames N` removes resulting short shots and linked companions, leaving gaps. Detection prints JSON; mutations require `--output` and protect existing files unless `--overwrite` is passed.
+
+```sh
+animathio-cli scenes project.amio detect --clip 1
+animathio-cli scenes project.amio split --track 1 -o split.amio
+animathio-cli scenes project.amio markers --clip 1 -o marked.amio
+```
+
+<!-- help:scenes -->
+```text
+Detect hard scene changes, split clips or add markers
+
+Usage: animathio-cli scenes [OPTIONS] <PROJECT> <MODE>
+
+Arguments:
+  <PROJECT>  Input project archive or JSON
+  <MODE>     Detect only, split linked clips, or add markers [possible values: detect, split, markers]
+
+Options:
+      --clip <CLIP>
+          Analyse this video clip
+      --track <TRACK>
+          Analyse all video on this track
+      --sensitivity <SENSITIVITY>
+          Sensitivity in 0..=1; higher detects smaller changes [default: 0.5]
+      --min-shot-frames <MIN_SHOT_FRAMES>
+          Minimum shot length in project frames [default: 6]
+      --delete-shorter-than-frames <DELETE_SHORTER_THAN_FRAMES>
+          Remove resulting short shots and linked companions, leaving gaps [default: 0]
+  -o, --output <OUTPUT>
+          Output archive, required for split and markers
+      --overwrite
+          Replace an existing output
+  -h, --help
+          Print help
+```
+<!-- /help:scenes -->

@@ -81,6 +81,8 @@ gets a JSON-RPC error instead of a result.
 | `beats.add_markers` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar?, every?, downbeats_only?, color?, name_prefix? } }` | `{ added, bpm, confidence }`; one batch adding a marker at each selected beat; beats that already carry a marker are skipped |
 | `timeline.sync_cuts_to_beats` | `{ params: { clips, source?, mode?, max_shift?, min_segment?, frame_align?, every?, downbeats_only?, detect? } }` | `{ shifted, splits, unchanged, skipped, bpm? }`; one batch, see [Markers and beat sync](#markers-and-beat-sync) |
 | `import.manim` | `{ params: { path?, source?, script_dir?, scene?, replace? } }` | `{ tracks, assets, warnings, infos }`; runs in the sandboxed `org.animathio.import-manim` plugin, which must be loaded |
+| `video.detect_scenes` | `{ params: { clip?, track?, sensitivity?, min_shot_frames?, delete_shorter_than_frames? } }` | Snapshot-bound scene proposal |
+| `video.split_at_scenes` | `{ draft, markers }` | Apply reviewed splits or markers |
 | `video.reframe` | `{ params: { aspect?, smoothness?, clips? } }` | video clip count; one undo batch; editor replies after its cancellable worker completes |
 | `subtitles.generate` | `{ params: { model?, language?, clip?, track?, range?, download_model?, split?, style? } }` | `{ language, added?: { track_id, background_track_id?, first_clip, cues }, cues: [{ start, end, text }] }`; transcribes the project's audio (or one clip, track or `range`) locally with Whisper and adds caption clips on a new `Subtitles` track as one undo step. `model` is `tiny`, `base` (default) or `small`; a missing model is an error unless `download_model` is true. `style` is a caption style choice (see `subtitles.style`; default `classic`) and `background_track_id` is absent for styles without a bar. The editor answers when the job finishes (it can take minutes) |
 | `subtitles.export` | `{ params: { format?, output?, track?, overwrite? } }` | `{ format, track, cues, text?, path? }`; renders a subtitle track (default: the first track named `Subtitles` with text clips) as `srt` or `vtt`, returning the text or writing `output` (a `.vtt` extension selects WebVTT) |
@@ -168,6 +170,8 @@ clears its undo history.
 | `detect_beats` | Detect tempo and beats offline from the audio, without editing | optional `clip`, `track`, paired `from_ms` / `to_ms`, `min_bpm` (60), `max_bpm` (200), `bpm`, `beats_per_bar` (4); `add_markers` (false) also adds markers at the selected beats (`every`, `downbeats_only`, `color`) as one undo step. Returns `bpm`, `confidence`, `beats_ms`, `beat_ticks`, `downbeats` |
 | `sync_cuts_to_beats` | Snap the selected clips' cuts to beats/markers, or split them there, as one undo step | `clips` (ids), `source` (`beats`, `markers`, `both`), `mode` (`snap`, `split`), `max_shift_ms` (250), `min_segment_ms` (100, split only), `frame_align` (true), `every`, `downbeats_only`, `analyze_clip` / `analyze_track` / `bpm` / `beats_per_bar` for the beat analysis |
 | `trim_silence` | Remove pauses detected in the audio, ripple-closing the gaps, in one undo step | `threshold_db` (-40), `min_silence_ms` (400), `padding_ms` (100), optional audio `track` id |
+| `detect_scenes` | `clip?`, `track?`, `sensitivity?`, `min_shot_frames?`, `delete_shorter_than_frames?` | Review hard-cut proposal |
+| `split_at_scenes` | `proposal`, `markers?` | Apply scene splits or markers |
 | `auto_reframe` | `aspect?`, `smoothness?`, `clips?` | Subject-following portrait/square video; changes canvas and position/scale animation as one undo step; returns `{clips}` |
 | `auto_subtitles` | Fully local automatic subtitles: transcribe the project's audio (or one `clip`/`track`, or `from_ms`..`to_ms`) with Whisper and add caption-bar clips on a new `Subtitles` track, one undo step | `model` (`tiny`/`base`/`small`, default `base`), `language` (ISO 639-1, omit to detect), `download_model` (false; set only with the user's consent: one-time 78-488 MB download, SHA-256 verified), `max_chars_per_line` (42), `max_lines` (2), `style` (`classic` default, `word-highlight`, `karaoke`, `pop`, `one-word`, `bold-outline`: animated CapCut-style captions driven by Whisper's per-word timings) with optional `font_size`, `color`, `accent`, `outline` (`#RRGGBB[AA]`), `position` (`top`/`middle`/`bottom`) and `max_words`. Returns the language, track ids and the cues in ms. Needs a build with the `whisper` feature; blocks until done |
 | `export_subtitles` | Return or write the subtitle track as SRT or WebVTT | `format` (`srt`/`vtt`), `track`, `path`, `overwrite` |
@@ -279,7 +283,7 @@ noting the ms/pixel conventions.
 
 ### Registering with Claude Code
 
-Add the server with a project file (headless) or against a running editor:
+Add the server with a project file or against a running editor:
 
 ```bash
 claude mcp add animathio -- animathio-cli mcp --project /path/to/project.amio
@@ -559,3 +563,9 @@ transitions and automation behavior.
 Individual music targets must be audio clips on unlocked tracks. Voice clips (including resolved linked audio) cannot also be music targets. In the Auto duck panel, use the Music clips to duck buttons alongside the track buttons; CLI accepts repeated `--music-clip` ids.
 
 Denoise learning uses a noise-only interval inside an audio clip (32 ms to 30 s). The editor action Clip > Learn denoise from In/Out uses the selected audio clip and its first denoise instance. Add denoise first, then set In and Out around noise without speech. MCP `learn_noise` accepts the instance id explicitly. Learning uses the dry 16 kHz mono mix, including clip gain (track gain is excluded), with at most sixteen analysis frames. Sixteen 500 Hz power-density bands are stored as numeric effect parameters; the last band is extrapolated above 8 kHz. Learn again after changing clip gain or upstream processing. Undo restores the complete previous profile.
+
+## Scene cuts
+
+`detect_scenes` takes `clip` or `track`, optional `sensitivity` (0..1, default 0.5) and `min_shot_frames` (default 6). It returns a proposal containing the expected project snapshot and cuts with `enabled` toggles, timeline ticks and base64-encoded 96×54 grayscale thumbnails. Pass the reviewed object as `proposal` to `split_at_scenes`; `markers: true` adds markers instead. Editor detection runs on a worker. Control methods are `video.detect_scenes` and `video.split_at_scenes`. Reanalysis is required after any project change.
+
+Sampling is 4 Hz: very short scenes can be missed and detected boundaries have up to one sample of latency. Slow fades and gradual motion are ignored. The editor offers sensitivity and minimum-shot presets, track-wide reanalysis, and short-shot deletion presets. `delete_shorter_than_frames` removes short resulting shots and linked companions, leaving timeline gaps.

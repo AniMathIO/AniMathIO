@@ -208,6 +208,7 @@ impl Editor {
                 MenuItem::action("Write on…", WriteOn),
                 MenuItem::action("Generate subtitles…", GenerateSubtitles),
                 MenuItem::action("Auto reframe…", AutoReframe),
+                MenuItem::action("Split at scene changes…", SceneCuts),
                 MenuItem::action("Automatic cuts…", AutomaticCuts),
                 MenuItem::action("Auto duck…", AutoDuck),
                 MenuItem::action("Learn denoise from In/Out", LearnNoise),

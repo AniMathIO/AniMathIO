@@ -4,15 +4,15 @@ use animathio_core::{
     AssetId, ClipId, ClipKind, Command, History, Interpolation, Keyframe, ParamValue, Project,
     TICKS_PER_SECOND, Target, Time, TransformProperty,
 };
-use animathio_media::{FilmCraftBackend, Frame, MediaBackend};
+use animathio_media::{FilmCraftBackend, MediaBackend};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::atomic::{AtomicBool, Ordering},
 };
 
-const W: usize = 96;
-const H: usize = 54;
+use crate::scene_detector::{Detector, H, W, thumbnail};
+
 const STEP: i64 = TICKS_PER_SECOND / 4;
 const MAX_SAMPLES: usize = 20_000;
 const MAX_KEYS: usize = 256;
@@ -70,26 +70,6 @@ fn aspect(params: &ReframeParams) -> Result<(u32, u32), ControlError> {
     }
 }
 
-// Analysis runs at 96x54, regardless of decoded source resolution. FilmCraft currently
-// decodes a full frame first; no full-resolution analysis or retained frame sequence.
-#[allow(clippy::cast_possible_truncation)]
-fn thumbnail(frame: &Frame) -> Vec<f64> {
-    let mut out = Vec::with_capacity(W * H);
-    for y in 0..H {
-        for x in 0..W {
-            let sx = (x as u64 * u64::from(frame.width) / W as u64) as usize;
-            let sy = (y as u64 * u64::from(frame.height) / H as u64) as usize;
-            let i = (sy * frame.width as usize + sx) * 4;
-            let p = &frame.pixels[i..i + 3];
-            out.push(
-                (0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2]))
-                    / 255.,
-            );
-        }
-    }
-    out
-}
-
 #[derive(Clone, Copy, Debug)]
 struct Point {
     time: Time,
@@ -101,7 +81,7 @@ struct Point {
 struct Tracker {
     previous: Vec<f64>,
     centre: (f64, f64),
-    difference: f64,
+    detector: Detector,
     last_time: Time,
 }
 impl Tracker {
@@ -109,7 +89,7 @@ impl Tracker {
         Self {
             previous: Vec::new(),
             centre: (0.5, 0.5),
-            difference: 0.0,
+            detector: Detector::default(),
             last_time: Time(0),
         }
     }
@@ -117,16 +97,7 @@ impl Tracker {
     #[allow(clippy::cast_precision_loss)]
     fn sample(&mut self, luma: Vec<f64>, time: Time, crop: (f64, f64), smoothness: f64) -> Point {
         let first = self.previous.is_empty();
-        let diff = if first {
-            0.0
-        } else {
-            luma.iter()
-                .zip(&self.previous)
-                .map(|(a, b)| (a - b).abs())
-                .sum::<f64>()
-                / (W * H) as f64
-        };
-        let cut = !first && diff > 0.18 && diff > self.difference * 3.0;
+        let cut = self.detector.sample(&luma, time, 0.18, Time(0));
         let mean = luma.iter().sum::<f64>() / (W * H) as f64;
         let (mut total, mut sx, mut sy) = (0., 0., 0.);
         for y in 1..H - 1 {
@@ -176,11 +147,6 @@ impl Tracker {
         };
         self.previous = luma;
         self.last_time = time;
-        self.difference = if cut {
-            0.0
-        } else {
-            self.difference * 0.8 + diff * 0.2
-        };
         Point {
             time,
             x: self.centre.0,

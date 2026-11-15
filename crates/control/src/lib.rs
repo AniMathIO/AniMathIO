@@ -118,3 +118,7 @@ pub use templates::{
     MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, delete_user_template,
     project_templates, save_user_template, template_catalog, template_library_dir,
 };
+
+mod scene_detector;
+mod scenes;
+pub use scenes::{SceneCut, SceneDraft, SceneParams, detect_scenes, scene_command};

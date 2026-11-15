@@ -102,6 +102,8 @@ fn describe_cut_remove_batch_and_preset() {
         "trim_silence",
         "auto_subtitles",
         "auto_reframe",
+        "detect_scenes",
+        "split_at_scenes",
         "export_subtitles",
         "import_subtitles",
         "add_title",

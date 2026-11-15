@@ -51,6 +51,7 @@ actions!(
         NextMarker,
         ShowMarkers,
         AutoReframe,
+        SceneCuts,
         SpeedDuration,
         InsertFrameHold,
         NewProject,
@@ -774,6 +775,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     .on_action(
         cx.listener(|this, _: &InsertFrameHold, window, cx| this.open_frame_hold(window, cx)),
     )
+    .on_action(cx.listener(|this, _: &SceneCuts, _, cx| this.open_scenes(cx)))
     .on_action(cx.listener(|this, _: &AutoReframe, _, cx| this.open_reframe(cx)))
     .on_action(cx.listener(|this, _: &AutomaticCuts, _, cx| this.open_autocut(cx)))
     .on_action(cx.listener(|this, _: &LearnNoise, _, cx| this.learn_noise(cx)))
