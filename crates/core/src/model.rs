@@ -642,18 +642,23 @@ impl Project {
                 clip.time_map
                     .validate(clip.range.end.0 - clip.range.start.0)?;
                 let (source_start, source_end) = clip.source_bounds();
+                let source_span = if clip.time_map.hold {
+                    1
+                } else if let Some(length) = clip.time_map.source_length {
+                    length.0
+                } else if clip.time_map == crate::ClipTimeMap::default() {
+                    clip.range.end.0 - clip.range.start.0
+                } else {
+                    clip.time_map
+                        .integrated(Time(
+                            clip.time_map.phase.0 + clip.range.end.0 - clip.range.start.0,
+                        ))
+                        .0
+                };
                 if clip.source_offset.0 < 0
                     || source_start.0 < 0
                     || source_end < source_start
-                    || clip
-                        .source_offset
-                        .0
-                        .checked_add(
-                            clip.time_map
-                                .source_length
-                                .map_or(clip.range.end.0 - clip.range.start.0, |length| length.0),
-                        )
-                        .is_none()
+                    || clip.source_offset.0.checked_add(source_span).is_none()
                 {
                     return Err(invalid("invalid source time range"));
                 }

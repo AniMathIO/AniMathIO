@@ -24,7 +24,7 @@ Editor and headless engine prototype. What works today:
 | Area | Status |
 | --- | --- |
 | Project model, commands, undo/redo | ✅ `core` |
-| `.amio` / `project.json` format | ✅ `format` (schema version 6) |
+| `.amio` / `project.json` format | ✅ `format` (schema version 7) |
 | Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
 | PNG frame / sequence rendering | ✅ `animathio-cli` |
 | Audio decoding (streaming; Opus included), mixing, playback (cpal) | ✅ `audio` |
@@ -61,6 +61,18 @@ device callback). Video effects in the inspector have a bypass switch like audio
 Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
 the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
 and 256-byte display strings.
+
+## Clip speed and frame holds
+
+Select a clip and open **Clip → Speed/Duration…** (Ctrl+R in the timeline), or the
+inspector's **Speed** section. Set 6.25–1600%, reverse, duration in project frames,
+or linear ramp keys (`frame:percent, frame:percent`). Source ranges stay fixed;
+linked audio follows using pitch-shifting varispeed. Optional ripple shifts
+trailing clips on unlocked tracks; without ripple, overlapping results fail.
+**Insert frame hold segment…** splits at the playhead and inserts a held picture
+with silent companion audio as one undo step. CLI: `animathio-cli set-clip-speed`
+and `animathio-cli freeze-frame`; MCP: `set_clip_speed` and `freeze_frame`.
+See [retiming rules and limits](docs/architecture.md#clip-retiming).
 
 ## Auto-reframe
 

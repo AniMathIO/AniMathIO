@@ -5,7 +5,7 @@ use crate::style::{self, color as colors};
 
 /// Paint-ready waveform paths, shared by snapshots; bounded independently of PCM.
 pub(super) type WavePathCache =
-    std::rc::Rc<std::cell::RefCell<BTreeMap<(AssetId, [u64; 11]), gpui::Path<Pixels>>>>;
+    std::rc::Rc<std::cell::RefCell<BTreeMap<(AssetId, [u64; 12]), gpui::Path<Pixels>>>>;
 
 /// An icon-only button with a tooltip, using a Lucide (or bundled) SVG.
 pub(super) fn icon_button(
@@ -679,6 +679,9 @@ pub(super) fn paint_waveform(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if clip.time_map.hold {
+        return;
+    }
     const STEP: f32 = 3.0;
     let left = f32::from(x0 + px(4.)).max(f32::from(bounds.left()));
     let right = f32::from(x1 - px(2.)).min(f32::from(bounds.right()));
@@ -698,6 +701,7 @@ pub(super) fn paint_waveform(
     let key = (
         asset.clone(),
         [
+            clip.id.0,
             clip.source_offset as u64,
             clip.start.0 as u64,
             clip.end.0 as u64,
@@ -719,10 +723,18 @@ pub(super) fn paint_waveform(
         return;
     }
     let peak_at = |x: f32| {
-        let start =
-            (f64::from(x - f32::from(x0)) / layout.pixels_per_tick) as i64 + clip.source_offset;
-        let end = start.saturating_add((f64::from(STEP) / layout.pixels_per_tick).ceil() as i64);
-        (wave.peak_between(start, end.max(start + 1)) * half_max).max(0.5)
+        let local = (f64::from(x - f32::from(x0)) / layout.pixels_per_tick) as i64;
+        let step = (f64::from(STEP) / layout.pixels_per_tick).ceil() as i64;
+        let a = clip
+            .time_map
+            .source_time(Time(clip.source_offset), Time(local))
+            .0;
+        let b = clip
+            .time_map
+            .source_time(Time(clip.source_offset), Time(local.saturating_add(step)))
+            .0;
+        let (start, end) = (a.min(b), a.max(b));
+        (wave.peak_between(start, end.max(start.saturating_add(1))) * half_max).max(0.5)
     };
     let steps = ((right - left) / STEP).ceil() as usize;
     // PathBuilder tessellates concave polygons; `gpui::Path::line_to` only fans

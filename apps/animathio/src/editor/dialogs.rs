@@ -849,7 +849,7 @@ impl Editor {
         let editor = cx.entity();
         window.open_dialog(cx,move|dialog,_,cx| {
             let (percent,duration,mode,reverse,ripple,ramps)=(percent.clone(),duration.clone(),mode.clone(),reverse.clone(),ripple.clone(),ramps.clone());
-            let editor=editor.clone(); let ramp_text=ramp_text.clone(); let original_ramps=original_ramps.clone();
+            let editor=editor.clone(); let ramp_text=ramp_text.clone(); let original_ramps=original_ramps.clone(); let clip=clip.clone();
             let form=Form::new().child(field("Change",Select::new(&mode)))
                 .child(field("Speed (%)",Input::new(&percent)))
                 .child(field("Duration (frames)",Input::new(&duration)))

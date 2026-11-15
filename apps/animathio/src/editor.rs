@@ -388,6 +388,8 @@ struct KeyframePaint {
 }
 
 struct ClipPaint {
+    id: ClipId,
+    time_map: animathio_core::ClipTimeMap,
     effect_warning: bool,
     thumbnail_first: usize,
     row: usize,

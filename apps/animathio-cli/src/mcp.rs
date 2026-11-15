@@ -96,6 +96,7 @@ impl McpServer {
 
 #[derive(Deserialize, JsonSchema)]
 struct SetClipSpeed {
+    #[serde(deserialize_with = "lenient_id")]
     clip_id: String,
     /// Rational speed numerator, 1/16x to 16x at millionth precision.
     numerator: u32,
@@ -117,6 +118,7 @@ struct RampPoint {
 }
 #[derive(Deserialize, JsonSchema)]
 struct FreezeFrame {
+    #[serde(deserialize_with = "lenient_id")]
     clip_id: String,
     /// Absolute timeline ticks inside the clip.
     at: i64,
@@ -2790,5 +2792,91 @@ mod fit_tests {
                 before
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod retime_tests {
+    use super::*;
+    #[tokio::test]
+    async fn retime_and_freeze_tools_are_atomic_and_undo_exactly() {
+        let mut backend = HeadlessHandler::new();
+        backend
+            .command_apply(Command::Batch {
+                commands: vec![
+                    Command::AddTrack {
+                        track: Track::new(TrackId(1), "video"),
+                        index: 0,
+                    },
+                    Command::AddClip {
+                        track: TrackId(1),
+                        clip: Clip::new(
+                            ClipId(1),
+                            animathio_core::ClipKind::Error("fixture".into()),
+                            TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+                        ),
+                    },
+                ],
+            })
+            .unwrap();
+        let server = McpServer::new(Box::new(backend));
+        let before = server.backend.lock().await.project_get().unwrap().project;
+        server
+            .set_clip_speed(Parameters(
+                serde_json::from_value(
+                    json!({"clip_id":1,"numerator":2,"denominator":1,"reverse":true}),
+                )
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let retimed = server.backend.lock().await.project_get().unwrap().project;
+        assert_eq!(
+            retimed.tracks()[0].clips()[&ClipId(1)].range.end,
+            Time(TICKS_PER_SECOND / 2)
+        );
+        server
+            .freeze_frame(Parameters(
+                serde_json::from_value(json!({"clip_id":"1","at":TICKS_PER_SECOND/4,"frames":30}))
+                    .unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            server
+                .backend
+                .lock()
+                .await
+                .project_get()
+                .unwrap()
+                .project
+                .tracks()[0]
+                .clips()
+                .len(),
+            3
+        );
+        server.backend.lock().await.history_undo().unwrap();
+        assert_eq!(
+            server.backend.lock().await.project_get().unwrap().project,
+            retimed
+        );
+        server.backend.lock().await.history_undo().unwrap();
+        assert_eq!(
+            server.backend.lock().await.project_get().unwrap().project,
+            before
+        );
+        assert!(
+            server
+                .set_clip_speed(Parameters(
+                    serde_json::from_value(json!({"clip_id":"1","numerator":1,"denominator":0}))
+                        .unwrap()
+                ))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            server.backend.lock().await.project_get().unwrap().project,
+            before
+        );
     }
 }

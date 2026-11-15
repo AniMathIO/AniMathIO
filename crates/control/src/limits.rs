@@ -77,14 +77,18 @@ impl SourceLimits {
         if clip.time_map.hold {
             return None;
         }
-        if clip.time_map.reverse {
-            return Some(clip.range.end);
-        }
         let room = limit.0 - clip.source_offset.0;
         let duration = if clip.time_map == animathio_core::ClipTimeMap::default() {
             room.max(0)
         } else {
-            clip.time_map.duration_for(Time(room.max(1))).ok()?.0 - clip.time_map.phase.0
+            let room = clip
+                .time_map
+                .source_length
+                .map_or(room, |length| room.min(length.0));
+            if room <= 0 {
+                return Some(clip.range.start);
+            }
+            clip.time_map.duration_for(Time(room)).ok()?.0 - clip.time_map.phase.0
         };
         Some(Time(clip.range.start.0.saturating_add(duration.max(0))))
     }

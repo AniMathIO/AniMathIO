@@ -175,6 +175,10 @@ impl ClipTimeMap {
         Ok(())
     }
     /// Exact integrated speed, rounded down once to integer source ticks.
+    ///
+    /// # Panics
+    /// May panic on malformed clocks; call `validate` before using a clock built
+    /// directly. Project loading and commands validate clocks automatically.
     #[must_use]
     pub fn integrated(&self, time: Time) -> Time {
         let t = i128::from(time.0.clamp(0, MAX_RETIME_TICKS));
@@ -221,36 +225,36 @@ impl ClipTimeMap {
         Ok(Time(lo))
     }
 }
+impl ClipTimeMap {
+    /// Map local timeline ticks to absolute source ticks using a validated clock.
+    ///
+    /// # Panics
+    /// Panics if reverse is set without a source length (an invalid clock).
+    #[must_use]
+    pub fn source_time(&self, source_offset: Time, local: Time) -> Time {
+        if self.hold {
+            return source_offset;
+        }
+        if self == &Self::default() {
+            return Time(source_offset.0.saturating_add(local.0));
+        }
+        let pos = self
+            .integrated(Time(local.0.saturating_add(self.phase.0)))
+            .0;
+        let pos = self.source_length.map_or(pos, |s| pos.min(s.0 - 1));
+        Time(source_offset.0.saturating_add(if self.reverse {
+            self.source_length.expect("validated reverse span").0 - 1 - pos
+        } else {
+            pos
+        }))
+    }
+}
 impl Clip {
     /// Timeline-local time to absolute source time. Reverse starts one tick before
     /// the exclusive source end, ensuring frame/sample lookup stays inside the range.
     #[must_use]
     pub fn source_time(&self, local: Time) -> Time {
-        if self.time_map.hold {
-            return self.source_offset;
-        }
-        if self.time_map == ClipTimeMap::default() {
-            return Time(self.source_offset.0.saturating_add(local.0));
-        }
-        let pos = self
-            .time_map
-            .integrated(Time(local.0.saturating_add(self.time_map.phase.0)))
-            .0;
-        let pos = self.time_map.source_length.map_or(pos, |s| pos.min(s.0));
-        Time(
-            self.source_offset
-                .0
-                .saturating_add(if self.time_map.reverse {
-                    self.time_map
-                        .source_length
-                        .expect("validated reverse span")
-                        .0
-                        - 1
-                        - pos
-                } else {
-                    pos
-                }),
-        )
+        self.time_map.source_time(self.source_offset, local)
     }
     /// Half-open source bounds used by source-limit guards and retiming edits.
     #[must_use]
@@ -261,21 +265,49 @@ impl Clip {
                 Time(self.source_offset.0.saturating_add(1)),
             );
         }
-        let a = self.source_time(Time(0)).0;
-        let b = self
-            .source_time(Time(self.range.end.0 - self.range.start.0))
-            .0;
-        if self.time_map.reverse {
-            (Time(b.saturating_add(1)), Time(a.saturating_add(1)))
-        } else {
-            (Time(a), Time(b))
+        if self.time_map == ClipTimeMap::default() {
+            return (
+                self.source_offset,
+                Time(
+                    self.source_offset
+                        .0
+                        .saturating_add(self.range.end.0 - self.range.start.0),
+                ),
+            );
         }
+        // Bounds use the exclusive integrated endpoint, rather than the clamped
+        // frame lookup (which always remains inside the retained source span).
+        let integral = |local: i64| {
+            let pos = self
+                .time_map
+                .integrated(Time(local.saturating_add(self.time_map.phase.0)))
+                .0;
+            self.time_map
+                .source_length
+                .map_or(pos, |length| pos.min(length.0))
+        };
+        let (a, b) = (integral(0), integral(self.range.end.0 - self.range.start.0));
+        let (a, b) = if self.time_map.reverse {
+            let length = self
+                .time_map
+                .source_length
+                .expect("validated reverse span")
+                .0;
+            (length - b, length - a)
+        } else {
+            (a, b)
+        };
+        (
+            Time(self.source_offset.0.saturating_add(a)),
+            Time(self.source_offset.0.saturating_add(b)),
+        )
     }
 }
 
 /// Build Insert Frame Hold Segment as one batch. Split tails keep their curve phase;
 /// linked companions get the same silent hold, and all unlocked trailing clips ripple.
 /// A hold can be inserted at the clip start or strictly inside it.
+#[allow(clippy::too_many_lines)]
 pub fn freeze_frame_command(
     project: &Project,
     id: ClipId,
@@ -450,6 +482,9 @@ pub(crate) fn speed_commands(
             }
             let mut updated = clip.clone();
             if companion {
+                if clip.time_map.hold {
+                    return Err(invalid("trim frame holds to change their duration"));
+                }
                 let (start, end) = clip.source_bounds();
                 let length = Time(end.0 - start.0);
                 let duration = map.duration_for(length)?;

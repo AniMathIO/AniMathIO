@@ -752,3 +752,31 @@ Options:
   -h, --help             Print help
 ```
 <!-- /help:media-fit -->
+
+
+## `set-clip-speed`
+
+Retimes a clip and linked companions while keeping their source ranges. Speed is
+an exact decimal or rational multiplier, 1/16–16x at millionth precision. Optional
+linear ramp keys use local timeline ticks. Audio uses pitch-shifting varispeed.
+Without ripple, overlapping results fail; ripple shifts unlocked trailing clips.
+
+```sh
+animathio-cli set-clip-speed input.amio --clip 1 --speed 2 --reverse --ripple -o retimed.amio
+animathio-cli set-clip-speed input.amio --clip 1 --speed 1 --ramps '[{"time":0,"speed":{"numerator":1,"denominator":2}},{"time":705600000,"speed":{"numerator":2,"denominator":1}}]' -o ramp.amio
+```
+
+<!-- help:set-clip-speed -->
+<!-- /help:set-clip-speed -->
+
+## `freeze-frame`
+
+Inserts a frame hold at an absolute timeline position inside a clip; linked audio
+is silent during the hold. Splits and ripples unlocked trailing clips as one edit.
+
+```sh
+animathio-cli freeze-frame input.amio --clip 1 --at 0.5 --frames 30 -o held.amio
+```
+
+<!-- help:freeze-frame -->
+<!-- /help:freeze-frame -->

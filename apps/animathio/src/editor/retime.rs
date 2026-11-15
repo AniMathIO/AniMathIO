@@ -65,6 +65,11 @@ impl Editor {
                 Rounding::Nearest,
             )
             .unwrap_or(0);
+        if clip.time_map.hold {
+            return div().px_3().py_2().child(format!(
+                "Frame hold · {frames} frames. Trim edges to change duration; audio is silent."
+            ));
+        }
         div()
             .flex()
             .flex_col()

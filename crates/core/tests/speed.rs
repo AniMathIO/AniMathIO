@@ -9,7 +9,7 @@ fn project(linked: bool, trailing: bool) -> Project {
     for n in 1..=2 {
         Command::AddTrack {
             track: Track::new(TrackId(n), "layer"),
-            index: (n - 1) as usize,
+            index: usize::try_from(n - 1).unwrap(),
         }
         .apply(&mut p)
         .unwrap();
@@ -218,4 +218,66 @@ fn frame_hold_is_a_single_batch_with_exact_undo_and_continuous_tail() {
         .unwrap();
     assert_eq!(tail.source_time(Time(30)), original.source_time(Time(230)));
     assert_eq!(clip(&p, 3).range.start, Time(500 + length));
+}
+
+#[test]
+fn extreme_valid_curves_and_invalid_serialized_clocks_are_bounded() {
+    let map = ClipTimeMap {
+        ramps: vec![
+            SpeedPoint {
+                time: Time(0),
+                speed: ClipSpeed::new(16, 1).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(MAX_RETIME_TICKS),
+                speed: ClipSpeed::new(1, 16).unwrap(),
+            },
+        ],
+        ..ClipTimeMap::default()
+    };
+    map.validate(MAX_RETIME_TICKS).unwrap();
+    assert!(map.integrated(Time(MAX_RETIME_TICKS / 2)).0 > 0);
+    assert!(map.integrated(Time(MAX_RETIME_TICKS)).0 < 16 * MAX_RETIME_TICKS);
+    let p = project(false, false);
+    let mut value = serde_json::to_value(&p).unwrap();
+    let clock = &mut value["tracks"][0]["clips"]["1"]["time_map"];
+    clock["reverse"] = true.into();
+    assert!(serde_json::from_value::<Project>(value.clone()).is_err());
+    value["tracks"][0]["clips"]["1"]["time_map"]["source_length"] = 1000.into();
+    value["tracks"][0]["clips"]["1"]["time_map"]["phase"] = i64::MAX.into();
+    assert!(serde_json::from_value::<Project>(value).is_err());
+}
+
+#[test]
+fn hold_at_start_and_retime_rollback_leave_no_orphaned_links() {
+    let mut p = project(true, true);
+    exact(
+        &mut p,
+        Command::InsertFrameHold {
+            id: ClipId(1),
+            at: Time(0),
+            frames: 1,
+        },
+    );
+    let hold = p.tracks()[0]
+        .clips()
+        .values()
+        .find(|c| c.time_map.hold)
+        .unwrap();
+    let other = p.tracks()[1]
+        .clips()
+        .values()
+        .find(|c| c.time_map.hold)
+        .unwrap();
+    assert_eq!(hold.link_group, other.link_group);
+    let before = p.clone();
+    let command = Command::SetClipSpeed {
+        id: hold.id,
+        speed: ClipSpeed::new(2, 1).unwrap(),
+        reverse: false,
+        ramps: vec![],
+        ripple: false,
+    };
+    assert!(command.apply(&mut p).is_err());
+    assert_eq!(p, before);
 }
