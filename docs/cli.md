@@ -881,3 +881,16 @@ Options:
   -h, --help             Print help
 ```
 <!-- /help:learn-noise -->
+
+## `scenes`
+
+Detect hard cuts, split linked video/audio, or add markers. Select `--clip` or `--track`. `--sensitivity` defaults to 0.5 and `--min-shot-frames` to 6. `--delete-shorter-than-frames N` removes resulting short shots and linked companions, leaving gaps. Detection prints JSON; mutations require `--output` and protect existing files unless `--overwrite` is passed.
+
+```sh
+animathio-cli scenes project.amio detect --clip 1
+animathio-cli scenes project.amio split --track 1 -o split.amio
+animathio-cli scenes project.amio markers --clip 1 -o marked.amio
+```
+
+<!-- help:scenes -->
+<!-- /help:scenes -->

@@ -906,3 +906,62 @@ fn learn_noise_in_out_apply_and_undo(cx: &mut TestAppContext) {
     ui.dispatch(Undo);
     assert_eq!(ui.read(|e| e.project.clone()), before);
 }
+
+#[gpui::test]
+fn scene_menu_requires_video_and_does_not_mutate(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    ui.dispatch(actions::SceneCuts);
+    ui.read(|editor| {
+        assert!(editor.scene_panel.is_none());
+        assert!(
+            editor
+                .error
+                .as_ref()
+                .is_some_and(|e| e.contains("video clip"))
+        );
+        assert_eq!(editor.project, Project::default());
+    });
+}
+
+#[gpui::test]
+fn scene_review_split_and_undo(cx: &mut TestAppContext) {
+    use animathio_core::{Asset, AssetId, Clip, ClipKind, TICKS_PER_SECOND, TimeRange, TrackId};
+    let bytes = include_bytes!("../../../../../crates/control/tests/scenes.mp4").to_vec();
+    let asset = AssetId::of(&bytes);
+    let mut project = Project::default();
+    Command::AddAsset {
+        id: asset.clone(),
+        asset: Asset {
+            name: "scenes.mp4".into(),
+            media_type: "video/mp4".into(),
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "Video"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(
+            ClipId(1),
+            ClipKind::Video(asset.clone()),
+            TimeRange::new(Time(0), Time(3 * TICKS_PER_SECOND)).unwrap(),
+        ),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, BTreeMap::from([(asset, bytes)]));
+    ui.update(|e, _, cx| e.select_only(ClipId(1), cx));
+    ui.dispatch(actions::SceneCuts);
+    ui.settle();
+    ui.read(|e| assert!(e.scene_panel.as_ref().is_some_and(|p| !p.busy)));
+    ui.update(|e, _, cx| e.apply_scenes(false, cx));
+    ui.read(|e| assert_eq!(e.project.tracks()[0].clips().len(), 2));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}

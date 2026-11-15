@@ -19,6 +19,7 @@ impl Editor {
         self.duck_review = None;
         self.marker_panel = None;
         self.reframe_panel = None;
+        self.scene_panel = None;
         self.track_rename = None;
         self.gesture = None;
         self.keyframe_drag = None;

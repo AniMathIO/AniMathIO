@@ -556,6 +556,21 @@ pub(crate) struct ApplyAutocuts {
     proposal: serde_json::Value,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct DetectScenes {
+    clip: Option<u64>,
+    track: Option<u64>,
+    sensitivity: Option<f64>,
+    min_shot_frames: Option<u32>,
+    delete_shorter_than_frames: Option<u32>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct SplitAtScenes {
+    proposal: serde_json::Value,
+    #[serde(default)]
+    markers: bool,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct AutoReframe {
     /// Target aspect: 9:16 (default), 1:1 or 4:5.
@@ -2007,6 +2022,44 @@ impl McpServer {
             })
             .map_err(mcp_error)?;
         tool_text(json!({"deleted": clip.0}))
+    }
+
+    #[tool(
+        description = "Detect hard scene changes without editing. Select one video clip or track. Review cuts[].enabled in the returned snapshot-bound proposal, then call split_at_scenes."
+    )]
+    async fn detect_scenes(
+        &self,
+        Parameters(p): Parameters<DetectScenes>,
+    ) -> Result<CallToolResult, McpError> {
+        let draft = self
+            .backend
+            .lock()
+            .await
+            .detect_scenes(animathio_control::SceneParams {
+                clip: p.clip.map(ClipId),
+                track: p.track.map(TrackId),
+                sensitivity: p.sensitivity.unwrap_or(0.5),
+                min_shot_frames: p.min_shot_frames.unwrap_or(6),
+                delete_shorter_than_frames: p.delete_shorter_than_frames.unwrap_or(0),
+            })
+            .map_err(mcp_error)?;
+        tool_text(serde_json::to_value(draft).map_err(|e| invalid(&e.to_string()))?)
+    }
+    #[tool(
+        description = "Apply a reviewed detect_scenes proposal as one undo step, splitting linked audio too. Set markers=true to add markers instead. Rejects stale project snapshots."
+    )]
+    async fn split_at_scenes(
+        &self,
+        Parameters(p): Parameters<SplitAtScenes>,
+    ) -> Result<CallToolResult, McpError> {
+        let draft = serde_json::from_value(p.proposal).map_err(|e| invalid(&e.to_string()))?;
+        let result = self
+            .backend
+            .lock()
+            .await
+            .split_at_scenes(draft, p.markers)
+            .map_err(mcp_error)?;
+        tool_text(result)
     }
 
     #[tool(

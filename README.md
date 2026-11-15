@@ -31,6 +31,7 @@ Editor and headless engine prototype. What works today:
 | Plugin system (wasmtime Component Model) | ✅ ABI 1.1.0 (1.0.0 frozen, plus animation-preset and importer worlds); first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
 | Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
 | Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
+| Scene-change cuts and markers (review, linked audio, undo) | ✅ editor, CLI and MCP |
 | Auto-reframe to portrait/square (offline subject tracking) | ✅ editor, CLI and MCP |
 | Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
 | v1 and Manim importers | ✅ `import-v1` (native), Manim via the sandboxed `org.animathio.import-manim` plugin |
@@ -444,3 +445,5 @@ snippets, formula templates and a Write on preset. See the
 authoring surface, CPU golden frames and H.264/AAC export offline. Each includes
 landscape and vertical layouts; the opt-in `scripts/showcase-export.sh` produces
 full deliveries using checksum-pinned public-domain recordings.
+
+Scene detection: **Clip → Split at scene changes…** reviews sampled hard cuts with thumbnails and toggles, then splits linked video/audio or adds markers in one undo step. CLI `scenes` and headless MCP expose the same analysis.

@@ -433,6 +433,15 @@ pub enum Call {
         /// Clips, source, mode and tolerances.
         params: crate::SyncCutsParams,
     },
+    /// Propose hard scene changes without mutating the project.
+    #[serde(rename = "video.detect_scenes")]
+    DetectScenes { params: crate::SceneParams },
+    /// Apply reviewed scene splits or markers in one undo step.
+    #[serde(rename = "video.split_at_scenes")]
+    SplitAtScenes {
+        draft: crate::SceneDraft,
+        markers: bool,
+    },
     /// Reframe video clips to a subject-following portrait or square canvas.
     #[serde(rename = "video.reframe")]
     AutoReframe {

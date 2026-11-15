@@ -15,6 +15,29 @@ impl Editor {
                 return;
             };
             self.finish_color_edit(cx);
+            if let Call::DetectScenes { params } = &call {
+                let project = self.project.clone();
+                let assets = self.assets.clone();
+                let params = params.clone();
+                cx.spawn(async move |_, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            Ok::<_, ControlError>(serde_json::to_value(
+                                animathio_control::detect_scenes(
+                                    &project,
+                                    &assets,
+                                    &params,
+                                    &std::sync::atomic::AtomicBool::new(false),
+                                    &|_| {},
+                                )?,
+                            )?)
+                        })
+                        .await;
+                    let _ = reply.send(result);
+                })
+                .detach();
+                continue;
+            }
             if let Call::AutoReframe { params } = &call {
                 self.start_reframe(params.clone(), Some(reply), cx);
                 continue;
@@ -520,6 +543,17 @@ impl Editor {
                 )?;
                 self.after_edit(cx);
                 serde_json::to_value(result)?
+            }
+            Call::DetectScenes { .. } => {
+                return Err(ControlError::Other(
+                    "scene detection is handled asynchronously".into(),
+                ));
+            }
+            Call::SplitAtScenes { draft, markers } => {
+                let command = animathio_control::scene_command(&self.project, &draft, markers)?;
+                self.history.execute(&mut self.project, &command)?;
+                self.after_edit(cx);
+                serde_json::json!({"applied": true})
             }
             Call::AutoReframe { .. } => {
                 return Err(ControlError::Other(

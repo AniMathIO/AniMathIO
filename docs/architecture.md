@@ -850,3 +850,7 @@ scale and bounds its scrolling form to leave the preview and action buttons visi
 
 ![Math library](screenshots/editor-math-panel.png)
 ![Math object dialog](screenshots/editor-math-dialog.png)
+
+## Scene cuts
+
+`scene_detector` shares the sampled luminance detector with reframe, preserving its default thresholds. `scenes` decodes source frames through the media backend at 4 Hz, maps cuts to the project frame grid and stores a snapshot-bound review draft. The editor `scenes` module runs analysis on a cancellable worker. Application validates the snapshot, simulates linked splits on a scratch project and returns one nested batch. No format change.

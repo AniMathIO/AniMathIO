@@ -506,6 +506,18 @@ impl ControlHandler for HeadlessHandler {
                     &self.limits,
                 )?)?
             }
+            Call::DetectScenes { params } => serde_json::to_value(crate::detect_scenes(
+                &self.project,
+                &self.assets,
+                &params,
+                &std::sync::atomic::AtomicBool::new(false),
+                &|_| {},
+            )?)?,
+            Call::SplitAtScenes { draft, markers } => {
+                let command = crate::scene_command(&self.project, &draft, markers)?;
+                self.history.execute(&mut self.project, &command)?;
+                serde_json::json!({"applied": true})
+            }
             Call::AutoReframe { params } => serde_json::to_value(crate::auto_reframe(
                 &mut self.project,
                 &mut self.history,
