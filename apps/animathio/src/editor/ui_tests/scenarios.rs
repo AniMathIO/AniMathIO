@@ -1,8 +1,9 @@
 //! Scenarios that drive real actions and assert on model and view state.
 
+use gpui::{AppContext, AsKeystroke};
+
 use animathio_control::{
-    CaptionStyleParams, MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style,
-    math_object_range,
+    MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style, math_object_range,
 };
 use animathio_core::{ClipSpeed, EffectId, EffectInstance};
 
@@ -696,7 +697,9 @@ fn math_dialog_adds_latex_onto_an_occupied_track_as_a_new_layer(cx: &mut TestApp
     ui.advance_clock(std::time::Duration::from_millis(400));
     ui.settle();
 
-    ui.update(|_, window, cx| panel.update(cx, |panel, cx| panel.apply(window, cx)));
+    ui.cx
+        .update(|window, cx| panel.update(cx, |panel, cx| panel.apply(window, cx)));
+    ui.settle();
     let added = ui.read(|e| e.selected.expect("added clip selected"));
     ui.read(|e| {
         // The playhead's track is occupied, so the object lands on a new layer.
@@ -737,7 +740,9 @@ fn math_dialog_adds_latex_onto_an_occupied_track_as_a_new_layer(cx: &mut TestApp
     });
     ui.advance_clock(std::time::Duration::from_millis(400));
     ui.settle();
-    ui.update(|_, window, cx| panel.update(cx, |panel, cx| panel.apply(window, cx)));
+    ui.cx
+        .update(|window, cx| panel.update(cx, |panel, cx| panel.apply(window, cx)));
+    ui.settle();
     ui.read(|e| {
         assert_eq!(e.project.tracks().len(), tracks + 1, "edit adds no layer");
         let clip = e.find_clip(added).expect("edited clip");

@@ -145,7 +145,7 @@ impl Ui {
 
     /// Advance the test clock, firing timers (debounced previews, animations).
     pub(super) fn advance_clock(&mut self, duration: std::time::Duration) {
-        self.cx.advance_clock(duration);
+        self.cx.executor().advance_clock(duration);
         self.cx.run_until_parked();
     }
 
