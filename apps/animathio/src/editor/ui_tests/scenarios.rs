@@ -1012,14 +1012,9 @@ fn auto_duck_does_not_default_to_a_selected_image_as_the_voice(cx: &mut TestAppC
     ui.update(|editor, _, cx| editor.select_only(image, cx));
     ui.dispatch(actions::AutoDuck);
     ui.read(|editor| {
-        assert!(
-            editor
-                .duck_review
-                .as_ref()
-                .unwrap()
-                .params
-                .voice_clips
-                .is_empty()
+        assert_eq!(
+            editor.duck_review.as_ref().unwrap().params.voice_clips,
+            Vec::<ClipId>::new()
         );
     });
 }
