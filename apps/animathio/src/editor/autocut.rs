@@ -13,7 +13,7 @@ use gpui_component::{
 /// What the review analyses: the selected clip, its track's mix, or the whole project
 /// (or the in/out range).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Scope {
+pub(super) enum Scope {
     Clip,
     Track,
     Project,
@@ -60,7 +60,7 @@ impl Scope {
 pub(super) struct Review {
     cancel: animathio_transcribe::Cancel,
     identity: Arc<()>,
-    params: AutocutParams,
+    pub(super) params: AutocutParams,
     pub(super) proposal: Option<AutocutProposal>,
     sliders: Vec<Entity<SliderState>>,
     _subscriptions: Vec<Subscription>,
@@ -175,6 +175,34 @@ impl Editor {
             error: None,
         });
         self.analyse_autocut(cx);
+    }
+
+    pub(super) fn set_autocut_scope(&mut self, scope: Scope, cx: &mut Context<Self>) {
+        let track = self.selected_audio_track();
+        let selected = self.selected;
+        if let Some(review) = self.autocut_review.as_mut() {
+            scope.apply(&mut review.params, selected, track);
+        }
+        self.analyse_autocut(cx);
+    }
+
+    /// Apply the enabled cuts of the current proposal as one undo step and close the panel.
+    pub(super) fn apply_autocut(&mut self, cx: &mut Context<Self>) {
+        let proposal = self
+            .autocut_review
+            .as_ref()
+            .and_then(|r| r.proposal.clone());
+        if let Some(p) = proposal {
+            match autocut_command(&self.project, &p) {
+                Ok(command) => {
+                    if self.try_execute(&command, cx) {
+                        self.autocut_review = None;
+                    }
+                }
+                Err(error) => self.error = Some(error.to_string()),
+            }
+        }
+        cx.notify();
     }
 
     fn analyse_autocut(&mut self, cx: &mut Context<Self>) {
@@ -298,12 +326,7 @@ impl Editor {
                     .selected(scope == current)
                     .label(scope.label())
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        let track = this.selected_audio_track();
-                        let selected = this.selected;
-                        if let Some(r) = this.autocut_review.as_mut() {
-                            scope.apply(&mut r.params, selected, track);
-                        }
-                        this.analyse_autocut(cx);
+                        this.set_autocut_scope(scope, cx);
                     })),
                 );
             }
@@ -530,23 +553,7 @@ impl Editor {
                         .compact()
                         .label("Apply")
                         .disabled(!can_apply)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let proposal = this
-                                .autocut_review
-                                .as_ref()
-                                .and_then(|r| r.proposal.clone());
-                            if let Some(p) = proposal {
-                                match autocut_command(&this.project, &p) {
-                                    Ok(command) => {
-                                        if this.try_execute(&command, cx) {
-                                            this.autocut_review = None;
-                                        }
-                                    }
-                                    Err(error) => this.error = Some(error.to_string()),
-                                }
-                            }
-                            cx.notify();
-                        })),
+                        .on_click(cx.listener(|this, _, _, cx| this.apply_autocut(cx))),
                 ),
         );
         Some(panel)
