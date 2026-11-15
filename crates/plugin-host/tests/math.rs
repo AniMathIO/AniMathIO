@@ -557,7 +557,7 @@ fn graph_parametric_rejects_invalid_domains_and_breaks_at_nonfinite_values() {
             .sum::<usize>();
         assert_eq!(moves, expected_moves, "{items}");
     }
-    // A finite domain must not overflow during sample-index multiplication.
+    // Extreme domains must not overflow or exhaust sandbox fuel during refinement.
     let scene = host
         .render_clip(
             &graph,
@@ -570,8 +570,56 @@ fn graph_parametric_rejects_invalid_domains_and_breaks_at_nonfinite_values() {
             (640, 360),
         )
         .unwrap();
-    let VectorElement::StrokePath { path, .. } = &scene.elements[0] else {
-        panic!("expected a finite sampled curve");
-    };
-    assert_eq!(path.len(), 257);
+    assert!(
+        scene.elements.is_empty(),
+        "unresolvable extreme domains are omitted"
+    );
+}
+
+#[test]
+fn graph_clipping_asymptotes_golden() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+    for (name, expression, range) in [
+        ("graph-tan-clipped", "tan(x)", 5.0),
+        ("graph-reciprocal-clipped", "1/x", 5.0),
+        ("graph-large-range-clipped", "1000000*x", 1000000.0),
+    ] {
+        let scene = host
+            .render_clip(
+                &graph,
+                &BTreeMap::new(),
+                &json!({
+                    "items": format!("plot y={expression}"), "show_labels": false,
+                    "scale_mode": "stretch", "x_min": -range, "x_max": range,
+                    "y_min": -5.0, "y_max": 5.0,
+                }),
+                0,
+                (640, 360),
+            )
+            .unwrap();
+        let Some(animathio_core::VectorElement::StrokePath { path, .. }) = scene.elements.last()
+        else {
+            panic!("missing plot");
+        };
+        assert!(!path.is_empty());
+        let mut previous: Option<animathio_core::Point> = None;
+        for verb in path {
+            let (animathio_core::PathVerb::MoveTo(p) | animathio_core::PathVerb::LineTo(p)) = verb
+            else {
+                panic!("unexpected curve verb");
+            };
+            assert!(p.x.is_finite() && p.y.is_finite());
+            assert!((0.0..=640.0).contains(&p.x) && (0.0..=360.0).contains(&p.y));
+            if matches!(verb, animathio_core::PathVerb::LineTo(_))
+                && name != "graph-large-range-clipped"
+                && let Some(a) = previous
+            {
+                assert!((a.y - p.y).abs() < 180.0, "asymptote bridge");
+            }
+            previous = Some(*p);
+        }
+        golden_vector(scene, name);
+    }
 }
