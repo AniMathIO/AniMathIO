@@ -60,6 +60,20 @@ impl From<f64> for ParamValue {
     }
 }
 impl ParamValue {
+    pub(crate) fn asset_reference(&self) -> Option<&AssetId> {
+        // Keep this exhaustive so future container variants must account for
+        // their nested references as well.
+        match self {
+            Self::AssetRef(id) => id.as_ref(),
+            Self::Number(_)
+            | Self::Color(_)
+            | Self::Point(_)
+            | Self::Bool(_)
+            | Self::Enum(_)
+            | Self::String(_) => None,
+        }
+    }
+
     /// Numeric value, when this is a scalar.
     #[must_use]
     pub fn as_number(&self) -> Option<f64> {

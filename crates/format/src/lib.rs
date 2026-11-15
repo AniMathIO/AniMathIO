@@ -179,7 +179,8 @@ pub fn write_amio<W: Write + Seek>(
 /// undone) are dropped, so every save path can hand its full cache to
 /// [`save_amio`] without drifting from the container's strict manifest rule.
 /// An asset that the manifest lists but whose bytes are missing still makes
-/// [`save_amio`] fail.
+/// [`save_amio`] fail. This filter does not replace model validation: writers
+/// also reject native or typed references absent from the manifest.
 #[must_use]
 pub fn referenced_assets(
     project: &Project,

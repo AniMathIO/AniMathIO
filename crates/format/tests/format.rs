@@ -657,3 +657,66 @@ fn referenced_assets_matches_manifest_filter() {
     let referenced = referenced_assets(&project, &cache);
     assert_eq!(referenced, assets);
 }
+
+#[test]
+fn plugin_asset_references_roundtrip_and_dangling_documents_are_rejected() {
+    for keyframed in [false, true] {
+        let (mut project, assets) = fixture(b"plugin texture");
+        // Leave only a plugin reference, so a native source cannot mask the bug.
+        Command::RemoveClip { id: ClipId(1) }
+            .apply(&mut project)
+            .unwrap();
+        let id = AssetId::of(b"plugin texture");
+        let command = if keyframed {
+            Command::AddKeyframe {
+                id: ClipId(2),
+                target: Target::Param("texture".into()),
+                time: Time(200),
+                keyframe: Keyframe {
+                    value: ParamValue::AssetRef(Some(id)),
+                    interpolation: Interpolation::Hold,
+                },
+            }
+        } else {
+            Command::SetPluginParam {
+                id: ClipId(2),
+                name: "texture".into(),
+                value: Some(ParamValue::AssetRef(Some(id))),
+            }
+        };
+        command.apply(&mut project).unwrap();
+        assert_eq!(read_json(json_bytes(&project).as_slice()).unwrap(), project);
+        let mut bytes = write_amio(Cursor::new(Vec::new()), &project, &assets).unwrap();
+        bytes.set_position(0);
+        assert_eq!(read_amio(bytes, Limits::default()).unwrap().assets, assets);
+
+        // Simulate an older writer's corrupted document; reopening must fail.
+        let mut value = serde_json::to_value(&project).unwrap();
+        value["format"] = json!("animathio");
+        value["schemaVersion"] = json!(SCHEMA_VERSION);
+        value["assets"] = json!({});
+        let json = serde_json::to_vec(&value).unwrap();
+        let error = read_json(json.as_slice()).unwrap_err().to_string();
+        assert!(error.contains("missing asset"), "{error}");
+        assert!(read_amio(archive(&[("project.json", &json)]), Limits::default()).is_err());
+    }
+}
+
+#[test]
+fn effect_parameters_cannot_contain_typed_asset_references() {
+    let (project, _) = fixture(b"texture");
+    let effect = json!({
+        "id": 1,
+        "plugin": "org.example.effect",
+        "effect": "texture",
+        "params": {"texture": {"AssetRef": AssetId::of(b"texture")}}
+    });
+    for chain in ["effects", "audio_effects"] {
+        let mut value = serde_json::to_value(&project).unwrap();
+        value["tracks"][1]["clips"]["2"][chain] = json!([effect.clone()]);
+        assert!(serde_json::from_value::<Project>(value).is_err());
+    }
+    let mut value = serde_json::to_value(&project).unwrap();
+    value["tracks"][1]["audio_effects"] = json!([effect]);
+    assert!(serde_json::from_value::<Project>(value).is_err());
+}

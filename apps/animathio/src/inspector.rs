@@ -781,6 +781,17 @@ mod typed_tests {
             .with_asset_ref("asset", "Asset", "image/*", None);
         for model in models_from_schema(&schema) {
             let mut project = Project::default();
+            if matches!(model, ParamModel::Asset { .. }) {
+                Command::AddAsset {
+                    id: animathio_core::AssetId::of(b"edited"),
+                    asset: animathio_core::Asset {
+                        name: "edited.png".into(),
+                        media_type: "image/png".into(),
+                    },
+                }
+                .apply(&mut project)
+                .unwrap();
+            }
             Command::AddTrack {
                 track: Track::new(TrackId(0), "t"),
                 index: 0,

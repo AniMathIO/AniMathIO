@@ -24,6 +24,7 @@ fn pairs() -> impl Strategy<Value = (ParamValue, ParamValue)> {
 }
 fn project(value: ParamValue) -> Project {
     let mut project = Project::default();
+    register_asset(&mut project, &value);
     Command::AddTrack {
         track: Track::new(TrackId(0), "typed"),
         index: 0,
@@ -47,6 +48,21 @@ fn project(value: ParamValue) -> Project {
     .unwrap();
     project
 }
+fn register_asset(project: &mut Project, value: &ParamValue) {
+    if let ParamValue::AssetRef(Some(id)) = value
+        && !project.assets().contains_key(id)
+    {
+        Command::AddAsset {
+            id: id.clone(),
+            asset: Asset {
+                name: "typed parameter fixture".into(),
+                media_type: "application/octet-stream".into(),
+            },
+        }
+        .apply(project)
+        .unwrap();
+    }
+}
 fn add(value: ParamValue, time: i64, interpolation: Interpolation) -> Command {
     Command::AddKeyframe {
         id: ClipId(0),
@@ -66,6 +82,7 @@ proptest! {
     fn exact_keys_and_clamped_endpoints((left, right) in pairs(), mode in 0_u8..3) {
         let mode = [Interpolation::Linear, Interpolation::EaseInOut, Interpolation::Hold][usize::from(mode)];
         let mut p = project(left.clone());
+        register_asset(&mut p, &right);
         add(left.clone(), 10, mode).apply(&mut p).unwrap();
         add(right.clone(), 900, mode).apply(&mut p).unwrap();
         prop_assert_eq!(sample(&p, 0), left.clone());
@@ -78,6 +95,7 @@ proptest! {
     fn explicit_hold_and_discrete_values_never_blend((left, right) in pairs(), t in 11_i64..900, mode in 0_u8..3) {
         let mode = if matches!(left, ParamValue::Number(_) | ParamValue::Color(_) | ParamValue::Point(_)) { Interpolation::Hold } else { [Interpolation::Linear, Interpolation::EaseInOut, Interpolation::Hold][usize::from(mode)] };
         let mut p = project(left.clone());
+        register_asset(&mut p, &right);
         add(left.clone(), 10, mode).apply(&mut p).unwrap();
         add(right.clone(), 900, mode).apply(&mut p).unwrap();
         prop_assert_eq!(sample(&p, t), left);
@@ -90,6 +108,7 @@ proptest! {
         target in 0_i64..1000,
     ) {
         let mut p = project(left.clone());
+        register_asset(&mut p, &right);
         add(left, 10, Interpolation::EaseInOut).apply(&mut p).unwrap();
         add(right, 900, Interpolation::Linear).apply(&mut p).unwrap();
         let before = p.clone();
@@ -147,6 +166,7 @@ proptest! {
     #[test]
     fn typed_commands_undo_redo_and_serde_are_exact((left, right) in pairs()) {
         let mut p = project(left.clone());
+        register_asset(&mut p, &right);
         let commands = [
             Command::SetPluginParam { id: ClipId(0), name: "p".into(), value: Some(right.clone()) },
             add(left.clone(), 10, Interpolation::EaseInOut),

@@ -426,6 +426,14 @@ numbers. Validation rejects nonfinite values, mixed-type curves, and curves whos
 type differs from their typed base parameter. Plugin curves may also target an
 implicit schema default without a stored base value.
 
+Every native clip source and every non-null typed asset reference in clip parameters
+or keyframes must exist in the project asset manifest, including keys outside the
+trimmed clip range. `RemoveAsset` and batches that leave dangling references fail
+transactionally; JSON and archive writers apply the same model validation. Effect
+parameters (video and audio) are numeric only, and typed values have no nested
+containers. Save helpers omit cached bytes absent from the manifest while keeping
+the caller's cache available for undo.
+
 Numbers, points, and colours support linear, smoothstep ease-in/out, and hold
 interpolation. Colour RGB channels interpolate in linear light (not sRGB byte
 space), with alpha interpolated separately. Booleans, enum choices, strings, and
