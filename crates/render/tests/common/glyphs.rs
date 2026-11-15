@@ -34,8 +34,8 @@ pub fn scene(kind: &str) -> Scene {
             fit: animathio_core::Fit::Stretch,
             transform: if matches!(kind, "title" | "classic") {
                 Transform {
-                    x: 0.05,
-                    y: 0.3,
+                    x: 0.5,
+                    y: if kind == "classic" { 0.75 } else { 0.5 },
                     scale_x: 0.9,
                     scale_y: 0.4,
                     ..Transform::default()
@@ -43,7 +43,7 @@ pub fn scene(kind: &str) -> Scene {
             } else {
                 Transform::default()
             },
-            params: Default::default(),
+            params: std::collections::BTreeMap::default(),
             effects: vec![],
             transition: None,
         }],
