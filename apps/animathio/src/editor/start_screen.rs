@@ -217,7 +217,7 @@ impl Editor {
                     .map(|(index, preset)| {
                         let (width, height) = preset.resolution();
                         let (label, detail) = match preset {
-                            ExportPreset::Youtube1080p => ("1080p Full HD", "1920 x 1080"),
+                            ExportPreset::Youtube1080p => ("1080p (default)", "1920 x 1080"),
                             ExportPreset::Youtube4k => ("4K Ultra HD", "3840 x 2160"),
                             ExportPreset::ShortsVertical => ("9:16 Vertical", "1080 x 1920"),
                             ExportPreset::Square => ("Square", "1080 x 1080"),
@@ -239,6 +239,7 @@ impl Editor {
                         };
                         div()
                             .id(("start-preset", index))
+                            .debug_selector(move || format!("canvas-preset-{index}"))
                             .focusable()
                             .tab_index(0)
                             .focus_visible(|this| this.border_color(style::hex(color::ACCENT)))

@@ -81,6 +81,13 @@ pub(super) fn card_models(
         .collect()
 }
 
+// These first-party profile coefficients remain editable, but are rarely adjusted by hand.
+fn learned_band(instance: &animathio_core::EffectInstance, name: &str) -> bool {
+    instance.plugin == "org.animathio.audio-basic"
+        && instance.effect == "denoise"
+        && (0..16).any(|band| name == format!("noise_{band}"))
+}
+
 impl Editor {
     /// Audio filters offered by loaded audio-effect plugins, in plugin then listing order.
     pub(super) fn available_audio_effects(&self) -> Vec<animathio_plugin_host::EffectDescriptor> {
@@ -352,6 +359,8 @@ impl Editor {
                         .child("Plugin not loaded"),
                 );
             }
+            let mut advanced_rows = div().flex().flex_col();
+            let mut has_advanced = false;
             for ParamRow {
                 name,
                 label,
@@ -360,6 +369,7 @@ impl Editor {
                 ..
             } in model.params
             {
+                let advanced = learned_band(&instances[index], &name);
                 let value = match chain {
                     AudioChain::Clip(id) => self.find_clip(id).map_or(value, |clip| {
                         inspector::sampled_numeric(
@@ -390,7 +400,47 @@ impl Editor {
                     AudioChain::Clip(id) => Some(self.row_diamond(id, &target, cx)),
                     AudioChain::Track(_) => None,
                 };
-                card = card.child(Self::param_row(diamond, label, control, cx));
+                let row = Self::param_row(diamond, label, control, cx)
+                    .id(SharedString::from(format!("audio-param-{field}")))
+                    .debug_selector(move || format!("audio-param-{field}"));
+                if advanced {
+                    has_advanced = true;
+                    advanced_rows = advanced_rows.child(row);
+                } else {
+                    card = card.child(row);
+                }
+            }
+            if has_advanced {
+                let open = self.audio_advanced.contains(&(chain, effect));
+                card = card
+                    .child(
+                        Button::new(SharedString::from(format!("{key}-advanced")))
+                            .debug_selector(move || {
+                                format!("audio-advanced-{chain:?}-{}", effect.0)
+                            })
+                            .ghost()
+                            .compact()
+                            .label("Advanced")
+                            .icon(
+                                icons::icon(if open {
+                                    IconName::ChevronDown
+                                } else {
+                                    IconName::ChevronRight
+                                })
+                                .xsmall(),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if !this.audio_advanced.remove(&(chain, effect)) {
+                                    this.audio_advanced.insert((chain, effect));
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        gpui_component::collapsible::Collapsible::new()
+                            .open(open)
+                            .content(advanced_rows),
+                    );
             }
             rows.push(card);
         }

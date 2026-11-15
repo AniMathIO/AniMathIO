@@ -58,9 +58,16 @@ fn start_screen_then_new_project(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
     assert!(ui.read(Editor::is_start_screen));
     ui.dispatch(NewProject);
+    assert!(ui.read(Editor::is_start_screen));
+    ui.press("enter");
     ui.read(|editor| {
         assert!(!editor.is_start_screen());
         assert_eq!(editor.project.tracks().len(), 1);
+        assert_eq!(
+            (editor.project.width(), editor.project.height()),
+            (1920, 1080)
+        );
+        assert!(!editor.dirty);
     });
 }
 
@@ -547,6 +554,13 @@ fn latex_on_occupied_track_creates_a_layer(cx: &mut TestAppContext) {
     let layers = ui.read(|e| e.project.tracks().len());
     ui.update(|e, _, cx| e.add_plugin_clip_by_id("org.animathio.latex", cx));
     assert_eq!(ui.read(|e| e.project.tracks().len()), layers + 1);
+    ui.read(|e| {
+        assert!(
+            timeline::display_tracks(&e.project)[0]
+                .clips()
+                .contains_key(&e.selected.unwrap())
+        );
+    });
     ui.dispatch(Undo);
     assert_eq!(ui.read(|e| e.project.tracks().len()), layers);
 }
@@ -1171,5 +1185,547 @@ fn scene_review_split_and_undo(cx: &mut TestAppContext) {
     ui.update(|e, _, cx| e.apply_scenes(false, cx));
     ui.read(|e| assert_eq!(e.project.tracks()[0].clips().len(), 3));
     ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn foreground_rows_match_hits_drops_selection_and_track_moves(cx: &mut TestAppContext) {
+    let (mut project, assets) = voice_and_music();
+    for (index, id) in [3, 4, 5].into_iter().enumerate() {
+        Command::AddTrack {
+            track: Track::new(animathio_core::TrackId(id), format!("V{id}")),
+            index: index + 2,
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: animathio_core::TrackId(id),
+            clip: animathio_core::Clip::new(
+                ClipId(id + 20),
+                animathio_core::ClipKind::Error("visual".into()),
+                animathio_core::TimeRange::new(Time(0), Time(1000 * MS)).unwrap(),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.read(|e| {
+        let ids: Vec<_> = timeline::display_tracks(&e.project)
+            .iter()
+            .map(|t| t.id().0)
+            .collect();
+        assert_eq!(ids, [5, 4, 3, 1, 2]);
+        let layout = e.current_layout();
+        let y = layout.ruler_height + layout.row_height / 2.;
+        assert_eq!(
+            timeline::hit_test(&layout, &e.project, 10., y).map(|hit| hit.clip),
+            Some(ClipId(25))
+        );
+        assert_eq!(
+            timeline::drop_placement(&layout, &e.project, 10., y, Time(0), false)
+                .unwrap()
+                .0,
+            animathio_core::TrackId(5)
+        );
+        assert_eq!(
+            crate::selection::marquee(&layout, &e.project, (0., layout.ruler_height), (20., y)),
+            BTreeSet::from([ClipId(25)])
+        );
+    });
+    ui.update(|e, _, cx| e.move_track_to_row(animathio_core::TrackId(3), 0, cx));
+    assert_eq!(
+        ui.read(|e| timeline::display_tracks(&e.project)[0].id().0),
+        3
+    );
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.update(|e, _, cx| e.move_track_by(animathio_core::TrackId(5), 1, cx));
+    assert_eq!(
+        ui.read(|e| timeline::display_tracks(&e.project)[1].id().0),
+        5
+    );
+    ui.dispatch(Undo);
+    ui.update(|e, _, cx| e.add_timeline_track(cx));
+    assert_eq!(
+        ui.read(|e| timeline::display_tracks(&e.project)[0].id().0),
+        6
+    );
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn ruler_and_marker_lane_stay_fixed_when_tracks_scroll(cx: &mut TestAppContext) {
+    let mut project = Project::default();
+    for id in 1..=12 {
+        Command::AddTrack {
+            track: Track::new(animathio_core::TrackId(id), format!("V{id}")),
+            index: usize::try_from(id - 1).unwrap(),
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: animathio_core::TrackId(id),
+            clip: animathio_core::Clip::new(
+                ClipId(id + 20),
+                animathio_core::ClipKind::Error("visual".into()),
+                animathio_core::TimeRange::new(Time(0), Time(2000 * MS)).unwrap(),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let mut ui = Ui::open(cx, project, BTreeMap::new());
+    seek(&mut ui, 1000);
+    ui.dispatch(AddMarker);
+    let marker = ui.read(|e| e.project.markers()[0].id);
+    let ruler_before = ruler_point(&ui, Time(1000 * MS));
+    let top_before = ui.read(|e| e.timeline_tracks_top);
+    ui.update(|e, _, cx| {
+        e.timeline_scroll_handle.set_offset(gpui::point(
+            gpui::px(0.),
+            gpui::px(-e.dock.track_height.pixels() * 3.),
+        ));
+        cx.notify();
+    });
+    let ruler_after = ruler_point(&ui, Time(1000 * MS));
+    assert_eq!(ruler_before, ruler_after);
+    assert!(ui.read(|e| e.timeline_tracks_top) < top_before - 1.);
+    ui.click(ruler_after, gpui::Modifiers::default());
+    assert_eq!(
+        ui.read(|e| e.marker_selection.clone()),
+        BTreeSet::from([marker])
+    );
+    let (point, expected) = ui.read(|e| {
+        let layout = e.current_layout();
+        let point = gpui::point(
+            e.timeline_bounds.origin.x + gpui::px(timeline::time_to_x(&layout, Time(500 * MS))),
+            e.timeline_bounds.origin.y + gpui::px(layout.ruler_height + layout.row_height / 2.),
+        );
+        let row = ((f32::from(point.y) - e.timeline_tracks_top) / layout.row_height) as usize;
+        (
+            point,
+            timeline::display_tracks(&e.project)[row]
+                .clips()
+                .values()
+                .next()
+                .unwrap()
+                .id,
+        )
+    });
+    assert_eq!(expected, ClipId(29), "three rows scrolled: V9 is now first");
+    ui.click(point, gpui::Modifiers::default());
+    assert_eq!(ui.read(|e| e.selected), Some(expected));
+    ui.read(|e| {
+        let (x, y) = e.timeline_relative(point);
+        let layout = e.current_layout();
+        let hit = timeline::hit_test(&layout, &e.project, x, y).unwrap();
+        assert_eq!(hit.clip, expected);
+        assert_eq!(
+            timeline::drop_placement(&layout, &e.project, x, y, e.position, false)
+                .unwrap()
+                .0,
+            hit.track
+        );
+    });
+}
+
+fn dialog_ready(ui: &mut Ui) {
+    ui.advance_clock(std::time::Duration::from_millis(400));
+}
+
+fn edit_dialog_field(ui: &mut Ui, selector: &'static str, value: &str) {
+    let bounds = ui
+        .cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("missing {selector}"));
+    ui.click(bounds.center(), gpui::Modifiers::default());
+    ui.press("secondary-a");
+    ui.press("backspace");
+    if !value.is_empty() {
+        ui.cx.simulate_input(value);
+    }
+    ui.settle();
+}
+
+#[gpui::test]
+fn project_settings_dialog_enter_validates_applies_and_escape_cancels(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(Editor::open_settings);
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "project-width", "0");
+    ui.press("enter");
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    assert!(
+        ui.cx.update(|w, cx| {
+            use gpui_component::WindowExt;
+            w.has_active_dialog(cx)
+        }),
+        "project settings unexpectedly closed"
+    );
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("project-width").is_some());
+    assert!(ui.cx.debug_bounds("dialog-validation-error").is_some());
+    edit_dialog_field(&mut ui, "project-width", "1280");
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert_eq!(ui.read(|e| e.project.width()), 1280);
+    assert!(ui.cx.debug_bounds("project-width").is_none());
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.update(Editor::open_settings);
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("dialog-validation-error").is_none());
+    edit_dialog_field(&mut ui, "project-width", "1440");
+    ui.press("escape");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("project-width").is_none());
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.update(Editor::open_settings);
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "project-width", "960");
+    let apply = ui.cx.debug_bounds("dialog-apply").unwrap();
+    ui.click(apply.center(), gpui::Modifiers::default());
+    assert_eq!(ui.read(|e| e.project.width()), 960);
+}
+
+#[gpui::test]
+fn speed_and_hold_dialogs_retain_invalid_input_and_apply_enter(cx: &mut TestAppContext) {
+    let (project, assets) = voice_pair();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, window, cx| {
+        e.select_only(PAIR_FIRST, cx);
+        e.open_speed_duration(window, cx);
+    });
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "speed-percent", "0");
+    ui.press("enter");
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    assert!(ui.cx.debug_bounds("speed-percent").is_some());
+    edit_dialog_field(&mut ui, "speed-percent", "200");
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("speed-percent").is_none());
+    assert!(
+        (ui.read(|e| e.find_clip(PAIR_FIRST).unwrap().time_map.speed.percent()) - 200.).abs()
+            < f64::EPSILON
+    );
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.update(|e, window, cx| {
+        e.seek_to(Time(500 * MS), cx);
+        e.open_frame_hold(window, cx);
+    });
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "hold-frames", "0");
+    ui.press("enter");
+    assert!(ui.cx.debug_bounds("hold-frames").is_some());
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    edit_dialog_field(&mut ui, "hold-frames", "15");
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("hold-frames").is_none());
+    assert_ne!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn invalid_export_and_named_preset_dialogs_stay_open_on_enter(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(Editor::open_export_dialog);
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "export-output", "");
+    ui.press("enter");
+    assert!(
+        ui.cx.update(|w, cx| {
+            use gpui_component::WindowExt;
+            w.has_active_dialog(cx)
+        }),
+        "export unexpectedly closed"
+    );
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("export-output").is_some());
+    assert!(ui.cx.debug_bounds("dialog-validation-error").is_some());
+    ui.press("escape");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("export-output").is_none());
+    ui.update(Editor::open_save_caption_preset);
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "caption-preset-name", "  ");
+    ui.press("enter");
+    assert!(ui.cx.debug_bounds("caption-preset-name").is_some());
+    edit_dialog_field(&mut ui, "caption-preset-name", "UI keyboard preset");
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("caption-preset-name").is_none());
+    assert!(ui.read(|e| {
+        e.caption_presets
+            .iter()
+            .any(|p| p.name == "UI keyboard preset")
+    }));
+    ui.update(|_, window, cx| Editor::save_template_dialog(window, cx));
+    ui.settle();
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "template-name", "");
+    ui.press("enter");
+    assert!(ui.cx.debug_bounds("template-name").is_some());
+    ui.press("escape");
+    dialog_ready(&mut ui);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn unavailable_subtitle_engine_dialog_cannot_be_started_with_enter(cx: &mut TestAppContext) {
+    if animathio_transcribe::engine_available() {
+        return;
+    }
+    let (project, assets) = voice_and_music();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(Editor::open_subtitles_dialog);
+    dialog_ready(&mut ui);
+    ui.press("enter");
+    assert!(ui.read(|e| e.subtitle_job.is_none()));
+    assert!(ui.cx.debug_bounds("dialog-0").is_some());
+    ui.press("escape");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("dialog-0").is_none());
+}
+
+#[gpui::test]
+fn marker_dialog_enter_saves_escape_cancels(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.dispatch(AddMarker);
+    let id = ui.read(|e| e.project.markers()[0].id);
+    ui.update(|e, w, cx| e.open_marker_dialog(id, w, cx));
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "marker-name", "Chapter one");
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert_eq!(
+        ui.read(|e| e.project.marker(id).unwrap().name.clone()),
+        "Chapter one"
+    );
+    assert!(ui.cx.debug_bounds("marker-name").is_none());
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|e, w, cx| e.open_marker_dialog(id, w, cx));
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "marker-name", "Cancelled");
+    ui.press("escape");
+    dialog_ready(&mut ui);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn write_on_dialog_validates_duration_before_enter_applies(cx: &mut TestAppContext) {
+    let mut project = Project::default();
+    Command::AddTrack {
+        track: Track::new(animathio_core::TrackId(1), "Math"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddClip {
+        track: animathio_core::TrackId(1),
+        clip: animathio_core::Clip::new(
+            ClipId(1),
+            animathio_core::ClipKind::Plugin {
+                plugin_id: "org.animathio.latex".into(),
+                params: serde_json::json!({"source":"x"}),
+            },
+            animathio_core::TimeRange::new(Time(0), Time(2000 * MS)).unwrap(),
+        ),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, BTreeMap::new());
+    ui.update(|e, window, cx| {
+        e.select_only(ClipId(1), cx);
+        e.open_write_on(window, cx);
+    });
+    dialog_ready(&mut ui);
+    edit_dialog_field(&mut ui, "write-duration", "0");
+    ui.press("enter");
+    assert!(ui.cx.debug_bounds("write-duration").is_some());
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    edit_dialog_field(&mut ui, "write-duration", "1");
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds("write-duration").is_none());
+    assert!(!ui.read(|e| e.find_clip(ClipId(1)).unwrap().animations.is_empty()));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn new_project_shortcut_and_menu_reuse_the_launcher_canvas_chooser(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.press("secondary-alt-n");
+    assert!(ui.read(Editor::is_start_screen));
+    assert!(ui.cx.debug_bounds("canvas-preset-0").is_some());
+    ui.press("enter");
+    assert_eq!(
+        ui.read(|e| (e.project.width(), e.project.height())),
+        (1920, 1080)
+    );
+    ui.dispatch(NewProject);
+    assert!(ui.read(Editor::is_start_screen));
+    let vertical = ui.cx.debug_bounds("canvas-preset-2").unwrap();
+    ui.click(vertical.center(), gpui::Modifiers::default());
+    assert_eq!(
+        ui.read(|e| (e.project.width(), e.project.height())),
+        (1080, 1920)
+    );
+    ui.read(|e| {
+        assert!(!e.dirty);
+        assert_eq!(e.project.tracks().len(), 1);
+    });
+    ui.dispatch(Undo);
+    assert_eq!(
+        ui.read(|e| (e.project.width(), e.project.height())),
+        (1080, 1920)
+    );
+}
+
+#[gpui::test]
+fn denoise_learned_bands_are_collapsed_and_can_be_expanded(cx: &mut TestAppContext) {
+    let (mut project, assets) = voice_and_music();
+    let mut params: BTreeMap<_, _> = (0..16).map(|i| (format!("noise_{i}"), 0.0001)).collect();
+    params.insert("reduction_db".into(), 12.);
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(VOICE_CLIP),
+        index: 0,
+        effect: EffectInstance {
+            id: EffectId(777),
+            plugin: "org.animathio.audio-basic".into(),
+            effect: "denoise".into(),
+            bypass: false,
+            params,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(2560.), gpui::px(1440.)));
+    ui.update(|e, _, cx| {
+        e.dock.right_open = true;
+        e.closed_sections.insert("speed".into());
+        e.select_only(VOICE_CLIP, cx);
+        cx.notify();
+    });
+    assert!(ui.read(|e| e.audio_advanced.is_empty()));
+    assert!(
+        ui.cx
+            .debug_bounds("audio-param-Clip(ClipId(10)):ae777:noise_0")
+            .is_none()
+    );
+    let header = ui
+        .cx
+        .debug_bounds("audio-advanced-Clip(ClipId(10))-777")
+        .unwrap();
+    ui.click(header.center(), gpui::Modifiers::default());
+    dialog_ready(&mut ui);
+    assert!(ui.read(|e| {
+        e.audio_advanced
+            .contains(&(AudioChain::Clip(VOICE_CLIP), EffectId(777)))
+    }));
+    assert!(
+        ui.cx
+            .debug_bounds("audio-param-Clip(ClipId(10)):ae777:noise_0")
+            .is_some()
+    );
+    assert!(
+        ui.cx
+            .debug_bounds("audio-param-Clip(ClipId(10)):ae777:noise_15")
+            .is_some()
+    );
+    let header = ui
+        .cx
+        .debug_bounds("audio-advanced-Clip(ClipId(10))-777")
+        .unwrap();
+    ui.click(header.center(), gpui::Modifiers::default());
+    dialog_ready(&mut ui);
+    assert!(
+        ui.cx
+            .debug_bounds("audio-param-Clip(ClipId(10)):ae777:noise_0")
+            .is_none()
+    );
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn auto_duck_clip_targets_show_asset_track_and_time_and_are_clickable(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let before = project.clone();
+    let track = project
+        .tracks()
+        .iter()
+        .find(|t| t.id() == MUSIC_TRACK)
+        .unwrap();
+    let label =
+        super::super::ducking::duck_clip_label(&project, track, &track.clips()[&MUSIC_CLIP]);
+    assert_eq!(label, "music.wav / Music (00:00:00:00)");
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.select_only(VOICE_CLIP, cx);
+        e.open_duck(cx);
+    });
+    let target = ui.cx.debug_bounds("duck-target-11").unwrap();
+    ui.click(target.center(), gpui::Modifiers::default());
+    assert!(ui.read(|e| {
+        e.duck_review
+            .as_ref()
+            .unwrap()
+            .params
+            .music_clips
+            .contains(&MUSIC_CLIP)
+    }));
+    ui.update(|e, _, cx| {
+        e.duck_review = None;
+        cx.notify();
+    });
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn math_dialog_enter_submits_from_the_multiline_source_and_escape_cancels(cx: &mut TestAppContext) {
+    if !require_plugins("math_dialog_enter_submits_from_the_multiline_source_and_escape_cancels") {
+        return;
+    }
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    let count = ui.read(clip_count);
+    ui.update(|e, window, cx| e.open_math(MathObjectKind::Latex, None, window, cx));
+    dialog_ready(&mut ui);
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert_eq!(ui.read(clip_count), count + 1);
+    assert!(!ui.cx.update(|window, cx| {
+        use gpui_component::WindowExt;
+        window.has_active_dialog(cx)
+    }));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.update(|e, window, cx| e.open_math(MathObjectKind::Latex, None, window, cx));
+    dialog_ready(&mut ui);
+    ui.press("escape");
+    dialog_ready(&mut ui);
+    assert!(!ui.cx.update(|window, cx| {
+        use gpui_component::WindowExt;
+        window.has_active_dialog(cx)
+    }));
     assert_eq!(ui.read(|e| e.project.clone()), before);
 }

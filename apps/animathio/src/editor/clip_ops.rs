@@ -427,21 +427,55 @@ impl Editor {
         }
     }
 
-    /// Move a track one step up (`-1`) or down (`1`) the stack.
-    pub(super) fn move_track_by(&mut self, id: TrackId, delta: isize, cx: &mut Context<Self>) {
-        let Some(from) = self
+    /// Move `id` to the display row `to`, staying inside its visual/audio section.
+    pub(super) fn move_track_to_row(&mut self, id: TrackId, to: usize, cx: &mut Context<Self>) {
+        let tracks = timeline::display_tracks(&self.project);
+        let Some(from) = tracks.iter().position(|track| track.id() == id) else {
+            return;
+        };
+        let last = tracks.len().saturating_sub(1);
+        let (lo, hi) = display_section(&tracks, from);
+        let to = to.clamp(lo, hi).min(last);
+        if to == from {
+            return;
+        }
+        let index = self
             .project
             .tracks()
             .iter()
-            .position(|track| track.id() == id)
-        else {
+            .position(|track| track.id() == tracks[to].id());
+        if let Some(index) = index {
+            self.move_track_to(id, index, cx);
+        }
+    }
+
+    /// Move one visual row, keeping visual and audio stacks separate.
+    pub(super) fn move_track_by(&mut self, id: TrackId, delta: isize, cx: &mut Context<Self>) {
+        let tracks = timeline::display_tracks(&self.project);
+        let Some(from) = tracks.iter().position(|track| track.id() == id) else {
             return;
         };
-        if let Some(to) = from
-            .checked_add_signed(delta)
-            .filter(|to| *to < self.project.tracks().len())
-        {
-            self.move_track_to(id, to, cx);
-        }
+        let last = tracks.len().saturating_sub(1);
+        let row = if delta < 0 {
+            from.saturating_sub(delta.unsigned_abs())
+        } else {
+            from.saturating_add(delta.unsigned_abs()).min(last)
+        };
+        self.move_track_to_row(id, row, cx);
+    }
+}
+
+/// The inclusive display-row bounds of the section containing `row`: video rows stay above
+/// the first audio-only row, audio rows below it.
+pub(super) fn display_section(tracks: &[&Track], row: usize) -> (usize, usize) {
+    let boundary = tracks
+        .iter()
+        .position(|track| timeline::is_audio_only(track))
+        .unwrap_or(tracks.len());
+    let last = tracks.len().saturating_sub(1);
+    if row < boundary {
+        (0, boundary.saturating_sub(1))
+    } else {
+        (boundary.min(last), last)
     }
 }

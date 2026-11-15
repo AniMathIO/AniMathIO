@@ -8,7 +8,6 @@ use animathio_control::{
     CaptionPosition, CaptionPreset, CaptionStyleParams, SubtitleStyleParams, caption_style_command,
     caption_styles, clip_caption_style,
 };
-use gpui_component::WindowExt;
 use gpui_component::form::Form;
 use gpui_component::input::Input;
 
@@ -343,18 +342,15 @@ impl Editor {
         self.ensure_caption_presets();
         let name = super::dialogs::input("", window, cx);
         let editor = cx.entity();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        super::dialogs::open_dialog(window, cx, move |dialog, _, cx| {
             let name_submit = name.clone();
             let editor = editor.clone();
-            dialog
-                .title(super::dialogs::heading(
-                    IconName::Bookmark,
-                    "Save caption preset",
-                ))
-                .child(Form::new().child(super::dialogs::field("Preset name", Input::new(&name))))
-                .footer(super::dialogs::footer("Save", cx, move |_, window, cx| {
+            // The Save button and Enter share one action.
+            let save_preset: super::dialogs::Submit = {
+                let (name_submit, editor) = (name_submit.clone(), editor.clone());
+                std::rc::Rc::new(move |cx: &mut gpui::App| {
                     let value = name_submit.read(cx).value().trim().to_owned();
-                    let saved = editor.update(cx, |this, _cx| {
+                    editor.update(cx, |this, cx| {
                         let look = this.caption_look.clone();
                         match animathio_control::save_caption_preset_at(
                             &value,
@@ -367,14 +363,25 @@ impl Editor {
                             }
                             Err(error) => {
                                 this.error = Some(error.to_string());
+                                cx.notify();
                                 false
                             }
                         }
-                    });
-                    if saved {
-                        window.close_dialog(cx);
-                    }
-                }))
+                    })
+                })
+            };
+            let dialog = dialog
+                .title(super::dialogs::heading(
+                    IconName::Bookmark,
+                    "Save caption preset",
+                ))
+                .child(Form::new().child(super::dialogs::field(
+                    "Preset name",
+                    super::dialogs::tagged_input("caption-preset-name", Input::new(&name)),
+                )))
+                .footer(super::dialogs::submit_footer("Save", cx));
+            // Enter saves the preset, like the primary button.
+            super::dialogs::on_enter(dialog, move |_, cx| save_preset(cx))
         });
     }
 

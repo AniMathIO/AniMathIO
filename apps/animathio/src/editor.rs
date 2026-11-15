@@ -553,7 +553,10 @@ pub(crate) struct Editor {
     image: Option<Arc<RenderImage>>,
     request_generation: u64,
     last_requested: Option<Time>,
+    /// Ruler origin and width, with the height of the ruler plus the visible track viewport.
     timeline_bounds: Bounds<Pixels>,
+    /// Window y of the (scrolled) track canvas's top edge.
+    timeline_tracks_top: f32,
     timeline_zoom: f32,
     zoom_motion: Option<ZoomMotion>,
     gain_drag: Option<GainDrag>,
@@ -593,6 +596,8 @@ pub(crate) struct Editor {
     keyframe_drag: Option<KeyframeDrag>,
     selected_keyframe: Option<KeyframeSelection>,
     error: Option<String>,
+    error_sequence: u64,
+    last_error: Option<String>,
     focus_handle: FocusHandle,
     control: Option<ControlRuntime>,
     bench: Option<ViewportBench>,
@@ -630,6 +635,7 @@ pub(crate) struct Editor {
     safe_areas: bool,
     viewer_menu_open: bool,
     closed_sections: BTreeSet<String>,
+    audio_advanced: BTreeSet<(AudioChain, EffectId)>,
     /// Inspector window lengths for applying In / Out / Emphasis presets.
     preset_durations: animations::PresetDurations,
     context_menu: Option<ContextMenu>,
@@ -733,6 +739,7 @@ impl Editor {
             request_generation: 0,
             last_requested: None,
             timeline_bounds: Bounds::default(),
+            timeline_tracks_top: 0.0,
             timeline_zoom: 1.0,
             zoom_motion: None,
             gain_drag: None,
@@ -765,6 +772,8 @@ impl Editor {
             keyframe_drag: None,
             selected_keyframe: None,
             error,
+            error_sequence: 0,
+            last_error: None,
             focus_handle: cx.focus_handle(),
             control,
             bench: bench.then(ViewportBench::new),
@@ -805,6 +814,7 @@ impl Editor {
             safe_areas: false,
             viewer_menu_open: false,
             closed_sections: BTreeSet::new(),
+            audio_advanced: BTreeSet::new(),
             preset_durations: animations::PresetDurations::default(),
             context_menu: None,
             context_menu_pos: None,
@@ -987,6 +997,12 @@ impl Render for Editor {
                 }
             }))
             .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if this.is_start_screen() && event.keystroke.key == "enter" {
+                    this.new_project_with_preset(animathio_control::ExportPreset::Youtube1080p, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(self.menu_bar(window, cx))
             .child(workspace);
         root = root.child(self.status_line(cx));
