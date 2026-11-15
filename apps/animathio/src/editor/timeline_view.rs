@@ -1123,19 +1123,52 @@ impl Editor {
         }
     }
 
+    /// The interactive surface shared by the ruler and the track canvas: both route pointer
+    /// gestures to the same handlers, which map positions through `timeline_relative`.
+    fn timeline_surface(&self, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex_1()
+            .h_full()
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_timeline_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_timeline_context_menu))
+            .on_mouse_move(cx.listener(Self::on_timeline_mouse_move))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
+            // Releasing past the canvas (track headers, the empty space below the last
+            // track) still commits.
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_timeline_mouse_up))
+            .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
+            .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                let position = window.mouse_position();
+                let (x, y) = this.timeline_relative(position);
+                let layout = this.current_layout();
+                let placement = timeline::drop_placement(
+                    &layout,
+                    &this.project,
+                    x,
+                    y,
+                    this.position,
+                    this.snapping,
+                );
+                if let Some(placement) = placement {
+                    this.import_paths(paths.paths(), Some(placement), cx);
+                }
+            }))
+    }
+
     pub(super) fn timeline_panel(&self, cx: &mut Context<Self>) -> Div {
-        let snapshot = self.build_timeline_snapshot(cx);
+        let snapshot = std::rc::Rc::new(self.build_timeline_snapshot(cx));
+        let snapshot_tracks = snapshot.clone();
         let zoom = self.timeline_zoom;
         let scroll = self.timeline_scroll;
         let weak = cx.entity().downgrade();
         let weak_paint = weak.clone();
+        let weak_ruler = weak.clone();
         let snapping = self.snapping;
         let ripple_all = self.ripple_scope == RippleScope::AllTracks;
         let overview = snapshot.overview.clone();
         let overview_rows = snapshot.rows;
         let duration = snapshot.duration;
-        let content_height =
-            ruler_height() + self.project.tracks().len() as f32 * self.dock.track_height.pixels();
+        let content_height = self.project.tracks().len() as f32 * self.dock.track_height.pixels();
         let pool_dragging = self.pool_drag.is_some();
 
         div()
@@ -1387,6 +1420,55 @@ impl Editor {
                     ),
             )
             .child(
+                // The ruler and marker lane live outside the vertical scroll area.
+                div()
+                    .h(px(ruler_height()))
+                    .flex_shrink_0()
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .child(
+                        div()
+                            .w(px(track_header_width()))
+                            .h_full()
+                            .flex_shrink_0()
+                            .bg(cx.theme().popover)
+                            .border_b_1()
+                            .border_color(cx.theme().border),
+                    )
+                    .child(self.timeline_surface(cx).child(
+                        canvas(
+                            move |bounds, _window, cx| {
+                                let _ = weak_ruler.update(cx, |this, cx| {
+                                    let viewport = this.timeline_scroll_handle.bounds().size.height;
+                                    let full = Bounds::new(
+                                        bounds.origin,
+                                        size(bounds.size.width, bounds.size.height + viewport),
+                                    );
+                                    if this.timeline_bounds != full {
+                                        this.timeline_bounds = full;
+                                        cx.notify();
+                                    }
+                                });
+                            },
+                            move |bounds, (), window, cx| {
+                                window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                                    paint_timeline(
+                                        TimelinePart::Ruler,
+                                        bounds,
+                                        &snapshot,
+                                        zoom,
+                                        scroll,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            },
+                        )
+                        .size_full(),
+                    )),
+            )
+            .child(
                 div()
                     .flex_1()
                     .min_h_0()
@@ -1405,95 +1487,69 @@ impl Editor {
                                     .flex()
                                     .flex_row()
                                     .child(self.track_header(cx))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .h_full()
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(Self::on_timeline_mouse_down),
-                                            )
-                                            .on_mouse_down(
-                                                MouseButton::Right,
-                                                cx.listener(Self::on_timeline_context_menu),
-                                            )
-                                            .on_mouse_move(
-                                                cx.listener(Self::on_timeline_mouse_move),
-                                            )
-                                            .on_mouse_up(
-                                                MouseButton::Left,
-                                                cx.listener(Self::on_timeline_mouse_up),
-                                            )
-                                            // Releasing past the canvas (track headers, the
-                                            // empty space below the last track) still commits.
-                                            .on_mouse_up_out(
-                                                MouseButton::Left,
-                                                cx.listener(Self::on_timeline_mouse_up),
-                                            )
-                                            .on_scroll(cx.listener(Self::on_timeline_scroll_wheel))
-                                            .on_drop::<ExternalPaths>(cx.listener(
-                                                |this, paths: &ExternalPaths, window, cx| {
-                                                    let position = window.mouse_position();
-                                                    let (x, y) = this.timeline_relative(position);
-                                                    let layout = this.current_layout();
-                                                    let placement = timeline::drop_placement(
-                                                        &layout,
-                                                        &this.project,
-                                                        x,
-                                                        y,
-                                                        this.position,
-                                                        this.snapping,
-                                                    );
-                                                    if let Some(placement) = placement {
-                                                        this.import_paths(
-                                                            paths.paths(),
-                                                            Some(placement),
+                                    .child(self.timeline_surface(cx).child(canvas(
+                                        move |bounds, _window, cx| {
+                                            let _ = weak.update(cx, |this, cx| {
+                                                let top = f32::from(bounds.origin.y);
+                                                if (this.timeline_tracks_top - top).abs() > 0.01 {
+                                                    this.timeline_tracks_top = top;
+                                                    cx.notify();
+                                                }
+                                            });
+                                        },
+                                        {
+                                            let weak = weak_paint.clone();
+                                            move |bounds, (), window, cx| {
+                                                // The track half is positioned as if the ruler
+                                                // sat above it, so painting and hit-testing share
+                                                // one geometry; the scroll viewport clips the
+                                                // ruler-sized overhang.
+                                                let shifted = Bounds::new(
+                                                    point(
+                                                        bounds.origin.x,
+                                                        bounds.origin.y - px(ruler_height()),
+                                                    ),
+                                                    size(
+                                                        bounds.size.width,
+                                                        bounds.size.height + px(ruler_height()),
+                                                    ),
+                                                );
+                                                window.with_content_mask(
+                                                    Some(ContentMask { bounds }),
+                                                    |window| {
+                                                        paint_timeline(
+                                                            TimelinePart::Tracks,
+                                                            shifted,
+                                                            &snapshot_tracks,
+                                                            zoom,
+                                                            scroll,
+                                                            window,
                                                             cx,
                                                         );
-                                                    }
-                                                },
-                                            ))
-                                            .child(
-                                                canvas(
-                                                    move |bounds, _window, cx| {
-                                                        let _ = weak.update(cx, |this, cx| {
-                                                            if this.timeline_bounds != bounds {
-                                                                this.timeline_bounds = bounds;
-                                                                cx.notify();
-                                                            }
-                                                        });
                                                     },
-                                                    {
-                                                        let weak = weak_paint.clone();
-                                                        move |bounds, (), window, cx| {
-                                                            paint_timeline(
-                                                                bounds, &snapshot, zoom, scroll,
-                                                                window, cx,
-                                                            );
-                                                            if pool_dragging {
-                                                                let weak = weak.clone();
-                                                                window.on_mouse_event(
-                                                move |event: &MouseUpEvent,
-                                                      phase: DispatchPhase,
-                                                      window,
-                                                      cx| {
-                                                    if phase == DispatchPhase::Bubble {
-                                                        let position = event.position;
-                                                        let _ = weak.update(cx, |this, cx| {
-                                                            this.drop_on_timeline(position, cx);
-                                                        });
-                                                    }
-                                                    window.refresh();
-                                                },
-                                            );
-                                                                window.request_animation_frame();
+                                                );
+                                                if pool_dragging {
+                                                    let weak = weak.clone();
+                                                    window.on_mouse_event(
+                                                        move |event: &MouseUpEvent,
+                                                              phase: DispatchPhase,
+                                                              window,
+                                                              cx| {
+                                                            if phase == DispatchPhase::Bubble {
+                                                                let position = event.position;
+                                                                let _ = weak.update(cx, |this, cx| {
+                                                                    this.drop_on_timeline(position, cx);
+                                                                });
                                                             }
-                                                        }
-                                                    },
-                                                )
-                                                .size_full(),
-                                            ),
-                                    ),
+                                                            window.refresh();
+                                                        },
+                                                    );
+                                                    window.request_animation_frame();
+                                                }
+                                            }
+                                        },
+                                    )
+                                    .size_full())),
                             ),
                     )
                     .when(!self.edit_tool_feedback().is_empty(), |view| {
@@ -1523,14 +1579,6 @@ impl Editor {
             .flex()
             .flex_col()
             .bg(cx.theme().popover);
-        header = header.child(
-            div()
-                .h(px(ruler_height()))
-                .flex_shrink_0()
-                .w_full()
-                .border_b_1()
-                .border_color(cx.theme().border),
-        );
         for track in timeline::display_tracks(&self.project) {
             let id = track.id();
             let name = track.name().to_owned();

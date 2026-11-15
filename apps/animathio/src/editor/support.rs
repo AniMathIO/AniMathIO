@@ -94,7 +94,17 @@ pub(super) fn header_pill(
         .child(icons::icon(icon).xsmall())
 }
 
+/// Which half of the timeline a paint call draws. The ruler and marker lane stay fixed
+/// while the track rows scroll vertically, so each half has its own canvas; both use the
+/// same geometry (the track half is positioned as if the ruler sat above it).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TimelinePart {
+    Ruler,
+    Tracks,
+}
+
 pub(super) fn paint_timeline(
+    part: TimelinePart,
     bounds: Bounds<Pixels>,
     snapshot: &TimelineSnapshot,
     zoom: f32,
@@ -115,6 +125,7 @@ pub(super) fn paint_timeline(
     let ruler_bg = style::hex(colors::BG);
     let border = style::hex(colors::BORDER);
     let muted = style::hex(colors::TEXT_SECONDARY);
+    let ruler_part = part == TimelinePart::Ruler;
     window.paint_quad(fill(bounds, background));
     let height = f32::from(bounds.size.height);
     let ruler = Bounds::from_corners(
@@ -124,9 +135,12 @@ pub(super) fn paint_timeline(
             bounds.origin.y + px(ruler_height()),
         ),
     );
-    window.paint_quad(fill(ruler, ruler_bg));
-    paint_ruler(bounds, &layout, snapshot, width, muted, border, window, cx);
-    for row in 0..snapshot.rows {
+    if ruler_part {
+        window.paint_quad(fill(ruler, ruler_bg));
+        paint_ruler(bounds, &layout, snapshot, width, muted, border, window, cx);
+    }
+    let rows = if ruler_part { 0 } else { snapshot.rows };
+    for row in 0..rows {
         let top = bounds.origin.y + px(ruler_height() + row as f32 * snapshot.row_height);
         let row_bounds = Bounds::from_corners(
             point(bounds.origin.x, top),
@@ -141,7 +155,7 @@ pub(super) fn paint_timeline(
             },
         ));
     }
-    for row in 0..snapshot.rows {
+    for row in 0..rows {
         if !snapshot.overview.iter().any(|(r, _, _)| *r == row) {
             paint_clip_label(
                 "Drop media here".into(),
@@ -156,15 +170,15 @@ pub(super) fn paint_timeline(
             );
         }
     }
-    for clip in &snapshot.clips {
+    for clip in snapshot.clips.iter().filter(|_| !ruler_part) {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             paint_clip(bounds, &layout, clip, &snapshot.waveform_paths, window, cx);
         });
     }
-    for transition in &snapshot.transitions {
+    for transition in snapshot.transitions.iter().filter(|_| !ruler_part) {
         paint_transition(bounds, &layout, transition, window, cx);
     }
-    if let Some((left, top, right, bottom)) = snapshot.marquee {
+    if let Some((left, top, right, bottom)) = snapshot.marquee.filter(|_| !ruler_part) {
         let band = Bounds::from_corners(
             point(bounds.origin.x + px(left), bounds.origin.y + px(top)),
             point(bounds.origin.x + px(right), bounds.origin.y + px(bottom)),
@@ -172,7 +186,7 @@ pub(super) fn paint_timeline(
         window.paint_quad(fill(band, cx.theme().ring.opacity(0.18)));
         window.paint_quad(outline(band, cx.theme().ring, BorderStyle::Solid));
     }
-    for (range, row) in &snapshot.autocuts {
+    for (range, row) in snapshot.autocuts.iter().filter(|_| !ruler_part) {
         let x0 = timeline::time_to_x(&layout, range.start).clamp(0., layout.width);
         let x1 = timeline::time_to_x(&layout, range.end).clamp(0., layout.width);
         #[allow(clippy::cast_precision_loss)]

@@ -17,10 +17,17 @@ impl Editor {
     }
 
     pub(super) fn timeline_relative(&self, position: Point<Pixels>) -> (f32, f32) {
-        (
-            f32::from(position.x) - f32::from(self.timeline_bounds.origin.x),
-            f32::from(position.y) - f32::from(self.timeline_bounds.origin.y),
-        )
+        let x = f32::from(position.x) - f32::from(self.timeline_bounds.origin.x);
+        let ruler_bottom = self.timeline_bounds.origin.y + px(ruler_height());
+        // The ruler is fixed above the scrolling tracks: pointers over it measure from the
+        // ruler's top, pointers below it from the scrolled track canvas (which the shared
+        // hit-testing sees as sitting `ruler_height` below its own origin).
+        let y = if position.y < ruler_bottom {
+            f32::from(position.y) - f32::from(self.timeline_bounds.origin.y)
+        } else {
+            ruler_height() + f32::from(position.y) - self.timeline_tracks_top
+        };
+        (x, y)
     }
 
     pub(super) fn find_clip(&self, id: ClipId) -> Option<&Clip> {

@@ -553,7 +553,10 @@ pub(crate) struct Editor {
     image: Option<Arc<RenderImage>>,
     request_generation: u64,
     last_requested: Option<Time>,
+    /// Ruler origin and width, with the height of the ruler plus the visible track viewport.
     timeline_bounds: Bounds<Pixels>,
+    /// Window y of the (scrolled) track canvas's top edge.
+    timeline_tracks_top: f32,
     timeline_zoom: f32,
     zoom_motion: Option<ZoomMotion>,
     gain_drag: Option<GainDrag>,
@@ -733,6 +736,7 @@ impl Editor {
             request_generation: 0,
             last_requested: None,
             timeline_bounds: Bounds::default(),
+            timeline_tracks_top: 0.0,
             timeline_zoom: 1.0,
             zoom_motion: None,
             gain_drag: None,

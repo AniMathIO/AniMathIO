@@ -110,7 +110,10 @@ impl Editor {
             cx.notify();
             return;
         };
-        let Some(track) = self.project.tracks().first().map(Track::id) else {
+        let Some(track) = timeline::display_tracks(&self.project)
+            .first()
+            .map(|track| track.id())
+        else {
             self.error = Some("no track to place the clip".into());
             cx.notify();
             return;
@@ -147,12 +150,8 @@ impl Editor {
         }
         let time = timeline::drop_start(&layout, &self.project, x, self.position, self.snapping);
         let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
-        let track = self
-            .project
-            .tracks()
-            .get(row)
-            .map(Track::id)
-            .or_else(|| self.project.tracks().first().map(Track::id));
+        let track = selection::track_at(&self.project, row)
+            .or_else(|| timeline::display_tracks(&self.project).first().map(|t| t.id()));
         if let PoolDrag::Math(kind) = &drag {
             self.add_math_default(*kind, time, cx);
             return;
@@ -163,7 +162,7 @@ impl Editor {
         }
         if let PoolDrag::Plugin(plugin_id) = &drag {
             // Elements are overlays: the row under the pointer when free, else a free layer.
-            let row_track = self.project.tracks().get(row).map(Track::id);
+            let row_track = selection::track_at(&self.project, row);
             self.drop_plugin(plugin_id.clone(), row_track, time, cx);
             return;
         }
