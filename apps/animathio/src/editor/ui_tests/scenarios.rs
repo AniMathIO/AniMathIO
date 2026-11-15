@@ -1,17 +1,20 @@
 //! Scenarios that drive real actions and assert on model and view state.
 
-use animathio_control::{caption_styles, clip_caption_style};
-use animathio_core::{EffectId, EffectInstance};
+use animathio_control::{CaptionStyleParams, MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style, math_object_range};
+use animathio_core::{ClipSpeed, EffectId, EffectInstance};
 
 use super::fixtures::*;
 use super::{
-    AudioChain, BTreeMap, ClipId, Command, Editor, LeftTab, Project, TestAppContext, Time, Track,
-    Ui, actions, require_plugins, timeline,
+    AudioChain, BTreeMap, BTreeSet, ClipId, Command, Editor, LeftTab, MarkerId, Project,
+    TestAppContext, Time, Tool, Track, Ui, actions, require_plugins, timeline,
 };
 use crate::editor::actions::{
-    AddMarker, AutomaticCuts, NewProject, NextMarker, PreviousMarker, Redo, ShowEffects,
-    ShowMarkers, SplitClip, ToggleInspector, Undo,
+    AddMarker, AutomaticCuts, DeleteSelection, NewProject, NextMarker, PreviousMarker, Redo,
+    ShowEffects, ShowMarkers, SplitClip, ToggleInspector, Undo,
 };
+use crate::editor::math::MathEditor;
+use crate::editor::retime;
+use crate::editor::support::project_size;
 use crate::editor::caption_styles::LookChange;
 
 fn clip_count(editor: &Editor) -> usize {
@@ -466,5 +469,260 @@ fn clip_context_menu_renders_with_shortcuts(cx: &mut TestAppContext) {
             )
             .is_some()
         );
+        // The hints match the Premiere keymap (#240): Ctrl/Cmd+K split, Q/W ripple
+        // trims, M marker, V/C/B tools.
+        let hint = |action: &dyn gpui::Action| -> (String, bool) {
+            let binding = window
+                .highest_precedence_binding_for_action_in_context(
+                    action,
+                    gpui::KeyContext::parse("Timeline").expect("context"),
+                )
+                .expect("binding exists");
+            let stroke = binding.keystrokes()[0].as_keystroke();
+            (stroke.key.clone(), stroke.modifiers.secondary(cx))
+        };
+        assert_eq!(hint(&actions::SplitClip), ("k".into(), true));
+        assert_eq!(hint(&actions::RippleTrimPrevious), ("q".into(), false));
+        assert_eq!(hint(&actions::RippleTrimNext), ("w".into(), false));
+        assert_eq!(hint(&actions::AddMarker), ("m".into(), false));
+        assert_eq!(hint(&actions::SelectTool), ("v".into(), false));
+        assert_eq!(hint(&actions::BladeTool), ("c".into(), false));
+        assert_eq!(hint(&actions::RippleTool), ("b".into(), false));
     });
+}
+
+/// A window-space point on the timeline ruler at `time` (the marker lane).
+fn ruler_point(ui: &Ui, time: Time) -> gpui::Point<gpui::Pixels> {
+    ui.read(|e| {
+        let layout = e.current_layout();
+        let x = timeline::time_to_x(&layout, time);
+        let y = layout.ruler_height / 2.;
+        gpui::point(
+            gpui::px(f32::from(e.timeline_bounds.origin.x) + x),
+            gpui::px(f32::from(e.timeline_bounds.origin.y) + y),
+        )
+    })
+}
+
+#[gpui::test]
+fn premiere_keymap_tools_split_and_ripple_trims(cx: &mut TestAppContext) {
+    let (project, assets) = voice_pair();
+    let mut ui = Ui::open(cx, project, assets);
+    // Focus the timeline by clicking its ruler, like a real editor session.
+    ui.click(ruler_point(&ui, Time(0)), gpui::Modifiers::default());
+
+    // Tool keys: V selection, C razor, B ripple edit.
+    ui.press("c");
+    assert_eq!(ui.read(|e| e.tool), Tool::Blade);
+    ui.press("b");
+    assert_eq!(ui.read(|e| e.tool), Tool::Ripple);
+    ui.press("v");
+    assert_eq!(ui.read(|e| e.tool), Tool::Select);
+
+    // Ctrl/Cmd+K splits the clip under the playhead; one undo restores it.
+    let before = ui.read(|e| e.project.clone());
+    seek(&mut ui, 1000);
+    ui.press("secondary-k");
+    assert_eq!(ui.read(|e| e.project.tracks()[0].clips().len()), 3);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+
+    // Q ripple-trims the previous edit to the playhead: the first clip's head,
+    // the tail shifts left, the source window follows.
+    ui.press("q");
+    ui.read(|e| {
+        let clips = e.project.tracks()[0].clips();
+        let head = clips.get(&PAIR_FIRST).expect("first clip");
+        assert_eq!(head.range.start, Time(0));
+        assert_eq!(head.range.end, Time(1000 * MS));
+        assert_eq!(head.source_bounds(), (Time(1000 * MS), Time(2000 * MS)));
+        let tail = clips.get(&PAIR_SECOND).expect("second clip");
+        assert_eq!(tail.range.start, Time(1000 * MS));
+        assert_eq!(tail.range.end, Time(3000 * MS));
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+
+    // W ripple-trims the next edit: the first clip's tail, source kept from zero.
+    ui.press("w");
+    ui.read(|e| {
+        let clips = e.project.tracks()[0].clips();
+        let head = clips.get(&PAIR_FIRST).expect("first clip");
+        assert_eq!(head.range.end, Time(1000 * MS));
+        assert_eq!(head.source_bounds(), (Time(0), Time(1000 * MS)));
+        let tail = clips.get(&PAIR_SECOND).expect("second clip");
+        assert_eq!(tail.range.start, Time(1000 * MS));
+        assert_eq!(tail.range.end, Time(3000 * MS));
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn speed_duration_change_ripples_and_undoes(cx: &mut TestAppContext) {
+    let (project, assets) = voice_pair();
+    let mut ui = Ui::open(cx, project, assets);
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|e, _, cx| e.select_only(PAIR_FIRST, cx));
+    // The Speed/Duration dialog parses its percent field with `retime::percent`
+    // and applies one `SetClipSpeed`; drive the same path here.
+    let speed = retime::percent("200").expect("valid percent");
+    assert_eq!(speed, ClipSpeed::new(2, 1).expect("2x"));
+    ui.update(|e, _, cx| {
+        // The inspector's Speed section renders for the selection.
+        let _ = e.speed_rows(PAIR_FIRST, cx);
+        assert!(e.try_execute(
+            &Command::SetClipSpeed {
+                id: PAIR_FIRST,
+                speed,
+                reverse: false,
+                ramps: Vec::new(),
+                ripple: true,
+            },
+            cx
+        ));
+    });
+    ui.read(|e| {
+        let clips = e.project.tracks()[0].clips();
+        let head = clips.get(&PAIR_FIRST).expect("first clip");
+        // 2x halves the timeline duration and keeps the source interval.
+        assert_eq!(head.range.start, Time(0));
+        assert_eq!(head.range.end, Time(1000 * MS));
+        assert_eq!(head.source_bounds(), (Time(0), Time(2000 * MS)));
+        assert_eq!(head.time_map.speed.percent(), 200.);
+        // Ripple trailing clips moved the second clip up by the lost second.
+        let tail = clips.get(&PAIR_SECOND).expect("second clip");
+        assert_eq!(tail.range.start, Time(1000 * MS));
+        assert_eq!(tail.range.end, Time(3000 * MS));
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Redo);
+    ui.read(|e| {
+        assert_eq!(
+            e.project.tracks()[0].clips().get(&PAIR_FIRST).unwrap().range.end,
+            Time(1000 * MS)
+        );
+    });
+}
+
+#[gpui::test]
+fn markers_select_by_click_toggle_and_delete(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    seek(&mut ui, 1000);
+    ui.dispatch(AddMarker);
+    seek(&mut ui, 2000);
+    ui.dispatch(AddMarker);
+    let ids: Vec<MarkerId> = ui.read(|e| e.project.markers().iter().map(|m| m.id).collect());
+    assert_eq!(ids.len(), 2);
+    let selection = |ui: &Ui| ui.read(|e| e.marker_selection.clone());
+
+    // Clicking a marker on the ruler selects it and parks the playhead on it.
+    ui.click(ruler_point(&ui, Time(1000 * MS)), gpui::Modifiers::default());
+    assert_eq!(selection(&ui), BTreeSet::from([ids[0]]));
+    assert_eq!(ui.read(|e| e.position), Time(1000 * MS));
+
+    // Shift-click adds the second marker to the selection.
+    ui.click(
+        ruler_point(&ui, Time(2000 * MS)),
+        gpui::Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(selection(&ui), BTreeSet::from([ids[0], ids[1]]));
+
+    // Shift-clicking a selected marker toggles it off.
+    ui.click(
+        ruler_point(&ui, Time(1000 * MS)),
+        gpui::Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(selection(&ui), BTreeSet::from([ids[1]]));
+
+    // Delete removes exactly the selected marker; undo restores it and the
+    // selection is pruned to markers that exist.
+    ui.dispatch(DeleteSelection);
+    ui.read(|e| {
+        let times: Vec<_> = e.project.markers().iter().map(|m| m.time).collect();
+        assert_eq!(times, [Time(1000 * MS)]);
+        assert!(e.marker_selection.is_empty());
+    });
+    ui.dispatch(Undo);
+    ui.read(|e| {
+        assert_eq!(e.project.markers().len(), 2);
+        assert!(e.marker_selection.iter().all(|id| e.project.marker(*id).is_some()));
+    });
+}
+
+#[gpui::test]
+fn math_dialog_adds_latex_onto_an_occupied_track_as_a_new_layer(cx: &mut TestAppContext) {
+    if !require_plugins("math_dialog_adds_latex_onto_an_occupied_track_as_a_new_layer") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let before = ui.read(|e| e.project.clone());
+    let tracks = ui.read(|e| e.project.tracks().len());
+
+    // The Add math object dialog panel, exactly as `Editor::open_math` builds it.
+    let panel = ui.update(|e, window, cx| {
+        let draft = MathObjectDraft::new(MathObjectKind::Latex);
+        let range = math_object_range(e.position).expect("range");
+        let editor = cx.entity().downgrade();
+        let session = e.project_session;
+        let size = project_size(&e.project);
+        cx.new(|cx| {
+            MathEditor::new(draft, editor, session, range, None, false, size, window, cx)
+        })
+    });
+    // Let the debounced live preview finish so Apply is enabled.
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    ui.settle();
+
+    ui.update(|_, window, cx| panel.update(cx, |panel, cx| panel.apply(window, cx)));
+    let added = ui.read(|e| e.selected.expect("added clip selected"));
+    ui.read(|e| {
+        // The playhead's track is occupied, so the object lands on a new layer.
+        assert_eq!(e.project.tracks().len(), tracks + 1);
+        let clip = e.find_clip(added).expect("added clip");
+        assert!(matches!(
+            &clip.kind,
+            animathio_core::ClipKind::Plugin { plugin_id, .. } if plugin_id == "org.animathio.latex"
+        ));
+    });
+    // One undo removes object and layer.
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+
+    // Editing through the dialog changes only the object's parameters, in place.
+    ui.dispatch(Redo);
+    let added_state = ui.read(|e| e.project.clone());
+    let panel = ui.update(|e, window, cx| {
+        let mut draft = MathObjectDraft::new(MathObjectKind::Latex);
+        draft.fields.insert("source".into(), "x^2".into());
+        let range = e.find_clip(added).expect("clip").range;
+        let editor = cx.entity().downgrade();
+        let session = e.project_session;
+        let size = project_size(&e.project);
+        cx.new(|cx| {
+            MathEditor::new(draft, editor, session, range, Some(added), false, size, window, cx)
+        })
+    });
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    ui.settle();
+    ui.update(|_, window, cx| panel.update(cx, |panel, cx| panel.apply(window, cx)));
+    ui.read(|e| {
+        assert_eq!(e.project.tracks().len(), tracks + 1, "edit adds no layer");
+        let clip = e.find_clip(added).expect("edited clip");
+        let animathio_core::ParamValue::String(source) = clip.params.get("source").unwrap() else {
+            panic!("source param");
+        };
+        assert_eq!(source, "x^2");
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), added_state);
 }

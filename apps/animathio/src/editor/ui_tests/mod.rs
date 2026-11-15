@@ -133,6 +133,18 @@ impl Ui {
         self.cx.run_until_parked();
     }
 
+    /// Click at a window position: hit-tested and dispatched like a real mouse.
+    pub(super) fn click(&mut self, position: gpui::Point<gpui::Pixels>, modifiers: gpui::Modifiers) {
+        self.cx.simulate_click(position, modifiers);
+        self.cx.run_until_parked();
+    }
+
+    /// Advance the test clock, firing timers (debounced previews, animations).
+    pub(super) fn advance_clock(&mut self, duration: std::time::Duration) {
+        self.cx.advance_clock(duration);
+        self.cx.run_until_parked();
+    }
+
     /// Let background work (analysis, audio preparation) and redraws finish.
     pub(super) fn settle(&mut self) {
         self.cx.run_until_parked();

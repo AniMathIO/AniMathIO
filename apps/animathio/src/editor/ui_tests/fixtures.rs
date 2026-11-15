@@ -103,6 +103,47 @@ pub(super) fn voice_and_music() -> (Project, BTreeMap<AssetId, Vec<u8>>) {
     )
 }
 
+/// Ids in [`voice_pair`]: a track with two consecutive tone clips.
+pub(super) const PAIR_TRACK: TrackId = TrackId(3);
+pub(super) const PAIR_FIRST: ClipId = ClipId(20);
+pub(super) const PAIR_SECOND: ClipId = ClipId(21);
+
+/// A 4 s tone on one track as two consecutive 2 s clips, for edits that move the
+/// tail (speed changes, ripple trims).
+pub(super) fn voice_pair() -> (Project, BTreeMap<AssetId, Vec<u8>>) {
+    let tone = wav(&[(0.5, 4000)]);
+    let asset_id = AssetId::of(&tone);
+    let half = TimeRange::new(Time(0), Time(2000 * MS)).expect("range");
+    let second = TimeRange::new(Time(2000 * MS), Time(4000 * MS)).expect("range");
+    let mut project = Project::default();
+    Command::Batch {
+        commands: vec![
+            Command::AddAsset {
+                id: asset_id.clone(),
+                asset: Asset {
+                    name: "tone.wav".into(),
+                    media_type: "audio/wav".into(),
+                },
+            },
+            Command::AddTrack {
+                track: Track::new(PAIR_TRACK, "Tone"),
+                index: 0,
+            },
+            Command::AddClip {
+                track: PAIR_TRACK,
+                clip: Clip::new(PAIR_FIRST, ClipKind::Audio(asset_id.clone()), half),
+            },
+            Command::AddClip {
+                track: PAIR_TRACK,
+                clip: Clip::new(PAIR_SECOND, ClipKind::Audio(asset_id.clone()), second),
+            },
+        ],
+    }
+    .apply(&mut project)
+    .expect("voice pair project");
+    (project, BTreeMap::from([(asset_id, tone)]))
+}
+
 /// Two caption cues (one with word timings) as one command, like Generate subtitles applies.
 pub(super) fn caption_command(project: &Project) -> Command {
     let cue = |start: i64, end: i64, text: &str| {

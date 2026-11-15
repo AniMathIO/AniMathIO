@@ -383,7 +383,7 @@ pub(super) struct MathEditor {
     focused: bool,
 }
 impl MathEditor {
-    fn new(
+    pub(super) fn new(
         draft: MathObjectDraft,
         editor: WeakEntity<Editor>,
         session: u64,
@@ -629,7 +629,9 @@ impl MathEditor {
             self.schedule_preview(cx);
         }
     }
-    fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Commit the draft: add the object (or update the edited one) as one undo step.
+    /// The dialog's Add button and Enter submit here; UI tests drive it directly.
+    pub(super) fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.busy || self.error.is_some() {
             return;
         }
