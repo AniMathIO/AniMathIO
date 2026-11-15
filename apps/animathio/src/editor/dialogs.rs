@@ -2,6 +2,7 @@
 use super::*;
 use crate::style;
 use animathio_control::ExportPreset;
+use gpui_component::dialog::Dialog;
 use gpui_component::form::{Field as FormField, Form};
 use gpui_component::input::{Input, InputState, NumberInput};
 use gpui_component::select::{Select, SelectState};
@@ -57,6 +58,44 @@ pub(super) fn footer(
         )
 }
 
+/// A form dialog's submit action: it applies the form and returns whether the dialog may
+/// close. The primary button and the Enter key share one action, so they behave the same.
+pub(super) type Submit = std::rc::Rc<dyn Fn(&mut App) -> bool>;
+
+/// The footer of a form dialog: Cancel plus a primary button that runs `submit`.
+/// A `submit` that returns `false` keeps the dialog open, so invalid input shows its
+/// error instead of discarding the form.
+pub(super) fn submit_footer(label: &'static str, app: &App, submit: Submit) -> Div {
+    div()
+        .flex()
+        .gap_2()
+        .justify_end()
+        .child(
+            Button::new("dialog-cancel")
+                .label("Cancel")
+                .on_click(|_, window, cx| window.close_dialog(cx)),
+        )
+        .child(
+            style::primary_button("dialog-apply", app)
+                .debug_selector(|| "dialog-apply".into())
+                .label(label)
+                .on_click(move |_, window, cx| {
+                    if submit(cx) {
+                        window.close_dialog(cx);
+                    }
+                }),
+        )
+}
+
+/// Enter applies the form, exactly like the dialog's primary button. Escape cancels.
+/// The handler returns whether the dialog may close.
+pub(super) fn on_enter(
+    dialog: Dialog,
+    handler: impl Fn(&mut Window, &mut App) -> bool + 'static,
+) -> Dialog {
+    dialog.on_ok(move |_, window, cx| handler(window, cx))
+}
+
 /// An action that replaces (or closes) the current project.
 #[derive(Clone, Debug)]
 pub(super) enum ReplaceProject {
@@ -89,7 +128,9 @@ impl Editor {
         window.open_dialog(cx, move |dialog, _, cx| {
             let editor = editor.clone();
             let action = action.clone();
-            dialog
+            let footer_action = action.clone();
+            let footer_editor = editor.clone();
+            let dialog = dialog
                 .title(heading(IconName::TriangleAlert, title))
                 .child(
                     div()
@@ -101,14 +142,23 @@ impl Editor {
                     window.close_dialog(cx);
                     // `dirty` is left alone: a cancelled file picker or a failed
                     // open keeps the old (still unsaved) project.
-                    editor.update(cx, |this, cx| this.run_replace(action.clone(), window, cx));
-                }))
+                    footer_editor.update(cx, |this, cx| {
+                        this.run_replace(footer_action.clone(), window, cx);
+                    });
+                }));
+            // Enter confirms, like the primary button.
+            let editor = editor.clone();
+            on_enter(dialog, move |window, cx| {
+                window.close_dialog(cx);
+                editor.update(cx, |this, cx| this.run_replace(action.clone(), window, cx));
+                true
+            })
         });
     }
 
     fn run_replace(&mut self, action: ReplaceProject, window: &mut Window, cx: &mut Context<Self>) {
         match action {
-            ReplaceProject::New => self.new_project(cx),
+            ReplaceProject::New => self.new_project_with_chooser(cx),
             ReplaceProject::Open => self.open(cx),
             ReplaceProject::Recent(path) => self.open_path(&path, cx),
             ReplaceProject::ImportV1 => self.import_legacy(cx),
@@ -199,7 +249,8 @@ impl Editor {
                 })
             };
             let (queue_submit, now_submit) = (submit.clone(), submit);
-            dialog
+            let enter_submit = now_submit.clone();
+            let dialog = dialog
                 .title(heading(IconName::Clapperboard, "Export video"))
                 .width(px(560.))
                 .child(
@@ -266,7 +317,12 @@ impl Editor {
                                 .label("Export now")
                                 .on_click(move |_, window, cx| now_submit(true, window, cx)),
                         ),
-                )
+                );
+            // Enter exports now, like the primary button.
+            on_enter(dialog, move |window, cx| {
+                enter_submit(true, window, cx);
+                true
+            })
         });
     }
 
@@ -440,7 +496,7 @@ impl Editor {
         let editor = cx.entity();
         window.open_dialog(cx, move |dialog, _, cx| {
             let (replace, cancel) = (editor.clone(), editor.clone());
-            dialog
+            let dialog = dialog
                 .title(heading(IconName::TriangleAlert, "Replace existing file?"))
                 .width(px(480.))
                 .child(
@@ -478,7 +534,19 @@ impl Editor {
                                     window.close_dialog(cx);
                                 }),
                         ),
-                )
+                );
+            // Enter replaces, like the primary button.
+            let replace = editor.clone();
+            on_enter(dialog, move |window, cx| {
+                replace.update(cx, |this, cx| {
+                    if let Some((mut spec, front)) = this.pending_export.take() {
+                        spec.params.overwrite = true;
+                        this.enqueue_export(spec, front, cx);
+                    }
+                });
+                window.close_dialog(cx);
+                true
+            })
         });
     }
 
@@ -515,7 +583,51 @@ impl Editor {
             let pw = width.clone();
             let ph = height.clone();
             let preset = presets.clone();
-            dialog
+            let submit: Submit = std::rc::Rc::new(move |cx: &mut App| {
+                let size = w
+                    .read(cx)
+                    .value()
+                    .parse::<u32>()
+                    .ok()
+                    .zip(h.read(cx).value().parse::<u32>().ok());
+                let rate = parse_fps(f.read(cx).value().trim()).ok();
+                let background = {
+                    let rgba = Rgba::from(
+                        c.read(cx)
+                            .value()
+                            .unwrap_or_else(|| fields::to_hsla(background)),
+                    );
+                    [rgba.r, rgba.g, rgba.b, rgba.a]
+                        .map(|v| (v * 255.).round().clamp(0., 255.) as u8)
+                };
+                editor.update(cx, |this, cx| {
+                    let Some(((width, height), frame_rate)) = size.zip(rate) else {
+                        this.error = Some("Enter valid dimensions and frame rate".into());
+                        cx.notify();
+                        return false;
+                    };
+                    let command = Command::SetSettings {
+                        width,
+                        height,
+                        frame_rate,
+                        background,
+                        duration: this.project.duration(),
+                    };
+                    match this.history.execute(&mut this.project, &command) {
+                        Ok(()) => {
+                            this.after_edit(cx);
+                            true
+                        }
+                        Err(error) => {
+                            this.error = Some(error.0);
+                            cx.notify();
+                            false
+                        }
+                    }
+                })
+            });
+            let keyboard_submit = submit.clone();
+            let dialog = dialog
                 .title(heading(IconName::Settings2, "Project settings"))
                 .width(px(460.))
                 .child(
@@ -552,52 +664,8 @@ impl Editor {
                             gpui_component::color_picker::ColorPicker::new(&color),
                         )),
                 )
-                .footer(footer("Apply", cx, move |_, window, cx| {
-                    let size = w
-                        .read(cx)
-                        .value()
-                        .parse::<u32>()
-                        .ok()
-                        .zip(h.read(cx).value().parse::<u32>().ok());
-                    let rate = parse_fps(f.read(cx).value().trim()).ok();
-                    let background = {
-                        let rgba = Rgba::from(
-                            c.read(cx)
-                                .value()
-                                .unwrap_or_else(|| fields::to_hsla(background)),
-                        );
-                        [rgba.r, rgba.g, rgba.b, rgba.a]
-                            .map(|v| (v * 255.).round().clamp(0., 255.) as u8)
-                    };
-                    let valid = editor.update(cx, |this, cx| {
-                        let Some(((width, height), frame_rate)) = size.zip(rate) else {
-                            this.error = Some("Enter valid dimensions and frame rate".into());
-                            cx.notify();
-                            return false;
-                        };
-                        let command = Command::SetSettings {
-                            width,
-                            height,
-                            frame_rate,
-                            background,
-                            duration: this.project.duration(),
-                        };
-                        match this.history.execute(&mut this.project, &command) {
-                            Ok(()) => {
-                                this.after_edit(cx);
-                                true
-                            }
-                            Err(error) => {
-                                this.error = Some(error.0);
-                                cx.notify();
-                                false
-                            }
-                        }
-                    });
-                    if valid {
-                        window.close_dialog(cx);
-                    }
-                }))
+                .footer(submit_footer("Apply", cx, submit));
+            on_enter(dialog, move |_, cx| keyboard_submit(cx))
         });
     }
 
@@ -719,12 +787,8 @@ impl Editor {
                         .child(field("Theme density", Select::new(&density)))
                         .child(field("Motion", Select::new(&motion))),
                 )
+                .footer(submit_footer("Save", cx, submit))
                 .on_ok(move |_, _, cx| keyboard_submit(cx))
-                .footer(footer("Save", cx, move |_, window, cx| {
-                    if submit(cx) {
-                        window.close_dialog(cx);
-                    }
-                }))
         });
     }
     pub(super) fn open_manim_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -741,35 +805,35 @@ impl Editor {
             let editor = editor.clone();
             let scene_submit = scene.clone();
             let path = path.clone();
-            dialog
+            let submit: Submit = std::rc::Rc::new(move |cx: &mut App| {
+                let scene = scene_submit.read(cx).value().trim().to_owned();
+                editor.update(cx, |this, cx| {
+                    let params = animathio_control::ImportManimParams {
+                        path: Some(path.clone()),
+                        source: None,
+                        script_dir: None,
+                        scene: (!scene.is_empty()).then_some(scene),
+                        replace: false,
+                    };
+                    match this.handle_control_call(Call::ImportManim { params }, cx) {
+                        Ok(_) => true,
+                        Err(error) => {
+                            this.error = Some(error.to_string());
+                            cx.notify();
+                            false
+                        }
+                    }
+                })
+            });
+            let keyboard_submit = submit.clone();
+            let dialog = dialog
                 .title(heading(IconName::Code, "Import Manim scene"))
                 .child(Form::new().child(field(
                     "Scene class (blank uses first Scene)",
                     Input::new(&scene),
                 )))
-                .footer(footer("Import", cx, move |_, window, cx| {
-                    let scene = scene_submit.read(cx).value().trim().to_owned();
-                    let imported = editor.update(cx, |this, cx| {
-                        let params = animathio_control::ImportManimParams {
-                            path: Some(path.clone()),
-                            source: None,
-                            script_dir: None,
-                            scene: (!scene.is_empty()).then_some(scene),
-                            replace: false,
-                        };
-                        match this.handle_control_call(Call::ImportManim { params }, cx) {
-                            Ok(_) => true,
-                            Err(error) => {
-                                this.error = Some(error.to_string());
-                                cx.notify();
-                                false
-                            }
-                        }
-                    });
-                    if imported {
-                        window.close_dialog(cx);
-                    }
-                }))
+                .footer(submit_footer("Import", cx, submit));
+            on_enter(dialog, move |_, cx| keyboard_submit(cx))
         });
     }
 
@@ -782,30 +846,29 @@ impl Editor {
         window.open_dialog(cx, move |dialog, _, cx| {
             let duration_submit = duration.clone();
             let editor = editor.clone();
-            dialog
+            let submit: Submit = std::rc::Rc::new(move |cx: &mut App| {
+                let seconds = duration_submit.read(cx).value().parse::<f64>().ok();
+                editor.update(cx, |this, cx| {
+                    let Some(command) = this.find_clip(id).and_then(|clip| {
+                        seconds.and_then(|seconds| editing::write_on_command(clip, seconds))
+                    }) else {
+                        this.error = Some("Duration must be positive and fit within the clip".into());
+                        cx.notify();
+                        return false;
+                    };
+                    this.execute(&command, cx);
+                    true
+                })
+            });
+            let keyboard_submit = submit.clone();
+            let dialog = dialog
                 .title(heading(IconName::WandSparkles, "Write on"))
                 .child(Form::new().child(field(
                     "Reveal duration in seconds",
                     NumberInput::new(&duration),
                 )))
-                .footer(footer("Apply", cx, move |_, window, cx| {
-                    let seconds = duration_submit.read(cx).value().parse::<f64>().ok();
-                    let applied = editor.update(cx, |this, cx| {
-                        let Some(command) = this.find_clip(id).and_then(|clip| {
-                            seconds.and_then(|seconds| editing::write_on_command(clip, seconds))
-                        }) else {
-                            this.error =
-                                Some("Duration must be positive and fit within the clip".into());
-                            cx.notify();
-                            return false;
-                        };
-                        this.execute(&command, cx);
-                        true
-                    });
-                    if applied {
-                        window.close_dialog(cx);
-                    }
-                }))
+                .footer(submit_footer("Apply", cx, submit));
+            on_enter(dialog, move |_, cx| keyboard_submit(cx))
         });
     }
 }
@@ -873,27 +936,29 @@ impl Editor {
                 .child(field("Direction",Select::new(&reverse)))
                 .child(field("Ripple",Select::new(&ripple)))
                 .child(field("Ramp keys (frame:percent, …)",Input::new(&ramps)));
-            dialog.title(heading(IconName::SlidersHorizontal,"Speed/Duration")).width(px(540.)).child(form)
+            let submit: Submit = std::rc::Rc::new(move |cx: &mut App| {
+                let result=(|| -> Result<Command,String> {
+                    let speed=if selected(&mode,cx)=="Duration (frames)" {
+                        if !ramps.read(cx).value().trim().is_empty() {return Err("Clear ramp keys before setting duration".into());}
+                        let count=duration.read(cx).value().parse::<i64>().map_err(|_|"Enter a positive frame count")?;
+                        if count<=0 {return Err("Enter a positive frame count".into());}
+                        let target=rate.frame_to_time(count,Rounding::Nearest).map_err(|e|e.0)?.0;
+                        if target <= 0 { return Err("Duration must span at least one tick".into()); }
+                        let (a,b)=clip.source_bounds();
+                        // Quantize the requested ratio to the model's millionth lattice.
+                        let units=(i128::from(b.0-a.0)*1_000_000+i128::from(target)/2)/i128::from(target);
+                        animathio_core::ClipSpeed::new(u32::try_from(units).map_err(|_|"Duration is outside the speed limits")?,1_000_000).map_err(|e|e.0)?
+                    }else{retime::percent(&percent.read(cx).value())?};
+                    let keys=if ramps.read(cx).value().as_str()==ramp_text {original_ramps.clone()}else{retime::ramps(&ramps.read(cx).value(),rate)?};
+                    Ok(Command::SetClipSpeed{id,speed,reverse:selected(&reverse,cx)=="Reverse",ramps:keys,ripple:selected(&ripple,cx)=="Ripple trailing clips"})
+                })();
+                editor.update(cx,|this,cx|match &result {Ok(command)=>this.try_execute(command,cx),Err(error)=>{this.error=Some(error.clone());cx.notify();false}})
+            });
+            let keyboard_submit = submit.clone();
+            let dialog = dialog.title(heading(IconName::SlidersHorizontal,"Speed/Duration")).width(px(540.)).child(form)
                 .child(div().text_size(style::type_size::SM).child("Ramp keys override constant speed. Clear keys for constant speed or duration. Linked audio follows; pitch shifts. Keyframes keep their timeline times. Overlaps are rejected."))
-                .footer(footer("Apply",cx,move|_,window,cx| {
-                    let result=(|| -> Result<Command,String> {
-                        let speed=if selected(&mode,cx)=="Duration (frames)" {
-                            if !ramps.read(cx).value().trim().is_empty() {return Err("Clear ramp keys before setting duration".into());}
-                            let count=duration.read(cx).value().parse::<i64>().map_err(|_|"Enter a positive frame count")?;
-                            if count<=0 {return Err("Enter a positive frame count".into());}
-                            let target=rate.frame_to_time(count,Rounding::Nearest).map_err(|e|e.0)?.0;
-                            if target <= 0 { return Err("Duration must span at least one tick".into()); }
-                            let (a,b)=clip.source_bounds();
-                            // Quantize the requested ratio to the model's millionth lattice.
-                            let units=(i128::from(b.0-a.0)*1_000_000+i128::from(target)/2)/i128::from(target);
-                            animathio_core::ClipSpeed::new(u32::try_from(units).map_err(|_|"Duration is outside the speed limits")?,1_000_000).map_err(|e|e.0)?
-                        }else{retime::percent(&percent.read(cx).value())?};
-                        let keys=if ramps.read(cx).value().as_str()==ramp_text {original_ramps.clone()}else{retime::ramps(&ramps.read(cx).value(),rate)?};
-                        Ok(Command::SetClipSpeed{id,speed,reverse:selected(&reverse,cx)=="Reverse",ramps:keys,ripple:selected(&ripple,cx)=="Ripple trailing clips"})
-                    })();
-                    let applied=editor.update(cx,|this,cx|match &result {Ok(command)=>this.try_execute(command,cx),Err(error)=>{this.error=Some(error.clone());cx.notify();false}});
-                    if applied {window.close_dialog(cx);}
-                }))
+                .footer(submit_footer("Apply",cx,submit));
+            on_enter(dialog, move |_, cx| keyboard_submit(cx))
         });
     }
     pub(super) fn open_frame_hold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -905,17 +970,21 @@ impl Editor {
         let editor = cx.entity();
         window.open_dialog(cx,move|dialog,_,cx| {
             let frames=frames.clone(); let editor=editor.clone();
-            dialog.title(heading(IconName::SlidersHorizontal,"Insert frame hold segment"))
+            let submit: Submit = std::rc::Rc::new({
+                let (frames, editor) = (frames.clone(), editor.clone());
+                move |cx: &mut App| {
+                let count=frames.read(cx).value().parse::<u32>().ok();
+                editor.update(cx,|this,cx| {
+                    if let Some(frames)=count {this.try_execute(&Command::InsertFrameHold{id,at,frames},cx)}
+                    else{this.error=Some("Enter a positive frame count".into());cx.notify();false}
+                })
+            }});
+            let keyboard_submit = submit.clone();
+            let dialog = dialog.title(heading(IconName::SlidersHorizontal,"Insert frame hold segment"))
                 .child(field("Duration (project frames)",Input::new(&frames)))
                 .child(div().text_size(style::type_size::SM).child("Inserts at the playhead and ripples unlocked trailing clips. Linked audio is silent during the hold."))
-                .footer(footer("Insert",cx,move|_,window,cx| {
-                    let count=frames.read(cx).value().parse::<u32>().ok();
-                    let applied=editor.update(cx,|this,cx| {
-                        if let Some(frames)=count {this.try_execute(&Command::InsertFrameHold{id,at,frames},cx)}
-                        else{this.error=Some("Enter a positive frame count".into());cx.notify();false}
-                    });
-                    if applied{window.close_dialog(cx);}
-                }))
+                .footer(submit_footer("Insert",cx,submit));
+            on_enter(dialog, move |_, cx| keyboard_submit(cx))
         });
     }
 }

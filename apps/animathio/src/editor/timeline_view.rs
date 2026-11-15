@@ -1767,9 +1767,7 @@ impl Editor {
                 id,
                 name: name.clone().into(),
             };
-            let row_index = self
-                .project
-                .tracks()
+            let row_index = timeline::display_tracks(&self.project)
                 .iter()
                 .position(|track| track.id() == id)
                 .unwrap_or(0);
@@ -1831,7 +1829,7 @@ impl Editor {
                         style.border_t_2().border_color(cx.theme().ring)
                     })
                     .on_drop(cx.listener(move |this, drag: &TrackDrag, _, cx| {
-                        this.move_track_to(drag.id, row_index, cx);
+                        this.move_track_to_row(drag.id, row_index, cx);
                     }))
                     .h(px(self.dock.track_height.pixels()))
                     .flex_shrink_0()

@@ -258,6 +258,39 @@ impl Editor {
         let editor = cx.entity();
         let template = Arc::new(template);
         window.open_dialog(cx, move |dialog, _, cx| {
+            // The Apply button and Enter share one action.
+            let apply_fill: super::dialogs::Submit = {
+                let (rows, media, editor, template) = (
+                    rows.clone(),
+                    media.clone(),
+                    editor.clone(),
+                    template.clone(),
+                );
+                std::rc::Rc::new(move |cx: &mut gpui::App| {
+                    let media = media.read(cx).0.clone();
+                    let text: BTreeMap<_, _> = rows
+                        .iter()
+                        .filter(|(id, _, _)| !media.contains_key(id))
+                        .filter_map(|(id, _, state)| {
+                            let value = state.as_ref()?.read(cx).value().to_string();
+                            (!value.trim().is_empty()).then_some((*id, value))
+                        })
+                        .collect();
+                    if text.is_empty() && media.is_empty() {
+                        return true;
+                    }
+                    editor.update(cx, |this, cx| {
+                        match template.fill(&text, &media) {
+                            Ok(fill) => this.apply_template_fill(fill, cx),
+                            Err(error) => {
+                                this.error = Some(error.to_string());
+                                cx.notify();
+                                false
+                            }
+                        }
+                    })
+                })
+            };
             let mut body = div()
                 .flex()
                 .flex_col()
@@ -387,13 +420,7 @@ impl Editor {
                 }
                 body = body.child(row);
             }
-            let (rows, media, editor, template) = (
-                rows.clone(),
-                media.clone(),
-                editor.clone(),
-                template.clone(),
-            );
-            dialog
+            let dialog = dialog
                 .title("Fill placeholders")
                 .width(px(520.))
                 .child(
@@ -420,37 +447,23 @@ impl Editor {
                         .child(
                             style::primary_button("fill-template", cx)
                                 .label("Apply")
-                                .on_click(move |_, window, cx| {
-                                    let media = media.read(cx).0.clone();
-                                    let text: BTreeMap<_, _> = rows
-                                        .iter()
-                                        .filter(|(id, _, _)| !media.contains_key(id))
-                                        .filter_map(|(id, _, state)| {
-                                            let value =
-                                                state.as_ref()?.read(cx).value().to_string();
-                                            (!value.trim().is_empty()).then_some((*id, value))
-                                        })
-                                        .collect();
-                                    if text.is_empty() && media.is_empty() {
-                                        window.close_dialog(cx);
-                                        return;
-                                    }
-                                    let applied = editor.update(cx, |this, cx| {
-                                        match template.fill(&text, &media) {
-                                            Ok(fill) => this.apply_template_fill(fill, cx),
-                                            Err(error) => {
-                                                this.error = Some(error.to_string());
-                                                cx.notify();
-                                                false
-                                            }
+                                .on_click({
+                                    let apply_fill = apply_fill.clone();
+                                    move |_, window, cx| {
+                                        if apply_fill(cx) {
+                                            window.close_dialog(cx);
                                         }
-                                    });
-                                    if applied {
-                                        window.close_dialog(cx);
                                     }
                                 }),
                         ),
-                )
+                );
+            // Enter applies the template, like the primary button.
+            super::dialogs::on_enter(dialog, move |window, cx| {
+                if apply_fill(cx) {
+                    window.close_dialog(cx);
+                }
+                true
+            })
         });
     }
 
@@ -470,7 +483,55 @@ impl Editor {
             let n = name.clone();
             let c = category.clone();
             let editor = editor.clone();
-            dialog
+            // The Save button and Enter share one action.
+            let save_template: super::dialogs::Submit = {
+                let (n, c, editor) = (n.clone(), c.clone(), editor.clone());
+                std::rc::Rc::new(move |cx: &mut gpui::App| {
+                    let name = n.read(cx).value().to_string();
+                    let category = c.read(cx).value().to_string();
+                    editor.update(cx, |this, cx| {
+                        if name.trim().is_empty() {
+                            this.error = Some("Give the template a name".into());
+                            cx.notify();
+                            return false;
+                        }
+                        let placeholders = this
+                            .selected_ids()
+                            .into_iter()
+                            .map(|clip| Placeholder {
+                                clip,
+                                label: Some(this.placeholder_label(clip)),
+                            })
+                            .collect();
+                        let manifest = TemplateManifest {
+                            id: "pending".into(),
+                            name: name.clone(),
+                            description: String::new(),
+                            aspect: format!("{}:{}", this.project.width(), this.project.height()),
+                            category: category.clone(),
+                            thumbnail: None,
+                            placeholders,
+                        };
+                        match animathio_control::save_user_template(ProjectTemplate {
+                            project: this.project.clone(),
+                            assets: (*this.assets).clone(),
+                            manifest,
+                        }) {
+                            Ok(_) => {
+                                this.title_library.templates_started = false;
+                                cx.notify();
+                                true
+                            }
+                            Err(error) => {
+                                this.error = Some(error.to_string());
+                                cx.notify();
+                                false
+                            }
+                        }
+                    })
+                })
+            };
+            let dialog = dialog
                 .title("Save as template")
                 .child(Input::new(&name))
                 .child(Input::new(&category))
@@ -478,58 +539,22 @@ impl Editor {
                 .child(
                     Button::new("save-template")
                         .label("Save template")
-                        .on_click(move |_, window, cx| {
-                            let name = n.read(cx).value().to_string();
-                            let category = c.read(cx).value().to_string();
-                            let saved = editor.update(cx, |this, cx| {
-                                if name.trim().is_empty() {
-                                    this.error = Some("Give the template a name".into());
-                                    cx.notify();
-                                    return false;
+                        .on_click({
+                            let save_template = save_template.clone();
+                            move |_, window, cx| {
+                                if save_template(cx) {
+                                    window.close_dialog(cx);
                                 }
-                                let placeholders = this
-                                    .selected_ids()
-                                    .into_iter()
-                                    .map(|clip| Placeholder {
-                                        clip,
-                                        label: Some(this.placeholder_label(clip)),
-                                    })
-                                    .collect();
-                                let manifest = TemplateManifest {
-                                    id: "pending".into(),
-                                    name: name.clone(),
-                                    description: String::new(),
-                                    aspect: format!(
-                                        "{}:{}",
-                                        this.project.width(),
-                                        this.project.height()
-                                    ),
-                                    category: category.clone(),
-                                    thumbnail: None,
-                                    placeholders,
-                                };
-                                match animathio_control::save_user_template(ProjectTemplate {
-                                    project: this.project.clone(),
-                                    assets: (*this.assets).clone(),
-                                    manifest,
-                                }) {
-                                    Ok(_) => {
-                                        this.title_library.templates_started = false;
-                                        cx.notify();
-                                        true
-                                    }
-                                    Err(error) => {
-                                        this.error = Some(error.to_string());
-                                        cx.notify();
-                                        false
-                                    }
-                                }
-                            });
-                            if saved {
-                                window.close_dialog(cx);
                             }
                         }),
-                )
+                );
+            // Enter saves the template.
+            super::dialogs::on_enter(dialog, move |window, cx| {
+                if save_template(cx) {
+                    window.close_dialog(cx);
+                }
+                true
+            })
         });
     }
 }

@@ -40,16 +40,31 @@ impl Editor {
     }
 
     pub(super) fn new_project(&mut self, cx: &mut Context<Self>) {
+        self.new_project_inner(true, cx);
+    }
+
+    /// Reset to an empty project without a track, so the launcher's canvas chooser
+    /// shows. The menu's "New project" and the shortcut use it, so every entry point
+    /// picks the canvas the same way (the launcher's default tile is 1080p 16:9).
+    pub(super) fn new_project_with_chooser(&mut self, cx: &mut Context<Self>) {
+        self.new_project_inner(false, cx);
+    }
+
+    /// A fresh project. With `with_track` it starts with the usual "Video 1" track;
+    /// without one it stays empty, which is the launcher's canvas chooser.
+    fn new_project_inner(&mut self, with_track: bool, cx: &mut Context<Self>) {
         self.finish_color_edit(cx);
         let _ = self.clock.pause();
         self.reset_project_session();
         self.project = Project::new(self.project.frame_rate());
-        Command::AddTrack {
-            track: Track::new(TrackId(1), "Video 1"),
-            index: 0,
+        if with_track {
+            Command::AddTrack {
+                track: Track::new(TrackId(1), "Video 1"),
+                index: 0,
+            }
+            .apply(&mut self.project)
+            .expect("new project's first track");
         }
-        .apply(&mut self.project)
-        .expect("new project's first track");
         self.history = History::default();
         Arc::make_mut(&mut self.assets).clear();
         self.audio_generation = self.audio_generation.wrapping_add(1);

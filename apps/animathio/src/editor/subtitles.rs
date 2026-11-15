@@ -138,7 +138,39 @@ impl Editor {
                     ),
                 ]
             });
-            dialog
+            // The Generate button and Enter share one action.
+            let generate: super::dialogs::Submit = {
+                let (model, language, range, editor) = (
+                    model.clone(),
+                    language.clone(),
+                    range.clone(),
+                    editor.clone(),
+                );
+                std::rc::Rc::new(move |cx: &mut gpui::App| {
+                    let size = ModelSize::ALL
+                        .get(model.read(cx).selected_index(cx).map_or(1, |i| i.row))
+                        .copied()
+                        .unwrap_or_default();
+                    let code = LANGUAGES
+                        .get(
+                            language
+                                .read(cx)
+                                .selected_index(cx)
+                                .map_or(0, |i| i.row),
+                        )
+                        .map_or("auto", |(code, _)| code);
+                    let choice = range
+                        .read(cx)
+                        .selected_value()
+                        .cloned()
+                        .unwrap_or_default();
+                    editor.update(cx, |this, cx| {
+                        this.start_subtitles_from_dialog(size, code, &choice, cx);
+                    });
+                    true
+                })
+            };
+            let dialog = dialog
                 .title(
                     div()
                         .flex()
@@ -206,31 +238,21 @@ impl Editor {
                             style::primary_button("subtitles-generate", cx)
                                 .label("Generate")
                                 .disabled(!engine)
-                                .on_click(move |_, window, cx| {
-                                    let size = ModelSize::ALL
-                                        .get(model.read(cx).selected_index(cx).map_or(1, |i| i.row))
-                                        .copied()
-                                        .unwrap_or_default();
-                                    let code = LANGUAGES
-                                        .get(
-                                            language
-                                                .read(cx)
-                                                .selected_index(cx)
-                                                .map_or(0, |i| i.row),
-                                        )
-                                        .map_or("auto", |(code, _)| code);
-                                    let choice = range
-                                        .read(cx)
-                                        .selected_value()
-                                        .cloned()
-                                        .unwrap_or_default();
-                                    editor.update(cx, |this, cx| {
-                                        this.start_subtitles_from_dialog(size, code, &choice, cx);
-                                    });
-                                    window.close_dialog(cx);
+                                .on_click({
+                                    let generate = generate.clone();
+                                    move |_, window, cx| {
+                                        generate(cx);
+                                        window.close_dialog(cx);
+                                    }
                                 }),
                         ),
-                )
+                );
+            // Enter generates, like the primary button.
+            super::dialogs::on_enter(dialog, move |window, cx| {
+                generate(cx);
+                window.close_dialog(cx);
+                true
+            })
         });
     }
 

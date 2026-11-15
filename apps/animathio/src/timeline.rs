@@ -5,12 +5,22 @@ use animathio_core::{
 /// Timeline presentation order: foreground first, with audio-only tracks below
 /// all visual (including empty) tracks. The core's back-to-front order is unchanged.
 pub(crate) fn display_tracks(project: &Project) -> Vec<&Track> {
-    let audio = |track: &&Track| {
-        !track.clips().is_empty()
-            && track.clips().values().all(|clip| matches!(clip.kind, ClipKind::Audio { .. }))
-    };
-    project.tracks().iter().rev().filter(|track| !audio(track))
-        .chain(project.tracks().iter().filter(audio)).collect()
+    project
+        .tracks()
+        .iter()
+        .rev()
+        .filter(|track| !is_audio_only(track))
+        .chain(project.tracks().iter().filter(|track| is_audio_only(track)))
+        .collect()
+}
+
+/// A track that holds only audio clips (a non-empty track, so empty tracks stay visual).
+pub(crate) fn is_audio_only(track: &Track) -> bool {
+    !track.clips().is_empty()
+        && track
+            .clips()
+            .values()
+            .all(|clip| matches!(clip.kind, ClipKind::Audio { .. }))
 }
 
 /// Pixel geometry shared by timeline painting and hit-testing. All coordinates are
