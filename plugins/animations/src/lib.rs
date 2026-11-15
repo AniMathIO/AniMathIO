@@ -40,7 +40,7 @@ impl Guest for Animations {
     fn describe() -> Manifest {
         Manifest {
             name: "Animations".to_owned(),
-            version: "1.0.0".to_owned(),
+            version: "1.1.0".to_owned(),
             description: "Entrance, exit and emphasis presets".to_owned(),
             kinds: vec!["animation-preset".into()],
             metadata: vec![],
@@ -232,11 +232,11 @@ fn catalog() -> Vec<PresetDescriptor> {
                 &format!("typewriter-{verb}"),
                 &format!("Typewriter {suffix}"),
                 &format!(
-                    "{} the text one character at a time",
+                    "{} text characters or formula outlines in order",
                     if role == Entrance { "Write" } else { "Erase" }
                 ),
                 role,
-                &[TEXT],
+                &[TEXT, "plugin:org.animathio.latex"],
                 vec![choice(
                     "easing",
                     "Easing",

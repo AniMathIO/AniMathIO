@@ -2,6 +2,7 @@
 mod autocut;
 mod duck;
 mod markers;
+mod math_objects;
 mod mcp;
 mod reframe;
 mod retime;
@@ -39,6 +40,11 @@ enum Action {
     FreezeFrame {
         #[command(flatten)]
         args: retime::HoldArgs,
+    },
+    /// List or add typed objects from the editor Math panel.
+    MathObjects {
+        #[command(subcommand)]
+        action: math_objects::MathAction,
     },
     /// List the bundled project templates.
     Templates {
@@ -368,6 +374,7 @@ fn run(cli: Cli) -> Result<()> {
             output,
         } => run_import_manim(&input, scene.as_deref(), &output)?,
         Action::Animations { action } => run_animations(action)?,
+        Action::MathObjects { action } => math_objects::run(action)?,
         Action::Render {
             project,
             frame,

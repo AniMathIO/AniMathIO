@@ -171,6 +171,7 @@ impl Editor {
             LeftTab::Plugins => 1.,
             LeftTab::Effects => 2.,
             LeftTab::Titles => 3.,
+            LeftTab::Math => 4.,
         };
         let from = index(self.previous_left_tab);
         let to = index(self.left_tab);
@@ -183,8 +184,8 @@ impl Editor {
         let eased = 1. - (1. - progress).powi(3);
         let indicator = div()
             .absolute()
-            .left(relative((from + (to - from) * eased) / 4.))
-            .w(relative(1. / 4.))
+            .left(relative((from + (to - from) * eased) / 5.))
+            .w(relative(1. / 5.))
             .h_full()
             .rounded(px(style::radius::CONTROL))
             .bg(style::hexa(color::ACCENT, 0.16))
@@ -204,6 +205,7 @@ impl Editor {
                         (LeftTab::Plugins, "Plugins", IconName::Puzzle),
                         (LeftTab::Effects, "Effects", IconName::Sparkles),
                         (LeftTab::Titles, "Titles", IconName::Type),
+                        (LeftTab::Math, "Math", IconName::Shapes),
                     ]
                     .map(|(tab, label, icon)| {
                         let selected = self.left_tab == tab;
@@ -235,8 +237,14 @@ impl Editor {
                                 color::TEXT_SECONDARY
                             }))
                             .hover(|this| this.bg(style::hexa(color::HOVER, 0.7)))
-                            .child(icons::icon(icon).small())
-                            .child(label)
+                            .when(
+                                self.dock.left_width < 240. || self.dock.left_width >= 360.,
+                                |tab| tab.child(icons::icon(icon).small()),
+                            )
+                            .when(self.dock.left_width >= 240., |tab| tab.child(label))
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(label).build(window, cx)
+                            })
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.select_left_tab(tab, cx)),
                             )

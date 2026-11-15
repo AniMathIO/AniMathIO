@@ -421,7 +421,7 @@ impl Editor {
             .bg(hex(color::VIEWER_STAGE))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     if this.playing {
                         this.seek_to(this.position, cx);
                     }
@@ -468,6 +468,9 @@ impl Editor {
                     let Some((id, transform, fitted)) = this.selected_visual() else {
                         return;
                     };
+                    if event.click_count >= 2 && this.edit_math(id, window, cx) {
+                        return;
+                    }
                     if this.project.tracks().iter().any(|track| {
                         track.is_locked() && track.clips().values().any(|clip| clip.id == id)
                     }) {

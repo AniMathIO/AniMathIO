@@ -81,6 +81,7 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
         "create_from_template",
         "add_text",
         "add_math",
+        "add_math_object",
         "add_graph",
         "import_manim_scene",
         "add_media",
@@ -553,6 +554,42 @@ fn lists_templates_and_creates_projects_from_them_over_mcp() {
         "{response}"
     );
     assert!(!dir.path().join("twice.amio").exists());
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn typed_math_objects_share_panel_defaults_and_undo() {
+    let dir = tempdir().unwrap();
+    let (mut child, mut stdout, mut stdin) = spawn_mcp(&empty_project(dir.path()));
+    initialize(&mut stdin, &mut stdout);
+    for kind in [
+        "latex",
+        "text",
+        "point",
+        "line",
+        "vector",
+        "polygon",
+        "plot",
+        "circle",
+        "ellipse",
+        "cartesian",
+        "polar",
+    ] {
+        let before = call(&mut stdin, &mut stdout, "get_project_state", json!({}));
+        let added = call(
+            &mut stdin,
+            &mut stdout,
+            "add_math_object",
+            json!({"kind":kind}),
+        );
+        assert!(added["clip_id"].is_number(), "{kind}: {added}");
+        let state = call(&mut stdin, &mut stdout, "get_project_state", json!({}));
+        assert_eq!(state["project"]["tracks"].as_array().unwrap().len(), 1);
+        call(&mut stdin, &mut stdout, "undo", json!({}));
+        let after = call(&mut stdin, &mut stdout, "get_project_state", json!({}));
+        assert_eq!(after["project"], before["project"], "{kind}");
+    }
     drop(stdin);
     assert!(child.wait().unwrap().success());
 }

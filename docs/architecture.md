@@ -85,7 +85,7 @@ Rules that keep the layers honest:
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `animations` (the inspector
-Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `titles` (Titles tab), `dialogs`, `export_panel`
+Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `math` (Math tab, typed object dialog and inspector), `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
@@ -803,3 +803,36 @@ unchanged dialog submission. Ctrl+R opens the dialog from the timeline; the Rate
 Stretch tool and graphical ramp handles are deferred. The CLI's
 `animathio-cli set-clip-speed` and `animathio-cli freeze-frame` and the MCP tools
 route through the shared commands and source-limit guards.
+
+## Mathematical object workflow
+
+The library's **Math** tab offers LaTeX, Text, Point, Line segment, Vector,
+Polygon, Plot, Circle, Ellipse, Cartesian grid and Polar grid. Click a preview
+card to configure it; the plus button adds defaults at the playhead, and dragging
+its preview to the timeline adds defaults at the drop time. Placement uses a
+free visual layer. Double-click a math clip in the timeline or on its visible
+ink in the viewer to reopen the same editor. The inspector presents the same
+labelled fields; Apply commits the draft as one undoable batch.
+
+`crates/control/src/math_objects.rs` owns the object catalogue, field definitions,
+validation and command mapping. Geometry uses math units (a ten-unit square,
+positive Y upward), scaled uniformly from the short canvas edge. Text and LaTeX
+sizes use a percentage of the short edge. Shape paths and polar grid paths go through
+the shapes plugin; function plots and labelled Cartesian grids go through graph. The editable definition is
+stored in plugin metadata, with typed overrides for subsequent edits. Effects,
+transforms, timeline placement and existing keyframes survive Apply. No format
+schema fields are added. Legacy LaTeX clips also open in this editor; Typst clips
+keep their generated inspector.
+
+Preview renders on a background worker through the real plugins and CPU render
+path, after a 250 ms debounce. Results carry generations so older work cannot
+replace a newer draft. Library previews are cached for the editor session. Drafts
+never mutate the project until Add or Apply. The LaTeX editor inserts snippets
+at the caret and offers six formula templates, colour, relative font size and a
+Write on toggle for new clips, using the animation plugin's typewriter entrance
+preset. Plugin errors appear inline and disable Add/Apply.
+The cards and fields follow the interface text scale; the dialog widens with UI
+scale and bounds its scrolling form to leave the preview and action buttons visible.
+
+![Math library](screenshots/editor-math-panel.png)
+![Math object dialog](screenshots/editor-math-dialog.png)

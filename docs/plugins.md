@@ -983,3 +983,22 @@ All first-party components and the example are built against ABI 1.1.0 and decla
 retain older binaries; 0.1 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.
+
+
+### Math library additions
+
+Shapes 1.1.0 adds the `point` shape choice as an ellipse alias, using the same
+centre and width/height fields. Existing arrow, ellipse and polygon/path support
+also serves the typed Math library. Arbitrary polygons and oriented vectors are
+encoded with the existing path parameter; polar grids are paths, while Cartesian grids use graph.
+Graph 1.2.0 adds optional `axis_color` and `grid_color` parameters (legacy defaults
+unchanged) and opt-in `strict_errors` for plot-expression validation. Its item language
+and ABI are unchanged. Animations 1.1.0 allows the existing
+typewriter entrance/exit presets on LaTeX as well as Text, animating `reveal`.
+These are additive plugin-version changes under ABI 1.x: no WIT records or worlds
+change, and old components and saved parameters continue to load.
+
+LaTeX 1.2.0 adds optional `strict_errors` (default false). Math draft previews and
+CLI/MCP validation set it for their validation call, so typesetting failures return
+an inline diagnostic. Saved clips retain the tolerant error-frame rendering used
+by older projects.

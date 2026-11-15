@@ -632,3 +632,65 @@ fn v1_serializer_corpus_imports_and_renders() {
     }
     assert_eq!(count, 6);
 }
+
+#[test]
+fn math_catalog_adds_every_kind_and_rejects_invalid_latex_without_saving() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("empty.json");
+    write_json(
+        File::create(&input).unwrap(),
+        &animathio_core::Project::default(),
+    )
+    .unwrap();
+    let list = cli(&["math-objects", "list"]);
+    assert!(list.status.success());
+    let drafts: Vec<animathio_control::MathObjectDraft> =
+        serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(drafts.len(), animathio_control::MathObjectKind::ALL.len());
+    for draft in drafts {
+        let kind = serde_json::to_value(draft.kind).unwrap();
+        let kind = kind.as_str().unwrap();
+        let output = dir.path().join(format!("{kind}.amio"));
+        let mut args = vec![
+            "math-objects",
+            "add",
+            path(&input),
+            "--kind",
+            kind,
+            "-o",
+            path(&output),
+        ];
+        if kind == "latex" {
+            args.push("--write-on");
+        }
+        ok(&args);
+        let bundle = read_amio(File::open(output).unwrap(), Limits::default()).unwrap();
+        let clip = bundle.project.tracks()[0].clips().values().next().unwrap();
+        assert_eq!(
+            animathio_control::math_object_draft(
+                clip,
+                animathio_export::resolution(&bundle.project)
+            )
+            .unwrap()
+            .kind,
+            draft.kind
+        );
+        if kind == "latex" {
+            assert_eq!(clip.animations.len(), 1);
+        }
+    }
+    let output = dir.path().join("invalid.amio");
+    let result = cli(&[
+        "math-objects",
+        "add",
+        path(&input),
+        "--kind",
+        "latex",
+        "--field",
+        r"source=\frac{",
+        "-o",
+        path(&output),
+    ]);
+    assert!(!result.status.success());
+    assert!(!output.exists());
+}

@@ -18,6 +18,7 @@ fn packages() -> &'static (tempfile::TempDir, Vec<PluginPackage>) {
             "text",
             "shapes",
             "latex",
+            "graph",
             "effects-basic",
             "audio-basic",
             "animations",
@@ -71,7 +72,7 @@ pub fn packages_for_tests() -> &'static [PluginPackage] {
     &packages().1
 }
 
-/// A host with the first-party text, shapes, LaTeX, effects, animations and importer plugins, built once per test process.
+/// A host with the first-party text, shapes, LaTeX, graph, effects, animations and importer plugins, built once per test process.
 pub fn host() -> PluginHost {
     let (cache, packages) = packages();
     let mut host = PluginHost::new(cache.path()).unwrap();

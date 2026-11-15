@@ -85,11 +85,16 @@ impl Guest for LatexPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "latex".to_string(),
-            version: "1.1.0".to_string(),
+            version: "1.2.0".to_string(),
             description: "LaTeX/Typst math typeset by the host into vector outlines".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
             params: vec![
+                ParamSpec {
+                    id: "strict_errors".into(),
+                    label: "Return typesetting errors".into(),
+                    kind: ParamKind::Bool(BoolParam { default: false }),
+                },
                 ParamSpec {
                     id: "units".into(),
                     label: "Units".into(),
@@ -202,7 +207,14 @@ impl Guest for LatexPlugin {
         // the problem is visible right where the formula would be.
         let result = match host::typeset_math(&source, math_mode, font_size) {
             Ok(result) => result,
-            Err(diagnostic) => return error_scene(&diagnostic.message, shorter, size),
+            Err(diagnostic) => {
+                if params.iter().any(|entry| {
+                    entry.id == "strict_errors" && matches!(entry.value, ParamValue::Bool(true))
+                }) {
+                    return Err(diagnostic);
+                }
+                return error_scene(&diagnostic.message, shorter, size);
+            }
         };
         if result.paths.is_empty() {
             return Ok(Scene {

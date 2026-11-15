@@ -1594,13 +1594,17 @@ impl Editor {
             body = body.child(self.section("opacity", "Compositing", div().child(opacity_row), cx));
         }
         if matches!(clip.kind, ClipKind::Plugin { .. }) && !is_title {
-            let rows = self.plugin_rows(id, window, cx);
-            body = body.child(self.section(
-                "params",
-                "Text / Content",
-                div().flex().flex_col().children(rows),
-                cx,
-            ));
+            if let Some(math) = self.math_inspector(id, window, cx) {
+                body = body.child(math);
+            } else {
+                let rows = self.plugin_rows(id, window, cx);
+                body = body.child(self.section(
+                    "params",
+                    "Text / Content",
+                    div().flex().flex_col().children(rows),
+                    cx,
+                ));
+            }
         } else if visual {
             let rows = self.numeric_param_rows(id, window, cx);
             if !rows.is_empty() {

@@ -371,11 +371,34 @@ fn build_typst_source(
         MathMode::Typst => strip_math_delimiters(source.trim()).to_string(),
     };
 
+    // MiTeX emits compatibility function names for roots and matrix environments.
+    // Bind these locally: no Typst package download or filesystem import is needed.
+    // Semantics: https://github.com/mitex-rs/mitex/blob/main/packages/mitex/specs/latex/standard.typ
+    let helpers = if mode == MathMode::Latex {
+        r#"#let matrix = math.mat.with(delim: none)
+#let bmatrix = math.mat.with(delim: "[")
+#let pmatrix = math.mat.with(delim: "(")
+#let Bmatrix = math.mat.with(delim: "{")
+#let vmatrix = math.mat.with(delim: "|")
+#let Vmatrix = math.mat.with(delim: "||")
+#let mitexsqrt(..args) = {
+  let values = args.pos()
+  if values.len() == 1 { math.sqrt(values.at(0)) }
+  else {
+    let index = values.at(0).children.filter(part => part != [\[] and part != [\]]).sum()
+    math.root(index, values.at(1))
+  }
+}
+"#
+    } else {
+        ""
+    };
+
     Ok(format!(
         "#set page(width: auto, height: auto, margin: 0pt)\n\
          #set text(size: {font_size}pt)\n\
          #show math.equation: set text(font: \"STIX Two Math\")\n\
-         $ {math} $"
+         {helpers}$ {math} $"
     ))
 }
 
@@ -698,6 +721,19 @@ mod tests {
     fn typeset_latex(source: &str) -> Result<TypesetResult, TypesetError> {
         let engine = TypesetEngine::new()?;
         engine.typeset(source, MathMode::Latex, 48.0)
+    }
+
+    #[test]
+    fn roots_and_matrix_environments_have_local_compatibility_helpers() {
+        for source in [
+            r"\sqrt{x}",
+            r"\sqrt[3]{x}",
+            r"\begin{matrix}a & b \\ c & d\end{matrix}",
+            r"\begin{bmatrix}1 & 0 \\ 0 & 1\end{bmatrix}",
+        ] {
+            let result = typeset_latex(source).unwrap_or_else(|e| panic!("{source}: {e}"));
+            assert!(result.bbox.max_x > result.bbox.min_x);
+        }
     }
 
     #[test]
