@@ -14,7 +14,9 @@ name: Package
 #
 # Every job installs the bundle, then runs `animathio --version` and
 # `animathio-cli --version` headlessly and checks that the bundled `.amplugin`
-# bundles arrived next to (or lib-relative to) the executable.
+# bundles arrived next to (or lib-relative to) the executable. A final job
+# collects all three installer artifacts and publishes a `SHA256SUMS` file for
+# them (#156, "Release integrity").
 
 on:
   workflow_dispatch:
@@ -221,4 +223,48 @@ jobs:
         with:
           name: installers-${{ matrix.artifact }}
           path: target/packages/*
+          if-no-files-found: error
+
+  checksums:
+    name: checksums
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(*)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no installer files were downloaded" >&2
+            exit 1
+          fi
+          # One line per installer, sorted by name, in the format `sha256sum -c`
+          # expects. All three platform artifacts are merged into this directory.
+          # Exclude any pre-existing SHA256SUMS so a re-run cannot hash itself.
+          installers=()
+          for f in "${files[@]}"; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            installers+=("$f")
+          done
+          if [ "${#installers[@]}" -eq 0 ]; then
+            echo "no installer files were downloaded" >&2
+            exit 1
+          fi
+          printf '%s\0' "${installers[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: SHA256SUMS
+          path: installers/SHA256SUMS
           if-no-files-found: error

@@ -154,6 +154,7 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 - [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md) — what maps from 1.x and what doesn't
 - [`docs/design.md`](docs/design.md) — visual design tokens and UI rules
 - [`docs/release-checklist.md`](docs/release-checklist.md) — what is left before the 2.0 swap
+- [`docs/release-notes-2.0.md`](docs/release-notes-2.0.md) — the 2.0 release notes draft
 
 ## Installing
 
@@ -169,8 +170,15 @@ and `installers-macos`), or build from source below. Each installer ships both `
 | Windows | `animathio_<version>_x64-setup.exe` | NSIS installer, unsigned (SmartScreen warns) |
 | macOS | `AniMathIO_<version>_<arch>.dmg` | unsigned and not notarized: right-click, Open |
 
-Verify with `animathio --version` and `animathio-cli --version`. Provenance of CI-built
-installers is attested with `actions/attest-build-provenance`
+Verify with `animathio --version` and `animathio-cli --version`. The `Package` workflow also
+publishes a `SHA256SUMS` artifact covering every installer it built. Download the installers and
+that file into the same directory, then check them with:
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+Provenance of CI-built installers is attested with `actions/attest-build-provenance`
 (`gh attestation verify <file> --repo AniMathIO/AniMathIO`).
 
 ## Building
