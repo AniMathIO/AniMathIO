@@ -224,9 +224,9 @@ impl Editor {
                     Button::new(SharedString::from(format!("scene-cut-{i}")))
                         .compact()
                         .label(format!(
-                            "{} · {} ticks",
+                            "{} · {}",
                             if cut.enabled { "Include" } else { "Skip" },
-                            cut.time.0
+                            crate::timecode::format_timecode(cut.time, self.project.frame_rate())
                         ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(draft) =
