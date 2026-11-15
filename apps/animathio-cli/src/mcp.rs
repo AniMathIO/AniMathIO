@@ -505,6 +505,14 @@ pub(crate) struct ProposeAutocuts {
     #[serde(default)]
     download_model: bool,
 }
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub(crate) struct LearnNoise {
+    clip: u64,
+    effect: u64,
+    from_ms: f64,
+    to_ms: f64,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AutoDuck {
     /// Voice clip ids (a video clip resolves its linked audio).
@@ -514,7 +522,10 @@ pub(crate) struct AutoDuck {
     #[serde(default)]
     voice_tracks: Vec<u64>,
     /// Music track ids; every audio clip on them gets gain keyframes.
+    #[serde(default)]
     music_tracks: Vec<u64>,
+    #[serde(default)]
+    music_clips: Vec<u64>,
     /// How far the music drops under speech, in dB (default 12).
     depth_db: Option<f64>,
     /// Ramp down finishing when the voice starts, in milliseconds (default 300).
@@ -2067,7 +2078,27 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Auto-duck music under speech. Detects voice activity in the voice clips/tracks (silence detector with hysteresis on the dry mix), bridges short gaps, and writes linear gain keyframes on every audio clip of the music tracks: the music ramps down over attack_ms finishing as the voice starts, holds depth_db below its own gain, and ramps up over release_ms after the voice ends. One undo step. With dry_run=true only the proposal is returned (voice and ducked ranges in ticks, per-clip keyframes). Clips that already have gain keyframes are an error unless replace_existing is true."
+        description = "Learn a persistent denoise profile from a noise-only timeline range of an audio clip, at most 30 seconds. Supply an existing denoise effect id. One undo step."
+    )]
+    async fn learn_noise(
+        &self,
+        Parameters(p): Parameters<LearnNoise>,
+    ) -> Result<CallToolResult, McpError> {
+        let range = TimeRange::new(ms_to_ticks(p.from_ms)?, ms_to_ticks(p.to_ms)?)
+            .map_err(|e| invalid(&e.to_string()))?;
+        let mut backend = self.backend.lock().await;
+        backend
+            .handle(animathio_control::Call::LearnNoise {
+                clip: ClipId(p.clip),
+                effect: animathio_core::EffectId(p.effect),
+                range,
+            })
+            .map_err(mcp_error)?;
+        tool_text(serde_json::json!({"learned":true}))
+    }
+
+    #[tool(
+        description = "Auto-duck music under speech. Detects voice activity in the voice clips/tracks (silence detector with hysteresis on the dry mix), bridges short gaps, and writes linear gain keyframes on the chosen music_clips and every audio clip of the music_tracks: the music ramps down over attack_ms finishing as the voice starts, holds depth_db below its own gain, and ramps up over release_ms after the voice ends. One undo step. With dry_run=true only the proposal is returned (voice and ducked ranges in ticks, per-clip keyframes). Clips that already have gain keyframes are an error unless replace_existing is true."
     )]
     async fn auto_duck(
         &self,
@@ -2086,6 +2117,7 @@ impl McpServer {
             voice_clips: p.voice_clips.into_iter().map(ClipId).collect(),
             voice_tracks: p.voice_tracks.into_iter().map(TrackId).collect(),
             music_tracks: p.music_tracks.into_iter().map(TrackId).collect(),
+            music_clips: p.music_clips.into_iter().map(ClipId).collect(),
             depth_db: p.depth_db.unwrap_or(defaults.depth_db),
             attack: p.attack_ms.map_or(Ok(defaults.attack), ms_to_ticks)?,
             release: p.release_ms.map_or(Ok(defaults.release), ms_to_ticks)?,

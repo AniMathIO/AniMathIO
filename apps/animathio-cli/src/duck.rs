@@ -16,9 +16,12 @@ pub(crate) struct DuckArgs {
     /// Voice track id; may be repeated.
     #[arg(long = "voice-track")]
     voice_tracks: Vec<u64>,
-    /// Music track id to duck; may be repeated, at least one is required.
-    #[arg(long = "music-track", required = true)]
+    /// Music track id to duck; may be repeated.
+    #[arg(long = "music-track")]
     music_tracks: Vec<u64>,
+    /// Individual music audio clip id to duck; may be repeated.
+    #[arg(long = "music-clip")]
+    music_clips: Vec<u64>,
     /// How far the music drops under speech, in dB.
     #[arg(long, default_value = "12")]
     depth_db: f64,
@@ -66,6 +69,7 @@ pub(crate) fn run(args: DuckArgs) -> Result<()> {
         voice_clips: args.voice_clips.into_iter().map(ClipId).collect(),
         voice_tracks: args.voice_tracks.into_iter().map(TrackId).collect(),
         music_tracks: args.music_tracks.into_iter().map(TrackId).collect(),
+        music_clips: args.music_clips.into_iter().map(ClipId).collect(),
         depth_db: args.depth_db,
         attack: args.attack,
         release: args.release,

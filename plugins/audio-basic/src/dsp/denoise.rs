@@ -111,6 +111,8 @@ impl Plan {
 }
 
 struct Denoise {
+    profile: Option<[f64; 16]>,
+    rate: f64,
     plan: std::rc::Rc<Plan>,
     channels: usize,
     floor: f64,
@@ -139,8 +141,11 @@ pub fn new(
     smoothing: f64,
     rate: f64,
     channels: usize,
+    profile: Option<[f64; 16]>,
 ) -> Box<dyn Processor> {
     Box::new(Denoise {
+        profile,
+        rate,
         plan: std::rc::Rc::new(Plan::new()),
         channels,
         floor: 10_f64.powf(-MAX_REDUCTION_DB * strength / 20.0),
@@ -253,6 +258,10 @@ impl Denoise {
                 let mut noise = f64::from(self.cur_min[k]);
                 for sub in &self.subs[..valid] {
                     noise = noise.min(f64::from(sub[k]));
+                }
+                if let Some(profile) = self.profile {
+                    let band = ((k as f64 * self.rate / N as f64 / 500.0) as usize).min(15);
+                    noise = profile[band] * self.rate * 256.0;
                 }
                 let ratio = power[k] / (noise * self.threshold + TINY);
                 let t = ((ratio - 0.5) / 1.5).clamp(0.0, 1.0);

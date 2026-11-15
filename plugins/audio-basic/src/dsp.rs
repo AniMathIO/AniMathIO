@@ -150,6 +150,23 @@ pub const EFFECTS: [EffectDef; 7] = [
             p("strength", "Strength", 0.0, 1.0, 0.7, 0.01),
             p("sensitivity_db", "Sensitivity (dB)", 0.0, 18.0, 6.0, 0.1),
             p("smoothing", "Smoothing", 0.0, 1.0, 0.6, 0.01),
+            p("noise_profile", "Use learned profile", 0.0, 1.0, 0.0, 1.0),
+            p("noise_0", "Noise band 0", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_1", "Noise band 1", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_2", "Noise band 2", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_3", "Noise band 3", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_4", "Noise band 4", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_5", "Noise band 5", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_6", "Noise band 6", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_7", "Noise band 7", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_8", "Noise band 8", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_9", "Noise band 9", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_10", "Noise band 10", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_11", "Noise band 11", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_12", "Noise band 12", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_13", "Noise band 13", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_14", "Noise band 14", 0.0, 1.0, 0.0, 0.000001),
+            p("noise_15", "Noise band 15", 0.0, 1.0, 0.0, 0.000001),
         ],
     },
 ];
@@ -724,7 +741,7 @@ impl Processor for VoiceCleanup {
 }
 
 fn build(effect: &Resolved<'_>, rate: f64, channels: usize) -> Box<dyn Processor> {
-    let v = |id| effect.get(id);
+    let v = |id: &str| effect.get(id);
     match effect.def.id {
         "gain" => Box::new(Gain(db_to_lin(v("gain_db")))),
         "eq3" => Box::new(Eq3 {
@@ -796,6 +813,7 @@ fn build(effect: &Resolved<'_>, rate: f64, channels: usize) -> Box<dyn Processor
             v("smoothing"),
             rate,
             channels,
+            (v("noise_profile") >= 0.5).then(|| std::array::from_fn(|i| v(&format!("noise_{i}")))),
         ),
         other => unreachable!("effect {other} is in EFFECTS"),
     }
@@ -1108,6 +1126,35 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn learned_profile_beats_adaptive_on_continuous_tone() {
+        let frames = 4 * RATE as usize;
+        let clean: Vec<f32> = (0..frames)
+            .map(|n| (0.2 * (2.0 * PI * 440.0 * n as f64 / f64::from(RATE)).sin()) as f32)
+            .collect();
+        let background = noise(0.03, frames, 13);
+        let density = background
+            .iter()
+            .map(|x| f64::from(*x).powi(2))
+            .sum::<f64>()
+            / frames as f64
+            / f64::from(RATE);
+        let mixed: Vec<f32> = clean.iter().zip(&background).map(|(a, b)| a + b).collect();
+        let mut params = vec![("noise_profile".to_owned(), 1.0)];
+        params.extend((0..16).map(|i| (format!("noise_{i}"), density)));
+        let refs: Vec<_> = params.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+        let learned = run("denoise", &refs, &mixed, 1);
+        let adaptive = run("denoise", &[], &mixed, 1);
+        let reference: Vec<_> = std::iter::repeat_n(0.0, 512)
+            .chain(clean)
+            .take(frames)
+            .collect();
+        assert!(
+            error_power(&learned, &reference, RATE as usize)
+                < error_power(&adaptive, &reference, RATE as usize)
+        );
     }
 
     #[test]

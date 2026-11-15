@@ -349,6 +349,29 @@ fn auto_duck_panel_apply_and_undo(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn auto_duck_clip_apply_and_undo(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.select_only(VOICE_CLIP, cx));
+    ui.dispatch(actions::AutoDuck);
+    ui.update(|e, _, cx| {
+        e.duck_review
+            .as_mut()
+            .expect("panel open")
+            .params
+            .music_clips = vec![MUSIC_CLIP];
+        e.analyse_duck(cx);
+    });
+    assert!(ui.read(|e| e.duck_review.as_ref().unwrap().proposal.is_some()));
+    ui.update(|e, _, cx| e.apply_duck(cx));
+    assert!(ui.read(|e| e.duck_review.is_none()));
+    assert_ne!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
 fn video_effect_card_param_edit_and_undo(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
@@ -842,4 +865,44 @@ fn slide_tool(cx: &mut TestAppContext) {
 #[gpui::test]
 fn rolling_tool(cx: &mut TestAppContext) {
     additional_tool_scenario(cx, "n", Tool::Rolling);
+}
+#[gpui::test]
+fn learn_noise_in_out_apply_and_undo(cx: &mut TestAppContext) {
+    let (mut project, assets) = voice_and_music();
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(MUSIC_CLIP),
+        index: 0,
+        effect: EffectInstance {
+            id: EffectId(777),
+            plugin: "org.animathio.audio-basic".into(),
+            effect: "denoise".into(),
+            params: BTreeMap::new(),
+            bypass: false,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.select_only(MUSIC_CLIP, cx);
+        e.marks.set_in(Time(0));
+        e.marks.set_out(Time(100 * MS));
+    });
+    ui.dispatch(actions::LearnNoise);
+    ui.read(|e| {
+        assert_eq!(
+            e.project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .find(|c| c.id == MUSIC_CLIP)
+                .unwrap()
+                .audio_effects[0]
+                .params["noise_profile"],
+            1.0
+        );
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
 }

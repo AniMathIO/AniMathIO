@@ -389,6 +389,16 @@ pub enum Call {
         /// Snapshot-bound proposal.
         proposal: crate::DuckProposal,
     },
+    /// Learn a persistent noise profile from a timeline range.
+    #[serde(rename = "audio.learn_noise")]
+    LearnNoise {
+        /// Audio clip.
+        clip: ClipId,
+        /// Existing denoise instance.
+        effect: animathio_core::EffectId,
+        /// Noise-only timeline interval, at most 30 seconds.
+        range: animathio_core::TimeRange,
+    },
     /// List the project's timeline markers.
     #[serde(rename = "markers.list")]
     MarkersList,

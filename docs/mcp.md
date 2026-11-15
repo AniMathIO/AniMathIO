@@ -69,7 +69,8 @@ gets a JSON-RPC error instead of a result.
 | `audio_effects.add` | `{ params: { clip? \| track?, plugin, effect, params?, index? } }` | `{ chain, effect_id }` where `chain` is `{ "Clip": id }` or `{ "Track": id }`; give exactly one of `clip` and `track`; unspecified params use the plugin defaults; unknown or out-of-range params are rejected |
 | `timeline.propose_autocuts` | `{ params: { silence_db?, hysteresis_db?, metric?, min_silence?, keep_short_pauses?, padding_before?, padding_after?, clip?, track?, range?, all_unlocked_tracks?, fillers?, language?, filler_words?, model?, download_model? } }` | snapshot-bound proposal `{ revision, tracks, cuts: [{ range: { start, end }, reason, confidence, enabled }], total_saved }`; all times are ticks; no mutation |
 | `timeline.apply_autocuts` | `{ proposal }` | removed ranges and total removed ticks; one undoable ripple batch; rejects stale project revisions, invalid/overlapping ranges, locked tracks and missing companion tracks |
-| `timeline.propose_duck` | `{ params: { voice_clips?, voice_tracks?, music_tracks, depth_db?, attack?, release?, min_gap?, threshold_db?, hysteresis_db?, range?, replace_existing? } }` | snapshot-bound proposal `{ revision, voice, ducked, clips: [{ clip, track, keys: [{ time, gain }] }], replace_existing }`; times are ticks (key times clip-local); no mutation |
+| `audio.learn_noise` | `{ clip, effect, range: { start, end } }` | Learn sixteen noise-power bands for an existing clip denoise instance from a noise-only timeline range; one undoable batch |
+| `timeline.propose_duck` | `{ params: { voice_clips?, voice_tracks?, music_tracks?, music_clips?, depth_db?, attack?, release?, min_gap?, threshold_db?, hysteresis_db?, range?, replace_existing? } }` | snapshot-bound proposal `{ revision, voice, ducked, clips: [{ clip, track, keys: [{ time, gain }] }], replace_existing }`; times are ticks (key times clip-local); no mutation |
 | `timeline.apply_duck` | `{ proposal }` | `{ clips, keyframes, ducked }`; writes the proposal's gain keyframes as one undoable batch; rejects stale project revisions |
 | `timeline.trim_silence` | `{ params: { threshold_db?, min_silence?, padding?, track? } }` | removed ranges; detects silent audio (RMS in 10 ms windows) and ripple-removes it from every track as one undo step; `min_silence` and `padding` are ticks |
 | `markers.list` | — | `[Marker]` sorted by time: `{ id, time, duration?, name, color, note }` (ticks) |
@@ -158,7 +159,8 @@ clears its undo history.
 | `remove_range` | Cut a section out of every track | `from_ms`, `to_ms`, `ripple` (default true: later content shifts left and an explicit canvas duration shrinks), `markers` (`auto` default, `ride` or `stay`: markers after the cut move with the content; markers inside collapse onto the cut) |
 | `propose_autocuts` | Review automatic cuts without editing; returns a proposal with tick ranges, reason, heuristic confidence and enabled toggles | `silence_db` (-40), `min_silence_ms` (500), `hysteresis_db` (3), `peak` (false), `keep_short_pauses` (true), `padding_before_ms` / `padding_after_ms` (100), optional `clip`, `track`, paired `from_ms` / `to_ms`, `all_unlocked_tracks` (false), `fillers` (false), `language`, `filler_words`, `model` (base), `download_model` (false) |
 | `apply_autocuts` | Apply the reviewed proposal as one undo step; selected tracks and linked companions ripple together | `proposal`: the exact object from `propose_autocuts`, with unwanted `cuts[].enabled` set to false. Coordinates are ticks in the original project; stale proposals are rejected |
-| `auto_duck` | Duck music under speech: detect voice activity in the voice clips/tracks and write gain keyframes on the audio clips of the music tracks, one undo step. `dry_run` only returns the proposal (voice and ducked tick ranges, per-clip keyframes) | `music_tracks` (required), `voice_clips` / `voice_tracks` (at least one), `depth_db` (12), `attack_ms` (300), `release_ms` (500), `min_gap_ms` (400), `threshold_db` (-40), `hysteresis_db` (3), paired `from_ms` / `to_ms`, `replace_existing` (false), `dry_run` (false) |
+| `learn_noise` | Learn a persistent denoise profile from a noise-only audio clip interval, one undo step | `clip`, `effect`, `from_ms`, `to_ms` |
+| `auto_duck` | Duck music under speech: detect voice activity in the voice clips/tracks and write gain keyframes on the audio clips of the music tracks, one undo step. `dry_run` only returns the proposal (voice and ducked tick ranges, per-clip keyframes) | `music_tracks` / `music_clips` (at least one target), `voice_clips` / `voice_tracks` (at least one), `depth_db` (12), `attack_ms` (300), `release_ms` (500), `min_gap_ms` (400), `threshold_db` (-40), `hysteresis_db` (3), paired `from_ms` / `to_ms`, `replace_existing` (false), `dry_run` (false) |
 | `list_markers` | List timeline markers | no arguments; returns `{markers: [{id, time_ms, ticks, duration_ms, name, color, note}]}` |
 | `add_marker` | Add a marker (one undo step) | `time_ms`, optional `name`, `color`, `note`, `duration_ms`; returns `{id}` |
 | `remove_marker` | Remove a marker (one undo step) | `id` |
@@ -497,7 +499,7 @@ entry threshold `threshold_db`, release `hysteresis_db` above it) inverted over 
 analysed span. Voice regions closer than the larger of `min_gap` and `attack + release` are
 bridged into one dip, because the music could not recover in between.
 
-Each region becomes a linear `gain` curve on every audio clip of the music tracks:
+Each region becomes a linear `gain` curve on the selected music clips and every audio clip of the music tracks (the union is deduplicated):
 1 → `10^(-depth_db/20)` over `attack`, finishing when the voice starts (the analysis is
 offline, so the music is already down on the first word), held through the voice, back to 1
 over `release` starting when the voice ends. Keys are written in clip-local ticks and
@@ -553,3 +555,7 @@ Both tools use `command.apply`: `Command::SetClipSpeed` has fields
 and `ripple`; `Command::InsertFrameHold` has `id`, `at` and `frames`.
 See [retiming semantics](architecture.md#clip-retiming) for bounds, ripple,
 transitions and automation behavior.
+
+Individual music targets must be audio clips on unlocked tracks. Voice clips (including resolved linked audio) cannot also be music targets. In the Auto duck panel, use the Music clips to duck buttons alongside the track buttons; CLI accepts repeated `--music-clip` ids.
+
+Denoise learning uses a noise-only interval inside an audio clip (32 ms to 30 s). The editor action Clip > Learn denoise from In/Out uses the selected audio clip and its first denoise instance. Add denoise first, then set In and Out around noise without speech. MCP `learn_noise` accepts the instance id explicitly. Learning uses the dry 16 kHz mono mix, including clip gain (track gain is excluded), with at most sixteen analysis frames. Sixteen 500 Hz power-density bands are stored as numeric effect parameters; the last band is extrapolated above 8 kHz. Learn again after changing clip gain or upstream processing. Undo restores the complete previous profile.

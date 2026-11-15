@@ -29,7 +29,7 @@ mod bindings {
         fn describe() -> Manifest {
             Manifest {
                 name: "Basic Audio Effects".to_owned(),
-                version: "1.1.0".to_owned(),
+                version: "1.2.0".to_owned(),
                 description: "Gain, EQ, compressor, gate, high-pass, voice cleanup and denoise"
                     .to_owned(),
                 kinds: vec!["audio-effect".into()],

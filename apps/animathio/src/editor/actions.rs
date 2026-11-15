@@ -45,6 +45,7 @@ actions!(
         GenerateSubtitles,
         AutomaticCuts,
         AutoDuck,
+        LearnNoise,
         AddMarker,
         PreviousMarker,
         NextMarker,
@@ -775,6 +776,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     )
     .on_action(cx.listener(|this, _: &AutoReframe, _, cx| this.open_reframe(cx)))
     .on_action(cx.listener(|this, _: &AutomaticCuts, _, cx| this.open_autocut(cx)))
+    .on_action(cx.listener(|this, _: &LearnNoise, _, cx| this.learn_noise(cx)))
     .on_action(cx.listener(|this, _: &AutoDuck, _, cx| this.open_duck(cx)))
     .on_action(cx.listener(|this, _: &AddMarker, window, cx| {
         if this.fields.any_focused(window, cx) {

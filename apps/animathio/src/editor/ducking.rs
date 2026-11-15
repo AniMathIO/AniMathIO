@@ -27,7 +27,7 @@ fn ticks(seconds: f64) -> Time {
 impl DuckReview {
     fn ready(&self) -> bool {
         (!self.params.voice_clips.is_empty() || !self.params.voice_tracks.is_empty())
-            && !self.params.music_tracks.is_empty()
+            && (!self.params.music_tracks.is_empty() || !self.params.music_clips.is_empty())
     }
     fn invalidate(&mut self) {
         self.proposal = None;
@@ -182,7 +182,12 @@ impl Editor {
             .tracks()
             .iter()
             .enumerate()
-            .filter(|(_, t)| review.params.music_tracks.contains(&t.id()))
+            .filter(|(_, t)| {
+                review.params.music_tracks.contains(&t.id())
+                    || t.clips()
+                        .keys()
+                        .any(|id| review.params.music_clips.contains(id))
+            })
             .flat_map(|(row, _)| proposal.ducked.iter().map(move |range| (*range, row)))
             .collect()
     }
@@ -219,7 +224,7 @@ impl Editor {
                     .child("Auto duck"),
             )
             .child(div().text_size(crate::style::type_size::XS).text_color(theme.muted_foreground).child(
-                "Lower the music under speech. Pick where the voice is and which tracks to duck.",
+                "Lower the music under speech. Pick where the voice is and which tracks or clips to duck.",
             ));
         let audio_tracks: Vec<(TrackId, String)> = self
             .project
@@ -312,6 +317,44 @@ impl Editor {
                 })),
         );
         panel = chips(panel, "Music tracks to duck", true, cx);
+        let mut clip_targets = div().flex().flex_wrap().gap_1();
+        for track in self.project.tracks() {
+            for clip in track
+                .clips()
+                .values()
+                .filter(|c| matches!(c.kind, animathio_core::ClipKind::Audio(_)))
+            {
+                let id = clip.id;
+                let on = review.params.music_clips.contains(&id);
+                clip_targets = clip_targets.child(
+                    Button::new(("duck-music-clip", id.0 as usize))
+                        .compact()
+                        .label(format!("Clip {}", id.0))
+                        .icon(icons::icon(if on {
+                            IconName::Check
+                        } else {
+                            IconName::Minus
+                        }))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(r) = this.duck_review.as_mut() {
+                                if r.params.music_clips.contains(&id) {
+                                    r.params.music_clips.retain(|c| *c != id);
+                                } else {
+                                    r.params.music_clips.push(id);
+                                }
+                            }
+                            this.analyse_duck(cx);
+                        })),
+                );
+            }
+        }
+        panel = panel
+            .child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .child("Music clips to duck"),
+            )
+            .child(clip_targets);
         let labels = [
             format!("Duck depth: -{:.1} dB", review.params.depth_db),
             format!("Attack: {}", timecode(review.params.attack)),
