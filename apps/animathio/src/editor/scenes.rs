@@ -96,6 +96,7 @@ impl Editor {
         }
         cx.notify();
     }
+    #[allow(clippy::too_many_lines)]
     pub(super) fn scene_view(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let panel = self.scene_panel.as_ref()?;
         let mut view = div()
@@ -136,6 +137,12 @@ impl Editor {
                 )),
             );
         }
+        view = view.child(div().text_size(crate::style::type_size::XS).child(format!(
+            "Sensitivity {:.0}% · minimum {} frames · delete under {} frames (leaves gaps)",
+            panel.params.sensitivity * 100.,
+            panel.params.min_shot_frames,
+            panel.params.delete_shorter_than_frames
+        )));
         if !panel.busy {
             for (label, value) in [("Low sensitivity", 0.25), ("Medium", 0.5), ("High", 0.75)] {
                 let mut params = panel.params.clone();

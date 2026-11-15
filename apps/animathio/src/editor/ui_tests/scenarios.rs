@@ -910,6 +910,8 @@ fn learn_noise_in_out_apply_and_undo(cx: &mut TestAppContext) {
 #[gpui::test]
 fn scene_menu_requires_video_and_does_not_mutate(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    ui.dispatch(NewProject);
+    let before = ui.read(|e| e.project.clone());
     ui.dispatch(actions::SceneCuts);
     ui.read(|editor| {
         assert!(editor.scene_panel.is_none());
@@ -919,7 +921,7 @@ fn scene_menu_requires_video_and_does_not_mutate(cx: &mut TestAppContext) {
                 .as_ref()
                 .is_some_and(|e| e.contains("video clip"))
         );
-        assert_eq!(editor.project, Project::default());
+        assert_eq!(editor.project, before);
     });
 }
 
@@ -949,7 +951,7 @@ fn scene_review_split_and_undo(cx: &mut TestAppContext) {
         clip: Clip::new(
             ClipId(1),
             ClipKind::Video(asset.clone()),
-            TimeRange::new(Time(0), Time(3 * TICKS_PER_SECOND)).unwrap(),
+            TimeRange::new(Time(0), Time(4 * TICKS_PER_SECOND)).unwrap(),
         ),
     }
     .apply(&mut project)
@@ -961,7 +963,7 @@ fn scene_review_split_and_undo(cx: &mut TestAppContext) {
     ui.settle();
     ui.read(|e| assert!(e.scene_panel.as_ref().is_some_and(|p| !p.busy)));
     ui.update(|e, _, cx| e.apply_scenes(false, cx));
-    ui.read(|e| assert_eq!(e.project.tracks()[0].clips().len(), 2));
+    ui.read(|e| assert_eq!(e.project.tracks()[0].clips().len(), 3));
     ui.dispatch(Undo);
     assert_eq!(ui.read(|e| e.project.clone()), before);
 }

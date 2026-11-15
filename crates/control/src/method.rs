@@ -435,11 +435,16 @@ pub enum Call {
     },
     /// Propose hard scene changes without mutating the project.
     #[serde(rename = "video.detect_scenes")]
-    DetectScenes { params: crate::SceneParams },
+    DetectScenes {
+        /// Video selection and detection settings.
+        params: crate::SceneParams,
+    },
     /// Apply reviewed scene splits or markers in one undo step.
     #[serde(rename = "video.split_at_scenes")]
     SplitAtScenes {
+        /// Reviewed snapshot-bound proposal.
         draft: crate::SceneDraft,
+        /// Add markers instead of splitting clips.
         markers: bool,
     },
     /// Reframe video clips to a subject-following portrait or square canvas.

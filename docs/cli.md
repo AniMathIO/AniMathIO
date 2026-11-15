@@ -37,6 +37,7 @@ Commands:
   duck            Lower music under speech with gain keyframes, as one undoable edit
   markers         List, add or remove timeline markers
   beats           Detect tempo and beats offline; optionally add markers at the beats
+  scenes          Detect hard scene changes, split clips or add markers
   reframe         Reframe video to portrait or square with offline subject tracking
   models          List or download the local Whisper speech models
   new-sample      Write a three-second animated image/text/shape demo archive
@@ -893,4 +894,23 @@ animathio-cli scenes project.amio markers --clip 1 -o marked.amio
 ```
 
 <!-- help:scenes -->
+```text
+Detect hard scene changes, split clips or add markers
+
+Usage: animathio-cli scenes [OPTIONS] <PROJECT> <MODE>
+
+Arguments:
+  <PROJECT>  
+  <MODE>     [possible values: detect, split, markers]
+
+Options:
+      --clip <CLIP>                                              
+      --track <TRACK>                                            
+      --sensitivity <SENSITIVITY>                                [default: 0.5]
+      --min-shot-frames <MIN_SHOT_FRAMES>                        [default: 6]
+      --delete-shorter-than-frames <DELETE_SHORTER_THAN_FRAMES>  [default: 0]
+  -o, --output <OUTPUT>                                          
+      --overwrite                                                
+  -h, --help                                                     Print help
+```
 <!-- /help:scenes -->

@@ -75,7 +75,7 @@ mod tests {
         let mut d = Detector::default();
         for i in 0..30 {
             let mut frame = vec![f64::from(i) / 30.; 64];
-            frame[i as usize % 64] = 1.;
+            frame[usize::try_from(i).unwrap() % 64] = 1.;
             assert!(!d.sample(&frame, Time(i64::from(i)), 0.18, Time(0)));
         }
     }

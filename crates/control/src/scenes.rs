@@ -17,11 +17,15 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SceneParams {
+    /// Selected video clip.
     pub clip: Option<ClipId>,
+    /// Selected video track, mutually exclusive with clip.
     pub track: Option<TrackId>,
     /// Larger values detect smaller changes; range 0..=1.
     pub sensitivity: f64,
+    /// Minimum spacing between cuts in project frames.
     pub min_shot_frames: u32,
+    /// Delete resulting shots shorter than this many frames; zero disables.
     pub delete_shorter_than_frames: u32,
 }
 impl Default for SceneParams {
@@ -38,11 +42,14 @@ impl Default for SceneParams {
 /// One independently selectable cut, on the project frame grid.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SceneCut {
+    /// Original video clip identity.
     pub clip: ClipId,
+    /// Absolute timeline cut position.
     pub time: Time,
+    /// Review toggle.
     pub enabled: bool,
     /// 96 by 54 grayscale review thumbnail.
-    #[serde(default)]
+    #[serde(default, with = "thumbnail_encoding")]
     pub thumbnail: Vec<u8>,
 }
 /// Proposals are valid only for the project snapshot that was analysed.
@@ -51,6 +58,7 @@ pub struct SceneDraft {
     expected: Project,
     #[serde(default)]
     delete_shorter_than_frames: u32,
+    /// Independently selectable proposed cuts.
     pub cuts: Vec<SceneCut>,
 }
 fn invalid(s: &str) -> ControlError {
@@ -58,6 +66,7 @@ fn invalid(s: &str) -> ControlError {
 }
 /// Decode through the regular media backend at four samples per second.
 #[allow(
+    clippy::too_many_lines,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
@@ -109,7 +118,7 @@ pub fn detect_scenes(
             unreachable!()
         };
         let bytes = assets
-            .get(&asset)
+            .get(asset)
             .ok_or_else(|| invalid("missing video asset"))?;
         if AssetId::of(bytes) != *asset {
             return Err(invalid("video asset hash mismatch"));
@@ -118,8 +127,8 @@ pub fn detect_scenes(
             .open_video_bytes("media", bytes.clone().into())
             .map_err(|e| ControlError::Other(e.to_string()))?;
         let mut detector = Detector::default();
-        for local in
-            (0..clip.range.end.0 - clip.range.start.0).step_by(usize::try_from(step).unwrap())
+        for local in (0..clip.range.end.0 - clip.range.start.0)
+            .step_by(usize::try_from(step).map_err(|_| invalid("unsupported sample step"))?)
         {
             if cancel.load(Ordering::Relaxed) {
                 return Err(invalid("cancelled"));
@@ -253,4 +262,20 @@ pub fn scene_command(
             .collect();
     }
     Ok(Command::Batch { commands })
+}
+
+// Compact wire representation keeps large reviewed proposals under transport limits.
+mod thumbnail_encoding {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+        let encoded = String::deserialize(deserializer)?;
+        if encoded.len() > 96 * 54 * 2 {
+            return Err(serde::de::Error::custom("thumbnail too large"));
+        }
+        STANDARD.decode(encoded).map_err(serde::de::Error::custom)
+    }
 }
