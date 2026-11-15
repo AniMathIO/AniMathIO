@@ -995,7 +995,7 @@ impl Render for Editor {
         if let Some(panel) = self.autocut_panel(cx) {
             root = root.child(panel);
         }
-        if let Some(panel) = self.duck_panel(cx) {
+        if let Some(panel) = self.duck_panel(window, cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.subtitle_panel(cx) {

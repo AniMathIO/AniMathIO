@@ -65,6 +65,116 @@ fn start_screen_then_new_project(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn library_import_at_an_occupied_playhead_leaves_the_timeline_alone(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    let bytes = wav(&[(0.25, 1200)]);
+    let path = super::config_dir().join("library-import-occupied.wav");
+    std::fs::write(&path, &bytes).unwrap();
+    // The Import media picker uses this library-only path, even at time zero.
+    ui.update(|editor, _, cx| editor.import_paths(&[path], None, cx));
+    ui.read(|editor| {
+        assert_eq!(editor.project.tracks(), before.tracks());
+        assert!(
+            editor
+                .project
+                .assets()
+                .contains_key(&animathio_core::AssetId::of(&bytes))
+        );
+    });
+    let imported = ui.read(|editor| editor.project.clone());
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), imported);
+}
+
+#[gpui::test]
+fn launcher_library_import_creates_a_drop_target_in_one_undo_step(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    let before = ui.read(|editor| editor.project.clone());
+    let path = super::config_dir().join("library-import-launcher.wav");
+    std::fs::write(&path, wav(&[(0.25, 1000)])).unwrap();
+    ui.update(|editor, _, cx| editor.import_paths(&[path], None, cx));
+    ui.read(|editor| {
+        assert!(!editor.is_start_screen());
+        assert_eq!(editor.project.assets().len(), 1);
+        assert_eq!(editor.project.tracks().len(), 1);
+        assert_eq!(clip_count(editor), 0);
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+}
+
+#[gpui::test]
+fn add_track_button_is_reachable_at_720p_and_undoable(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.settle();
+    let bounds = ui
+        .cx
+        .debug_bounds("timeline-add-track")
+        .expect("visible Add track button");
+    assert!(bounds.bottom() <= gpui::px(720.));
+    assert!(bounds.right() <= gpui::px(1280.));
+    ui.click(bounds.center(), gpui::Modifiers::default());
+    ui.read(|editor| {
+        assert_eq!(editor.project.tracks().len(), before.tracks().len() + 1);
+        assert!(editor.project.tracks().last().unwrap().clips().is_empty());
+        assert_eq!(
+            &editor.project.tracks()[..before.tracks().len()],
+            before.tracks()
+        );
+    });
+    let added = ui.read(|editor| editor.project.clone());
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), added);
+}
+
+#[gpui::test]
+fn preferences_enter_saves_and_invalid_input_keeps_the_dialog_open(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let original = ui.read(|editor| editor.preferences.clone());
+    let edit_autosave = |ui: &mut Ui, text: &str| {
+        let bounds = ui
+            .cx
+            .debug_bounds("preferences-autosave")
+            .unwrap_or_else(|| panic!("Autosave input missing before entering {text}"));
+        ui.click(bounds.center(), gpui::Modifiers::default());
+        ui.press("secondary-a");
+        ui.cx.simulate_input(text);
+    };
+    ui.update(Editor::open_preferences);
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    edit_autosave(&mut ui, "17");
+    ui.press("enter");
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    assert_eq!(ui.read(|editor| editor.preferences.autosave_seconds), 17);
+    assert_eq!(crate::preferences::Preferences::load().autosave_seconds, 17);
+    assert!(ui.cx.debug_bounds("preferences-autosave").is_none());
+
+    ui.update(Editor::open_preferences);
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    edit_autosave(&mut ui, "-1");
+    ui.press("enter");
+    assert_eq!(ui.read(|editor| editor.preferences.autosave_seconds), 17);
+    assert!(ui.cx.debug_bounds("preferences-autosave").is_some());
+    edit_autosave(&mut ui, "23");
+    let save = ui.cx.debug_bounds("dialog-apply").unwrap();
+    ui.click(save.center(), gpui::Modifiers::default());
+    assert_eq!(ui.read(|editor| editor.preferences.autosave_seconds), 23);
+    assert_eq!(crate::preferences::Preferences::load().autosave_seconds, 23);
+    original.save().unwrap();
+}
+
+#[gpui::test]
 fn split_undo_redo_through_actions(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
@@ -866,6 +976,108 @@ fn slide_tool(cx: &mut TestAppContext) {
 fn rolling_tool(cx: &mut TestAppContext) {
     additional_tool_scenario(cx, "n", Tool::Rolling);
 }
+
+#[gpui::test]
+fn rate_stretch_at_the_top_corner_does_not_drag_a_fade(cx: &mut TestAppContext) {
+    let (project, assets) = voice_pair();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| editor.select_only(PAIR_FIRST, cx));
+    ui.click(ruler_point(&ui, Time(0)), gpui::Modifiers::default());
+    ui.press("r");
+    let corner = ui.read(|editor| {
+        let layout = editor.current_layout();
+        let end = editor.find_clip(PAIR_FIRST).unwrap().range.end;
+        gpui::point(
+            editor.timeline_bounds.origin.x + gpui::px(timeline::time_to_x(&layout, end) - 3.),
+            editor.timeline_bounds.origin.y
+                + gpui::px(layout.ruler_height + 3. + super::super::FADE_HANDLE_INSET),
+        )
+    });
+    ui.cx
+        .simulate_mouse_down(corner, gpui::MouseButton::Left, gpui::Modifiers::default());
+    ui.settle();
+    assert!(ui.read(|editor| matches!(
+        editor.gesture,
+        Some(TimelineGesture::Trim(TrimDrag {
+            tool: Tool::RateStretch,
+            ..
+        }))
+    )));
+    let destination = corner - gpui::point(gpui::px(30.), gpui::px(0.));
+    ui.cx.simulate_mouse_move(
+        destination,
+        gpui::MouseButton::Left,
+        gpui::Modifiers::default(),
+    );
+    ui.cx.simulate_mouse_up(
+        destination,
+        gpui::MouseButton::Left,
+        gpui::Modifiers::default(),
+    );
+    ui.settle();
+    ui.read(|editor| {
+        let clip = editor.find_clip(PAIR_FIRST).unwrap();
+        assert!(clip.time_map.speed.percent() > 100.);
+        assert!(clip.animations.is_empty(), "no accidental fade keyframes");
+    });
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.dispatch(Redo);
+    assert!(
+        ui.read(|editor| editor
+            .find_clip(PAIR_FIRST)
+            .unwrap()
+            .time_map
+            .speed
+            .percent())
+            > 100.
+    );
+}
+
+#[gpui::test]
+fn auto_duck_does_not_default_to_a_selected_image_as_the_voice(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let image = project
+        .tracks()
+        .iter()
+        .flat_map(|track| track.clips().values())
+        .find(|clip| matches!(clip.kind, animathio_core::ClipKind::Image(_)))
+        .unwrap()
+        .id;
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| editor.select_only(image, cx));
+    ui.dispatch(actions::AutoDuck);
+    ui.read(|editor| {
+        assert_eq!(
+            editor.duck_review.as_ref().unwrap().params.voice_clips,
+            Vec::<ClipId>::new()
+        );
+    });
+}
+
+#[gpui::test]
+fn auto_duck_can_be_scrolled_and_cancelled_at_720p(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.dispatch(actions::AutoDuck);
+    let panel = ui.cx.debug_bounds("duck-review").unwrap();
+    assert!(panel.bottom() <= gpui::px(720.));
+    ui.cx.simulate_event(gpui::ScrollEvent {
+        position: panel.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-1600.))),
+        ..Default::default()
+    });
+    ui.settle();
+    let cancel = ui.cx.debug_bounds("duck-cancel").unwrap();
+    assert!(cancel.top() >= panel.top());
+    assert!(cancel.bottom() <= panel.bottom());
+    ui.click(cancel.center(), gpui::Modifiers::default());
+    assert!(ui.read(|editor| editor.duck_review.is_none()));
+}
+
 #[gpui::test]
 fn learn_noise_in_out_apply_and_undo(cx: &mut TestAppContext) {
     let (mut project, assets) = voice_and_music();

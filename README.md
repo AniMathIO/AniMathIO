@@ -275,7 +275,8 @@ splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later
 on the same track as one undo step. S toggles snapping and an engaged snap draws an
 yellow line. The additional edit tools preserve source intervals (Rate Stretch),
 shift source in/out (Slip), compensate touching neighbours (Slide) or move a shared
-edit point (Rolling Edit). Each drag is one undo step; the floating readout shows
+edit point (Rolling Edit). These edge tools also work at the fade-handle corners.
+Each drag is one undo step; the floating readout shows
 the delta, speed and source timecodes. Equals/minus zooms and backslash fits the timeline.
 Shift+Left/Right steps the playhead five frames; Ctrl/Cmd+Shift+K adds edits on all unlocked tracks.
 Q and W ripple-trim the previous/next edit to the playhead, Ctrl/Cmd+D applies the default
@@ -303,7 +304,14 @@ separately from projects. Interface → UI scale defaults to the desktop's text 
 (KDE forceFontDPI/Xft.dpi, GNOME text-scaling-factor, Windows text-size slider), can be
 set to 80–200% in 10% steps and applies live; `ANIMATHIO_UI_SCALE=150` overrides it for
 a run.
+Enter in Preferences saves the form, just like **Save**; invalid autosave values
+keep it open and show an error.
 
+**Import media** (Ctrl/Cmd+I or the library's plus button) adds files to the library
+without inserting clips or changing the playhead. Drag a library card onto a timeline
+track to place it, or click it to add at the playhead. Use **Add track** in the timeline
+header to create an empty foreground layer; adding a track is undoable. Tracks later
+in the timeline list composite over earlier tracks.
 Drop OS media files on the pool to import assets, or on a timeline track to import
 and place them at that position. Multiple files are placed consecutively. The Plugins
 tab's **Write on…** action replaces a selected LaTeX clip's reveal animation with
@@ -409,9 +417,11 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 ![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
 
 Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto duck…,
-`animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks,
+`animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks or clips,
 tune depth and attack/release, and review the ducked spans on the timeline first; see the
 [CLI reference](docs/cli.md#duck) and [rules](docs/mcp.md#auto-ducking).
+Only audio/video selections default to the voice source. The review panel scrolls
+in shorter windows so its actions stay reachable.
 
 The launcher lists five bundled project templates and saved user templates, with CPU
 thumbnail cards. Creating one opens Fill placeholders for text and picked media;

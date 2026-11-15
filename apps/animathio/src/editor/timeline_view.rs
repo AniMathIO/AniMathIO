@@ -162,7 +162,10 @@ impl Editor {
             cx.notify();
             return;
         }
-        if let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
+        // Explicit edge tools take priority over the selected clip's fade and
+        // keyframe handles, including at its upper and lower corners.
+        let edge_tool = matches!(self.tool, Tool::RateStretch | Tool::Rolling);
+        if !edge_tool && let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
             self.select_only(clip_id, cx);
             self.selected_field = None;
             self.selected_keyframe = None;
@@ -177,7 +180,7 @@ impl Editor {
             cx.notify();
             return;
         }
-        if let Some(selection) = self.hit_keyframe(&layout, x, y) {
+        if !edge_tool && let Some(selection) = self.hit_keyframe(&layout, x, y) {
             let clip = self.find_clip(selection.clip_id).cloned();
             self.select_only(selection.clip_id, cx);
             self.selected_field = None;

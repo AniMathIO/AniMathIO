@@ -135,9 +135,25 @@ impl Editor {
                                 IconName::Film,
                                 "Timeline",
                                 div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
                                     .text_size(crate::style::type_size::XS)
                                     .text_color(style::hex(color::TEXT_SECONDARY))
-                                    .child(format!("{} tracks", self.project.tracks().len())),
+                                    .child(format!("{} tracks", self.project.tracks().len()))
+                                    .child(
+                                        Button::new("timeline-add-track")
+                                            .debug_selector(|| "timeline-add-track".into())
+                                            .ghost()
+                                            .compact()
+                                            .icon(icons::icon(IconName::Plus))
+                                            .label("Add track")
+                                            .tooltip("Add an empty foreground track")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.add_timeline_track(cx);
+                                                window.focus(&this.panel_focus[0], cx);
+                                            })),
+                                    ),
                             ))
                             .child(div().flex_1().min_h_0().child(self.timeline_panel(cx))),
                     )),

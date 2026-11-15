@@ -10,6 +10,31 @@ use gpui_component::input::{InputEvent, InputState};
 use super::*;
 
 impl Editor {
+    /// Expose the core's track creation in the timeline, including after the
+    /// last track was undone. Later model tracks composite over earlier ones.
+    pub(super) fn add_timeline_track(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self
+            .project
+            .tracks()
+            .iter()
+            .map(|track| track.id().0)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+        else {
+            self.error = Some("Cannot add another track: track IDs exhausted".into());
+            cx.notify();
+            return;
+        };
+        self.execute(
+            &Command::AddTrack {
+                track: Track::new(TrackId(id), format!("Track {id}")),
+                index: self.project.tracks().len(),
+            },
+            cx,
+        );
+    }
+
     /// The reconciled selection. The primary clip always belongs to it, and a
     /// selection set that went stale (the primary was set directly) collapses to
     /// the primary alone.

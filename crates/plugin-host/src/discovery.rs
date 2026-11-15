@@ -78,6 +78,12 @@ fn search_dirs(
             allow_reserved_ids: false,
         });
     }
+    // An explicit development override often points at the same directory as
+    // the executable-relative fallback. Keep the first source (and its trust
+    // policy), rather than loading every bundle again and reporting false ID
+    // conflicts. Canonical paths also catch relative paths and symlink aliases.
+    let mut seen = std::collections::BTreeSet::new();
+    dirs.retain(|dir| seen.insert(dir.path.canonicalize().unwrap_or_else(|_| dir.path.clone())));
     dirs
 }
 
@@ -128,5 +134,34 @@ mod tests {
         ));
         assert!(super::super::check_plugin_id("org.animathio.latex", true).is_ok());
         assert!(super::super::check_plugin_id("com.example.math", false).is_ok());
+    }
+
+    #[test]
+    fn override_and_bundled_alias_load_the_directory_once() {
+        let root = std::env::temp_dir().join(format!(
+            "animathio-discovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let plugins = root.join("plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        let canonical_plugins = plugins.canonicalize().unwrap();
+        let dirs = search_dirs(
+            Some(root.join("plugins/../plugins")),
+            Some(&root.join("animathio")),
+            Some(&root),
+        );
+        assert_eq!(
+            dirs.iter()
+                .filter(|dir| dir.path.canonicalize().ok().as_ref() == Some(&canonical_plugins))
+                .count(),
+            1
+        );
+        assert_eq!(dirs[0].path, root.join("plugins/../plugins"));
+        assert!(dirs[0].allow_reserved_ids);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

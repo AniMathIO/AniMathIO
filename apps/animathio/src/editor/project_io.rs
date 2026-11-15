@@ -218,12 +218,9 @@ impl Editor {
         else {
             return;
         };
-        let track = self
-            .project
-            .tracks()
-            .first()
-            .map_or(TrackId(self.next_id), Track::id);
-        self.import_paths(&paths, Some((track, self.position)), cx);
+        // Import builds the library. Timeline placement is a separate click or
+        // drag, so an occupied playhead cannot prevent importing another file.
+        self.import_paths(&paths, None, cx);
     }
 
     pub(super) fn import_paths(
@@ -244,6 +241,7 @@ impl Editor {
             self.error = Some(error.clone());
         }
         if !imported.is_empty() {
+            let imported_count = imported.len();
             let result = if matches!(&command, Command::Batch { commands } if commands.is_empty()) {
                 Ok(())
             } else {
@@ -254,6 +252,11 @@ impl Editor {
                     Arc::make_mut(&mut self.assets).extend(imported);
                     self.worker.load(self.assets.clone());
                     self.after_edit(cx);
+                    if placement.is_none() {
+                        self.notices.push(crate::style::Toast::info(format!(
+                            "Imported {imported_count} media files. Drag them to the timeline."
+                        )));
+                    }
                 }
                 Err(error) => self.error = Some(error.0),
             }
@@ -274,7 +277,10 @@ impl Editor {
         let mut commands = Vec::new();
         let mut imported = BTreeMap::new();
         let mut errors = Vec::new();
-        if let Some((track, _)) = placement
+        let initial_track = placement
+            .map(|(track, _)| track)
+            .or_else(|| draft.tracks().is_empty().then_some(TrackId(*next)));
+        if let Some(track) = initial_track
             && !draft.tracks().iter().any(|t| t.id() == track)
         {
             let command = Command::AddTrack {
