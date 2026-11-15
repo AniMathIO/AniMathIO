@@ -5,6 +5,7 @@ use animathio_control::{
     LATEX_SNIPPETS, LATEX_TEMPLATES, MathObjectDraft, MathObjectKind, math_object_command,
     math_object_draft, math_object_range,
 };
+use animathio_core::ParamValue;
 use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{
     Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction, Textarea,
@@ -234,7 +235,7 @@ impl Editor {
                 .text_size(px(11.))
                 .text_color(hex(color::TEXT_SECONDARY))
                 .child(
-                    "Choose an object to edit. + adds defaults; drag a preview to the timeline.",
+                    "Choose an object to configure. + adds defaults; drag a preview to the timeline.",
                 ),
         );
         for (i, kind) in MathObjectKind::ALL.into_iter().enumerate() {
@@ -861,7 +862,7 @@ impl Render for MathEditor {
                     .child(if self.busy {
                         "Updating preview…"
                     } else {
-                        "Live plugin preview; geometry uses a ten-unit guide grid"
+                        "Live preview; ten units across the short edge, positive Y upward"
                     }),
             );
         if let Some(error) = &self.error {
