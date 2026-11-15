@@ -136,9 +136,13 @@ def main() -> None:
             table_rows.append((label, "MiB", ki_range_to_mib(cell.get("v1", "n/a")), ki_range_to_mib(cell.get("v2", "n/a"))))
         if scenario.startswith("export"):
             stats = metric_stats(rows, "output_bytes")
-            cell = {app: fmt_cell([row["output_bytes"] for row in rows if row.get("output_bytes") is not None and row["app"] == app], 0) for app in stats}
+            cell = {
+                app: fmt_cell([row["output_bytes"] / KB for row in rows if row.get("output_bytes") is not None and row["app"] == app], 0)
+                for app in stats
+            }
             entry["output_bytes"] = {"cell": cell, "stats": stats}
-            table_rows.append(("exported MP4 size", "KiB", cell.get("v1", "n/a"), cell.get("v2", "n/a")))
+            duration = "60 s" if scenario.endswith("60") else "10 s"
+            table_rows.append((f"exported MP4 size, {duration} project", "KiB", cell.get("v1", "n/a"), cell.get("v2", "n/a")))
         results["scenarios"][scenario] = entry
 
     (out / "results.json").write_text(json.dumps(results, indent=1))

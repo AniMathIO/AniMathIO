@@ -136,17 +136,18 @@ with open(sys.argv[1], "w") as fh:
     json.dump(info, fh, indent=1)
 PY
 
-  # Versions of both apps.
+  # Versions of both apps. The v2 binaries may come from another checkout
+  # (--v2-bin), so record that checkout's commit, not this repo's HEAD.
   V1_VERSION="$(node -p "require('$V1_SRC/package.json').version")"
   V1_ELECTRON="$(node -p "require('$V1_SRC/package.json').devDependencies.electron || require('$V1_SRC/package.json').dependencies.electron || 'unknown'")"
   V2_VERSION="$("$V2_BIN/animathio" --version | awk '{print $2}')"
-  V2_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+  V2_BIN_COMMIT="$(git -C "$(dirname "$V2_BIN")" rev-parse --short HEAD 2>/dev/null || echo unknown)"
   V1_COMMIT="$(git -C "$V1_SRC" rev-parse --short HEAD)"
   python3 - "$RAW/versions.json" <<PY
 import json, sys
 json.dump({
   "v1": {"version": "$V1_VERSION", "electron": "$V1_ELECTRON", "commit": "$V1_COMMIT"},
-  "v2": {"version": "$V2_VERSION", "commit": "$V2_COMMIT"},
+  "v2": {"version": "$V2_VERSION", "commit": "$V2_BIN_COMMIT", "binary_path": "$V2_BIN"},
 }, open(sys.argv[1], "w"), indent=1)
 PY
 
