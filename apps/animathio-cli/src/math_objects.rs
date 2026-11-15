@@ -71,23 +71,12 @@ pub(super) fn run(action: MathAction) -> Result<()> {
             )?;
             let (command, added) = math_object_command(&bundle.project, &draft, range, None)?;
             let mut host = plugin_host()?;
-            let (plugin, mut params) = draft.parameters((
-                bundle.project.width().max(1),
-                bundle.project.height().max(1),
-            ))?;
+            let size = animathio_export::resolution(&bundle.project);
+            let (plugin, mut params) = draft.parameters(size)?;
             if matches!(kind, MathObjectKind::Latex | MathObjectKind::Plot) {
                 params["strict_errors"] = serde_json::json!(true);
             }
-            host.render_clip(
-                &plugin,
-                &BTreeMap::new(),
-                &params,
-                0,
-                (
-                    bundle.project.width().max(1),
-                    bundle.project.height().max(1),
-                ),
-            )?;
+            host.render_clip(&plugin, &BTreeMap::new(), &params, 0, size)?;
             let mut candidate = bundle.project.clone();
             command.apply(&mut candidate)?;
             let mut commands = vec![command];

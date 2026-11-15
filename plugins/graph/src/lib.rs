@@ -844,6 +844,7 @@ impl Guest for GraphPlugin {
                 parse_expression(expression).map_err(|message| Diagnostic {
                     code: "invalid-expression".into(),
                     message,
+                    metadata: vec![],
                 })?;
             }
         }

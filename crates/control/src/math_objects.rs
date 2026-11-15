@@ -153,7 +153,11 @@ impl MathObjectDraft {
                         "Hello, AniMathIO!"
                     },
                 ),
-                number("size", "Font size (% of short edge)", "6"),
+                number(
+                    "size",
+                    "Font size (% of short edge)",
+                    if self.kind == K::Latex { "12" } else { "6" },
+                ),
             ],
             K::Point => {
                 let mut f = center();

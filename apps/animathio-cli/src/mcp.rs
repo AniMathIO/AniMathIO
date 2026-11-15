@@ -1247,7 +1247,7 @@ impl McpServer {
             .ok_or_else(|| invalid("time overflow"))?;
         let range = TimeRange::new(start, Time(end)).map_err(|e| invalid(&e.to_string()))?;
         let mut host = super::plugin_host().map_err(|e| invalid(&e.to_string()))?;
-        let size = (state.project.width().max(1), state.project.height().max(1));
+        let size = animathio_export::resolution(&state.project);
         let (plugin, mut params) = draft.parameters(size).map_err(mcp_error)?;
         if matches!(
             kind,

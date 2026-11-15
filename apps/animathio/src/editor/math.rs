@@ -21,7 +21,11 @@ pub(super) struct MathLibrary {
 
 // The preview host is shared across worker jobs, retaining compiled components and
 // bounded plugin output caches while drafts change. Never acquire it on the UI thread.
-fn render_preview(draft: &MathObjectDraft, size: (u32, u32)) -> Result<Arc<RenderImage>, String> {
+fn render_preview(
+    draft: &MathObjectDraft,
+    size: (u32, u32),
+    thumbnail: bool,
+) -> Result<Arc<RenderImage>, String> {
     static HOST: std::sync::OnceLock<std::sync::Mutex<Option<PluginHost>>> =
         std::sync::OnceLock::new();
     let mut guard = HOST
@@ -31,17 +35,22 @@ fn render_preview(draft: &MathObjectDraft, size: (u32, u32)) -> Result<Arc<Rende
     let host = guard
         .as_mut()
         .ok_or("Build the first-party plugins to preview math objects")?;
-    preview(draft, size, host)
+    preview(draft, size, host, thumbnail)
 }
 
 fn preview(
     draft: &MathObjectDraft,
     size: (u32, u32),
     host: &mut PluginHost,
+    thumbnail: bool,
 ) -> Result<Arc<RenderImage>, String> {
     let (plugin, mut params) = draft.parameters(size).map_err(|e| e.to_string())?;
     if matches!(draft.kind, MathObjectKind::Latex | MathObjectKind::Plot) {
         params["strict_errors"] = serde_json::json!(true);
+    }
+    if thumbnail && plugin == "org.animathio.shapes" {
+        params["stroke_width"] =
+            serde_json::json!(f64::from(size.0.min(size.1)) / f64::from(size.0) * 0.014);
     }
     host.render_clip(&plugin, &BTreeMap::new(), &params, 0, size)
         .map_err(|e| e.to_string())?;
@@ -82,6 +91,23 @@ fn preview(
     )
     .map_err(|e| e.to_string())?;
     command.apply(&mut project).map_err(|e| e.to_string())?;
+    if thumbnail && plugin == "org.animathio.shapes" {
+        let id = project
+            .tracks()
+            .last()
+            .and_then(|t| t.clips().keys().next())
+            .copied()
+            .ok_or("missing preview clip")?;
+        Command::SetPluginParam {
+            id,
+            name: "stroke_width".into(),
+            value: Some(ParamValue::Number(
+                params["stroke_width"].as_f64().unwrap_or(0.01),
+            )),
+        }
+        .apply(&mut project)
+        .map_err(|e| e.to_string())?;
+    }
     let scene = host.resolve(&evaluate(&project, Time(0)), size);
     let frame = animathio_render::render(&scene, &mut animathio_render::RenderCtx::default(), size)
         .map_err(|e| e.to_string())?;
@@ -178,7 +204,17 @@ impl Editor {
                             .into_iter()
                             .enumerate()
                             .filter_map(|(i, k)| {
-                                render_preview(&MathObjectDraft::new(k), (360, 240))
+                                let mut draft = MathObjectDraft::new(k);
+                                if matches!(k, MathObjectKind::Latex | MathObjectKind::Text) {
+                                    draft.fields.insert("size".into(), "28".into());
+                                }
+                                if k == MathObjectKind::Text {
+                                    draft.fields.insert("source".into(), "Text".into());
+                                }
+                                if k == MathObjectKind::Point {
+                                    draft.fields.insert("radius".into(), "0.35".into());
+                                }
+                                render_preview(&draft, (180, 120), true)
                                     .ok()
                                     .map(|p| (i, p))
                             })
@@ -554,7 +590,7 @@ impl MathEditor {
                 return;
             }
             let result = cx
-                .background_spawn(async move { render_preview(&draft, size) })
+                .background_spawn(async move { render_preview(&draft, size, false) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.generation == generation {
