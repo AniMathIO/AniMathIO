@@ -99,7 +99,7 @@ fn geometry_preserves_math_units_in_landscape_and_portrait() {
         let w = params["width"].as_f64().unwrap() * f64::from(size.0);
         let h = params["height"].as_f64().unwrap() * f64::from(size.1);
         assert!((w - h).abs() < 1e-8);
-        assert!((w / f64::from(size.0.min(size.1)) - 0.32).abs() < 1e-8);
+        assert!((w / f64::from(size.0.min(size.1)) - 0.4).abs() < 1e-8);
     }
 }
 
@@ -114,7 +114,8 @@ fn formula_palette_typesets_and_write_preset_is_atomic() {
     for &(label, source) in LATEX_SNIPPETS.iter().chain(LATEX_TEMPLATES) {
         let mut draft = MathObjectDraft::new(MathObjectKind::Latex);
         draft.fields.insert("source".into(), source.into());
-        let (plugin, params) = draft.parameters((640, 360)).unwrap();
+        let (plugin, mut params) = draft.parameters((640, 360)).unwrap();
+        params["strict_errors"] = serde_json::json!(true);
         host.render_clip(&plugin, &BTreeMap::new(), &params, 0, (640, 360))
             .unwrap_or_else(|e| panic!("{label}: {e}"));
     }
@@ -200,4 +201,59 @@ fn each_object_edits_without_losing_timing_or_transform_and_undoes_exactly() {
         undo.apply(&mut project).unwrap();
         assert_eq!(project, before, "{kind:?}");
     }
+}
+
+#[test]
+fn every_object_renders_real_ink_in_landscape_and_portrait() {
+    let mut host = animathio_plugin_host::test_support::host();
+    for size in [(640, 360), (360, 640)] {
+        for kind in MathObjectKind::ALL {
+            let draft = MathObjectDraft::new(kind);
+            let (plugin, mut params) = draft.parameters(size).unwrap();
+            if kind == MathObjectKind::Latex {
+                params["strict_errors"] = serde_json::json!(true);
+            }
+            host.render_clip(&plugin, &Default::default(), &params, 0, size)
+                .unwrap_or_else(|e| panic!("{kind:?} {size:?}: {e}"));
+            let mut project = Project::default();
+            Command::SetSettings {
+                width: size.0,
+                height: size.1,
+                frame_rate: project.frame_rate(),
+                background: [0, 0, 0, 255],
+                duration: Time(0),
+            }
+            .apply(&mut project)
+            .unwrap();
+            math_object_command(&project, &draft, math_object_range(Time(0)).unwrap(), None)
+                .unwrap()
+                .0
+                .apply(&mut project)
+                .unwrap();
+            let scene = host.resolve(&animathio_core::evaluate(&project, Time(0)), size);
+            let frame = animathio_render::render(&scene, &mut Default::default(), size).unwrap();
+            assert!(
+                frame
+                    .pixels
+                    .chunks_exact(4)
+                    .any(|p| p[0] != 0 || p[1] != 0 || p[2] != 0),
+                "{kind:?} {size:?} must produce visible ink"
+            );
+        }
+    }
+}
+
+#[test]
+fn invalid_latex_reports_an_error_in_strict_preview_but_legacy_render_still_works() {
+    let mut host = animathio_plugin_host::test_support::host();
+    let mut draft = MathObjectDraft::new(MathObjectKind::Latex);
+    draft.fields.insert("source".into(), r"\frac{".into());
+    let (plugin, mut params) = draft.parameters((640, 360)).unwrap();
+    host.render_clip(&plugin, &Default::default(), &params, 0, (640, 360))
+        .unwrap();
+    params["strict_errors"] = serde_json::json!(true);
+    assert!(
+        host.render_clip(&plugin, &Default::default(), &params, 0, (640, 360))
+            .is_err()
+    );
 }

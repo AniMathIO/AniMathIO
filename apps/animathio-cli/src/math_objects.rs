@@ -68,10 +68,13 @@ pub(super) fn run(action: MathAction) -> Result<()> {
             )?;
             let (command, added) = math_object_command(&bundle.project, &draft, range, None)?;
             let mut host = plugin_host()?;
-            let (plugin, params) = draft.parameters((
+            let (plugin, mut params) = draft.parameters((
                 bundle.project.width().max(1),
                 bundle.project.height().max(1),
             ))?;
+            if kind == MathObjectKind::Latex {
+                params["strict_errors"] = serde_json::json!(true);
+            }
             host.render_clip(
                 &plugin,
                 &BTreeMap::new(),

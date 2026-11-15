@@ -39,7 +39,10 @@ fn preview(
     size: (u32, u32),
     host: &mut PluginHost,
 ) -> Result<Arc<RenderImage>, String> {
-    let (plugin, params) = draft.parameters(size).map_err(|e| e.to_string())?;
+    let (plugin, mut params) = draft.parameters(size).map_err(|e| e.to_string())?;
+    if draft.kind == MathObjectKind::Latex {
+        params["strict_errors"] = serde_json::json!(true);
+    }
     host.render_clip(&plugin, &BTreeMap::new(), &params, 0, size)
         .map_err(|e| e.to_string())?;
     let mut project = Project::default();
@@ -135,9 +138,8 @@ impl Editor {
         let editor = cx.entity().downgrade();
         let session = self.project_session;
         let size = project_size(&self.project);
-        let panel = cx.new(|cx| {
-            MathEditor::new(draft, editor, session, range, edit, true, size, window, cx)
-        });
+        let panel = cx
+            .new(|cx| MathEditor::new(draft, editor, session, range, edit, true, size, window, cx));
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
                 .title(if edit.is_some() {
@@ -232,6 +234,10 @@ impl Editor {
                     .cursor_pointer()
                     .focusable()
                     .tab_index(0)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.pool_drag = None;
+                        this.open_math(kind, None, window, cx);
+                    }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                             this.open_math(kind, None, window, cx);
@@ -247,11 +253,7 @@ impl Editor {
                                 cx.listener(move |this, _, _, cx| {
                                     this.arm_pool_drag(PoolDrag::Math(kind), cx)
                                 }),
-                            )
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.pool_drag = None;
-                                this.open_math(kind, None, window, cx);
-                            })),
+                            ),
                     )
                     .child(
                         div()
@@ -303,7 +305,17 @@ impl Editor {
             let session = self.project_session;
             let size = project_size(&self.project);
             let state = cx.new(|cx| {
-                MathEditor::new(draft, editor, session, range, Some(id), false, size, window, cx)
+                MathEditor::new(
+                    draft,
+                    editor,
+                    session,
+                    range,
+                    Some(id),
+                    false,
+                    size,
+                    window,
+                    cx,
+                )
             });
             self.math_inspector = Some((id, signature, state));
         }
@@ -410,28 +422,30 @@ impl MathEditor {
                 fields.insert(key.into(), state);
             }
         }
-        let rgba = animathio_control::parse_caption_color(&draft.color)
-            .unwrap_or([255, 255, 255, 255]);
+        let rgba =
+            animathio_control::parse_caption_color(&draft.color).unwrap_or([255, 255, 255, 255]);
         let color = cx.new(|cx| {
             let mut state = ColorPickerState::new(window, cx);
             state.set_value(fields::to_hsla(rgba), window, cx);
             state
         });
-        subscriptions.push(cx.subscribe(&color, |this, _, event: &ColorPickerEvent, cx| {
-            let ColorPickerEvent::Change(Some(hsla)) = event else {
-                return;
-            };
-            let rgba = Rgba::from(*hsla);
-            let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
-            this.draft.color = format!(
-                "#{:02x}{:02x}{:02x}{:02x}",
-                channel(rgba.r),
-                channel(rgba.g),
-                channel(rgba.b),
-                channel(rgba.a)
-            );
-            this.schedule_preview(cx);
-        }));
+        subscriptions.push(
+            cx.subscribe(&color, |this, _, event: &ColorPickerEvent, cx| {
+                let ColorPickerEvent::Change(Some(hsla)) = event else {
+                    return;
+                };
+                let rgba = Rgba::from(*hsla);
+                let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
+                this.draft.color = format!(
+                    "#{:02x}{:02x}{:02x}{:02x}",
+                    channel(rgba.r),
+                    channel(rgba.g),
+                    channel(rgba.b),
+                    channel(rgba.a)
+                );
+                this.schedule_preview(cx);
+            }),
+        );
         let mut this = Self {
             draft,
             dialog,
@@ -573,6 +587,9 @@ impl MathEditor {
         }
     }
     fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy || self.error.is_some() {
+            return;
+        }
         let draft = self.draft.clone();
         let range = self.range;
         let edit = self.edit;
@@ -749,22 +766,20 @@ impl Render for MathEditor {
                 form = form.child(palette);
             }
         }
-        form = form
-            .child("Colour")
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(ColorPicker::new(&self.color))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(self.draft.color.clone()),
-                    ),
-            );
+        form = form.child("Colour").child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(ColorPicker::new(&self.color))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(self.draft.color.clone()),
+                ),
+        );
         if self.edit.is_none() && self.draft.kind == MathObjectKind::Latex {
             form = form.child(
                 Switch::new("math-write")

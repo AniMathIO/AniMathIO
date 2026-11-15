@@ -995,3 +995,8 @@ Graph's item language and ABI are unchanged. Animations 1.1.0 allows the existin
 typewriter entrance/exit presets on LaTeX as well as Text, animating `reveal`.
 These are additive plugin-version changes under ABI 1.x: no WIT records or worlds
 change, and old components and saved parameters continue to load.
+
+LaTeX 1.2.0 adds optional `strict_errors` (default false). Math draft previews and
+CLI/MCP validation set it for their validation call, so typesetting failures return
+an inline diagnostic. Saved clips retain the tolerant error-frame rendering used
+by older projects.

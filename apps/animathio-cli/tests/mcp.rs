@@ -564,7 +564,17 @@ fn typed_math_objects_share_panel_defaults_and_undo() {
     let (mut child, mut stdout, mut stdin) = spawn_mcp(&empty_project(dir.path()));
     initialize(&mut stdin, &mut stdout);
     for kind in [
-        "latex", "text", "point", "line", "vector", "polygon", "circle", "ellipse", "polar",
+        "latex",
+        "text",
+        "point",
+        "line",
+        "vector",
+        "polygon",
+        "plot",
+        "circle",
+        "ellipse",
+        "cartesian",
+        "polar",
     ] {
         let before = call(&mut stdin, &mut stdout, "get_project_state", json!({}));
         let added = call(

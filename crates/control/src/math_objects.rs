@@ -231,8 +231,8 @@ impl MathObjectDraft {
         }
         let color = crate::parse_caption_color(&self.color)?;
         let short = f64::from(size.0.min(size.1).max(1));
-        let sx = short / f64::from(size.0.max(1)) * 0.08;
-        let sy = short / f64::from(size.1.max(1)) * 0.08;
+        let sx = short / f64::from(size.0.max(1)) * 0.1;
+        let sy = short / f64::from(size.1.max(1)) * 0.1;
         let point = |x: f64, y: f64| [0.5 + x * sx, 0.5 - y * sy];
         let mut path = Vec::new();
         let mut params = json!({"units":"normalized", "shape":"path", "fill":[0,0,0,0], "stroke":color, "stroke_width":short / f64::from(size.0.max(1)) * 0.003});
