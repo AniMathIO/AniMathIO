@@ -505,6 +505,14 @@ pub(crate) struct ProposeAutocuts {
     #[serde(default)]
     download_model: bool,
 }
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+pub(crate) struct LearnNoise {
+    clip: u64,
+    effect: u64,
+    from_ms: f64,
+    to_ms: f64,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct AutoDuck {
     /// Voice clip ids (a video clip resolves its linked audio).
@@ -2067,6 +2075,26 @@ impl McpServer {
             .propose_autocuts(params)
             .map_err(mcp_error)?;
         tool_text(serde_json::to_value(result).map_err(|e| invalid(&e.to_string()))?)
+    }
+
+    #[tool(
+        description = "Learn a persistent denoise profile from a noise-only timeline range of an audio clip, at most 30 seconds. Supply an existing denoise effect id. One undo step."
+    )]
+    async fn learn_noise(
+        &self,
+        Parameters(p): Parameters<LearnNoise>,
+    ) -> Result<CallToolResult, McpError> {
+        let range = TimeRange::new(ms_to_ticks(p.from_ms)?, ms_to_ticks(p.to_ms)?)
+            .map_err(|e| invalid(&e.to_string()))?;
+        let mut backend = self.backend.lock().await;
+        backend
+            .handle(animathio_control::Call::LearnNoise {
+                clip: ClipId(p.clip),
+                effect: animathio_core::EffectId(p.effect),
+                range,
+            })
+            .map_err(mcp_error)?;
+        tool_text(serde_json::json!({"learned":true}))
     }
 
     #[tool(

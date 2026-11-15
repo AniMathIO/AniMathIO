@@ -4,6 +4,7 @@ mod duck;
 mod markers;
 mod math_objects;
 mod mcp;
+mod noise;
 mod reframe;
 mod retime;
 mod transcribe;
@@ -178,6 +179,11 @@ enum Action {
         args: autocut::AutocutArgs,
     },
     /// Lower music under speech with gain keyframes, as one undoable edit.
+    /// Learn a denoise profile from a noise-only timeline interval.
+    LearnNoise {
+        #[command(flatten)]
+        args: noise::NoiseArgs,
+    },
     Duck {
         #[command(flatten)]
         args: duck::DuckArgs,
@@ -501,6 +507,7 @@ fn run(cli: Cli) -> Result<()> {
         }
         Action::Transcribe { args } => transcribe::run(&args)?,
         Action::Autocut { args } => autocut::run(args)?,
+        Action::LearnNoise { args } => noise::run(args)?,
         Action::Duck { args } => duck::run(args)?,
         Action::Markers { args } => markers::run_markers(args)?,
         Action::Beats { args } => markers::run_beats(args)?,

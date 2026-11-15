@@ -468,6 +468,22 @@ impl Editor {
                     "duck analysis is handled asynchronously".into(),
                 ));
             }
+            Call::LearnNoise {
+                clip,
+                effect,
+                range,
+            } => {
+                let command = animathio_control::learn_noise_command(
+                    &self.project,
+                    &self.assets,
+                    clip,
+                    effect,
+                    range,
+                )?;
+                self.history.execute(&mut self.project, &command)?;
+                self.after_edit(cx);
+                serde_json::to_value(())?
+            }
             Call::ApplyDuck { proposal } => {
                 let result =
                     animathio_control::apply_duck(&mut self.project, &mut self.history, &proposal)?;

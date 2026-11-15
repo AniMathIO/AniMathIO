@@ -10,6 +10,8 @@
 //! socket; clients must send it with every request and it is compared in
 //! constant time.
 
+mod noise;
+pub use noise::{learn_noise_command, noise_bands};
 mod animations;
 mod authoring;
 mod math_objects;

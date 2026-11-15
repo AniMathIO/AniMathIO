@@ -461,3 +461,40 @@ fn clip_targets_union_with_tracks_and_undo_once() {
     params.music_clips = vec![ClipId(1)];
     assert!(propose_duck(&project, &assets, &params).is_err());
 }
+
+#[test]
+fn learned_noise_profile_is_one_undoable_batch() {
+    use animathio_core::{AudioChain, EffectId, EffectInstance};
+    let (mut project, assets) = session();
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(ClipId(2)),
+        index: 0,
+        effect: EffectInstance {
+            id: EffectId(88),
+            plugin: "org.animathio.audio-basic".into(),
+            effect: "denoise".into(),
+            params: BTreeMap::new(),
+            bypass: false,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    let before = project.clone();
+    let command = animathio_control::learn_noise_command(
+        &project,
+        &assets,
+        ClipId(2),
+        EffectId(88),
+        range(0, 100),
+    )
+    .unwrap();
+    assert!(matches!(command, Command::Batch { .. }));
+    let mut history = History::default();
+    history.execute(&mut project, &command).unwrap();
+    assert_eq!(
+        project.tracks()[1].clips()[&ClipId(2)].audio_effects[0].params["noise_profile"],
+        1.0
+    );
+    history.undo(&mut project).unwrap();
+    assert_eq!(project, before);
+}
