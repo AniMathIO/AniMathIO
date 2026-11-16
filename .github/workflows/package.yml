@@ -21,7 +21,7 @@ name: Package
 on:
   workflow_dispatch:
   pull_request:
-    branches: [v2]
+    branches: [main]
     paths:
       - .github/workflows/package.yml
       - Cargo.toml

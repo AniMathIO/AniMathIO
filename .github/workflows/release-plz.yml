@@ -4,7 +4,7 @@ name: Release Plz
 # Releases themselves stay disabled until the 2.0 swap: see release-plz.toml.
 on:
   push:
-    branches: [v2]
+    branches: [main]
 
 permissions:
   contents: write # push the release-plz branch + commits
@@ -33,21 +33,21 @@ jobs:
   # Releases are disabled until the 2.0 swap (see release-plz.toml).
   # To enable, uncomment this job after flipping git_tag_enable/git_release_enable:
   #
-  # release:
-  #   name: Release
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-  #       with:
-  #         fetch-depth: 0
-  #         fetch-tags: true
-  #     - name: Install Rust toolchain
-  #       run: rustup toolchain install stable --profile minimal
-  #     - name: Tag and create GitHub release
-  #       uses: release-plz/action@f36720ba01927d9927fba665fcdf802e12bc264b # v0.5.147
-  #       with:
-  #         command: release
-  #         version: "0.4.3"
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Tag and create GitHub release
+        uses: release-plz/action@f36720ba01927d9927fba665fcdf802e12bc264b # v0.5.147
+        with:
+          command: release
+          version: "0.4.3"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

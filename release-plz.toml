@@ -60,11 +60,11 @@ name = "animathio-cli"
 # ENABLE AT THE SWAP, together with the baseline tag: while no `v2.*` tag exists
 # release-plz fails ("cargo metadata ... worktree") instead of doing nothing, which
 # would turn the `release-plz` workflow red.
-# git_only = true
+git_only = true
 # One changelog at the repository root (default would be apps/animathio-cli/CHANGELOG.md).
 changelog_path = "CHANGELOG.md"
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
 # Releases are disabled until the 2.0 swap. Flip both to `true` to enable.
-git_tag_enable = false
-git_release_enable = false
+git_tag_enable = true
+git_release_enable = true
