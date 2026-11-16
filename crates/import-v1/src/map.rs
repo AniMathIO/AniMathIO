@@ -961,6 +961,11 @@ fn import_breathe(
     project: &mut Project,
     report: &mut Report,
 ) -> Result<(), ImportError> {
+    // A huge clip would otherwise repeat the beat billions of times, with two
+    // keyframes per step, so the beat count is capped like the other
+    // approximations. All arithmetic stays in `f64` until the cap, so `u32`
+    // can never overflow.
+    const MAX_BEATS: u32 = 500;
     let start_ms = slide.in_ms.unwrap_or(0.0);
     let clip_ms = meta.duration_ticks as f64 * 1000.0 / TICKS_PER_SECOND as f64;
     let end_ms = clip_ms - slide.out_ms.unwrap_or(0.0);
@@ -973,16 +978,32 @@ fn import_breathe(
         return Ok(());
     }
     let period_ms = (1000.0 * 60.0 / 72.0) * 4.0;
-    let beats = (duration_ms / period_ms).floor() as u32;
-    if beats == 0 {
+    let raw_beats = (duration_ms / period_ms).floor();
+    if !raw_beats.is_finite() || raw_beats <= 0.0 {
         report.warn(format!(
             "animation {}: breathe window too short; skipped",
             animation.id
         ));
         return Ok(());
     }
+    let beats = if raw_beats >= f64::from(MAX_BEATS) {
+        report.warn(format!(
+            "animation {}: breathe would repeat {} beats; capped at {MAX_BEATS}",
+            animation.id, raw_beats as u64
+        ));
+        MAX_BEATS
+    } else {
+        // Below the cap the value is a small finite integer: exact cast.
+        raw_beats as u32
+    };
     let up = 1.05;
-    let steps = beats * 2;
+    let Some(steps) = beats.checked_mul(2) else {
+        report.warn(format!(
+            "animation {}: breathe repeats too many beats; skipped",
+            animation.id
+        ));
+        return Ok(());
+    };
     for index in 0..steps {
         let fraction = if steps > 1 {
             f64::from(index) / f64::from(steps - 1)

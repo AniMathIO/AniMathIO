@@ -363,6 +363,76 @@ fn breathe_animates_scale_and_mafs_reveal_falls_back_to_opacity() {
 }
 
 #[test]
+fn a_huge_breathe_window_is_capped_and_warned_instead_of_looping() {
+    const MAX_BEAT_KEYS: usize = 500 * 2;
+    // regression: `beats = duration/period as u32` overflowed and the loop
+    // emitted billions of keyframes for a clip like timeFrame {0, 8e12}.
+    let project = json!({
+        "backgroundColor": "#111111",
+        "audios": [],
+        "videos": [],
+        "images": [],
+        "editorElements": [
+            element(
+                "text-1",
+                "text",
+                "Text 1",
+                "",
+                placement(50.0, 100.0, 200.0, 40.0),
+                0.0,
+                8.0e12,
+                json!({
+                    "text": "hello",
+                    "fontSize": 24.0,
+                    "fontWeight": 400.0,
+                    "color": "#ff0000",
+                }),
+            ),
+        ],
+        "maxTime": 30000.0,
+        "animations": [
+            { "id": "a1", "targetId": "text-1", "duration": 4000.0, "type": "breathe", "properties": {} },
+        ],
+        "currentKeyFrame": 0,
+        "fps": 30.0,
+        "selectedVideoFormat": "mp4",
+        "canvas_width": 800.0,
+        "canvas_height": 600.0,
+        "mediaFiles": [],
+    });
+    let bytes = deflate(&project);
+    let start = std::time::Instant::now();
+    let (project, _assets, report) = import_v1_with_report(&bytes).unwrap();
+    // The bounded import returns almost immediately; the keyframe count is the
+    // real guard, the time bound only documents the DoS regression.
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    let clip = tracks(&project)[0].1.clone();
+    for (name, property) in [
+        ("scaleX", animathio_core::TransformProperty::ScaleX),
+        ("scaleY", animathio_core::TransformProperty::ScaleY),
+    ] {
+        let animation = clip
+            .animations
+            .iter()
+            .find(|a| a.target == animathio_core::Target::Transform(property))
+            .unwrap();
+        assert!(
+            animation.keys.keys().len() <= MAX_BEAT_KEYS,
+            "{name}: {} keys",
+            animation.keys.keys().len()
+        );
+    }
+    assert!(
+        report
+            .warnings()
+            .iter()
+            .any(|w| w.contains("breathe would repeat") && w.contains("capped at 500")),
+        "warnings: {:?}",
+        report.warnings()
+    );
+}
+
+#[test]
 fn imports_plain_json_without_deflate_compression() {
     let (deflated, _, _, _) = fixture();
     // Re-inflate to get the raw JSON, then import it uncompressed.
