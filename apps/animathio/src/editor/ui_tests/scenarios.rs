@@ -85,6 +85,22 @@ fn window_state_persists_through_the_config_dir(cx: &mut TestAppContext) {
     std::fs::remove_file(&path).ok();
 }
 
+/// The launcher shows no canvas yet, so the status bar hides the placeholder
+/// resolution/duration chips until a project exists.
+#[gpui::test]
+fn launcher_status_bar_hides_placeholder_resolution_and_duration(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    assert!(ui.read(Editor::is_start_screen));
+    ui.read(|editor| assert!(!editor.status_summary_visible()));
+    ui.dispatch(NewProject);
+    ui.press("enter");
+    ui.read(|editor| {
+        assert!(!editor.is_start_screen());
+        assert!(editor.status_summary_visible());
+        assert_eq!(editor.project.tracks().len(), 1);
+    });
+}
+
 #[gpui::test]
 fn start_screen_then_new_project(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());

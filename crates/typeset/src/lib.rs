@@ -906,6 +906,25 @@ mod tests {
     }
 
     #[test]
+    fn tfrac_renders_smaller_than_dfrac() {
+        let engine = TypesetEngine::new().unwrap();
+        let tfrac = engine
+            .typeset(r"\tfrac{1}{2}", MathMode::Latex, 48.0)
+            .unwrap();
+        let dfrac = engine
+            .typeset(r"\dfrac{1}{2}", MathMode::Latex, 48.0)
+            .unwrap();
+        let tfrac_height = tfrac.bbox.max_y - tfrac.bbox.min_y;
+        let dfrac_height = dfrac.bbox.max_y - dfrac.bbox.min_y;
+        // LaTeX textstyle: numerator/denominator in scriptstyle (~0.7x of
+        // display), so \tfrac must be clearly smaller than \dfrac.
+        assert!(
+            tfrac_height < dfrac_height * 0.8,
+            "tfrac height {tfrac_height} not clearly smaller than dfrac height {dfrac_height}"
+        );
+    }
+
+    #[test]
     fn typst_mode_matches_latex_style_output() {
         let engine = TypesetEngine::new().unwrap();
         let result = engine.typeset("frac(a,b)", MathMode::Typst, 48.0).unwrap();
