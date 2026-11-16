@@ -1,14 +1,27 @@
-# AniMathIO 2.0 release notes (draft)
+# AniMathIO 2.0 release notes
 
-> Draft for the `v2.0.0` GitHub release. The generated `CHANGELOG.md` (release-plz and
-> git-cliff) is folded in at the swap; this page is the human-written summary. The
-> remaining release steps are in [`release-checklist.md`](release-checklist.md).
+> The human-written summary for the `v2.0.0` GitHub release; the full list of changes is
+> in [`CHANGELOG.md`](../CHANGELOG.md).
 
 AniMathIO 2.0 is a from-scratch rewrite of the editor in Rust. The core is a small,
 reliable video editor (media clips, a multi-track timeline, transforms and keyframes,
 audio, preview and export); the math and creative features are sandboxed WebAssembly
 plugins, so the core stays small and every capability has a versioned API. Projects use
 the new `.amio` format. AniMathIO 1.x moves to a read-only `legacy` branch.
+
+## Faster and lighter than 1.x
+
+Measured on one Linux machine under Xvfb, medians of three runs (details and caveats in
+[`benchmarks.md`](benchmarks.md)):
+
+| | 1.8.3 (Electron) | 2.0 (Rust) |
+| --- | ---: | ---: |
+| Export, 60 s 1080p30 MP4 | 116.8 s | 37.4 s |
+| Export, 10 s 1080p30 MP4 | 20.4 s | 6.5 s |
+| Open a project | 1.08 s | 0.21 s |
+| Start to a usable window | 0.81 s | 0.20 s |
+| Memory, idle with a project open | 923 MiB | 487 MiB |
+| Installed size | 658 MiB | 293 MiB |
 
 ## What's new since v1
 
