@@ -586,6 +586,7 @@ pub(crate) struct Editor {
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
     plugin_host: Option<PluginHost>,
+    community: community_plugins::Browser,
     plugins: Vec<PluginDescriptor>,
     tool: Tool,
     marks: InOut,
@@ -788,6 +789,7 @@ impl Editor {
             timeline_scroll: 0.0,
             gesture: None,
             plugin_host,
+            community: community_plugins::Browser::default(),
             plugins,
             tool: Tool::default(),
             marks: InOut::default(),
@@ -868,6 +870,7 @@ impl Editor {
             waveform_paths: std::rc::Rc::default(),
             env,
         };
+        this.refresh_community_inventory(cx);
         if recovered {
             this.notices
                 .push(crate::style::Toast::info("Recovered from autosave"));
