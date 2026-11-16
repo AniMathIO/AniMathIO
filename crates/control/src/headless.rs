@@ -280,13 +280,30 @@ impl HeadlessHandler {
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("json"))
         {
-            save_json(&target, &self.project)?;
+            // Validate the entire asset set before publishing any file.
+            for id in self.project.assets().keys() {
+                if self
+                    .assets
+                    .get(id)
+                    .is_none_or(|bytes| AssetId::of(bytes) != *id)
+                {
+                    return Err(ControlError::Unsupported(format!(
+                        "missing or mismatched asset bytes: {}",
+                        id.as_str()
+                    )));
+                }
+            }
             let assets_dir = target.parent().unwrap_or(Path::new(".")).join("assets");
             fs::create_dir_all(&assets_dir)?;
             // Same manifest rule as the archive writer: only referenced bytes.
             for (id, bytes) in animathio_format::referenced_assets(&self.project, &self.assets) {
-                fs::write(assets_dir.join(id.as_str()), bytes)?;
+                // Temp file + rename per asset, mirroring the atomic `.amio`
+                // save, so a crash mid-loop never leaves a short asset file.
+                animathio_format::save_asset(assets_dir.join(id.as_str()), &bytes)?;
             }
+            // Publish the manifest only after every content-addressed sidecar.
+            // A failed save may add unused assets, but preserves the old project.
+            save_json(&target, &self.project)?;
         } else {
             save_amio(&target, &self.project, &self.assets)?;
         }
@@ -667,7 +684,201 @@ fn load_plugins() -> Option<PluginHost> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use animathio_core::{Clip, ClipId, Command, TICKS_PER_SECOND, TimeRange, Track, TrackId};
+    use animathio_core::{
+        Asset, Clip, ClipId, Command, TICKS_PER_SECOND, TimeRange, Track, TrackId,
+    };
+
+    /// A handler whose project references one asset, so plain-JSON saves
+    /// write it to `assets/`.
+    fn json_project_with_asset(bytes: &[u8]) -> HeadlessHandler {
+        let id = AssetId::of(bytes);
+        let mut handler = HeadlessHandler::new();
+        handler.assets.insert(id.clone(), bytes.to_vec());
+        handler
+            .handle(Call::CommandApply {
+                command: Command::AddAsset {
+                    id,
+                    asset: Asset {
+                        name: "media.bin".to_owned(),
+                        media_type: "application/octet-stream".to_owned(),
+                    },
+                },
+            })
+            .unwrap();
+        handler
+    }
+
+    #[test]
+    fn json_save_writes_assets_atomically() {
+        let bytes = b"media-bytes";
+        let id = AssetId::of(bytes);
+        let mut handler = json_project_with_asset(bytes);
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("project.json");
+        handler
+            .handle(Call::ProjectSave {
+                path: Some(json.clone()),
+            })
+            .unwrap();
+        let assets_dir = dir.path().join("assets");
+        assert_eq!(
+            fs::read(assets_dir.join(id.as_str())).unwrap(),
+            bytes,
+            "the asset is written next to the JSON project"
+        );
+        let entries: Vec<_> = fs::read_dir(&assets_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1, "no temp file survives the save");
+
+        handler.handle(Call::ProjectSave { path: None }).unwrap();
+        assert_eq!(fs::read(assets_dir.join(id.as_str())).unwrap(), bytes);
+
+        // Re-saving with new bytes replaces the asset set in place, still
+        // leaving only complete, hash-named files.
+        let next = b"replacement";
+        let next_id = AssetId::of(next);
+        handler.assets.remove(&id);
+        handler
+            .handle(Call::CommandApply {
+                command: Command::RemoveAsset { id: id.clone() },
+            })
+            .unwrap();
+        handler.assets.insert(next_id.clone(), next.to_vec());
+        handler
+            .handle(Call::CommandApply {
+                command: Command::AddAsset {
+                    id: next_id.clone(),
+                    asset: Asset {
+                        name: "media2.bin".to_owned(),
+                        media_type: "application/octet-stream".to_owned(),
+                    },
+                },
+            })
+            .unwrap();
+        handler.handle(Call::ProjectSave { path: None }).unwrap();
+        assert_eq!(fs::read(assets_dir.join(next_id.as_str())).unwrap(), next);
+        let entries: Vec<_> = fs::read_dir(&assets_dir).unwrap().collect();
+        assert_eq!(entries.len(), 2, "old asset kept, new one added, no temps");
+        for entry in entries {
+            assert_eq!(
+                entry.unwrap().file_name().len(),
+                64,
+                "only hash-named files"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_asset_write_leaves_previous_files_intact() {
+        let bytes = b"original-media";
+        let id = AssetId::of(bytes);
+        let mut handler = json_project_with_asset(bytes);
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("project.json");
+        handler
+            .handle(Call::ProjectSave {
+                path: Some(json.clone()),
+            })
+            .unwrap();
+        let assets_dir = dir.path().join("assets");
+        assert_eq!(fs::read(assets_dir.join(id.as_str())).unwrap(), bytes);
+
+        let previous_json = fs::read(&json).unwrap();
+
+        let replacement = b"replacement-media";
+        let replacement_id = AssetId::of(replacement);
+        handler.assets.remove(&id);
+        handler
+            .handle(Call::CommandApply {
+                command: Command::RemoveAsset { id },
+            })
+            .unwrap();
+        handler
+            .assets
+            .insert(replacement_id.clone(), replacement.to_vec());
+        handler
+            .handle(Call::CommandApply {
+                command: Command::AddAsset {
+                    id: replacement_id.clone(),
+                    asset: Asset {
+                        name: "media2.bin".to_owned(),
+                        media_type: "application/octet-stream".to_owned(),
+                    },
+                },
+            })
+            .unwrap();
+        // An existing directory at the destination makes persist fail on
+        // every platform, including privileged test runners.
+        let blocked = assets_dir.join(replacement_id.as_str());
+        fs::create_dir(&blocked).unwrap();
+        assert!(handler.handle(Call::ProjectSave { path: None }).is_err());
+        assert_eq!(fs::read(&json).unwrap(), previous_json);
+        fs::remove_dir(blocked).unwrap();
+        let entries: Vec<_> = fs::read_dir(&assets_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1, "the failed save added no temp files");
+        assert_eq!(
+            entries[0].as_ref().unwrap().file_name(),
+            std::ffi::OsStr::new(AssetId::of(b"original-media").as_str())
+        );
+        assert_eq!(
+            fs::read(assets_dir.join(AssetId::of(b"original-media").as_str())).unwrap(),
+            b"original-media",
+            "the previous asset is intact"
+        );
+        assert!(json.is_file(), "the previous project file is intact");
+    }
+
+    #[test]
+    fn json_save_partial_asset_failure_preserves_old_manifest() {
+        let mut handler = json_project_with_asset(b"original");
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("project.json");
+        handler
+            .handle(Call::ProjectSave {
+                path: Some(json.clone()),
+            })
+            .unwrap();
+        let previous = fs::read(&json).unwrap();
+        let mut ids = Vec::new();
+        for bytes in [b"first".as_slice(), b"second".as_slice()] {
+            let id = AssetId::of(bytes);
+            handler.assets.insert(id.clone(), bytes.to_vec());
+            handler
+                .handle(Call::CommandApply {
+                    command: Command::AddAsset {
+                        id: id.clone(),
+                        asset: Asset {
+                            name: "new".into(),
+                            media_type: "image/png".into(),
+                        },
+                    },
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        ids.sort();
+        fs::create_dir(dir.path().join("assets").join(ids[1].as_str())).unwrap();
+        assert!(handler.handle(Call::ProjectSave { path: None }).is_err());
+        assert!(dir.path().join("assets").join(ids[0].as_str()).is_file());
+        assert_eq!(fs::read(&json).unwrap(), previous);
+        let (project, _) = load_project(&json).unwrap();
+        assert_eq!(project.assets().len(), 1);
+    }
+
+    #[test]
+    fn json_save_rejects_missing_bytes_before_publishing_manifest() {
+        let mut handler = json_project_with_asset(b"asset");
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("project.json");
+        handler
+            .handle(Call::ProjectSave {
+                path: Some(json.clone()),
+            })
+            .unwrap();
+        let previous = fs::read(&json).unwrap();
+        handler.assets.clear();
+        assert!(handler.handle(Call::ProjectSave { path: None }).is_err());
+        assert_eq!(fs::read(json).unwrap(), previous);
+    }
 
     #[test]
     fn command_apply_and_history_round_trip() {

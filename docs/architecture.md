@@ -175,6 +175,11 @@ The undo stack is depth-capped (`History::with_limit`, default 500 entries);
 the oldest entries are dropped. This bounds entry count, not bytes; dirty
 state is tracked independently of whether undo is available.
 
+Plain-JSON saves validate referenced asset bytes, atomically replace each
+content-addressed sidecar, then publish the manifest. Failed sidecar writes
+preserve the old manifest; already written unused assets may remain. Unix saves
+also try to sync the containing directory after replacement (best effort).
+
 ## Time model (integer ticks)
 
 AniMathIO 2.0 uses **integer ticks** at a fixed rate, with **rational frame rates**
