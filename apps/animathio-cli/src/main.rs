@@ -394,6 +394,7 @@ fn run(cli: Cli) -> Result<()> {
             output,
             size,
         } => {
+            animathio_control::ensure_distinct_from_project(&output, &project)?;
             let bundle = load(&project)?;
             let time = if let Some(frame) = frame {
                 bundle
@@ -536,6 +537,12 @@ fn run(cli: Cli) -> Result<()> {
         } => {
             if from >= to {
                 return Err("--from must be less than exclusive --to".into());
+            }
+            for frame in from..to {
+                animathio_control::ensure_distinct_from_project(
+                    &output.join(format!("frame_{frame:06}.png")),
+                    &project,
+                )?;
             }
             let bundle = load(&project)?;
             // Check both conversion extremes and dimensions before creating any output.

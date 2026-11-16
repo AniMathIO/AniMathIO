@@ -47,6 +47,8 @@ pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, ControlError> {
 /// writer creates them). An existing target must be a regular file, not a
 /// directory or special file.
 pub fn validate_output_file(path: &Path) -> Result<PathBuf, ControlError> {
+    let resolved = resolve(path);
+    let path = resolved.as_path();
     let file_name = path.file_name().ok_or_else(|| {
         ControlError::InvalidPath(format!("path has no file name: {}", path.display()))
     })?;
@@ -98,75 +100,36 @@ pub fn validate_output_file(path: &Path) -> Result<PathBuf, ControlError> {
     Ok(target)
 }
 
-/// Best-effort canonical form of `path`: the file itself when it exists,
-/// otherwise the canonicalized nearest existing ancestor with the missing
-/// tail re-attached (the same rule [`validate_output_file`] applies), so a
-/// not-yet-written output still resolves to the file it would become. Falls
-/// back to the given form when nothing can be resolved.
+/// Resolve existing prefixes before appending missing components. Re-resolve after
+/// each component so `missing/../link` also follows the existing symlink.
 fn resolve(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-    let Some(file_name) = path.file_name() else {
-        return path.to_path_buf();
+    let mut resolved = if path.is_absolute() {
+        PathBuf::new()
+    } else {
+        current_dir().unwrap_or_default()
     };
-    let fallback = || path.to_path_buf();
-    let mut ancestor = match path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        Some(parent) => parent.to_path_buf(),
-        // A bare file name relative to the current directory.
-        None => {
-            return match current_dir() {
-                Ok(dir) => dir.join(file_name),
-                Err(_) => fallback(),
-            };
-        }
-    };
-    let mut missing: Vec<OsString> = Vec::new();
-    let mut base = loop {
-        match ancestor.canonicalize() {
-            Ok(canonical) => break canonical,
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                let Some(name) = ancestor.file_name() else {
-                    // A relative path whose parents are all missing: anchor at
-                    // the current directory, which canonicalizes below.
-                    break match current_dir() {
-                        Ok(dir) => dir,
-                        Err(_) => return fallback(),
-                    };
-                };
-                missing.push(OsString::from(name));
-                ancestor = match ancestor.parent() {
-                    Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-                    _ => {
-                        break match current_dir() {
-                            Ok(dir) => dir,
-                            Err(_) => return fallback(),
-                        };
-                    }
-                };
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                resolved.pop();
             }
-            Err(_) => return fallback(),
+            std::path::Component::CurDir => {}
+            other => resolved.push(other.as_os_str()),
         }
-    };
-    for component in missing.iter().rev() {
-        base.push(component);
+        if let Ok(canonical) = resolved.canonicalize() {
+            resolved = canonical;
+        }
     }
-    base.push(file_name);
-    base
+    resolved
 }
 
-/// Whether two paths name the same file. Both are resolved with [`resolve`],
-/// so a not-yet-existing output compares against the file it would become,
-/// including through symlinked parents. Comparison is case-insensitive on
-/// Windows and macOS, where the default filesystems ignore case.
+/// Whether paths identify the same file, including hard links. File identity
+/// delegates case handling to the filesystem (including case-sensitive volumes
+/// on Windows/macOS). Missing paths compare their resolved spelling.
 #[must_use]
 pub fn same_file(a: &Path, b: &Path) -> bool {
     let (a, b) = (resolve(a), resolve(b));
-    if cfg!(any(windows, target_os = "macos")) {
-        a.as_os_str().eq_ignore_ascii_case(b.as_os_str())
-    } else {
-        a == b
-    }
+    same_file::is_same_file(&a, &b).unwrap_or(false) || a == b
 }
 
 /// Refuse an export output that names the open project file: exporting an
@@ -326,13 +289,60 @@ mod tests {
         }
     }
 
-    #[cfg(any(windows, target_os = "macos"))]
     #[test]
-    fn comparison_ignores_case_where_the_filesystem_does() {
+    fn missing_tail_parent_segments_are_normalized() {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("project.amio");
         std::fs::write(&project, b"x").unwrap();
-        assert!(same_file(&dir.path().join("PROJECT.AMIO"), &project));
-        assert!(ensure_distinct_from_project(&dir.path().join("Project.Amio"), &project).is_err());
+        assert!(same_file(
+            &dir.path().join("missing/../project.amio"),
+            &project
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_symlink_and_missing_tail_cannot_hide_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        let alias = dir.path().join("alias.mp4");
+        std::os::unix::fs::symlink(&project, &alias).unwrap();
+        let output = validate_output_file(&dir.path().join("missing/../alias.mp4")).unwrap();
+        assert!(ensure_distinct_from_project(&output, &project).is_err());
+        assert_eq!(output, project.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn hard_links_are_project_aliases() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        let alias = dir.path().join("alias.mp4");
+        std::fs::write(&project, b"x").unwrap();
+        std::fs::hard_link(&project, &alias).unwrap();
+        assert!(ensure_distinct_from_project(&alias, &project).is_err());
+    }
+
+    #[test]
+    fn case_handling_follows_the_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        let lower = dir.path().join("project.amio");
+        let upper = dir.path().join("PROJECT.AMIO");
+        std::fs::write(&lower, b"x").unwrap();
+        let aliases = upper.exists();
+        assert_eq!(same_file(&lower, &upper), aliases);
+        if !aliases {
+            std::fs::write(&upper, b"y").unwrap();
+            assert!(!same_file(&lower, &upper));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_and_normal_paths_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        assert!(same_file(&project, &project.canonicalize().unwrap()));
     }
 }

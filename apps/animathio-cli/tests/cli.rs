@@ -731,3 +731,40 @@ fn math_catalog_adds_every_kind_and_rejects_invalid_latex_without_saving() {
     assert!(!result.status.success());
     assert!(!output.exists());
 }
+
+#[test]
+fn png_outputs_cannot_overwrite_the_project() {
+    let dir = tempdir().unwrap();
+    let project = dir.path().join("frame_000000.png");
+    write_json(
+        File::create(&project).unwrap(),
+        &animathio_core::Project::default(),
+    )
+    .unwrap();
+    let original = std::fs::read(&project).unwrap();
+    for args in [
+        vec![
+            "render",
+            path(&project),
+            "--frame",
+            "0",
+            "-o",
+            path(&project),
+        ],
+        vec![
+            "render-seq",
+            path(&project),
+            "--from",
+            "0",
+            "--to",
+            "1",
+            "-o",
+            path(dir.path()),
+        ],
+    ] {
+        let result = cli(&args);
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("open project file"));
+        assert_eq!(std::fs::read(&project).unwrap(), original);
+    }
+}

@@ -235,6 +235,7 @@ impl Editor {
             if let Call::RenderFrame { .. } = &call {
                 let project = self.project.clone();
                 let assets = self.assets.clone();
+                let path = self.path.clone();
                 std::thread::spawn(move || {
                     use animathio_control::ControlHandler;
                     let mut handler = animathio_control::HeadlessHandler::from_bundle(
@@ -242,7 +243,7 @@ impl Editor {
                             project,
                             assets: (*assets).clone(),
                         },
-                        None,
+                        path,
                     );
                     let _ = reply.send(handler.handle(call));
                 });
@@ -643,6 +644,9 @@ impl Editor {
         let frame = animathio_render::render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;
+            if let Some(project) = &self.path {
+                animathio_control::ensure_distinct_from_project(&canonical, project)?;
+            }
             frame.save_png(&canonical)?;
             Ok(RenderFrameResult {
                 size: frame.size,

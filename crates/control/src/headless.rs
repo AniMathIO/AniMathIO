@@ -141,6 +141,9 @@ impl HeadlessHandler {
         let frame = render(&scene, &mut ctx, (params.width, params.height))?;
         if let Some(output) = params.output {
             let canonical = validate_output_file(&output)?;
+            if let Some(project) = &self.path {
+                ensure_distinct_from_project(&canonical, project)?;
+            }
             frame.save_png(&canonical)?;
             Ok(RenderFrameResult {
                 size: frame.size,
@@ -957,6 +960,29 @@ mod tests {
             "{error}"
         );
         assert_eq!(std::fs::read(&project).unwrap(), b"x", "project untouched");
+    }
+
+    #[test]
+    fn render_frame_refuses_project_alias() {
+        let mut handler = text_project();
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        let alias = dir.path().join("alias.png");
+        std::fs::hard_link(&project, &alias).unwrap();
+        handler.path = Some(project.clone());
+        let error = handler
+            .handle(Call::RenderFrame {
+                params: RenderFrameParams {
+                    time: Time(0),
+                    width: 16,
+                    height: 16,
+                    output: Some(alias),
+                },
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("open project file"));
+        assert_eq!(std::fs::read(project).unwrap(), b"x");
     }
 
     #[test]

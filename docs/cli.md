@@ -922,3 +922,6 @@ Options:
           Print help
 ```
 <!-- /help:scenes -->
+
+PNG outputs from render and render-seq also refuse to overwrite the input project,
+including aliases through symlinks and hard links.

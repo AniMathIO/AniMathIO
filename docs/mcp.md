@@ -572,3 +572,8 @@ Denoise learning uses a noise-only interval inside an audio clip (32 ms to 30 s)
 `detect_scenes` takes `clip` or `track`, optional `sensitivity` (0..1, default 0.5) and `min_shot_frames` (default 6). It returns a proposal containing the expected project snapshot and cuts with `enabled` toggles, timeline ticks and base64-encoded 96×54 grayscale thumbnails. Pass the reviewed object as `proposal` to `split_at_scenes`; `markers: true` adds markers instead. Editor detection runs on a worker. Control methods are `video.detect_scenes` and `video.split_at_scenes`. Reanalysis is required after any project change.
 
 Sampling is 4 Hz: very short scenes can be missed and detected boundaries have up to one sample of latency. Slow fades and gradual motion are ignored. The editor offers sensitivity and minimum-shot presets, track-wide reanalysis, and short-shot deletion presets. `delete_shorter_than_frames` removes short resulting shots and linked companions, leaving timeline gaps.
+
+Export and PNG output guards compare filesystem identity, including hard links and
+symlinks, and resolve missing path tails. Case handling follows the volume rather
+than the operating system. Concurrent filesystem changes after validation (TOCTOU)
+remain outside this guard. PNG outputs also refuse the open project path.
