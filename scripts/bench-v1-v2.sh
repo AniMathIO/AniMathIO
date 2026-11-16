@@ -6,7 +6,7 @@
 #
 # Optional overrides (defaults make sense inside this repository):
 #   --v1-dist DIR    built v1 unpacked app (defaults to building origin/main into
-#                    /home/hunor/tmp/animathio-bench/v1 via a throwaway git worktree)
+#                    ${HOME}/tmp/animathio-bench/v1 via a throwaway git worktree)
 #   --v1-src DIR     v1 source tree with node_modules (the MCP SDK is loaded from it)
 #   --v2-bin DIR     directory holding `animathio` and `animathio-cli` (default
 #                    <repo>/target/release; build with scripts/build-plugins.sh and
@@ -46,7 +46,7 @@ SKIP_MEDIUM=0
 KEEP_GOING=0
 INSIDE_XVFB=0
 NO_BUILD=0
-BENCH_BASE="${ANIMATHIO_BENCH_BASE:-/home/hunor/tmp/animathio-bench}"
+BENCH_BASE="${ANIMATHIO_BENCH_BASE:-${HOME}/tmp/animathio-bench}"
 
 usage() { sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 

@@ -111,7 +111,7 @@ scripts/bench-v1-v2.sh --runs 3 --out "$PWD/bench/reproduction"
 ```
 
 The entry point requires built v2 binaries/plugins. It reuses the v1 checkout at
-`/home/hunor/tmp/animathio-bench/v1`, or builds `origin/main` there when missing.
+`~/tmp/animathio-bench/v1`, or builds `origin/main` there when missing.
 Use `--v1-src`, `--v1-dist`, `--v2-bin`, and `--plugins` to override locations.
 Use a fresh output directory: existing measurement rows are rejected. `--no-build`
 requires an existing v1 executable; `--skip-medium` and `--skip-seek` omit the

@@ -57,7 +57,7 @@ class Bench:
         self.exports.mkdir(parents=True, exist_ok=True)
         # AF_UNIX paths are capped at 108 bytes, and bench output dirs can be
         # deep, so keep the control-socket runtime dir short and private.
-        runtime_base = Path(os.environ.get("ANIMATHIO_BENCH_RUNTIME_BASE", "/home/hunor/tmp/animathio-bench"))
+        runtime_base = Path(os.environ.get("ANIMATHIO_BENCH_RUNTIME_BASE", str(Path.home() / "tmp" / "animathio-bench")))
         self.runtime = runtime_base / f"xdg-{os.getpid()}"
         self.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.v1_home = Path(args.out) / "v1home"

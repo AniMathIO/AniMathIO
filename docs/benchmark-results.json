@@ -18,7 +18,7 @@
     "v2": {
       "version": "2.0.0",
       "commit": "b10489a4f",
-      "binary_path": "/home/hunor/.t3/worktrees/AniMathIO/t3-f00fc1a4-f58b31a8be800695/target/release"
+      "binary_path": "./target/release"
     }
   },
   "sizes": {
@@ -109,7 +109,7 @@
     "target/plugins/audio-basic.amplugin": "e1ca9f92c0390f0615a6459c2bace1b11117db540e144be5e7e85a4d904915ae",
     "target/plugins/animations.amplugin": "1bb4753503a088ede3ec3da71604a81e45d6f4cb1040602d7f7984f73a00c198",
     "target/plugins/import-manim.amplugin": "109c0cd7c4173c89602d0fe8cec53c88abc8196bb3cd714e54cd9a489213edcb",
-    "/home/hunor/tmp/animathio-bench/v1/dist/linux-unpacked/resources/app.asar": "7ca965f57974aa3fc93a77fbbc644c530ce17d317ab973e32211488a11bdd5af"
+    "<v1-checkout>/dist/linux-unpacked/resources/app.asar": "7ca965f57974aa3fc93a77fbbc644c530ce17d317ab973e32211488a11bdd5af"
   },
   "scenarios": {
     "cold_start": {
