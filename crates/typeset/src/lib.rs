@@ -816,6 +816,23 @@ mod tests {
         engine.typeset(source, MathMode::Latex, 48.0)
     }
 
+    // The quick-xml advisory exceptions rely on CSL/XML files being inaccessible.
+    #[test]
+    fn math_world_rejects_external_sources_and_bytes() {
+        let engine = TypesetEngine::new().unwrap();
+        let world = MathWorld::new(engine.shared.clone(), "$ x $".to_string());
+        assert!(world.source(world.main_id).is_ok());
+        assert!(world.file(world.main_id).is_ok());
+        for path in ["style.csl", "input.xml", "nested/style.csl"] {
+            let id = FileId::new(RootedPath::new(
+                VirtualRoot::Project,
+                VirtualPath::new(path).unwrap(),
+            ));
+            assert!(matches!(world.source(id), Err(FileError::NotFound(_))));
+            assert!(matches!(world.file(id), Err(FileError::NotFound(_))));
+        }
+    }
+
     #[test]
     fn everyday_latex_commands_have_complete_helpers() {
         let engine = TypesetEngine::new().unwrap();

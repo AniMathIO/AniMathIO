@@ -1,7 +1,6 @@
 name: Security Audit
 
-# Daily RustSec advisory check. Uses cargo-deny once `deny.toml` lands (added in
-# the media PR), and falls back to `cargo audit` until then.
+# Daily RustSec checks for every independent Cargo lockfile.
 on:
   schedule:
     - cron: "23 3 * * *"
@@ -19,12 +18,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
-      - name: Check advisories (cargo-deny if deny.toml exists, else cargo audit)
-        run: |
-          if [ -f deny.toml ]; then
-            cargo install cargo-deny
-            cargo deny check advisories
-          else
-            cargo install cargo-audit
-            cargo audit
-          fi
+      - name: Install audit tools
+        run: cargo install --locked cargo-deny cargo-audit
+      - name: Check every lockfile
+        run: scripts/check-advisories.sh

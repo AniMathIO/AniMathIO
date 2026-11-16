@@ -25,6 +25,7 @@ API they describe must exist. Update them alongside behaviour changes:
 - `docs/mcp.md` — control protocol (JSON-RPC, socket, token) and the MCP tool surface
 - `docs/migrating-from-v1.md` — what maps from 1.x and known gaps
 - `docs/benchmarks.md` — v1 vs v2 benchmark methodology, results and caveats (`scripts/bench-v1-v2.sh`)
+- `docs/dependency-advisories.md` — dependency advisory baseline and exception reachability evidence
 - `docs/release-checklist.md` — manual and automatable steps left before the 2.0 swap
 
 `scripts/check-docs.sh` fails when a document names a path, `animathio-cli` subcommand
