@@ -40,7 +40,8 @@ This describes authoring in 2.x; importing saved 1.x projects has the limitation
 | Background Fill | File → Project settings → background colour | Moved |
 | Element list, order, placement and timing | Multi-track timeline, track order and inspector → Transform | Moved |
 | Manim source import | File → Import Manim scene | Moved |
-| Canvas settings and video export | File → Project settings; Export dialog (MP4; WebM output remains missing) | Moved |
+| Canvas settings and MP4 video export | File → Project settings; Export dialog | Moved |
+| WebM video export | No WebM output backend ([#303](https://github.com/AniMathIO/AniMathIO/issues/303)) | Missing |
 
 Plugin clip sources appear only in Elements. Plugins is the installed inventory:
 all loaded kinds, versions, enabled status and source directories. Titles contains
