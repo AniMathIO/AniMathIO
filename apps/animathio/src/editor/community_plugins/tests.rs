@@ -1,7 +1,10 @@
 //! Offline scenarios through the real editor and the same handlers used by its controls.
-use super::*;
+use super::{Downloader, Index, registry};
 use crate::editor::ui_tests::Ui;
+use crate::editor::{ClipKind, LeftTab, Time, evaluate};
+use animathio_plugin_host::CommunityStore;
 use gpui::TestAppContext;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 const HELLO: &[u8] =
     include_bytes!("../../../../../crates/plugin-host/tests/fixtures/hello-1.0.0.amplugin");
@@ -69,7 +72,7 @@ fn install_verify_enable_render_and_remove_live(cx: &mut TestAppContext) {
             .unwrap()
             .contains("sha-256 mismatch")
     }));
-    assert!(store.list().0.is_empty());
+    assert_eq!(store.list().0, []);
     ui.update(|e, _, cx| {
         e.refresh_community_inventory(cx);
         e.install_community_entry(entry, cx);
@@ -107,7 +110,7 @@ fn install_verify_enable_render_and_remove_live(cx: &mut TestAppContext) {
         );
     });
     ui.update(|e, _, cx| e.remove_community_plugin(ID.into(), cx));
-    assert!(store.list().0.is_empty());
+    assert_eq!(store.list().0, []);
     assert!(ui.read(|e| e.plugin_host.as_ref().unwrap().get_plugin(ID).is_none()));
     assert!(
         ui.read(|e| e.missing_plugin_ids().contains(ID)),
@@ -135,7 +138,7 @@ fn incompatible_abi_is_visible_but_cannot_install(cx: &mut TestAppContext) {
     assert!(entry.compatible().is_err());
     ui.update(|e, _, cx| e.install_community_entry(entry, cx));
     assert_eq!(downloads.load(Ordering::SeqCst), 0);
-    assert!(store.list().0.is_empty());
+    assert_eq!(store.list().0, []);
 }
 #[gpui::test]
 fn network_error_has_retry_and_keeps_installed_plugins(cx: &mut TestAppContext) {
@@ -184,5 +187,5 @@ fn index_contract_checks_schema_size_metadata_and_numeric_versions() {
             .unwrap_err()
             .contains("metadata mismatch")
     );
-    assert!(store.list().0.is_empty());
+    assert_eq!(store.list().0, []);
 }

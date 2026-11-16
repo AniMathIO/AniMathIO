@@ -7,25 +7,26 @@ use animathio_plugin_api::{PluginKind, PluginManifestToml, PluginPackage};
 use animathio_plugin_host::{CommunityError, CommunityStore, InstallOutcome, MAX_PACKAGE_BYTES};
 use serde::Deserialize;
 
-pub(super) const INDEX_URL: &str =
+pub(in crate::editor) const INDEX_URL: &str =
     "https://raw.githubusercontent.com/AniMathIO/plugins/main/community-index.json";
 const MAX_INDEX: u64 = 2 * 1024 * 1024;
-pub(super) type IndexFetcher = Arc<dyn Fn() -> Result<Index, String> + Send + Sync>;
-pub(super) type Downloader = Arc<dyn Fn(&str, u64) -> Result<Vec<u8>, String> + Send + Sync>;
+pub(in crate::editor) type IndexFetcher = Arc<dyn Fn() -> Result<Index, String> + Send + Sync>;
+pub(in crate::editor) type Downloader =
+    Arc<dyn Fn(&str, u64) -> Result<Vec<u8>, String> + Send + Sync>;
 
 #[derive(Clone, Debug, Deserialize)]
-pub(super) struct Index {
+pub(in crate::editor) struct Index {
     pub schema_version: u32,
     pub plugins: Vec<Entry>,
     pub delisted: Vec<Delisted>,
 }
 #[derive(Clone, Debug, Deserialize)]
-pub(super) struct Delisted {
+pub(in crate::editor) struct Delisted {
     pub id: String,
     pub reason: String,
 }
 #[derive(Clone, Debug, Deserialize)]
-pub(super) struct Entry {
+pub(in crate::editor) struct Entry {
     pub id: String,
     pub name: String,
     pub author: String,
@@ -122,7 +123,7 @@ fn read(reader: impl std::io::Read, limit: u64) -> Result<Vec<u8>, String> {
     }
     Ok(bytes)
 }
-pub(super) fn parse(bytes: &[u8]) -> Result<Index, String> {
+pub(in crate::editor) fn parse(bytes: &[u8]) -> Result<Index, String> {
     #[derive(Deserialize)]
     struct Schema {
         schema_version: u32,
@@ -139,7 +140,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Index, String> {
     }
     Ok(index)
 }
-pub(super) fn fetcher() -> IndexFetcher {
+pub(in crate::editor) fn fetcher() -> IndexFetcher {
     // Per-editor cache: conditional requests never download the unchanged index again.
     let cache = Mutex::new(None::<(Option<String>, Index)>);
     Arc::new(move || {
@@ -173,7 +174,7 @@ pub(super) fn fetcher() -> IndexFetcher {
         Ok(index)
     })
 }
-pub(super) fn downloader() -> Downloader {
+pub(in crate::editor) fn downloader() -> Downloader {
     Arc::new(|url, limit| {
         let response = agent(5).get(url).call().map_err(|e| e.to_string())?;
         read(

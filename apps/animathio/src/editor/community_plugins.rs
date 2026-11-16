@@ -150,7 +150,7 @@ impl Editor {
                     Ok(index) => this.community.index = Some(index),
                     Err(error) => {
                         this.community.error =
-                            Some(format!("Could not fetch community plugins: {error}"))
+                            Some(format!("Could not fetch community plugins: {error}"));
                     }
                 }
                 cx.notify();
@@ -530,7 +530,7 @@ impl Editor {
                                     || self.community.installed.iter().any(|p| p.id == id),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.install_community_entry(entry.clone(), cx)
+                                this.install_community_entry(entry.clone(), cx);
                             })),
                     );
                 } else {
@@ -589,7 +589,7 @@ impl Editor {
                             .disabled(busy || !enabled)
                             .on_change(cx.listener(
                                 move |this, checked: &bool, _, cx| {
-                                    this.toggle_community_plugin(id.clone(), *checked, cx)
+                                    this.toggle_community_plugin(id.clone(), *checked, cx);
                                 },
                             )),
                         )
@@ -600,7 +600,7 @@ impl Editor {
                                 .label("Remove")
                                 .disabled(busy)
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.remove_community_plugin(remove.clone(), cx)
+                                    this.remove_community_plugin(remove.clone(), cx);
                                 })),
                         ),
                 );
@@ -617,7 +617,7 @@ impl Editor {
                             .label(format!("Update available · {}", entry.version))
                             .disabled(busy || !enabled || entry.compatible().is_err())
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.install_community_entry(entry.clone(), cx)
+                                this.install_community_entry(entry.clone(), cx);
                             })),
                     );
                 }
@@ -708,7 +708,7 @@ impl Editor {
                             || (installed.is_some() && !update),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.install_community_entry(action.clone(), cx)
+                        this.install_community_entry(action.clone(), cx);
                     })),
             );
             body = body.child(row);
@@ -742,24 +742,24 @@ impl Editor {
                     .min_w_0()
                     .child(format!("Missing plugins: {names}")),
             );
-        if self.community_enabled() {
-            if let Some(index) = &self.community.index {
-                for entry in index.plugins.iter().filter(|p| ids.contains(&p.id)).take(3) {
-                    let entry = entry.clone();
-                    notice = notice.child(
-                        Button::new(SharedString::from(format!("notice-install-{}", entry.id)))
-                            .small()
-                            .label(format!("Install {}", entry.name))
-                            .disabled(
-                                self.community.busy
-                                    || entry.compatible().is_err()
-                                    || self.community.installed.iter().any(|p| p.id == entry.id),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.install_community_entry(entry.clone(), cx)
-                            })),
-                    );
-                }
+        if self.community_enabled()
+            && let Some(index) = &self.community.index
+        {
+            for entry in index.plugins.iter().filter(|p| ids.contains(&p.id)).take(3) {
+                let entry = entry.clone();
+                notice = notice.child(
+                    Button::new(SharedString::from(format!("notice-install-{}", entry.id)))
+                        .small()
+                        .label(format!("Install {}", entry.name))
+                        .disabled(
+                            self.community.busy
+                                || entry.compatible().is_err()
+                                || self.community.installed.iter().any(|p| p.id == entry.id),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.install_community_entry(entry.clone(), cx);
+                        })),
+                );
             }
         }
         notice.child(
