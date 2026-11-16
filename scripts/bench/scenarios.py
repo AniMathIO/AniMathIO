@@ -320,7 +320,7 @@ def run_timed_export_v1(bench: Bench, project: Path, out_mp4: Path, idx: int, sc
         bench.record(scenario, "v1", idx, {
             "export_seconds": round((finished - started) / 1000, 3),
             "output_bytes": size,
-            "probe": validate_mp4(out_mp4),
+            "probe": validate_mp4(out_mp4, 60 if scenario.endswith("60") else 10),
             "duration_ms": duration_ms,
             "peak_pss_kb": mem.get("pss_max_kb"),
             "peak_rss_kb": mem.get("rss_max_kb"),
@@ -369,14 +369,14 @@ def run_timed_export_v2(bench: Bench, project: Path, out_mp4: Path, idx: int, sc
     bench.record(scenario, "v2", idx, {
         "export_seconds": round((finished - started) / 1000, 3),
         "output_bytes": out_mp4.stat().st_size,
-        "probe": validate_mp4(out_mp4),
+        "probe": validate_mp4(out_mp4, 60 if scenario.endswith("60") else 10),
         "peak_pss_kb": mem.get("pss_max_kb"),
         "peak_rss_kb": mem.get("rss_max_kb"),
         "mem_mode": mem.get("mode"),
     })
 
 
-def validate_mp4(path: Path) -> dict:
+def validate_mp4(path: Path, seconds: int) -> dict:
     result = subprocess.run([
         "ffprobe", "-v", "error", "-show_entries",
         "stream=codec_name,width,height,r_frame_rate,nb_frames:format=duration",
@@ -386,6 +386,8 @@ def validate_mp4(path: Path) -> dict:
     video = next(s for s in probe["streams"] if s.get("width"))
     if (video["codec_name"], video["width"], video["height"], video["r_frame_rate"]) != ("h264", 1920, 1080, "30/1"):
         raise RuntimeError(f"unexpected export: {probe}")
+    if abs(float(probe["format"]["duration"]) - seconds) > 0.2:
+        raise RuntimeError(f"wrong export duration: {probe}")
     return probe
 
 

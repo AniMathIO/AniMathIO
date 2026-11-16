@@ -112,6 +112,7 @@ def main() -> None:
             "v1_release_downloads": release_assets,
         },
         "authoring": authoring,
+        "artifact_sha256": read("artifact-sha256.json"),
         "scenarios": {},
     }
 
@@ -159,7 +160,7 @@ def main() -> None:
     if machine:
         lines.append("")
         lines.append(
-            f"**Machine:** {machine.get('cpu')}, {machine.get('cores')} cores, {machine.get('memory_gib')} GiB RAM, "
+            f"**Machine:** {machine.get('cpu')}, {machine.get('cores')} logical CPUs, {machine.get('memory_gib')} GiB RAM, "
             f"{machine.get('distro')}, kernel {machine.get('kernel')}. **Display:** {machine.get('display')}. **Audio:** {machine.get('audio')}."
         )
     lines.append("")
@@ -194,6 +195,8 @@ def main() -> None:
             f" + first-party plugin bundles {v2s.get('plugins_bytes', 0) / KB / KB:.1f} MiB"
             f" = **{v2s.get('on_disk_total_bytes', 0) / KB / KB:.0f} MiB**."
         )
+    if v2s.get("payload_tar_gz_bytes"):
+        lines.append(f"- v2 reproducible gzip payload (editor + CLI + plugins, not an official installer): {v2s['payload_tar_gz_bytes'] / KB / KB:.1f} MiB.")
     (out / "results.md").write_text("\n".join(lines) + "\n")
     print(f"wrote {out}/results.json and {out}/results.md")
 

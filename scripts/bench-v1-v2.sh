@@ -156,6 +156,16 @@ json.dump({
 }, open(sys.argv[1], "w"), indent=1)
 PY
 
+  python3 - "$RAW/artifact-sha256.json" "$V2_BIN" "$PLUGINS" "$V1_DIST" <<'PY_HASH'
+import hashlib, json, sys
+from pathlib import Path
+_, output, binaries, plugins, v1 = sys.argv
+files = [Path(binaries) / n for n in ("animathio", "animathio-cli")]
+files += sorted(Path(plugins).glob("*.amplugin"))
+files += [Path(v1) / "resources" / "app.asar"]
+Path(output).write_text(json.dumps({str(p): hashlib.file_digest(p.open("rb"), "sha256").hexdigest() for p in files if p.is_file()}, indent=1))
+PY_HASH
+
   # Fixtures: graph raster, v1 seed + MCP step scripts, v2 .amio projects.
   log "generating fixtures (v1 seed/steps + v2 .amio projects via animathio-cli)"
   mkdir -p "$OUT/projects"
@@ -193,6 +203,17 @@ for pattern, key in (("dist/*.deb", "deb"), ("dist/*.AppImage", "appimage"), ("d
 Path(sys.argv[1]).write_text(json.dumps(sizes, indent=1))
 PY_SIZE
 
+  # A reproducible compressed v2 payload, explicitly not an official installer.
+  nice -n 19 ionice -c3 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+    -czf "$OUT/v2-payload.tar.gz" -C "$V2_BIN" animathio animathio-cli -C "$PLUGINS" .
+  python3 - "$RAW/sizes.json" "$OUT/v2-payload.tar.gz" <<'PY_SIZE'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1]); data = json.loads(p.read_text())
+data["v2"]["payload_tar_gz_bytes"] = Path(sys.argv[2]).stat().st_size
+p.write_text(json.dumps(data, indent=1))
+PY_SIZE
+
   # Published v1 release asset sizes (the honest "download size"), best effort.
   (cd "$REPO_ROOT" && gh release view --repo AniMathIO/AniMathIO --json assets,tagName \
      --jq '{tag: .tagName, assets: [.assets[] | {name, size}]}' >"$RAW/v1_release_assets.json" 2>/dev/null) \
@@ -212,10 +233,10 @@ fi
 log "running timed scenarios (runs=$RUNS, out=$OUT)"
 
 # The scenario runner does its own cleanup (it owns every process it starts).
+status=0
 ANIMATHIO_BENCH_SKIP_SEEK="$SKIP_SEEK" \
 ANIMATHIO_BENCH_SKIP_MEDIUM="$SKIP_MEDIUM" \
 ANIMATHIO_BENCH_KEEP_GOING="$KEEP_GOING" \
-status=0
 nice -n 19 ionice -c3 python3 "$REPO_ROOT/scripts/bench/scenarios.py" \
   --out "$OUT" --runs "$RUNS" \
   --v1-bin "$V1_DIST/AniMathIO" --v1-src "$V1_SRC" \
