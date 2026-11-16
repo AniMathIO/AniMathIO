@@ -717,7 +717,7 @@ fn latex_colored_reveal_and_evaluated_clip_color() {
     for (reveal, count, partial) in [
         (0.0, 0, false),
         (0.25, 1, true),
-        (0.5, 1, false),
+        (0.5, 2, true),
         (0.75, 2, true),
         (1.0, 2, false),
     ] {

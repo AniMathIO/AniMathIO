@@ -361,7 +361,7 @@ impl HostState {
 
     fn typeset_math_result(
         &mut self,
-        source: String,
+        source: &str,
         mode: wit_types::MathMode,
         font_size: f32,
     ) -> Result<TypesetResult, wit_types::Diagnostic> {
@@ -389,7 +389,7 @@ impl HostState {
         };
         let result = self
             .typeset
-            .typeset(&source, mode, font_size)
+            .typeset(source, mode, font_size)
             .map_err(|e| diagnostic("service-failed", e.to_string()))?;
         if result.paths.iter().map(Vec::len).sum::<usize>() > MAX_TYPESET_VERBS {
             return Err(diagnostic("limit-exceeded", "math exceeds path verb limit"));
@@ -1865,7 +1865,7 @@ impl colored_world::animathio::plugin::math_colors::Host for HostState {
         wit_types::Diagnostic,
     > {
         use colored_world::animathio::plugin::math_colors::{ColoredPath, ColoredTypesetResult};
-        let result = self.typeset_math_result(source, mode, font_size)?;
+        let result = self.typeset_math_result(&source, mode, font_size)?;
         let plain = typeset_to_wit(&result, MAX_TYPESET_VERBS);
         Ok(ColoredTypesetResult {
             bbox: plain.bbox,
@@ -2458,7 +2458,7 @@ impl Host for HostState {
         mode: wit_types::MathMode,
         font_size: f32,
     ) -> Result<wit_types::TypesetResult, wit_types::Diagnostic> {
-        let result = self.typeset_math_result(source, mode, font_size)?;
+        let result = self.typeset_math_result(&source, mode, font_size)?;
         Ok(typeset_to_wit(&result, MAX_TYPESET_VERBS))
     }
 
