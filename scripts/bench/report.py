@@ -163,7 +163,7 @@ def main() -> None:
             f"{machine.get('distro')}, kernel {machine.get('kernel')}. **Display:** {machine.get('display')}. **Audio:** {machine.get('audio')}."
         )
     lines.append("")
-    lines.append("Every value is the **median of N runs (min–max)**; N and the load average each run saw are in `results.json`. All GUI numbers are Xvfb (software rendering), and every run was gated on a 1-minute load average below the threshold recorded in the raw rows.")
+    lines.append("Every value is the **median of N runs (min–max)**; N and the load average each run saw are in `results.json`. All GUI numbers are Xvfb, and every run was gated on a 1-minute load average below the threshold recorded in the raw rows.")
     lines.append("")
     lines.append("| Metric | Unit | v1 (Electron/TypeScript) | v2 (Rust) |")
     lines.append("| --- | --- | --- | --- |")
@@ -191,7 +191,7 @@ def main() -> None:
         lines.append(
             f"- v2 on disk (from-source install): editor {v2s.get('animathio_editor_bytes', 0) / KB / KB:.0f} MiB"
             f" + CLI {v2s.get('animathio_cli_bytes', 0) / KB / KB:.0f} MiB"
-            f" + 8 first-party plugin bundles {v2s.get('plugins_bytes', 0) / KB / KB:.1f} MiB"
+            f" + first-party plugin bundles {v2s.get('plugins_bytes', 0) / KB / KB:.1f} MiB"
             f" = **{v2s.get('on_disk_total_bytes', 0) / KB / KB:.0f} MiB**."
         )
     (out / "results.md").write_text("\n".join(lines) + "\n")

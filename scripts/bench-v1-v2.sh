@@ -75,6 +75,10 @@ die() { printf '[bench] ERROR: %s\n' "$*" >&2; exit 1; }
 
 if [[ "$INSIDE_XVFB" != 1 ]]; then
   # ---------------------------------------------------------------- phase 1: builds, fixtures, sizes
+  [[ "$RUNS" =~ ^[0-9]+$ && "$RUNS" -ge 3 ]] || die "--runs must be at least 3"
+  for scenario in cold_start load_project_10 export_10 export_60; do
+    [[ ! -e "$OUT/raw/$scenario.json" ]] || die "existing measurements in $OUT; choose a fresh --out"
+  done
   mkdir -p "$OUT/raw"
   RAW="$OUT/raw"
 
@@ -175,6 +179,19 @@ v2 = {
 v2["on_disk_total_bytes"] = sum(v2.values())
 json.dump({"v2": v2}, open(sizes_path, "w"), indent=1)
 PY
+
+  # Record available v1 packages even if a later runtime scenario fails.
+  python3 - "$RAW/sizes_v1.json" "$V1_SRC" <<'PY_SIZE'
+import json, subprocess, sys
+from pathlib import Path
+sizes = {}
+for pattern, key in (("dist/*.deb", "deb"), ("dist/*.AppImage", "appimage"), ("dist/linux-unpacked", "unpacked_dir")):
+    matches = sorted(Path(sys.argv[2]).glob(pattern))
+    if matches:
+        p = matches[-1]
+        sizes[key] = {"path": p.name, "bytes": int(subprocess.check_output(["du", "-sb", str(p)]).split()[0])}
+Path(sys.argv[1]).write_text(json.dumps(sizes, indent=1))
+PY_SIZE
 
   # Published v1 release asset sizes (the honest "download size"), best effort.
   (cd "$REPO_ROOT" && gh release view --repo AniMathIO/AniMathIO --json assets,tagName \

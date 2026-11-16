@@ -28,6 +28,8 @@ All numbers in this document were measured on one machine, in one session:
 - **Load gating:** every timed run waits until the 1-minute load average is
   ≤ 4 and records the exact load it ran under (`bench/results.json`).
 
+CPU logical thread count is reported by `nproc`, not physical core count.
+
 The exact machine facts, app versions and commit SHAs of both apps are recorded
 in `bench/results.json` (`machine`, `versions`).
 
@@ -80,7 +82,7 @@ visible seconds each on a 5 s stagger, 60 s total.
   for v2.
 - v1's text elements are DOM/Konva text; v2's are `org.animathio.text` plugin
   clips. The v2 scene keeps five clips on five tracks; v1 keeps three elements
-  (text, math, image) on its single canvas layer with the same timeline.
+  (text, math, image) on its single canvas layer with the same timeline. v2 fades its clips in over the first second; the v1 scene is static. Formula font metrics, title weight and grid density also differ.
 - Both versions' projects were authored through their own automation interfaces:
   v1 via its MCP server (`set_canvas`, `add_text`, `add_math`, `add_media`,
   `update_element`), v2 via `animathio-cli math-objects add`. The v1 scenes are
@@ -118,6 +120,7 @@ Read before quoting any number above.
    exports, idle RSS) was measured under a Xvfb display.
    These results do not establish native desktop performance.
 2. **The export comparison compares shipped paths, not the same algorithm.**
+   v1 exports video only (the fixture has no audio); v2 includes a silent AAC track.
    v1 exports by capturing the canvas in real time (a 60 s project needs ≥ 60 s
    by construction) and converts WebM→MP4 with ffmpeg.wasm (`libx264 -preset
    superfast -crf 24`) inside the renderer, single-threaded. v2 renders
@@ -134,9 +137,8 @@ Read before quoting any number above.
 5. **RSS is the process-tree RSS sum** (shared pages can be counted repeatedly,
    sampled ≥ 8× per second during exports). PSS is retained in raw data as a supplementary metric. RSS is a sampling estimate,
    not a peak tracker; the export peak may be slightly under-sampled.
-6. **v2's cold start includes the sample project** (its default start state)
-   and plugin loading; v1's includes its dashboard. Neither number includes
-   first-run OS caches beyond the fresh `HOME` the harness creates.
+6. **Cold start means a fresh process, not a cold OS page cache.** The benchmark does not drop system caches. v2 startup includes the sample project (its default start state)
+   and plugin loading; v1's includes its dashboard. Each app reuses its private benchmark home between runs.
 7. **The medium project is not perfectly identical in structure:** v1 layers
    all 60 elements on one canvas layer, v2 uses 6 tracks × 10 clips (same
    schedule and content). Track model differences are part of what 2.0 changes.
