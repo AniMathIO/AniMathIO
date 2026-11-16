@@ -126,3 +126,38 @@ linked composition text fields before the usual clip properties. Preset data liv
 in `crates/control/presets/titles.json`; applying a composition is one command batch.
 
 See [Keyboard shortcuts](keyboard-shortcuts.md) for the Premiere default keymap.
+
+## Reproducing panel screenshots
+
+The developer launch option `--screenshot-panel=markers` opens the same panel as
+Clip > Markers and beat sync. `--screenshot-panel=autocut` selects the first audio
+clip in track order and runs the normal asynchronous analysis before showing its
+review. Pass a project path as usual; neither option applies edits. The control
+protocol can create markers and propose cuts but does not open these UI panels.
+
+The capture fixture combines the shared visual sample with a synthetic voice
+(tone, one-second pause, tone), a separate steady music bed and three named
+markers. The voice scope keeps the music from masking the pause. These are
+synthetic signals, not a speech-recognition demonstration.
+
+Run from the repository root (the release build and plugin compilation can take
+several minutes):
+
+```bash
+export CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0
+nice -n 19 ionice -c3 cargo build -p animathio --release --locked --bin animathio --example screenshot_project
+scripts/build-plugins.sh
+./target/release/examples/screenshot_project target/screenshot-project.amio
+mkdir --parents target/screenshot-config
+export XDG_CONFIG_HOME="$PWD/target/screenshot-config"
+export ANIMATHIO_PLUGIN_DIR="$PWD/target/plugins" ANIMATHIO_UI_SCALE=100 ANIMATHIO_AUDIO=none
+scripts/virtual-display.sh --screenshot docs/screenshots/editor-markers.png 30 \
+  ./target/release/animathio --screenshot-panel=markers target/screenshot-project.amio
+scripts/virtual-display.sh --screenshot docs/screenshots/editor-autocut.png 30 \
+  ./target/release/animathio --screenshot-panel=autocut target/screenshot-project.amio
+```
+
+The private config directory avoids changing personal preferences. Captures use
+1920×1080 Xvfb, silent audio and release binaries with first-party plugins. Inspect
+both PNGs: markers must have named rows; autocut must have completed analysis and
+show a proposed cut before capturing (increase the delay on slower machines).

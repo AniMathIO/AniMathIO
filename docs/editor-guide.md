@@ -323,12 +323,16 @@ FFmpeg chapter lists. See the [CLI reference](cli.md#beats) and
 [MCP reference](mcp.md#markers-and-beat-sync).
 
 
+![Markers and beat sync panel](screenshots/editor-markers.png)
+
 Automatic cuts for recordings are available through Clip > Automatic cuts,
 `animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence
 ranges on the timeline before applying one undoable linked audio/video ripple edit.
 Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see the
 [CLI reference](cli.md#autocut) and [review rules](mcp.md#automatic-cut-review).
 
+
+![Automatic cut review of a voice pause over music](screenshots/editor-autocut.png)
 
 Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto duck…,
 `animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks or clips,
