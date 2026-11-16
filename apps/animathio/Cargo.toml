@@ -37,6 +37,7 @@ serde_json.workspace = true
 [dev-dependencies]
 # Headless window tests (`gpui::TestAppContext` / `VisualTestContext`); see `src/editor/ui_tests/`.
 gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3"
 
 [lints]
 workspace = true

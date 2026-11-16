@@ -108,7 +108,10 @@ pub use method::{
     ImportManimResult, MathAddParams, ProjectState, RenderFrameParams, RenderFrameResult, Timeline,
     TrackInfo, clip_kind_label, media_type_of, timeline_of,
 };
-pub use path::{read_bounded, validate_existing_file, validate_output_file};
+pub use path::{
+    ensure_distinct_from_project, read_bounded, same_file, validate_existing_file,
+    validate_output_file,
+};
 pub use server::{
     ControlServer, MAX_REQUEST_BYTES, RunningServer, SocketSpec, default_socket_spec,
 };

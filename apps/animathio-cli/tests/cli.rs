@@ -458,6 +458,43 @@ fn export_creates_missing_parents_and_never_overwrites_silently() {
 }
 
 #[test]
+fn export_refuses_to_overwrite_the_project_file() {
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    let original = fs::read(&archive).unwrap();
+    // Even with --overwrite, the video must never replace the .amio itself.
+    let rejected = cli(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.1",
+        "-o",
+        path(&archive),
+        "--overwrite",
+    ]);
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(
+        stderr.contains("the output path is the open project file"),
+        "{stderr}"
+    );
+    assert_eq!(fs::read(&archive).unwrap(), original, "project untouched");
+    // A sibling output still exports while the project is the input.
+    let sibling = dir.path().join("sibling.mp4");
+    ok(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.1",
+        "-o",
+        path(&sibling),
+    ]);
+    assert!(sibling.is_file());
+    assert_eq!(fs::read(&archive).unwrap(), original, "project untouched");
+}
+
+#[test]
 fn import_media_preserves_companion_audio_and_video_only_sources() {
     use animathio_core::{ClipKind, FrameRate};
     use animathio_media::{EncoderConfig, Mp4Encoder, VideoConfig};
@@ -693,4 +730,41 @@ fn math_catalog_adds_every_kind_and_rejects_invalid_latex_without_saving() {
     ]);
     assert!(!result.status.success());
     assert!(!output.exists());
+}
+
+#[test]
+fn png_outputs_cannot_overwrite_the_project() {
+    let dir = tempdir().unwrap();
+    let project = dir.path().join("frame_000000.png");
+    write_json(
+        File::create(&project).unwrap(),
+        &animathio_core::Project::default(),
+    )
+    .unwrap();
+    let original = std::fs::read(&project).unwrap();
+    for args in [
+        vec![
+            "render",
+            path(&project),
+            "--frame",
+            "0",
+            "-o",
+            path(&project),
+        ],
+        vec![
+            "render-seq",
+            path(&project),
+            "--from",
+            "0",
+            "--to",
+            "1",
+            "-o",
+            path(dir.path()),
+        ],
+    ] {
+        let result = cli(&args);
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("open project file"));
+        assert_eq!(std::fs::read(&project).unwrap(), original);
+    }
 }

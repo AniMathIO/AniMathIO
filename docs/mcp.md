@@ -95,7 +95,10 @@ canonicalized and must resolve to regular files; `script_dir` must resolve to a
 directory. Output paths may name parents that do not exist yet — the export
 writer creates them — but their nearest existing ancestor must be a directory.
 `export` refuses an existing destination with an `output already exists` error
-unless `overwrite` is `true`, and writes the MP4 through a temporary file in the
+unless `overwrite` is `true`, and refuses an output that names the open project
+file with `invalid path: the output path is the open project file; choose a
+different file name` (both handlers: the connected editor and the headless
+`--project` mode), and writes the MP4 through a temporary file in the
 destination directory that is renamed into place only on success, so a cancelled
 or failed export never leaves a partial file. Control math/graph positions are
 normalized canvas fractions and their colors are `[r, g, b, a]` bytes. Durations
@@ -151,7 +154,7 @@ clears its undo history.
 | `set_playing` | Start / pause playback | |
 | `save_project` | Save to a path, or overwrite the current file | |
 | `render_frame` | Render one frame to PNG | base64 return, or written to a path |
-| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; creates missing parent directories; requires `overwrite: true` to replace an existing file; returns the written path |
+| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; creates missing parent directories; requires `overwrite: true` to replace an existing file; refuses an output that is the open project file; returns the written path |
 | `import_v1` | Import a v1 `.animathio` project, replacing the current one | |
 | `add_transition` | Add a transition on the cut between two adjacent clips | `kind`: `cross_dissolve` (default), `dip_to_black`, `dip_to_white`, `wipe` (+ `direction`: `left_to_right`/`right_to_left`/`top_to_bottom`/`bottom_to_top`); edit point by `between_clip_a` + `clip_b`, or by the nearest cut to `at_time_ms` (optionally on `track`); `duration_ms` is centred on the cut |
 | `list_transitions` | List transitions | id, track, clips, kind, `cut_ms`, `duration_ms` |
@@ -569,3 +572,8 @@ Denoise learning uses a noise-only interval inside an audio clip (32 ms to 30 s)
 `detect_scenes` takes `clip` or `track`, optional `sensitivity` (0..1, default 0.5) and `min_shot_frames` (default 6). It returns a proposal containing the expected project snapshot and cuts with `enabled` toggles, timeline ticks and base64-encoded 96×54 grayscale thumbnails. Pass the reviewed object as `proposal` to `split_at_scenes`; `markers: true` adds markers instead. Editor detection runs on a worker. Control methods are `video.detect_scenes` and `video.split_at_scenes`. Reanalysis is required after any project change.
 
 Sampling is 4 Hz: very short scenes can be missed and detected boundaries have up to one sample of latency. Slow fades and gradual motion are ignored. The editor offers sensitivity and minimum-shot presets, track-wide reanalysis, and short-shot deletion presets. `delete_shorter_than_frames` removes short resulting shots and linked companions, leaving timeline gaps.
+
+Export and PNG output guards compare filesystem identity, including hard links and
+symlinks, and resolve missing path tails. Case handling follows the volume rather
+than the operating system. Concurrent filesystem changes after validation (TOCTOU)
+remain outside this guard. PNG outputs also refuse the open project path.

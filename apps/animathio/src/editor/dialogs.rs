@@ -190,7 +190,7 @@ impl Editor {
 }
 
 /// Outcome of submitting the Export dialog.
-enum Submitted {
+pub(super) enum Submitted {
     Invalid,
     Queued,
     ConfirmOverwrite,
@@ -371,7 +371,7 @@ impl Editor {
     }
 
     #[allow(clippy::too_many_arguments)] // Dialog fields, passed straight through.
-    fn submit_export(
+    pub(super) fn submit_export(
         &mut self,
         preset: Option<ExportPreset>,
         choice: &str,
@@ -397,6 +397,14 @@ impl Editor {
         };
         if output.as_os_str().is_empty() || output.file_name().is_none() {
             self.error = Some("Choose an output file".into());
+            cx.notify();
+            return Submitted::Invalid;
+        }
+        // Exporting over the open project file would destroy it.
+        if let Some(project) = &self.path
+            && let Err(error) = animathio_control::ensure_distinct_from_project(&output, project)
+        {
+            self.error = Some(error.to_string());
             cx.notify();
             return Submitted::Invalid;
         }

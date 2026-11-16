@@ -246,6 +246,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -311,6 +312,7 @@ dependencies = [
  "image",
  "interprocess",
  "rustix 1.1.6",
+ "same-file",
  "serde",
  "serde_json",
  "subtle",

@@ -47,6 +47,8 @@ pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, ControlError> {
 /// writer creates them). An existing target must be a regular file, not a
 /// directory or special file.
 pub fn validate_output_file(path: &Path) -> Result<PathBuf, ControlError> {
+    let resolved = resolve(path);
+    let path = resolved.as_path();
     let file_name = path.file_name().ok_or_else(|| {
         ControlError::InvalidPath(format!("path has no file name: {}", path.display()))
     })?;
@@ -96,6 +98,52 @@ pub fn validate_output_file(path: &Path) -> Result<PathBuf, ControlError> {
         )));
     }
     Ok(target)
+}
+
+/// Resolve existing prefixes before appending missing components. Re-resolve after
+/// each component so `missing/../link` also follows the existing symlink.
+fn resolve(path: &Path) -> PathBuf {
+    let mut resolved = if path.is_absolute() {
+        PathBuf::new()
+    } else {
+        current_dir().unwrap_or_default()
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => resolved.push(other.as_os_str()),
+        }
+        if let Ok(canonical) = resolved.canonicalize() {
+            resolved = canonical;
+        }
+    }
+    resolved
+}
+
+/// Whether paths identify the same file, including hard links. File identity
+/// delegates case handling to the filesystem (including case-sensitive volumes
+/// on Windows/macOS). Missing paths compare their resolved spelling.
+#[must_use]
+pub fn same_file(a: &Path, b: &Path) -> bool {
+    let (a, b) = (resolve(a), resolve(b));
+    same_file::is_same_file(&a, &b).unwrap_or(false) || a == b
+}
+
+/// Refuse an export output that names the open project file: exporting an
+/// MP4 over `project.amio` would destroy the project. Every surface checks
+/// this before writing — the editor Export dialog, the editor's and the
+/// headless control/MCP `export` method, and `animathio-cli export`. An
+/// output that merely lives next to the project (or nowhere yet) is fine.
+pub fn ensure_distinct_from_project(output: &Path, project: &Path) -> Result<(), ControlError> {
+    if same_file(output, project) {
+        return Err(ControlError::InvalidPath(
+            "the output path is the open project file; choose a different file name".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn current_dir() -> Result<PathBuf, ControlError> {
@@ -176,5 +224,125 @@ mod tests {
             real.canonicalize().unwrap().join("nested/out.mp4"),
             "the resolved ancestor is used, not the link"
         );
+    }
+
+    #[test]
+    fn the_project_file_is_the_same_file_under_any_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        assert!(same_file(&project, &project));
+        assert!(same_file(&project, &dir.path().join("./project.amio")));
+        // `..` through an existing directory still names the project.
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        assert!(same_file(&project, &dir.path().join("sub/../project.amio")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_resolved_in_both_directions() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let project = real.join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(same_file(&link.join("project.amio"), &project));
+        // A not-yet-written output through a symlinked parent resolves to the
+        // real directory, so it only matches when the file names agree.
+        assert!(same_file(&link.join("out.mp4"), &real.join("out.mp4")));
+        assert!(!same_file(&link.join("out.mp4"), &project));
+    }
+
+    #[test]
+    fn other_files_in_the_project_directory_are_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        let other = dir.path().join("out.mp4");
+        std::fs::write(&other, b"y").unwrap();
+        assert!(!same_file(&other, &project));
+        assert!(ensure_distinct_from_project(&other, &project).is_ok());
+        // Outputs that do not exist yet compare by the file they would become.
+        assert!(ensure_distinct_from_project(&dir.path().join("new.mp4"), &project).is_ok());
+        assert!(
+            ensure_distinct_from_project(&dir.path().join("nested/deeper/new.mp4"), &project)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn exporting_onto_the_project_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        for spelling in [project.clone(), dir.path().join("./project.amio")] {
+            let error = ensure_distinct_from_project(&spelling, &project).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("the output path is the open project file"),
+                "{error}"
+            );
+            assert!(error.to_string().contains("choose a different file name"));
+        }
+    }
+
+    #[test]
+    fn missing_tail_parent_segments_are_normalized() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        assert!(same_file(
+            &dir.path().join("missing/../project.amio"),
+            &project
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_symlink_and_missing_tail_cannot_hide_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        let alias = dir.path().join("alias.mp4");
+        std::os::unix::fs::symlink(&project, &alias).unwrap();
+        let output = validate_output_file(&dir.path().join("missing/../alias.mp4")).unwrap();
+        assert!(ensure_distinct_from_project(&output, &project).is_err());
+        assert_eq!(output, project.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn hard_links_are_project_aliases() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        let alias = dir.path().join("alias.mp4");
+        std::fs::write(&project, b"x").unwrap();
+        std::fs::hard_link(&project, &alias).unwrap();
+        assert!(ensure_distinct_from_project(&alias, &project).is_err());
+    }
+
+    #[test]
+    fn case_handling_follows_the_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        let lower = dir.path().join("project.amio");
+        let upper = dir.path().join("PROJECT.AMIO");
+        std::fs::write(&lower, b"x").unwrap();
+        let aliases = upper.exists();
+        assert_eq!(same_file(&lower, &upper), aliases);
+        if !aliases {
+            std::fs::write(&upper, b"y").unwrap();
+            assert!(!same_file(&lower, &upper));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_and_normal_paths_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        assert!(same_file(&project, &project.canonicalize().unwrap()));
     }
 }
