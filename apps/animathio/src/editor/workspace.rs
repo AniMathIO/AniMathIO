@@ -183,11 +183,11 @@ impl Editor {
     /// Sliding pill only schedules frames for the 180ms after a tab change.
     pub(super) fn library_tabs(&self, cx: &mut Context<Self>) -> Div {
         let index = |tab| match tab {
-            LeftTab::Assets => 0.,
-            LeftTab::Plugins => 1.,
-            LeftTab::Effects => 2.,
-            LeftTab::Titles => 3.,
-            LeftTab::Math => 4.,
+            LeftTab::Media => 0.,
+            LeftTab::Plugins => 4.,
+            LeftTab::Effects => 3.,
+            LeftTab::Titles => 2.,
+            LeftTab::Elements => 1.,
         };
         let from = index(self.previous_left_tab);
         let to = index(self.left_tab);
@@ -217,27 +217,39 @@ impl Editor {
                 .child(indicator)
                 .children(
                     [
-                        (LeftTab::Assets, "Assets", IconName::Images),
-                        (LeftTab::Plugins, "Plugins", IconName::Puzzle),
-                        (LeftTab::Effects, "Effects", IconName::Sparkles),
+                        (LeftTab::Media, "Media", IconName::Images),
+                        (LeftTab::Elements, "Elements", IconName::Shapes),
                         (LeftTab::Titles, "Titles", IconName::Type),
-                        (LeftTab::Math, "Math", IconName::Shapes),
+                        (LeftTab::Effects, "Effects", IconName::Sparkles),
+                        (LeftTab::Plugins, "Plugins", IconName::Puzzle),
                     ]
                     .map(|(tab, label, icon)| {
                         let selected = self.left_tab == tab;
                         div()
                             .id(label)
-                            .focusable()
+                            .track_focus(&self.media_view.tab_focus[tab as usize])
                             .tab_index(0)
                             .focus_visible(|this| {
                                 this.border_1().border_color(style::hex(color::ACCENT))
                             })
-                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.select_left_tab(tab, cx);
-                                    cx.stop_propagation();
-                                }
-                            }))
+                            .on_key_down(cx.listener(
+                                move |this, event: &KeyDownEvent, window, cx| {
+                                    let index = this.left_tab as usize;
+                                    let next = match event.keystroke.key.as_str() {
+                                        "enter" | "space" => Some(tab),
+                                        "right" => Some(LeftTab::ALL[(index + 1) % 5]),
+                                        "left" => Some(LeftTab::ALL[(index + 4) % 5]),
+                                        "home" => Some(LeftTab::Media),
+                                        "end" => Some(LeftTab::Plugins),
+                                        _ => None,
+                                    };
+                                    if let Some(next) = next {
+                                        this.select_left_tab(next, cx);
+                                        window.focus(&this.media_view.tab_focus[next as usize], cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
                             .relative()
                             .flex_1()
                             .flex()
@@ -261,9 +273,10 @@ impl Editor {
                             .tooltip(move |window, cx| {
                                 gpui_component::tooltip::Tooltip::new(label).build(window, cx)
                             })
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.select_left_tab(tab, cx)),
-                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_left_tab(tab, cx);
+                                window.focus(&this.media_view.tab_focus[tab as usize], cx);
+                            }))
                     }),
                 )
                 .child(

@@ -269,7 +269,13 @@ impl Editor {
             (PresetRole::Exit, "Animations: Out"),
             (PresetRole::Emphasis, "Animations: Emphasis"),
         ] {
-            let group: Vec<_> = presets.iter().filter(|p| p.role == role).collect();
+            let group: Vec<_> = presets
+                .iter()
+                .filter(|p| {
+                    p.role == role
+                        && self.library_matches(LeftTab::Effects, &format!("{label} {}", p.name))
+                })
+                .collect();
             if group.is_empty() {
                 continue;
             }
@@ -302,6 +308,19 @@ impl Editor {
                             "animation-item-{}-{}",
                             preset.plugin_id, preset.preset_id
                         )))
+                        .focusable()
+                        .tab_index(0)
+                        .focus_visible(|s| s.bg(cx.theme().muted))
+                        .on_key_down({
+                            let plugin = plugin.clone();
+                            let id = id.clone();
+                            cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.apply_animation_preset(&plugin, &id, cx);
+                                    cx.stop_propagation();
+                                }
+                            })
+                        })
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.apply_animation_preset(&plugin, &id, cx);
                         }))

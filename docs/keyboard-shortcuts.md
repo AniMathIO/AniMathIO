@@ -79,11 +79,11 @@ later clips on that track left. Markers follow the ripple setting.
 | ZoomToFit (timeline) | `\` |
 | LargerTracks | `Ctrl-alt-=` |
 | SmallerTracks | `Ctrl-alt--` |
-| FocusLibrary (Premiere's Projects panel) | `shift-1` |
+| FocusLibrary (Library → Media; Premiere's Projects panel) | `shift-1` |
 | FocusTimeline | `shift-3` |
 | FocusViewer (Program Monitor) | `shift-4` |
 | FocusInspector (Effect Controls) | `shift-5` |
-| FocusEffects | `shift-7` |
+| FocusEffects (Library → Effects) | `shift-7` |
 | FitViewer | `shift-f` |
 
 ## Transitions, clips and selection

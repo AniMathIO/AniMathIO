@@ -149,7 +149,12 @@ impl Editor {
                 MenuItem::action("Delete selection", DeleteSelection).disabled(none_selected),
             ]),
             Menu::new("View").items([
-                MenuItem::action("Media pool", ToggleMediaPool).checked(self.dock.left_open),
+                MenuItem::action("Library", ToggleMediaPool).checked(self.dock.left_open),
+                MenuItem::action("Media", FocusLibrary),
+                MenuItem::action("Elements", ShowElements),
+                MenuItem::action("Titles", ShowTitles),
+                MenuItem::action("Effects", ShowEffects),
+                MenuItem::action("Plugins", ShowPlugins),
                 MenuItem::action("Inspector", ToggleInspector).checked(self.dock.right_open),
                 MenuItem::action("Timeline", ToggleTimeline).checked(self.dock.bottom_open),
                 MenuItem::separator(),

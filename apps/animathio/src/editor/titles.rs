@@ -126,7 +126,10 @@ impl Editor {
                 .text_color(hex(color::TEXT_SECONDARY))
                 .child("Double-click to add at playhead, or drag to timeline"),
         );
-        for preset in title_presets() {
+        for preset in title_presets()
+            .iter()
+            .filter(|p| self.library_matches(LeftTab::Titles, &p.name))
+        {
             let id = preset.id.clone();
             let drag = id.clone();
             let keyboard_id = id.clone();
@@ -157,6 +160,10 @@ impl Editor {
             cards = cards.child(
                 div()
                     .id(SharedString::from(format!("title-{id}")))
+                    .debug_selector({
+                        let id = id.clone();
+                        move || format!("title-{id}")
+                    })
                     .w_full()
                     .rounded(px(6.))
                     .overflow_hidden()

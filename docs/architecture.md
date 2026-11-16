@@ -91,7 +91,7 @@ shared panel handlers, asserting project and view state without devices or pixel
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `animations` (the inspector
-Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `math` (Math tab, typed object dialog and inspector), `titles` (Titles tab), `dialogs`, `export_panel`
+Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `math` (Elements cards, typed object dialog and inspector), `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails`, `actions` and `update_check`
 (at most one GitHub releases lookup per 24 h, a dismissable newer-release notice,
@@ -843,7 +843,7 @@ route through the shared commands and source-limit guards.
 
 ## Mathematical object workflow
 
-The library's **Math** tab offers LaTeX, Text, Point, Line segment, Vector,
+The library's **Elements** tab offers LaTeX, Text, Point, Line segment, Vector,
 Polygon, Plot, Circle, Ellipse, Cartesian grid and Polar grid. Click a preview
 card to configure it; the plus button adds defaults at the playhead, and dragging
 its preview to the timeline adds defaults at the drop time. Placement uses a
