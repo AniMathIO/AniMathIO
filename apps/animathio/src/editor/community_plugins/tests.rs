@@ -70,8 +70,22 @@ fn install_verify_enable_render_and_remove_live(cx: &mut TestAppContext) {
             .contains("sha-256 mismatch")
     }));
     assert!(store.list().0.is_empty());
-    ui.update(|e, _, cx| e.install_community_entry(entry, cx));
+    ui.update(|e, _, cx| {
+        e.refresh_community_inventory(cx);
+        e.install_community_entry(entry, cx);
+        assert!(e.community.busy);
+        assert!(
+            e.set_community_plugins_enabled(false, cx).is_err(),
+            "serialize settings writes"
+        );
+    });
     assert!(ui.read(|e| e.community.error.is_none()));
+    assert_eq!(
+        ui.read(|e| e.community.installed.len()),
+        1,
+        "stale refresh cannot overwrite install result"
+    );
+    assert!(store.settings().enabled);
     assert_eq!(store.list().0.len(), 1);
     assert!(
         !store.list().0[0].enabled,

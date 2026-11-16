@@ -19,6 +19,7 @@ pub(super) struct Browser {
     pub browsing: bool,
     pub fetching: bool,
     pub busy: bool,
+    inventory_revision: u64,
     pub error: Option<String>,
     pub explanation: bool,
     pub fetch: IndexFetcher,
@@ -33,6 +34,7 @@ impl Default for Browser {
             browsing: false,
             fetching: false,
             busy: false,
+            inventory_revision: 0,
             error: None,
             explanation: false,
             fetch: registry::fetcher(),
@@ -49,6 +51,9 @@ impl Editor {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
+        if self.community.busy {
+            return Err("Wait for the current plugin operation to finish".into());
+        }
         let store = self
             .community_store()
             .ok_or("no per-user directory is available for community plugins")?;
@@ -109,12 +114,17 @@ impl Editor {
         let Some(store) = self.community_store() else {
             return;
         };
+        self.community.inventory_revision = self.community.inventory_revision.wrapping_add(1);
+        let revision = self.community.inventory_revision;
         cx.spawn(async move |this, cx| {
             let (installed, problems) = cx
                 .background_executor()
                 .spawn(async move { store.list() })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                if this.community.busy || this.community.inventory_revision != revision {
+                    return;
+                }
                 this.community.installed = installed;
                 for problem in problems {
                     this.notices.push(crate::style::Toast::warning(problem));
@@ -161,6 +171,7 @@ impl Editor {
             return;
         };
         self.community.busy = true;
+        self.community.inventory_revision = self.community.inventory_revision.wrapping_add(1);
         self.community.error = None;
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -429,6 +440,7 @@ impl Editor {
                     .child(
                         gpui_component::switch::Switch::new("community-switch")
                             .checked(enabled)
+                            .disabled(busy)
                             .accessibility_label("Community plugins")
                             .on_click(cx.listener(move |this, checked: &bool, _, cx| {
                                 if let Err(error) = this.set_community_plugins_enabled(*checked, cx)
