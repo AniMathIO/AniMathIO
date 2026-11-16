@@ -2034,9 +2034,8 @@ fn clip_mut(project: &mut Project, id: ClipId) -> Result<&mut Clip, Error> {
 ///
 /// The undo stack is depth-capped ([`DEFAULT_HISTORY_LIMIT`], configurable with
 /// [`History::with_limit`]); the oldest entries are dropped so a long session
-/// cannot grow the stacks without bound. Dropping oldest entries can only make
-/// the project *differ more* from its saved file, so a dirty flag derived from
-/// "an undo entry exists" stays conservative.
+/// bounds the number of retained edits, not their byte size. Dirty state must
+/// be tracked independently: an empty undo stack does not imply a saved project.
 #[derive(Clone, Debug)]
 pub struct History {
     undo: Vec<Command>,
@@ -2077,6 +2076,11 @@ impl History {
     pub fn set_limit(&mut self, limit: usize) {
         self.limit = limit;
         self.enforce_limit();
+        // Keep the nearest future edits when reducing the cap. Redo pops
+        // from the end, so discard the farthest future first.
+        if self.redo.len() > limit {
+            self.redo.drain(..self.redo.len() - limit);
+        }
     }
     fn enforce_limit(&mut self) {
         if self.undo.len() > self.limit {
@@ -2120,6 +2124,7 @@ impl History {
             Ok(inverse) => {
                 self.redo.pop();
                 self.undo.push(inverse);
+                self.enforce_limit();
                 Ok(true)
             }
             Err(error) => {

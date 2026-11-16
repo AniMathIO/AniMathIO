@@ -1328,3 +1328,36 @@ fn history_default_limit_is_bounded() {
         "a sensible default, not a token cap"
     );
 }
+
+#[test]
+fn reducing_history_limit_bounds_redo_and_keeps_nearest_future() {
+    let mut project = base();
+    let mut history = History::with_limit(8);
+    for time in [10, 20, 30, 40] {
+        history
+            .execute(
+                &mut project,
+                &Command::MoveClip {
+                    id: ClipId(0),
+                    track: TrackId(0),
+                    start: Time(time),
+                },
+            )
+            .unwrap();
+    }
+    for _ in 0..4 {
+        assert!(history.undo(&mut project).unwrap());
+    }
+    history.set_limit(2);
+    assert!(history.redo(&mut project).unwrap());
+    assert!(history.redo(&mut project).unwrap());
+    assert!(!history.redo(&mut project).unwrap());
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(0)].range.start,
+        Time(20)
+    );
+    history.undo(&mut project).unwrap();
+    history.set_limit(0);
+    assert!(!history.redo(&mut project).unwrap());
+    assert!(!history.undo(&mut project).unwrap());
+}

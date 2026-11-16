@@ -172,8 +172,8 @@ so a colour change undoes in one step without swallowing adjacent edits. Asset
 parameter selectors display names but commit asset identities (or `null` for None).
 
 The undo stack is depth-capped (`History::with_limit`, default 500 entries);
-the oldest entries are dropped, which can only make the project differ more
-from its saved file, never less.
+the oldest entries are dropped. This bounds entry count, not bytes; dirty
+state is tracked independently of whether undo is available.
 
 ## Time model (integer ticks)
 
