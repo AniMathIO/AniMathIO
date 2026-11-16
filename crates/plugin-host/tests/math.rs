@@ -705,7 +705,10 @@ fn latex_inline_colors_golden() {
         (640, 360),
     )
     .unwrap();
-    assert_eq!(frame.pixels.chunks_exact(4).map(|p| p[3]).max(), Some(128));
+    assert_eq!(
+        frame.pixels.as_chunks::<4>().0.iter().map(|p| p[3]).max(),
+        Some(128)
+    );
 }
 
 #[test]

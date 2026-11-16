@@ -692,7 +692,7 @@ fn walk_shape(
     out: &mut Vec<TypesetPath>,
     colors: &mut Vec<Option<[u8; 4]>>,
 ) {
-    let mut paint = shape.fill.as_ref();
+    let mut outline_paint = shape.fill.as_ref();
     let mut path = Vec::new();
     match &shape.geometry {
         Geometry::Line(end) => {
@@ -759,11 +759,11 @@ fn walk_shape(
         && let Some(stroke) = &shape.stroke
     {
         path = stroke_outline(&path, stroke);
-        paint = Some(&stroke.paint);
+        outline_paint = Some(&stroke.paint);
     }
     if !path.is_empty() {
         out.push(transform_path(&path, state, 1.0));
-        colors.push(paint.and_then(path_color));
+        colors.push(outline_paint.and_then(path_color));
     }
 }
 
