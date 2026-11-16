@@ -14,6 +14,39 @@ Warnings go to stderr; the import succeeds as long as the project is structurall
 usable. Resource limits guard untrusted input: ≤ 2 GiB inflated JSON, ≤ 1 GiB per
 embedded asset, ≤ 10,000 media entries.
 
+## Where 1.x features live
+
+Audited against the frozen `legacy` sidebar, `renderer/types.ts`, the resource
+panels and Mafs dialog. “Moved” means an equivalent workflow exists at the listed
+location; “missing” identifies a concrete parity gap, not a hidden Library tab.
+This describes authoring in 2.x; importing saved 1.x projects has the limitations below.
+
+| 1.x feature | Where it lives in 2.x | Status |
+| --- | --- | --- |
+| Video / image / audio resources, upload | Library → Media; Import media; kind filters, grid/list and drag to timeline | Moved |
+| Microphone audio recorder | Import recorded audio files in Media; no in-app recording ([#299](https://github.com/AniMathIO/AniMathIO/issues/299)) | Missing |
+| Plain text / Mafs text | Library → Elements → Text & formulas → Text; source and size in dialog/inspector | Moved |
+| Title, Subtitle, Body, Caption, Heading 1–6 typography | Titles has composition presets; Text has editable size; original styles and font weights await [#300](https://github.com/AniMathIO/AniMathIO/issues/300) | Missing |
+| LaTeX, matrix source, formula colour | Elements → Text & formulas → LaTeX; source, snippets, templates and colour in dialog/inspector | Moved |
+| Natural-language → LaTeX (Gemini) | No equivalent; optional integration tracked in [#302](https://github.com/AniMathIO/AniMathIO/issues/302) | Missing |
+| Mafs point, line segment, vector, polygon, circle, ellipse | Elements → Shapes & geometry; each has a configurable dialog and inspector | Moved |
+| Mafs function plot | Elements → Graphs & grids → Plot; expression and ranges in dialog/inspector | Moved |
+| Mafs Cartesian / polar coordinates | Elements → Graphs & grids → Cartesian grid / Polar grid; editable as separate layers | Moved |
+| Fade in/out, directional slide in/out, breathe | Effects → Animations: In / Out / Emphasis; inspector → Animations | Moved |
+| Mafs reveal in/out | Effects → zoom-in / zoom-out presets; LaTeX also has Write on | Moved |
+| Clip-path slide and per-character slide | Whole-clip slide and typewriter are alternatives; exact parity awaits [#301](https://github.com/AniMathIO/AniMathIO/issues/301) | Missing |
+| None, black-and-white, sepia, invert, saturate effects | Effects → Video effects; inspector → Effects (remove/bypass gives None) | Moved |
+| Audio mixer volume and mute | Track gain/mute/solo controls; clip inspector gain/mute; viewer monitor volume | Moved |
+| Background Fill | File → Project settings → background colour | Moved |
+| Element list, order, placement and timing | Multi-track timeline, track order and inspector → Transform | Moved |
+| Manim source import | File → Import Manim scene | Moved |
+| Canvas settings and video export | File → Project settings; Export dialog (MP4; WebM output remains missing) | Moved |
+
+Plugin clip sources appear only in Elements. Plugins is the installed inventory:
+all loaded kinds, versions, enabled status and source directories. Titles contains
+composition/caption presets; Effects contains video/audio effects, transitions
+and animation presets. Media search and media-kind filters belong only to Media.
+
 ## What maps
 
 | v1 | v2 |
