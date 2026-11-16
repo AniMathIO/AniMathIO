@@ -494,7 +494,7 @@ impl Editor {
             .flex_1()
             .w_full()
             .p_1()
-            .id("media-body")
+            .id(("media-body", self.left_tab as usize))
             .debug_selector(|| "library-body".into())
             .overflow_y_scroll();
         match self.left_tab {
@@ -758,7 +758,16 @@ impl Editor {
                     })
                     .collect();
                 let animations = self.animation_library_rows(cx);
-                if effects.is_empty() && audio_effects.is_empty() && animations.is_empty() {
+                let has_transitions = ["Video fades", "Audio fades", "Video + audio fades"]
+                    .iter()
+                    .any(|label| {
+                        self.library_matches(LeftTab::Effects, &format!("Transitions {label}"))
+                    });
+                if effects.is_empty()
+                    && audio_effects.is_empty()
+                    && animations.is_empty()
+                    && !has_transitions
+                {
                     body = body.child(empty_state("No effect plugins loaded", cx));
                 }
                 let group = |label: &'static str| {
@@ -789,6 +798,7 @@ impl Editor {
                     let (click_plugin, click_effect) = (plugin.clone(), effect.clone());
                     body = body.child(
                         div()
+                            .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
                             .px_2()
                             .py_1()
                             .cursor_pointer()
@@ -816,7 +826,6 @@ impl Editor {
                                     }
                                 })
                             })
-                            .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.add_effect_to_selected(&click_plugin, &click_effect, cx);
                             }))
@@ -834,25 +843,69 @@ impl Editor {
                             ),
                     );
                 }
-                body = body.child(group("Transitions"));
-                for (key, label, kind) in [
-                    ("video", "Video fades", fades::TransitionKind::Video),
-                    ("audio", "Audio fades", fades::TransitionKind::Audio),
-                    ("both", "Video + audio fades", fades::TransitionKind::Both),
-                ] {
-                    if self.library_matches(LeftTab::Effects, &format!("Transitions {label}")) {
-                        body = body.child(
-                            Button::new(SharedString::from(format!("library-transition-{key}")))
-                                .ghost()
-                                .small()
-                                .label(label)
-                                .w_full()
-                                .tooltip("Apply one-second fades to selected clips")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.apply_default_transition(None, kind, cx)
-                                })),
-                        );
-                    }
+                let transitions: Vec<_> = [
+                    (
+                        "video",
+                        "Video fades",
+                        IconName::Film,
+                        fades::TransitionKind::Video,
+                    ),
+                    (
+                        "audio",
+                        "Audio fades",
+                        IconName::AudioWaveform,
+                        fades::TransitionKind::Audio,
+                    ),
+                    (
+                        "both",
+                        "Video + audio fades",
+                        IconName::Layers,
+                        fades::TransitionKind::Both,
+                    ),
+                ]
+                .into_iter()
+                .filter(|(_, label, _, _)| {
+                    self.library_matches(LeftTab::Effects, &format!("Transitions {label}"))
+                })
+                .collect();
+                if !transitions.is_empty() {
+                    body = body.child(group("Transitions"));
+                }
+                for (key, label, icon, kind) in transitions {
+                    let key_down = cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.apply_default_transition(None, kind, cx);
+                            cx.stop_propagation();
+                        }
+                    });
+                    body = body.child(
+                        div()
+                            .id(SharedString::from(format!("library-transition-{key}")))
+                            .debug_selector(move || format!("library-transition-{key}"))
+                            .px_2()
+                            .py_1()
+                            .cursor_pointer()
+                            .hover(|this| this.bg(cx.theme().muted))
+                            .focus_visible(|s| s.bg(cx.theme().muted))
+                            .focusable()
+                            .tab_index(0)
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(icons::icon(icon).small())
+                            .child(label)
+                            .tooltip(|window, cx| {
+                                gpui_component::tooltip::Tooltip::new(
+                                    "Apply one-second fades to the selected clips",
+                                )
+                                .build(window, cx)
+                            })
+                            .on_key_down(key_down)
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.apply_default_transition(None, kind, cx);
+                            })),
+                    );
                 }
                 body = body.children(animations);
                 if self.library_matches(LeftTab::Effects, "Animations Write on LaTeX") {
@@ -1144,21 +1197,32 @@ impl Editor {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            let source = plugin
+            let source_full = plugin
                 .source_path
                 .as_ref()
                 .map_or_else(|| "In-memory package".into(), |p| p.display().to_string());
+            // The bundle file name is what identifies the package; the full path is the tooltip.
+            let source = plugin
+                .source_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map_or_else(|| source_full.clone(), |n| n.to_string_lossy().into_owned());
+            let origin = if id.starts_with("org.animathio.") {
+                "First-party"
+            } else {
+                "Third-party"
+            };
             if !self.library_matches(
                 LeftTab::Plugins,
                 &format!(
-                    "{} {} {} {} {}",
-                    id, plugin.manifest.name, plugin.manifest.version, kinds, source
+                    "{} {} {} {} {} {}",
+                    id, plugin.manifest.name, plugin.manifest.version, kinds, source_full, origin
                 ),
             ) {
                 continue;
             }
             let selector = format!("installed-{id}");
-            let source_tooltip = source.clone();
+            let source_tooltip = source_full.clone();
             let id_tooltip = id.clone();
             body = body.child(
                 div()
@@ -1193,7 +1257,11 @@ impl Editor {
                                     .build(window, cx)
                             }),
                     )
-                    .child(div().text_color(hex(color::TEXT_SECONDARY)).child(kinds))
+                    .child(
+                        div()
+                            .text_color(hex(color::TEXT_SECONDARY))
+                            .child(format!("{kinds} · {origin}")),
+                    )
                     .child(
                         div()
                             .id(SharedString::from(format!(
