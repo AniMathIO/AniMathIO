@@ -101,7 +101,7 @@ pub use effects::{
 };
 pub use error::ControlError;
 pub use export_presets::ExportPreset;
-pub use handler::{ControlHandler, dispatch, from_value};
+pub use handler::{ControlHandler, ControlReply, dispatch, from_value};
 pub use headless::HeadlessHandler;
 pub use method::{
     AssetInfo, Call, ClipAdded, ClipInfo, ExportParams, GraphAddParams, ImportManimParams,

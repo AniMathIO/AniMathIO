@@ -22,7 +22,7 @@ use gpui_component::{ActiveTheme, Selectable, Sizable};
 use serde_json::{Value, json};
 
 use crate::clipboard::Clipboard;
-use crate::control::{ControlMsg, ControlRuntime};
+use crate::control::ControlRuntime;
 use crate::editing::{self, InOut, Shuttle, Tool};
 use crate::editor_env::{EditorEnv, PluginSource};
 use crate::fades::{self, FadeEdge};

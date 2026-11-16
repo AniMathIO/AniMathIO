@@ -118,13 +118,17 @@ impl ControlServer {
                         let result = (|| -> io::Result<()> {
                             while let Some(message) = read_message(&mut stream, MAX_REQUEST_BYTES)?
                             {
-                                let response = respond(
-                                    &mut *handler.lock().map_err(|_| {
-                                        io::Error::other("control handler poisoned")
-                                    })?,
-                                    &token,
-                                    &message,
-                                );
+                                let response = respond_with(&token, &message, |call| {
+                                    let reply = handler
+                                        .lock()
+                                        .map_err(|_| {
+                                            crate::ControlError::Other(
+                                                "control handler poisoned".into(),
+                                            )
+                                        })?
+                                        .defer(call);
+                                    reply()
+                                });
                                 stream.write_all(&response)?;
                                 stream.write_all(b"\n")?;
                                 stream.flush()?;
@@ -304,6 +308,14 @@ struct RawRequest {
 }
 
 fn respond<H: ControlHandler>(handler: &mut H, expected_token: &str, message: &[u8]) -> Vec<u8> {
+    respond_with(expected_token, message, |call| handler.handle(call))
+}
+
+fn respond_with(
+    expected_token: &str,
+    message: &[u8],
+    handle: impl FnOnce(Call) -> Result<Value, crate::ControlError>,
+) -> Vec<u8> {
     let Ok(request) = serde_json::from_slice::<RawRequest>(message) else {
         return json!({
             "jsonrpc": "2.0",
@@ -339,7 +351,7 @@ fn respond<H: ControlHandler>(handler: &mut H, expected_token: &str, message: &[
     }) else {
         return error_response(&id, -32_602, "invalid params");
     };
-    match handler.handle(call) {
+    match handle(call) {
         Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result})
             .to_string()
             .into_bytes(),

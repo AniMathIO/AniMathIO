@@ -40,6 +40,41 @@ Requests are capped at 16 MiB; responses at 64 MiB (renders can be several
 megabytes). A request without the token, or with a mismatched `jsonrpc` version,
 gets a JSON-RPC error instead of a result.
 
+### Editor acceptance and completion
+
+The editor must accept each request within **10 seconds** of queueing it. If its UI
+thread is busy beyond that deadline, the server returns JSON-RPC error **-32003**
+(request not accepted). The queued request is atomically expired before any editor
+side effects and cannot execute when the UI recovers. Retrying this error is safe.
+The pending bridge queue is bounded to eight requests. A full queue returns the
+same error immediately without queueing the request, so retries cannot accumulate
+unlimited expired work while the UI is wedged. Acceptance is an internal handshake,
+with no new wire message or client requirement.
+
+After acceptance there is **no completion timeout**. Export, subtitle transcription,
+reframe, autocut, scene detection and other jobs retain their existing result shapes
+and reply when done or cancelled, even after tens of minutes or hours. Other control
+connections can submit requests while an accepted job runs; a single connection
+still processes calls sequentially. A computation that stalls after acceptance must
+finish or be cancelled through its existing job controls; the acceptance deadline
+is not a job watchdog. Headless project-file MCP execution has no UI acceptance step.
+
+Closing a connection does not cancel work. A request already queued may still be
+accepted and applied if the editor reaches it before its deadline, and an accepted job
+keeps running to completion; its connection thread stays occupied (one of the eight
+client slots) until the job finishes and its reply is discarded. Cancel long jobs
+through their own controls, not by disconnecting. One `animathio-cli mcp` process uses a
+single connection and serialises its tool calls behind a running job. When the queue is
+full the error comes back at once, so clients retrying -32003 should back off.
+
+A closed editor bridge or dropped reply channel returns **-32004** immediately when
+detected. Its outcome may be unknown: an accepted edit might already have happened.
+Do not automatically retry mutations after this error or a transport disconnect.
+Window shutdown may close the socket instead of delivering an error. The existing
+**-32000** generic handler, **-32001** authentication and **-32002** unsupported errors
+remain unchanged. These errors use the existing JSON-RPC error envelope and are
+surfaced by `animathio-cli mcp` without protocol changes.
+
 ### Methods
 
 | Method | Params | Result |

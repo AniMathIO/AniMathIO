@@ -24,6 +24,12 @@ pub enum ControlError {
     /// The method is known but not supported by this handler.
     #[error("not supported: {0}")]
     Unsupported(String),
+    /// The editor did not accept this request; it cannot execute later.
+    #[error("editor did not accept request (busy or deadline elapsed); request was not applied")]
+    NotAccepted,
+    /// The editor or its reply channel closed; completion may be unknown.
+    #[error("editor reply channel closed; request completion is unknown")]
+    EditorClosed,
     /// A generic handler failure with a human-readable message.
     #[error("{0}")]
     Other(String),
@@ -72,6 +78,8 @@ impl ControlError {
             Self::MethodNotFound(_) => -32_601,
             Self::InvalidParams(_) | Self::InvalidPath(_) | Self::Json(_) => -32_602,
             Self::Unsupported(_) => -32_002,
+            Self::NotAccepted => -32_003,
+            Self::EditorClosed => -32_004,
             Self::Io(_)
             | Self::Model(_)
             | Self::Format(_)

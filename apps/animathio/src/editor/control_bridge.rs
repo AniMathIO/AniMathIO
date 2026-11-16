@@ -11,8 +11,11 @@ impl Editor {
                 };
                 control.rx.try_recv()
             };
-            let Ok(ControlMsg::Invoke(call, reply)) = next else {
+            let Ok(request) = next else {
                 return;
+            };
+            let Some((call, reply)) = request.accept() else {
+                continue;
             };
             self.finish_color_edit(cx);
             if let Call::DetectScenes { params } = &call {
