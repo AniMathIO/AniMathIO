@@ -175,7 +175,12 @@ impl Editor {
             .min_h_0()
             .p(px(style::space::GUTTER / 2.))
             .bg(style::hex(color::BG))
-            .child(workspace)
+            .flex()
+            .flex_col()
+            .when(!self.missing_plugin_ids().is_empty(), |body| {
+                body.child(self.missing_plugins_notice(cx))
+            })
+            .child(div().flex_1().min_h_0().child(workspace))
     }
 }
 

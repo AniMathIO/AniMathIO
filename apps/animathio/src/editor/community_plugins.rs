@@ -9,6 +9,7 @@
 use super::*;
 use crate::style::{color, hex};
 use animathio_plugin_host::{CommunityStore, InstalledPlugin};
+use gpui_component::Disableable;
 mod registry;
 use registry::{Downloader, Entry, Index, IndexFetcher};
 
@@ -56,6 +57,7 @@ impl Editor {
             let acknowledged = crate::editor_env::config_file("community-plugin-explanation");
             if !acknowledged.as_ref().is_some_and(|p| p.exists()) {
                 self.community.explanation = true;
+                self.notices.push(crate::style::Toast::info("Community plugins are sandboxed third-party code, with memory and time limits. AniMathIO does not audit them."));
                 if let Some(path) = acknowledged {
                     if let Some(parent) = path.parent() {
                         let _ = std::fs::create_dir_all(parent);
@@ -67,6 +69,7 @@ impl Editor {
             self.community.browsing = false;
         }
         self.sync_community_plugins(cx);
+        self.refresh_community_inventory(cx);
         Ok(())
     }
 
@@ -274,7 +277,7 @@ impl Editor {
 }
 
 impl Editor {
-    fn bundled_inventory(&self, cx: &mut Context<Self>) -> Div {
+    fn bundled_inventory(&self, _cx: &mut Context<Self>) -> Div {
         let mut body = div().flex().flex_col().gap_2();
         let Some(host) = &self.plugin_host else {
             return body;
@@ -566,13 +569,17 @@ impl Editor {
                         .flex_wrap()
                         .gap_2()
                         .child(
-                            Button::new(SharedString::from(format!("enable-{id}")))
-                                .small()
-                                .label(if on { "Disable" } else { "Enable" })
-                                .disabled(busy || !enabled)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.toggle_community_plugin(id.clone(), !on, cx)
-                                })),
+                            gpui_component::switch::Switch::new(SharedString::from(format!(
+                                "enable-{id}"
+                            )))
+                            .label(if on { "Enabled" } else { "Enable" })
+                            .checked(on)
+                            .disabled(busy || !enabled)
+                            .on_change(cx.listener(
+                                move |this, checked: &bool, _, cx| {
+                                    this.toggle_community_plugin(id.clone(), *checked, cx)
+                                },
+                            )),
                         )
                         .child(
                             Button::new(SharedString::from(format!("remove-{remove}")))
@@ -698,5 +705,60 @@ impl Editor {
             body = body.child("No community plugins match your search.");
         }
         body
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+impl Editor {
+    pub(super) fn missing_plugins_notice(&self, cx: &mut Context<Self>) -> Div {
+        let ids = self.missing_plugin_ids();
+        let names = ids.iter().cloned().collect::<Vec<_>>().join(", ");
+        let mut notice = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
+            .p_2()
+            .text_size(crate::style::type_size::XS)
+            .bg(hex(color::RAISED))
+            .debug_selector(|| "missing-plugins-notice".into())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(format!("Missing plugins: {names}")),
+            );
+        if self.community_enabled() {
+            if let Some(index) = &self.community.index {
+                for entry in index.plugins.iter().filter(|p| ids.contains(&p.id)).take(3) {
+                    let entry = entry.clone();
+                    notice = notice.child(
+                        Button::new(SharedString::from(format!("notice-install-{}", entry.id)))
+                            .small()
+                            .label(format!("Install {}", entry.name))
+                            .disabled(
+                                self.community.busy
+                                    || entry.compatible().is_err()
+                                    || self.community.installed.iter().any(|p| p.id == entry.id),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.install_community_entry(entry.clone(), cx)
+                            })),
+                    );
+                }
+            }
+        }
+        notice.child(
+            Button::new("missing-manage-plugins")
+                .small()
+                .ghost()
+                .label("Manage plugins")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.dock.left_open = true;
+                    this.select_left_tab(LeftTab::Plugins, cx);
+                })),
+        )
     }
 }

@@ -4,9 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use animathio_plugin_api::{PluginKind, PluginManifestToml, PluginPackage};
-use animathio_plugin_host::{
-    CommunityError, CommunityStore, InstallOutcome, community::MAX_PACKAGE_BYTES,
-};
+use animathio_plugin_host::{CommunityError, CommunityStore, InstallOutcome, MAX_PACKAGE_BYTES};
 use serde::Deserialize;
 
 pub(super) const INDEX_URL: &str =
@@ -125,10 +123,16 @@ fn read(reader: impl std::io::Read, limit: u64) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 pub(super) fn parse(bytes: &[u8]) -> Result<Index, String> {
-    let index: Index = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-    if index.schema_version != 1 {
+    #[derive(Deserialize)]
+    struct Schema {
+        schema_version: u32,
+    }
+    let schema: Schema = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    if schema.schema_version != 1 {
         return Err("This registry needs a newer AniMathIO".into());
     }
+    let index: Index = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    debug_assert_eq!(index.schema_version, 1);
     let mut ids = std::collections::BTreeSet::new();
     if index.plugins.len() > 5000 || index.plugins.iter().any(|p| !ids.insert(&p.id)) {
         return Err("Invalid registry entries".into());
