@@ -1927,7 +1927,10 @@ fn headless_environment_never_checks_for_updates(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, project, assets);
     ui.settle();
     ui.read(|editor| {
-        assert!(!editor.env.updates, "the headless environment skips the check");
+        assert!(
+            !editor.env.updates,
+            "the headless environment skips the check"
+        );
         assert!(
             editor.preferences.check_updates,
             "the gate is the environment, not the preference"

@@ -207,7 +207,10 @@ mod tests {
         let prefs: Preferences = serde_json::from_str("{}").unwrap();
         assert_eq!(prefs.autosave_seconds, 60);
         assert!(!prefs.reduce_motion);
-        assert!(prefs.check_updates, "the update check is opt-out, not opt-in");
+        assert!(
+            prefs.check_updates,
+            "the update check is opt-out, not opt-in"
+        );
         let text = serde_json::to_string(&prefs).unwrap();
         assert_eq!(
             serde_json::from_str::<Preferences>(&text).unwrap().compact,

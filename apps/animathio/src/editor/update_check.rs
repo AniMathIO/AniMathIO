@@ -1,4 +1,4 @@
-//! Startup check for a newer AniMathIO release.
+//! Startup check for a newer `AniMathIO` release.
 //!
 //! At most once every 24 hours ([`THROTTLE`], remembered in the config directory across
 //! restarts) the editor asks the GitHub releases API whether a newer 2.x release exists
@@ -31,7 +31,7 @@ const ENV_VAR: &str = "ANIMATHIO_NO_UPDATE_CHECK";
 /// Where the last attempt is remembered (`editor_env::config_file`).
 pub(super) const STATE_FILE: &str = "update-check.json";
 /// How often the editor may ask GitHub for the latest release.
-const THROTTLE: Duration = Duration::from_secs(24 * 60 * 60);
+const THROTTLE: Duration = Duration::from_hours(24);
 /// Connection timeout: the editor must never wait on this check.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Response-body timeout, applied on top of the connect timeout.
@@ -49,7 +49,7 @@ pub(super) struct Release {
 }
 
 /// The persisted "last attempt" timestamp, kept across restarts so the throttle holds.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CheckState {
     /// Unix seconds of the last completed attempt (successful or failed).
     last_check: u64,
@@ -123,21 +123,21 @@ fn load_state_from(path: &Path) -> Option<CheckState> {
     serde_json::from_slice(&bytes).ok()
 }
 
-fn save_state(state: &CheckState) {
+fn save_state(state: CheckState) {
     let Some(path) = crate::editor_env::config_file(STATE_FILE) else {
         return;
     };
     save_state_to(&path, state);
 }
 
-fn save_state_to(path: &Path, state: &CheckState) {
+fn save_state_to(path: &Path, state: CheckState) {
     if let Some(dir) = path.parent()
         && let Err(error) = std::fs::create_dir_all(dir)
     {
         log::debug!("update check: cannot create config dir: {error}");
         return;
     }
-    let Ok(bytes) = serde_json::to_vec(state) else {
+    let Ok(bytes) = serde_json::to_vec(&state) else {
         return;
     };
     let temporary = path.with_extension("json.tmp");
@@ -188,7 +188,7 @@ fn fetch(agent: &ureq::Agent) -> Option<Release> {
     }
 }
 
-/// The notice: "AniMathIO <version> is available" with an action that opens the
+/// The notice: "`AniMathIO` <version> is available" with an action that opens the
 /// release page in the browser.
 fn notice(release: &Release) -> gpui_component::notification::Notification {
     let url = release.url.clone();
@@ -221,28 +221,23 @@ fn open_url(url: &str) -> Result<(), String> {
 
 /// Decide whether this startup should ask GitHub about a newer release and, if so,
 /// start the background request; the answer arrives as the editor's normal toast.
-/// Called once when the editor window is built. Skipped on the headless test harness
-/// (`env.updates`), in CI, when the user opted out in Preferences or with
-/// `ANIMATHIO_NO_UPDATE_CHECK=1`, and within 24 h of the previous attempt.
-pub(super) fn schedule(cx: &mut gpui::Context<Editor>) {
-    let entity = cx.entity();
-    let (allowed, opted_in) = {
-        let this = entity.read(cx);
-        (this.env.updates, this.preferences.check_updates)
-    };
-    if !allowed || !opted_in || disabled_by_environment() {
+/// Called once while the editor window is built, with its environment and stored
+/// preference (`env_allows`, `opted_in`); skipped on the headless test harness,
+/// in CI, when the user opted out with `ANIMATHIO_NO_UPDATE_CHECK=1`, and within
+/// 24 h of the previous attempt.
+pub(super) fn schedule(env_allows: bool, opted_in: bool, cx: &mut gpui::Context<Editor>) {
+    if !env_allows || !opted_in || disabled_by_environment() {
         return;
     }
     let now = now_unix();
     if throttled(load_state(), now) {
         return;
     }
-    let editor = entity.downgrade();
-    cx.spawn(async move |_this, cx| {
+    cx.spawn(async move |this, cx| {
         let outcome = cx
             .background_spawn(async move {
                 let release = fetch(&agent());
-                save_state(&CheckState { last_check: now });
+                save_state(CheckState { last_check: now });
                 release
             })
             .await;
@@ -255,7 +250,7 @@ pub(super) fn schedule(cx: &mut gpui::Context<Editor>) {
         let Some(release) = check(&current, || Some(release)) else {
             return;
         };
-        if let Err(error) = editor.update(cx, |editor, cx| {
+        if let Err(error) = this.update(cx, |editor, cx| {
             editor.notices.push(notice(&release));
             cx.notify();
         }) {
@@ -281,11 +276,7 @@ mod tests {
             "the normal release tag"
         );
         assert_eq!(parse_tag("v2.10.3"), Some(Version::new(2, 10, 3)));
-        assert_eq!(
-            parse_tag("2.1.0"),
-            None,
-            "tags are v-prefixed on this repo"
-        );
+        assert_eq!(parse_tag("2.1.0"), None, "tags are v-prefixed on this repo");
         assert_eq!(
             parse_tag("animathio-v1.8.3"),
             None,
@@ -338,27 +329,23 @@ mod tests {
 
     #[test]
     fn environment_gates_the_check() {
-        let none = |_| None;
+        let none = |_: &str| None::<String>;
         assert!(!disabled_by_environment_with(none), "no variable set");
         assert!(
-            disabled_by_environment_with(|name| (name == ENV_VAR)
-                .then(|| "1".to_owned())),
+            disabled_by_environment_with(|name| (name == ENV_VAR).then(|| "1".to_owned())),
             "the documented opt-out variable"
         );
         assert!(
-            !disabled_by_environment_with(|name| (name == ENV_VAR)
-                .then(|| "0".to_owned())),
+            !disabled_by_environment_with(|name| (name == ENV_VAR).then(|| "0".to_owned())),
             "any other value keeps the check on"
         );
         assert!(
-            disabled_by_environment_with(|name| (name == "CI")
-                .then(|| "true".to_owned())),
+            disabled_by_environment_with(|name| (name == "CI").then(|| "true".to_owned())),
             "CI environments never check"
         );
-        assert!(
-            disabled_by_environment_with(|name| (name == "GITHUB_ACTIONS")
-                .then(|| "1".to_owned())),
-        );
+        assert!(disabled_by_environment_with(|name| (name
+            == "GITHUB_ACTIONS")
+            .then(|| "1".to_owned())),);
         assert!(
             !disabled_by_environment_with(|name| (name == "CI").then(String::new)),
             "an empty variable is not a CI environment"
@@ -370,7 +357,7 @@ mod tests {
         let day = THROTTLE.as_secs();
         let state = |secs: u64| Some(CheckState { last_check: secs });
         assert!(!throttled(None, 1_000), "first start checks");
-        assert!(!throttled(state(0), day - 1), "just inside the window");
+        assert!(throttled(state(0), day - 1), "just inside the window");
         assert!(!throttled(state(0), day), "the next day may check");
         assert!(throttled(state(0), day - 1_000), "already checked today");
         assert!(!throttled(state(0), day * 30), "a month later checks");
@@ -385,9 +372,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("update-check.json");
         assert_eq!(load_state_from(&path), None, "nothing written yet");
-        save_state_to(&path, &CheckState {
-            last_check: 1_700_000_000,
-        });
+        save_state_to(
+            &path,
+            CheckState {
+                last_check: 1_700_000_000,
+            },
+        );
         assert_eq!(
             load_state_from(&path).map(|state| state.last_check),
             Some(1_700_000_000)

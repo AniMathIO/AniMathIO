@@ -860,7 +860,7 @@ impl Editor {
         .detach();
         if !bench {
             // Never in viewport benches: deterministic and offline.
-            update_check::schedule(cx);
+            update_check::schedule(this.env.updates, this.preferences.check_updates, cx);
         }
         cx.observe_window_activation(window, |this, window, _| {
             if !window.is_window_active() {
