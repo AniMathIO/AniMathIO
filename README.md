@@ -57,7 +57,7 @@ compiler and libclang required). Models download on demand with confirmation.
 
 - [CLI reference](docs/cli.md) — headless project creation, rendering and export.
 - [MCP and control protocol](docs/mcp.md) — automate editing from an assistant.
-- [Plugin authoring](docs/plugins.md) — sandboxed WebAssembly extensions.
+- [Plugin authoring](docs/plugins.md) — sandboxed WebAssembly extensions; start from the [plugin template, examples and community index](https://github.com/AniMathIO/plugins).
 - [Architecture](docs/architecture.md) — crate map, time model and engine rules.
 - [Migrating from 1.x](docs/migrating-from-v1.md) — import projects and known gaps.
 - [Math showcases](examples/showcase/README.md) — reproducible offline explainers.

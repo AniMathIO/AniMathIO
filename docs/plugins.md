@@ -1,5 +1,7 @@
 # Plugin authoring guide
 
+Start with the [plugin template, examples and community index](https://github.com/AniMathIO/plugins).
+
 AniMathIO 2.0 plugins are sandboxed **WebAssembly components** (wasmtime,
 [Component Model](https://component-model.bytecodealliance.org/), WIT). Each plugin
 is compiled to `wasm32-wasip2` and packaged as an `.amplugin` — a zip containing
