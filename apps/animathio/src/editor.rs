@@ -158,11 +158,29 @@ type ClipAction = fn(&mut Editor, ClipId, &mut Context<Editor>);
 /// Tabs in the left media-pool panel.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LeftTab {
-    Math,
+    Media,
+    Elements,
     Titles,
-    Assets,
-    Plugins,
     Effects,
+    Plugins,
+}
+impl LeftTab {
+    const ALL: [Self; 5] = [
+        Self::Media,
+        Self::Elements,
+        Self::Titles,
+        Self::Effects,
+        Self::Plugins,
+    ];
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Media => "Media",
+            Self::Elements => "Elements",
+            Self::Titles => "Titles",
+            Self::Effects => "Effects",
+            Self::Plugins => "Plugins",
+        }
+    }
 }
 
 /// Viewer zoom modes for the preview image.
@@ -804,8 +822,8 @@ impl Editor {
             next_id: initial_next_id,
             recent: RecentFiles::load(),
             dock: DockLayout::load(),
-            left_tab: LeftTab::Assets,
-            previous_left_tab: LeftTab::Assets,
+            left_tab: LeftTab::Media,
+            previous_left_tab: LeftTab::Media,
             tab_changed: Instant::now()
                 .checked_sub(Duration::from_secs(1))
                 .unwrap_or_else(Instant::now),

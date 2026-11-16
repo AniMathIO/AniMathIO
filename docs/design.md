@@ -65,7 +65,12 @@ The violet-to-cyan UI action accent remains defined in `style.rs`.
 
 The workspace wraps each resizable pane in a rounded panel with a consistent
 icon/title/action header and 6px shared gutters. The library uses a sliding active
-pill for Assets, Plugins, Effects and Titles. The title bar shows the project name, an
+pill for Media, Elements, Titles, Effects and Plugins. Each tab keeps its own
+search; only Media has asset-kind filters and grid/list controls. Elements groups
+text/formulas, geometry and graphs/grids, followed by additional shape sources and
+third-party plugins. Plugins is an inventory of all loaded plugin kinds, versions,
+enabled status and bundle origins, with a link to the plugin catalog. Arrow keys,
+Home and End move selection and focus between tabs; Tab reaches search and cards. The title bar shows the project name, an
 unsaved dot, MCP listener status and Export. The bottom chips report the canvas,
 frame rate, duration, autosave policy, requested preview renderer and export queue.
 “GPU requested” describes the preview preference: the worker can fall back to CPU.

@@ -134,6 +134,13 @@ fn discovery_rejects_user_packages_with_reserved_ids_but_loads_trusted_bundles()
         .unwrap(),
         vec!["org.animathio.latex"]
     );
+    assert_eq!(
+        host.get_plugin("org.animathio.latex")
+            .unwrap()
+            .source_path
+            .as_deref(),
+        Some(bundled.path().join("latex.amplugin").as_path())
+    );
     let mut manifest = built.manifest.clone();
     manifest.id = "com.example.math".to_owned();
     let package = PluginPackage::new(manifest, built.wasm.clone()).unwrap();

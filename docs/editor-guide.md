@@ -3,6 +3,45 @@
 Desktop workflows, controls and examples for AniMathIO 2. See also the
 [keyboard shortcuts](keyboard-shortcuts.md) and [architecture](architecture.md).
 
+## Library
+
+The left dock has five distinct tabs. **View → Media / Elements / Titles / Effects /
+Plugins** opens the corresponding tab even when the Library is hidden. The existing
+Library and Effects focus shortcuts still open Media and Effects respectively.
+Arrow keys, Home and End move focus and selection between tabs; Tab continues to
+search, cards and buttons. Every tab retains its own search when switching away.
+
+| Tab | Contents and actions |
+| --- | --- |
+| **Media** | Imported assets only. Search names, filter All/Video/Images/Audio, switch grid/list, import using the Library + button, click to place or drag to the timeline. |
+| **Elements** | Text & formulas (LaTeX, Text), Shapes & geometry (points, lines, vectors, polygons, circles, ellipses), Graphs & grids (plots, Cartesian and polar grids). Click a card or press Enter/Space to configure; + adds defaults; drag its preview to the timeline. More shapes retains the generic Shapes source for rectangles, stars and arrows. Third-party clip sources appear under Plugins in this tab. |
+| **Titles** | Title compositions and caption presets. Double-click or Enter/Space adds at the playhead; drag to place on the timeline. Linked text fields remain editable in the inspector. |
+| **Effects** | Video effects, audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
+| **Plugins** | Every successfully loaded plugin, including effects, audio effects, animations and importers, with id, version, kind, Enabled status and bundle path (hover a truncated path/id to read it). Browse AniMathIO/plugins opens the catalog. Install bundles in a discovery directory and restart; enable/disable toggling is not implemented. Load failures are listed here too. |
+
+Media filters and view controls appear only on Media. Generated clips have one
+creation home in Elements; Plugins lists their installation metadata. See the
+[1.x feature map](migrating-from-v1.md#where-1x-features-live) for older workflows
+and the separately tracked gaps.
+
+| Media | Elements |
+| --- | --- |
+| ![Media](../docs/screenshots/editor-media.png) | ![Elements](../docs/screenshots/editor-library-elements.png) |
+
+| Titles | Effects |
+| --- | --- |
+| ![Titles](../docs/screenshots/editor-titles.png) | ![Effects](../docs/screenshots/editor-library-effects.png) |
+
+![Installed plugin inventory](../docs/screenshots/editor-library-plugins.png)
+
+The Library reorganization was compared against these release-build captures of
+2.1.0 on main, using the same private Xvfb display and first-party bundles:
+[Assets](../docs/screenshots/library-before-assets.png),
+[Plugins](../docs/screenshots/library-before-plugins.png),
+[Effects](../docs/screenshots/library-before-effects.png),
+[Titles](../docs/screenshots/library-before-titles.png),
+[Math](../docs/screenshots/library-before-math.png).
+
 ## Clip speed and frame holds
 
 Select a clip and open **Clip → Speed/Duration…** (Ctrl+R in the timeline), or the
@@ -55,7 +94,7 @@ stores it in the user data directory. The opt-in integration test runs the real 
 
 ## Editor gallery
 
-The editor shell (dark theme, media pool, viewer
+The editor shell (dark theme, Media library, viewer
 with transport controls, resizable inspector and vertically scrolling timeline):
 
 ![AniMathIO 2 editor](../docs/screenshots/editor-main.png)
@@ -72,7 +111,7 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Multi-selection](../docs/screenshots/editor-multiselect.png) | ![Media pool](../docs/screenshots/editor-media.png) |
 
-| Titles library alongside a math composition | Export queue (status-bar popover) |
+| Titles library | Export queue (status-bar popover) |
 | --- | --- |
 | ![Titles](../docs/screenshots/editor-titles.png) | ![Export queue](../docs/screenshots/editor-export-queue.png) |
 
@@ -276,7 +315,7 @@ the violet-to-cyan accent. See [the design guide](design.md).
 
 [Keyboard shortcuts](keyboard-shortcuts.md) — Premiere Pro defaults.
 
-The library's **Math** tab provides preview cards for LaTeX, text, points, lines,
+The library's **Elements** tab provides grouped preview cards for LaTeX, text, points, lines,
 vectors, polygons, plots, circles, ellipses and Cartesian/polar grids. Click a
 card for typed fields and a live preview, use its plus button for defaults, or
 drag it onto the timeline. Double-click an existing object to edit it. LaTeX has
@@ -284,7 +323,7 @@ snippets, formula templates and a Write on preset. See the
 [math workflow](architecture.md#mathematical-object-workflow) and the
 [CLI guide](cli.md) for automation equivalents.
 
-![Math library](../docs/screenshots/editor-math-panel.png)
+![Elements library](../docs/screenshots/editor-math-panel.png)
 ![Math object editor](../docs/screenshots/editor-math-dialog.png)
 
 ## Reproducible math showcases

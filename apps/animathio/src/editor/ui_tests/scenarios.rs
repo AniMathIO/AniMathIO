@@ -1940,3 +1940,240 @@ fn headless_environment_never_checks_for_updates(cx: &mut TestAppContext) {
     let state = super::config_dir().join(super::update_check::STATE_FILE);
     assert!(!state.exists(), "the harness never contacts the network");
 }
+
+/// Exercise the real rendered Library and its scoped input subscriptions.
+#[gpui::test]
+fn library_tabs_have_distinct_contents_and_scoped_search(cx: &mut TestAppContext) {
+    if !require_plugins("library_tabs_have_distinct_contents_and_scoped_search") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.dispatch(actions::FocusLibrary);
+    for (tab, selector) in [
+        (LeftTab::Media, "media-kind-filters"),
+        (LeftTab::Elements, "element-card-0"),
+        (LeftTab::Titles, "title-centered_title"),
+        (LeftTab::Effects, "library-write-on"),
+        (LeftTab::Plugins, "plugin-inventory"),
+    ] {
+        ui.update(|e, _, cx| e.select_left_tab(tab, cx));
+        assert!(
+            ui.cx.debug_bounds(selector).is_some(),
+            "missing content for {}",
+            tab.label()
+        );
+        assert_eq!(
+            ui.cx.debug_bounds("media-kind-filters").is_some(),
+            tab == LeftTab::Media
+        );
+        assert_eq!(
+            ui.cx.debug_bounds("element-card-0").is_some(),
+            tab == LeftTab::Elements
+        );
+        assert_eq!(
+            ui.cx.debug_bounds("title-centered_title").is_some(),
+            tab == LeftTab::Titles
+        );
+        assert_eq!(
+            ui.cx.debug_bounds("plugin-inventory").is_some(),
+            tab == LeftTab::Plugins
+        );
+        assert_eq!(
+            ui.cx.debug_bounds("library-write-on").is_some(),
+            tab == LeftTab::Effects
+        );
+    }
+    search_library(&mut ui, LeftTab::Elements, "latex");
+    assert!(ui.cx.debug_bounds("element-card-0").is_some());
+    assert!(ui.cx.debug_bounds("element-card-1").is_none());
+    assert_eq!(ui.read(|e| e.element_kinds().len()), 1);
+    search_library(&mut ui, LeftTab::Titles, "caption");
+    assert!(ui.cx.debug_bounds("title-caption").is_some());
+    assert!(ui.cx.debug_bounds("title-centered_title").is_none());
+    search_library(&mut ui, LeftTab::Effects, "invert");
+    assert!(
+        ui.cx
+            .debug_bounds("effect-item-org.animathio.effects-basic-invert")
+            .is_some()
+    );
+    assert!(ui.cx.debug_bounds("library-write-on").is_none());
+    search_library(&mut ui, LeftTab::Plugins, "import-manim");
+    assert!(
+        ui.cx
+            .debug_bounds("installed-org.animathio.import-manim")
+            .is_some()
+    );
+    assert!(ui.cx.debug_bounds("installed-org.animathio.text").is_none());
+    search_library(&mut ui, LeftTab::Media, "independent media query");
+    ui.update(|e, _, cx| e.select_left_tab(LeftTab::Elements, cx));
+    assert_eq!(
+        ui.read(|e| e.media_view.queries[LeftTab::Elements as usize].clone()),
+        "latex"
+    );
+    assert!(ui.cx.debug_bounds("element-card-0").is_some());
+    assert!(ui.cx.debug_bounds("element-card-1").is_none());
+    assert!(ui.cx.debug_bounds("media-kind-filters").is_none());
+}
+
+fn search_library(ui: &mut Ui, tab: LeftTab, query: &str) {
+    ui.update(|e, _, cx| e.select_left_tab(tab, cx));
+    ui.update(|e, window, cx| {
+        let input = e.media_view.searches[tab as usize]
+            .clone()
+            .expect("rendered search");
+        input.update(cx, |state, cx| state.set_value(query, window, cx));
+    });
+}
+
+#[gpui::test]
+fn library_plugins_lists_all_eight_kinds_without_duplicate_element_sources(
+    cx: &mut TestAppContext,
+) {
+    if !require_plugins("library_plugins_lists_all_eight_kinds_without_duplicate_element_sources") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.dispatch(actions::FocusLibrary);
+    ui.dispatch(actions::ShowPlugins);
+    let ids = ui.read(|e| e.plugin_host.as_ref().unwrap().loaded_plugin_ids());
+    let expected: Vec<_> = [
+        "animations",
+        "audio-basic",
+        "effects-basic",
+        "graph",
+        "import-manim",
+        "latex",
+        "shapes",
+        "text",
+    ]
+    .into_iter()
+    .map(|id| format!("org.animathio.{id}"))
+    .collect();
+    assert_eq!(ids, expected);
+    for id in ids {
+        search_library(&mut ui, LeftTab::Plugins, &id);
+        assert!(
+            ui.cx.debug_bounds(&format!("installed-{id}")).is_some(),
+            "missing {id}"
+        );
+        assert!(ui.read(|e| {
+            e.plugin_host
+                .as_ref()
+                .unwrap()
+                .get_plugin(&id)
+                .unwrap()
+                .source_path
+                .is_some()
+        }));
+    }
+    search_library(&mut ui, LeftTab::Elements, "");
+    ui.read(|e| {
+        assert_eq!(e.element_kinds().len(), 11);
+        let sources: Vec<_> = e
+            .element_plugin_sources()
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect();
+        assert_eq!(sources, ["org.animathio.shapes"]);
+    });
+    for id in ["text", "latex", "graph"] {
+        assert!(
+            ui.cx
+                .debug_bounds(&format!("element-plugin-org.animathio.{id}"))
+                .is_none()
+        );
+    }
+    // A third-party clip source belongs to Elements, not to Titles or Effects.
+    ui.update(|e, _, cx| {
+        let mut descriptor = e
+            .plugins
+            .iter()
+            .find(|p| p.id == "org.animathio.text")
+            .unwrap()
+            .clone();
+        descriptor.id = "example.generated".into();
+        descriptor.name = "Example generator".into();
+        e.plugins.push(descriptor);
+        cx.notify();
+    });
+    search_library(&mut ui, LeftTab::Elements, "example");
+    assert!(
+        ui.cx
+            .debug_bounds("element-plugin-example.generated")
+            .is_some()
+    );
+    assert_eq!(ui.read(|e| e.element_plugin_sources().len()), 1);
+}
+
+#[gpui::test]
+fn library_elements_plus_buttons_add_latex_text_and_shape_and_undo(cx: &mut TestAppContext) {
+    if !require_plugins("library_elements_plus_buttons_add_latex_text_and_shape_and_undo") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.dispatch(actions::FocusLibrary);
+    for (query, index, plugin) in [
+        ("latex", 0, "latex"),
+        ("text", 1, "text"),
+        ("circle", 7, "shapes"),
+    ] {
+        search_library(&mut ui, LeftTab::Elements, query);
+        let before = ui.read(|e| e.project.clone());
+        let count = ui.read(clip_count);
+        let bounds = ui
+            .cx
+            .debug_bounds(&format!("element-default-{index}"))
+            .expect("visible add button");
+        ui.click(bounds.center(), gpui::Modifiers::default());
+        assert_eq!(ui.read(clip_count), count + 1);
+        ui.read(|e| {
+            let clip = e.find_clip(e.selected.expect("new selection")).unwrap();
+            assert!(matches!(&clip.kind, animathio_core::ClipKind::Plugin { plugin_id, .. } if plugin_id == &format!("org.animathio.{plugin}")));
+        });
+        ui.dispatch(Undo);
+        assert_eq!(ui.read(|e| e.project.clone()), before);
+    }
+    // View destinations reopen a hidden panel, including the existing Effects action.
+    ui.update(|e, _, cx| {
+        e.dock.left_open = false;
+        cx.notify();
+    });
+    ui.dispatch(actions::ShowElements);
+    assert!(ui.read(|e| e.dock.left_open && e.left_tab == LeftTab::Elements));
+    ui.update(|e, _, cx| {
+        e.dock.left_open = false;
+        cx.notify();
+    });
+    ui.dispatch(actions::ShowTitles);
+    assert!(ui.read(|e| e.dock.left_open && e.left_tab == LeftTab::Titles));
+    ui.dispatch(actions::ShowPlugins);
+    assert!(ui.read(|e| e.left_tab == LeftTab::Plugins));
+    ui.dispatch(actions::ShowEffects);
+    assert!(ui.read(|e| e.left_tab == LeftTab::Effects));
+}
+
+#[gpui::test]
+fn library_tab_arrows_move_selection_and_focus(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.dispatch(actions::FocusLibrary);
+    ui.update(|e, window, cx| {
+        e.select_left_tab(LeftTab::Media, cx);
+        window.focus(&e.media_view.tab_focus[0], cx);
+    });
+    ui.press("right");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Elements));
+    ui.press("right");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Titles));
+    ui.press("end");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Plugins));
+    ui.press("right");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Media));
+    ui.press("left");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Plugins));
+    ui.press("home");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Media));
+}

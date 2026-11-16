@@ -106,7 +106,12 @@ fn load_plugin(host: &mut PluginHost, name: &str) -> String {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join(format!("{name}.amplugin"));
     std::fs::write(&path, bytes).unwrap();
-    host.load_plugin_file(&path).unwrap()
+    let id = host.load_plugin_file(&path).unwrap();
+    assert_eq!(
+        host.get_plugin(&id).unwrap().source_path.as_deref(),
+        Some(path.as_path())
+    );
+    id
 }
 
 fn plugin_clip(plugin_id: impl Into<String>, params: serde_json::Value) -> SceneClip {
