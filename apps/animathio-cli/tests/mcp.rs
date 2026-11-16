@@ -48,6 +48,7 @@ fn recv(stdout: &mut BufReader<ChildStdout>) -> Value {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn lists_tools_adds_a_clip_and_renders_a_frame() {
     let dir = tempdir().unwrap();
     let archive = dir.path().join("demo.amio");

@@ -22,11 +22,6 @@ impl Editor {
         Ok(())
     }
 
-    /// Whether the global community plugins switch is on.
-    pub(super) fn community_plugins_enabled(&self) -> bool {
-        crate::editor_env::community_store().is_some_and(|store| store.settings().enabled)
-    }
-
     /// Reconcile the loaded community plugins with the saved settings (the CLI may have
     /// changed them), refresh the plugin list and re-render the preview when anything changed.
     pub(super) fn sync_community_plugins(&mut self, cx: &mut Context<Self>) {

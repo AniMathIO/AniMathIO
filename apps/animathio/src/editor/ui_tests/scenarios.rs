@@ -1940,3 +1940,49 @@ fn headless_environment_never_checks_for_updates(cx: &mut TestAppContext) {
     let state = super::config_dir().join(super::update_check::STATE_FILE);
     assert!(!state.exists(), "the harness never contacts the network");
 }
+
+/// Community plugins start off. Switching them on and enabling one loads it into the running
+/// editor (its clip source appears in the plugin list); turning the switch off unloads it
+/// again. No restart, and the headless harness uses a private plugin folder and settings.
+#[gpui::test]
+fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
+    const HELLO: &[u8] =
+        include_bytes!("../../../../../crates/plugin-host/tests/fixtures/hello-1.0.0.amplugin");
+    const ID: &str = "com.example.hello";
+    if !require_plugins("community_plugins_load_and_unload_without_restart") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.settle();
+    let store = crate::editor_env::community_store().expect("private community store");
+    assert!(
+        store.dir().starts_with(super::config_dir()),
+        "tests never touch the user's plugin folder"
+    );
+    let has_hello = |ui: &Ui| ui.read(|editor| editor.plugins.iter().any(|plugin| plugin.id == ID));
+    assert!(!store.settings().enabled, "community plugins start off");
+    assert!(!has_hello(&ui));
+
+    // Installed plugins start disabled, so even a switched-on editor does not load them.
+    store.install_bytes(HELLO, None, false).unwrap();
+    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(true, cx).unwrap());
+    assert!(!has_hello(&ui), "installed but not enabled");
+
+    // Enabling the plugin (the CLI or a future Browse UI) and re-syncing loads it live.
+    store.set_plugin_enabled(ID, true).unwrap();
+    ui.update(|editor, _, cx| editor.sync_community_plugins(cx));
+    assert!(has_hello(&ui), "enabled plugin is loaded without a restart");
+
+    // Switching the global switch off unloads it, and the project is unaffected.
+    let before = ui.read(|editor| editor.project.clone());
+    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(false, cx).unwrap());
+    assert!(!has_hello(&ui), "switch off unloads community plugins");
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.read(|editor| {
+        let host = editor.plugin_host.as_ref().expect("plugin host");
+        assert!(host.get_plugin(ID).is_none());
+    });
+
+    store.uninstall(ID).unwrap();
+}

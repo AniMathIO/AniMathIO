@@ -148,3 +148,28 @@ fn a_broken_enabled_package_is_reported_not_loaded() {
     assert!(!report.problems.is_empty());
     assert!(fx.host.loaded_plugin_ids().is_empty());
 }
+
+#[test]
+fn unloading_drops_effect_and_audio_effect_registrations() {
+    let mut fx = fixture();
+    for bytes in [
+        &include_bytes!("fixtures/effects-basic-0.2.1.amplugin")[..],
+        &include_bytes!("fixtures/audio-basic-0.2.2.amplugin")[..],
+    ] {
+        let package = animathio_plugin_api::PluginPackage::from_bytes(bytes).unwrap();
+        let id = fx.host.load_plugin_package(package).unwrap();
+        let (before, after) = if id.ends_with("audio-basic") {
+            (fx.host.audio_effects().len(), 0)
+        } else {
+            (fx.host.effects().len(), 0)
+        };
+        assert!(before > 0, "{id} lists filters");
+        assert!(fx.host.unload_plugin(&id));
+        let remaining = if id.ends_with("audio-basic") {
+            fx.host.audio_effects().len()
+        } else {
+            fx.host.effects().len()
+        };
+        assert_eq!(remaining, after, "{id} filters are gone");
+    }
+}

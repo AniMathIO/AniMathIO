@@ -721,7 +721,9 @@ impl Editor {
             cx,
         );
         let check_updates = std::rc::Rc::new(std::cell::Cell::new(self.preferences.check_updates));
-        let community = std::rc::Rc::new(std::cell::Cell::new(self.community_plugins_enabled()));
+        let community = std::rc::Rc::new(std::cell::Cell::new(
+            crate::editor_env::community_plugins_enabled(),
+        ));
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let scale_submit = scale.clone();

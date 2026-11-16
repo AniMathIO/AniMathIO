@@ -131,6 +131,11 @@ pub(crate) fn community_store() -> Option<animathio_plugin_host::CommunityStore>
     Some(animathio_plugin_host::CommunityStore::new(dir, settings))
 }
 
+/// Whether the global community plugins switch is on (off when the settings are missing).
+pub(crate) fn community_plugins_enabled() -> bool {
+    community_store().is_some_and(|store| store.settings().enabled)
+}
+
 /// The compiled-plugin cache directory.
 pub(crate) fn plugin_cache_dir() -> PathBuf {
     match PROCESS.get() {
