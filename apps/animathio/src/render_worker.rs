@@ -39,13 +39,25 @@ pub(crate) struct RenderWorker {
 }
 
 impl RenderWorker {
-    pub(crate) fn spawn() -> Self {
+    /// Start the render thread. Fails when the OS refuses the thread (low
+    /// resource hosts); callers fall back to [`RenderWorker::disabled`] and an
+    /// error state instead of crashing.
+    pub(crate) fn spawn() -> Result<Self, String> {
         let (tx, worker_rx) = channel::<WorkerMsg>();
         let (result_tx, rx) = channel::<RenderResult>();
         std::thread::Builder::new()
             .name("animathio-render".into())
             .spawn(move || worker_loop(&worker_rx, &result_tx))
-            .expect("spawn render worker");
+            .map_err(|error| format!("spawn render worker: {error}"))?;
+        Ok(Self { tx, rx })
+    }
+
+    /// An inert worker for when the render thread could not start: posts are
+    /// dropped and no frame ever arrives, so the editor shows its error state
+    /// instead of a live preview.
+    pub(crate) fn disabled() -> Self {
+        let (tx, _) = channel::<WorkerMsg>();
+        let (_, rx) = channel::<RenderResult>();
         Self { tx, rx }
     }
 

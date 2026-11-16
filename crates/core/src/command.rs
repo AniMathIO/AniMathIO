@@ -2031,16 +2031,68 @@ fn clip_mut(project: &mut Project, id: ClipId) -> Result<&mut Clip, Error> {
 }
 
 /// Session-only undo/redo stacks. Project files contain data, not editing history.
-#[derive(Clone, Debug, Default)]
+///
+/// The undo stack is depth-capped ([`DEFAULT_HISTORY_LIMIT`], configurable with
+/// [`History::with_limit`]); the oldest entries are dropped so a long session
+/// bounds the number of retained edits, not their byte size. Dirty state must
+/// be tracked independently: an empty undo stack does not imply a saved project.
+#[derive(Clone, Debug)]
 pub struct History {
     undo: Vec<Command>,
     redo: Vec<Command>,
+    limit: usize,
+}
+
+/// Default undo history depth: enough for a long editing session while
+/// bounding the memory held by inverse commands (including `RestoreClips`
+/// batches).
+pub const DEFAULT_HISTORY_LIMIT: usize = 500;
+
+impl Default for History {
+    fn default() -> Self {
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+            limit: DEFAULT_HISTORY_LIMIT,
+        }
+    }
 }
 impl History {
+    /// History with a custom undo depth cap. A limit of zero keeps no undo
+    /// entries (every edit is still applied).
+    #[must_use]
+    pub fn with_limit(limit: usize) -> Self {
+        Self {
+            limit,
+            ..Self::default()
+        }
+    }
+    /// The configured undo depth cap.
+    #[must_use]
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+    /// Change the undo depth cap, dropping the oldest entries beyond it.
+    pub fn set_limit(&mut self, limit: usize) {
+        self.limit = limit;
+        self.enforce_limit();
+        // Keep the nearest future edits when reducing the cap. Redo pops
+        // from the end, so discard the farthest future first.
+        if self.redo.len() > limit {
+            self.redo.drain(..self.redo.len() - limit);
+        }
+    }
+    fn enforce_limit(&mut self) {
+        if self.undo.len() > self.limit {
+            let excess = self.undo.len() - self.limit;
+            self.undo.drain(..excess);
+        }
+    }
     /// Apply an edit, saving its inverse and clearing redo on success only.
     pub fn execute(&mut self, project: &mut Project, command: &Command) -> Result<(), Error> {
         let inverse = command.apply(project)?;
         self.undo.push(inverse);
+        self.enforce_limit();
         self.redo.clear();
         Ok(())
     }
@@ -2072,6 +2124,7 @@ impl History {
             Ok(inverse) => {
                 self.redo.pop();
                 self.undo.push(inverse);
+                self.enforce_limit();
                 Ok(true)
             }
             Err(error) => {

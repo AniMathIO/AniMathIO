@@ -109,7 +109,9 @@ impl Default for Thumbnails {
     fn default() -> Self {
         let (tx, requests) = sync_channel::<Request>(16);
         let (results, rx) = sync_channel(16);
-        std::thread::Builder::new()
+        // A failed spawn degrades to blank timeline thumbnails: with no worker
+        // draining `requests`, `try_send` fails and nothing is ever pending.
+        if let Err(error) = std::thread::Builder::new()
             .name("timeline-thumbnails".into())
             .spawn(move || {
                 let mut caches = WorkerCaches::new();
@@ -120,7 +122,9 @@ impl Default for Thumbnails {
                     }
                 }
             })
-            .expect("spawn timeline thumbnail worker");
+        {
+            eprintln!("timeline thumbnails disabled: {error}");
+        }
         Self {
             tx,
             rx,

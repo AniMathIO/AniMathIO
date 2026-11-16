@@ -171,6 +171,10 @@ once in `History`. Other commands and control calls finish a pending drag first,
 so a colour change undoes in one step without swallowing adjacent edits. Asset
 parameter selectors display names but commit asset identities (or `null` for None).
 
+The undo stack is depth-capped (`History::with_limit`, default 500 entries);
+the oldest entries are dropped. This bounds entry count, not bytes; dirty
+state is tracked independently of whether undo is available.
+
 ## Time model (integer ticks)
 
 AniMathIO 2.0 uses **integer ticks** at a fixed rate, with **rational frame rates**
