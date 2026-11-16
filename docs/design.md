@@ -30,7 +30,7 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
   Xft.dpi or GNOME text-scaling-factor. Component rem spacing, panel rows and
   timeline track heights follow UI scale; timeline time coordinates remain independent.
   Reference screenshots at [100%](../docs/screenshots/editor-scale-100.png) and
-  [150%](../docs/screenshots/editor-scale-150.png) use a private 2560×1440 Xvfb display.
+  [150%](../docs/screenshots/editor-scale-150.png) use a private 1600×1000 Xvfb display.
 - **Spacing:** 4px grid. Panel padding 8–12. Control and panel row spacing follows the theme rem size.
 - **Motion:** 120–180ms ease-out for hover, selection, tab and panel changes, popovers
   and toasts (gpui `with_animation`). Nothing animates during playback except the
@@ -100,7 +100,7 @@ chip, and the drop zone is dashed and lights up while files are dragged over it.
 - **Effect warnings:** a clip whose effect plugin is not loaded, or whose last preview
   frame failed inside an effect, gets an amber warning badge next to its kind icon in
   the timeline, a warning row (icon plus reason) in the inspector Effects section and a
-  toast when the preview first fails ([screenshot](screenshots/editor-effect-warning.png)).
+  toast when the preview first fails.
 - **Filmstrip:** one thumbnail per visible tile, requested per source time, decoded on
   a worker and kept in a 256-tile least-recently-used cache; the worker also keeps
   LRU caches of open decoders and stills and one shared copy of each encoded video. Fades are drawn by

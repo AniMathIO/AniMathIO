@@ -25,7 +25,7 @@ are replaced in one undo step. Other layers retain their normalized transforms.
 CLI: `animathio-cli reframe landscape.amio -o vertical.amio --aspect 9:16`.
 MCP `auto_reframe` provides the same operation. See [limitations](mcp.md#auto-reframe).
 
-![Auto-reframe settings and vertical video preview](../docs/screenshots/editor-auto-reframe.png)
+![Reframed portrait video preview](../docs/screenshots/editor-auto-reframe.png)
 
 ## Automatic subtitles
 
@@ -44,7 +44,7 @@ size, colours, top/middle/bottom position and words per line included). On the c
 use `transcribe lesson.amio --style karaoke -o out.amio`; over MCP pass `style` to
 `auto_subtitles` or call `set_caption_style` on existing captions.
 
-![Generated subtitles on a Subtitles track with the progress popover](../docs/screenshots/subtitles.png)
+![Imported captions on a Subtitles track](../docs/screenshots/subtitles.png)
 
 The speech engine is whisper.cpp, built only with `--features whisper` on `animathio`
 and `animathio-cli` (needs cmake, a C++ compiler and libclang; the installers are built
@@ -72,13 +72,10 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Multi-selection](../docs/screenshots/editor-multiselect.png) | ![Media pool](../docs/screenshots/editor-media.png) |
 
-| Titles tab and a lower third (inspector text fields) | Export queue (status-bar popover) |
+| Titles library alongside a math composition | Export queue (status-bar popover) |
 | --- | --- |
 | ![Titles](../docs/screenshots/editor-titles.png) | ![Export queue](../docs/screenshots/editor-export-queue.png) |
 
-| Missing effect plugin warning (badge, inspector row, toast) |
-| --- |
-| ![Effect warning](../docs/screenshots/editor-effect-warning.png) |
 
 | Media fit modes (Fit, Fill, Stretch, 1:1) and the Fit inspector control |
 | --- |
