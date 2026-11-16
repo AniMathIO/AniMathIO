@@ -1202,16 +1202,20 @@ impl McpServer {
             TimeRange::new(Time(0), duration).map_err(|e| mcp_error(e.into()))?,
         );
         clip.transform = transform;
+        // Track and clip land as one undoable batch; two separate requests
+        // would leave an empty track behind on failure and undo one at a time.
         backend
-            .command_apply(Command::AddTrack {
-                track: Track::new(track_id, "Text"),
-                index: state.project.tracks().len(),
-            })
-            .map_err(mcp_error)?;
-        backend
-            .command_apply(Command::AddClip {
-                track: track_id,
-                clip,
+            .command_apply(Command::Batch {
+                commands: vec![
+                    Command::AddTrack {
+                        track: Track::new(track_id, "Text"),
+                        index: state.project.tracks().len(),
+                    },
+                    Command::AddClip {
+                        track: track_id,
+                        clip,
+                    },
+                ],
             })
             .map_err(mcp_error)?;
         tool_text(json!({"track_id": track_id.0, "clip_id": clip_id.0}))
@@ -3097,5 +3101,37 @@ mod animation_tests {
         assert!((tenth - 0.9).abs() < 0.05, "opacity at 10%: {tenth}");
         let fade = opacity_at(&server, clip_len * 95 / 100).await;
         assert!((fade - 0.05).abs() < 0.05, "opacity at 95%: {fade}");
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn add_text_places_track_and_clip_in_one_undo_step() {
+        let server = McpServer::new(Box::new(HeadlessHandler::new()));
+        let before = server.backend.lock().await.project_get().unwrap().project;
+        let result = server
+            .add_text(Parameters(
+                serde_json::from_value(
+                    json!({"text":"hello","font_size":24.0,"duration_ms":2000.0}),
+                )
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let text = result.content[0].as_text().unwrap().text.clone();
+        assert!(
+            text.contains("\"track_id\":1") && text.contains("\"clip_id\":2"),
+            "{text}"
+        );
+        let state = server.backend.lock().await.project_get().unwrap();
+        assert_eq!(state.project.tracks().len(), 1);
+        assert_eq!(state.project.tracks()[0].clips().len(), 1);
+        // One undo removes both the clip and its track.
+        assert!(server.backend.lock().await.history_undo().unwrap());
+        let undone = server.backend.lock().await.project_get().unwrap();
+        assert_eq!(undone.project, before);
     }
 }
