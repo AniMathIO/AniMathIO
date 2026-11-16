@@ -94,7 +94,9 @@ fn archive_has_exact_content_addressed_entries_and_roundtrips() {
     let zip = ZipArchive::new(cursor.clone()).unwrap();
     assert_eq!(zip.len(), 2);
     assert_eq!(
-        zip.file_names().collect::<Vec<_>>(),
+        zip.file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect::<Vec<_>>(),
         vec![
             "project.json",
             &format!("assets/{}", AssetId::of(b"video bytes").as_str())

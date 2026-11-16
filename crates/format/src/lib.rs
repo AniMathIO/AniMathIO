@@ -252,7 +252,7 @@ pub fn read_amio<R: Read + Seek>(reader: R, limits: Limits) -> Result<Bundle, Er
     let mut total = 0_u64;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let name = entry.name().to_owned();
+        let name = entry.name()?.into_owned();
         let limit = if name == "project.json" {
             limits.project_bytes
         } else {
