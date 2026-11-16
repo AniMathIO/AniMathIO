@@ -57,6 +57,7 @@ impl Editor {
         self.finish_color_edit(cx);
         let _ = self.clock.pause();
         self.reset_project_session();
+        self.canvas_chosen = with_track;
         self.project = Project::new(self.project.frame_rate());
         animathio_control::ExportPreset::Youtube1080p
             .command(&self.project)
@@ -193,6 +194,7 @@ impl Editor {
                 let _ = self.clock.pause();
                 self.audio_generation = self.audio_generation.wrapping_add(1);
                 self.reset_project_session();
+                self.canvas_chosen = true;
                 self.project = project;
                 self.history = History::default();
                 self.assets = Arc::new(assets.clone());

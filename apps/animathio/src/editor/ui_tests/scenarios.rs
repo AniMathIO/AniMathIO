@@ -101,6 +101,64 @@ fn launcher_status_bar_hides_placeholder_resolution_and_duration(cx: &mut TestAp
     });
 }
 
+/// An explicitly opened empty project and an empty import still have a canvas.
+#[gpui::test]
+fn empty_project_keeps_status_summary(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    let path = super::config_dir().join("empty-status.amio");
+    crate::editor::support::write_project(&path, &Project::default(), &BTreeMap::new()).unwrap();
+    ui.update(|editor, _, cx| {
+        assert!(editor.try_open_path(&path, cx));
+        assert!(editor.status_summary_visible());
+        editor.new_project(cx);
+        editor.try_execute(
+            &Command::RemoveTrack {
+                id: animathio_core::TrackId(1),
+            },
+            cx,
+        );
+        assert_eq!(editor.project.tracks(), []);
+        assert!(editor.status_summary_visible());
+        editor.new_project_with_chooser(cx);
+        assert!(!editor.status_summary_visible());
+        editor
+            .handle_control_call(
+                animathio_control::Call::ProjectOpen { path: path.clone() },
+                cx,
+            )
+            .unwrap();
+        assert!(editor.status_summary_visible());
+        editor.new_project_with_chooser(cx);
+        let v1 = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/import-v1/tests/fixtures/empty.animathio");
+        editor.import_control_v1(&v1).unwrap();
+        assert!(editor.path.is_none());
+        assert!(editor.status_summary_visible());
+    });
+    std::fs::remove_file(path).ok();
+}
+
+#[gpui::test]
+fn empty_manim_import_keeps_status_summary(cx: &mut TestAppContext) {
+    if !require_plugins("empty_manim_import_keeps_status_summary") {
+        return;
+    }
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    ui.update(|editor, _, cx| {
+        editor.handle_control_call(animathio_control::Call::ImportManim {
+            params: animathio_control::ImportManimParams {
+                path: None,
+                source: Some("from manim import *\nclass Empty(Scene):\n    def construct(self):\n        pass\n".into()),
+                script_dir: None,
+                scene: None,
+                replace: true,
+            },
+        }, cx).unwrap();
+        assert!(editor.path.is_none());
+        assert!(editor.status_summary_visible());
+    });
+}
+
 #[gpui::test]
 fn start_screen_then_new_project(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());

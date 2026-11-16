@@ -525,6 +525,8 @@ pub(crate) struct Editor {
     pool: AudioPool,
     audio_ids: BTreeSet<AssetId>,
     path: Option<PathBuf>,
+    /// An opened/imported canvas stays open even when its last track is removed.
+    canvas_chosen: bool,
     /// Bumped whenever the project is replaced (new, open, v1/Manim replace), so
     /// background results started on an older project are discarded.
     project_session: u64,
@@ -715,7 +717,10 @@ impl Editor {
         }
         worker.set_backend(preview.backend());
         worker.load(Arc::new(assets.clone()));
+        let canvas_chosen =
+            path.is_some() || !project.tracks().is_empty() || !project.assets().is_empty();
         let mut this = Self {
+            canvas_chosen,
             project,
             history: History::default(),
             assets: Arc::new(assets),

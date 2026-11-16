@@ -234,10 +234,8 @@
   // todo: cfrac, dfrac are same?
   cfrac: define-cmd(2, handle: (num, den) => $display((num)/(den))$),
   dfrac: define-cmd(2, handle: (num, den) => $display((num)/(den))$),
-  // LaTeX \tfrac keeps display-size geometry but sets numerator and
-  // denominator in scriptstyle (~0.7x); Typst's `inline()` alone does not
-  // shrink the fraction operands, so set the text size explicitly.
-  tfrac: define-cmd(2, handle: (num, den) => $#text(size: 0.7em, math.frac(num, den))$),
+  // Text style keeps the math axis and rule weight while reducing operands.
+  tfrac: define-cmd(2, handle: (num, den) => math.inline(math.frac(num, den))),
   binom: define-cmd(2),
   dbinom: define-cmd(2, handle: (n, k) => $display(binom(#n, #k))$),
   tbinom: define-cmd(2, handle: (n, k) => $inline(binom(#n, #k))$),
