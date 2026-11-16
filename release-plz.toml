@@ -3,6 +3,9 @@
 [workspace]
 # Never publish to crates.io: internal crates + apps ship only as installers.
 publish = false
+# Nothing is published to crates.io, so API semver checks add nothing; with every
+# member analyzed they also need the full native toolchain to build docs.
+semver_check = false
 # Analyze unpublished workspace members too: changelog_include only sees packages
 # taking part in release analysis. All members compare against the same tag.
 git_only = true
