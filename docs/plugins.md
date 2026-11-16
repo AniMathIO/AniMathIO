@@ -57,6 +57,8 @@ the control handler all read the same file. `ANIMATHIO_PLUGIN_SETTINGS` override
 | macOS | `~/Library/Application Support/animathio/plugins` | `~/Library/Application Support/org.AniMathIO.AniMathIO/community-plugins.json` |
 | Windows | `%APPDATA%\animathio\plugins` | `%APPDATA%\AniMathIO\AniMathIO\config\community-plugins.json` |
 
+Community folder entries must be regular files; symlinks and special files are rejected.
+
 `ANIMATHIO_USER_PLUGIN_DIR` overrides the plugin folder (useful for tests and portable
 setups). `ANIMATHIO_PLUGIN_DIR` is unrelated: it is the developer override for *bundled*
 plugins and may use reserved ids.
