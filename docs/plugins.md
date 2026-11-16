@@ -179,7 +179,7 @@ To build a new 1.0 component:
 | `limits` | `() -> list<tuple<string, u64>>` | Configured sandbox policy and tick frequency; unique keys, unknown keys ignored. |
 | `read-sibling` | `(relative-path) -> result<list<u8>, diagnostic>` | Importer world only (`import-files` interface): bounded read of a file below the directory the caller granted for this import. |
 
-`typeset-result` is `{ paths: list<path>, bbox: bbox }`; each path contains a complete glyph or shape, including counter contours. Stroked math rules are returned as filled outlines. Write on reveals complete glyphs so counters remain open; `math-mode` is `latex` or
+`typeset-result` is `{ paths: list<path>, bbox: bbox }`; each path contains a complete glyph or shape, including counter contours. Stroked math rules are returned as filled outlines. LaTeX rendering embeds the MiTeX 0.2.4 standard helpers offline, with STIX Two Math for both equations and upright text; cases insert a quad between columns. Write on reveals complete glyphs so counters remain open; `math-mode` is `latex` or
 `typst`; `bbox` is `{ min-x, min-y, max-x, max-y }` (f32).
 
 ### Vector types (`types`)

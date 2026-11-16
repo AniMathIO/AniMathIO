@@ -371,34 +371,32 @@ fn build_typst_source(
         MathMode::Typst => strip_math_delimiters(source.trim()).to_string(),
     };
 
-    // MiTeX emits compatibility function names for roots and matrix environments.
-    // Bind these locally: no Typst package download or filesystem import is needed.
-    // Semantics: https://github.com/mitex-rs/mitex/blob/main/packages/mitex/specs/latex/standard.typ
+    // Embedded upstream MiTeX 0.2.4 definitions; no package or filesystem access.
     let helpers = if mode == MathMode::Latex {
-        r#"#let matrix = math.mat.with(delim: none)
-#let bmatrix = math.mat.with(delim: "[")
-#let pmatrix = math.mat.with(delim: "(")
-#let Bmatrix = math.mat.with(delim: "{")
-#let vmatrix = math.mat.with(delim: "|")
-#let Vmatrix = math.mat.with(delim: "||")
-#let mitexsqrt(..args) = {
-  let values = args.pos()
-  if values.len() == 1 { math.sqrt(values.at(0)) }
-  else {
-    let index = values.at(0).children.filter(part => part != [\[] and part != [\]]).sum()
-    math.root(index, values.at(1))
-  }
-}
-"#
+        concat!(
+            include_str!("mitex/prelude.typ"),
+            "\n",
+            include_str!("mitex/standard.typ"),
+            "\n",
+            include_str!("mitex/adapters.typ"),
+        )
     } else {
         ""
+    };
+    let math = if mode == MathMode::Latex {
+        {
+            let equation = format!("$ {math} $");
+            format!("#eval({equation:?}, scope: scope)")
+        }
+    } else {
+        format!("$ {math} $")
     };
 
     Ok(format!(
         "#set page(width: auto, height: auto, margin: 0pt)\n\
-         #set text(size: {font_size}pt)\n\
+         #set text(font: \"STIX Two Math\", size: {font_size}pt)\n\
          #show math.equation: set text(font: \"STIX Two Math\")\n\
-         {helpers}$ {math} $"
+         {helpers}{math}"
     ))
 }
 
@@ -770,6 +768,64 @@ mod tests {
         engine.typeset(source, MathMode::Latex, 48.0)
     }
 
+    #[test]
+    fn everyday_latex_commands_have_complete_helpers() {
+        let engine = TypesetEngine::new().unwrap();
+        for source in [
+            r"\frac{\partial f}{\partial x}",
+            r"\text{hello world}",
+            r"\textbf{bold}",
+            r"\mathbf{AB}",
+            r"\operatorname{rank}(A)",
+            r"\dfrac{1}{2}",
+            r"\tfrac{1}{2}",
+            r"\dbinom{n}{k}",
+            r"\boxed{x+1}",
+            r"\color{red} x",
+            r"\textcolor{blue}{x}",
+            r"\overbrace{a+b}^{n}",
+            r"\underbrace{a+b}_{n}",
+            r"\overset{a}{=}",
+            r"\underset{b}{=}",
+            r"\stackrel{a}{=}",
+            r"\xrightarrow{abc}",
+            r"\begin{align}a&=b\\c&=d\end{align}",
+            r"\begin{align*}a&=b\\c&=d\end{align*}",
+            r"\begin{aligned}a&=b\\c&=d\end{aligned}",
+            r"\begin{gathered}a=b\\c=d\end{gathered}",
+            r"\begin{split}a&=b\\c&=d\end{split}",
+            r"\begin{array}{lr}a&b\\c&d\end{array}",
+            r"\begin{smallmatrix}a&b\\c&d\end{smallmatrix}",
+            r"\displaystyle \frac{1}{2}",
+            r"a\!b",
+            r"x\pmod{n}",
+            r"a\phantom{b}c",
+            r"\sum_{\substack{i=1\\j=2}}^n x",
+            r"a\hspace{1em}b",
+            r"\frac{1}{\frac{2}{3}}",
+            r"\sqrt[3]{x}",
+            r"\begin{pmatrix}a&b\\c&d\end{pmatrix}",
+            r"\begin{bmatrix}a&b\\c&d\end{bmatrix}",
+            r"\begin{vmatrix}a&b\\c&d\end{vmatrix}",
+            r"\sum_{i=0}^n i",
+            r"\int_0^1 x\,dx",
+            r"\lim_{x\to0}x",
+            r"\alpha+\beta+\Gamma",
+            r"\mathbb{R}",
+            r"\mathcal{F}",
+            r"\mathrm{sin}",
+            r"\hat{x}+\bar{y}+\vec{z}",
+            r"\binom{n}{k}",
+            r"\cancel{x}",
+            r"\begin{cases}-x & x\le 0\\x & x>0\end{cases}",
+        ] {
+            let result = engine
+                .typeset(source, MathMode::Latex, 48.0)
+                .unwrap_or_else(|error| panic!("{source}: {error}"));
+            assert!(!result.paths.is_empty(), "{source}");
+            assert!(result.bbox.max_x > result.bbox.min_x, "{source}");
+        }
+    }
     #[test]
     fn roots_and_matrix_environments_have_local_compatibility_helpers() {
         for source in [
