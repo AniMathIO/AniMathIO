@@ -129,6 +129,7 @@ fn gpu_composites_cpu_effect_layers() {
     effect.params.insert("radius".to_owned(), 3.0);
     let scene = Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(0),
@@ -163,4 +164,16 @@ fn gpu_matches_cpu_glyph_counters() {
             compare(kind, &cpu, &gpu);
         }
     }
+}
+
+#[test]
+fn gpu_matches_cpu_project_background() {
+    let Some(gpu) = gpu() else { return };
+    let scene = Scene {
+        background: [240, 230, 210, 255],
+        ..Scene::default()
+    };
+    let cpu = render(&scene, &mut ctx(&BTreeMap::new(), None), (32, 24)).unwrap();
+    let gpu = render(&scene, &mut ctx(&BTreeMap::new(), Some(gpu)), (32, 24)).unwrap();
+    compare("project-background", &cpu, &gpu);
 }

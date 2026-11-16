@@ -239,7 +239,7 @@ class Builder:
                 }
             ]
         )
-        # The render API returns transparent frames. An explicit background layer makes
+        # Keep the explicit artwork background as well as the project setting; this makes
         # CLI PNGs, preview and the opaque MP4 delivery agree without postprocessing.
         self.shape(
             "Background",

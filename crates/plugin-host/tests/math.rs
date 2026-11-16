@@ -173,6 +173,7 @@ fn golden_vector(scene: VectorScene, name: &str) {
     std::fs::create_dir_all(&root).unwrap();
     let core_scene = CoreScene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![vector_clip(scene)],
     };
     let mut ctx = RenderCtx::default();
@@ -309,6 +310,7 @@ fn latex_preserves_glyph_holes_after_reveal() {
             .unwrap();
         let scene = CoreScene {
             canvas: (0, 0),
+            background: [0; 4],
             clips: vec![vector_clip(scene)],
         };
         let frame = render(&scene, &mut RenderCtx::default(), (640, 360)).unwrap();

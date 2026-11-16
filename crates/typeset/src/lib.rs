@@ -243,7 +243,7 @@ impl TypesetEngine {
         mode: MathMode,
         font_size: f32,
     ) -> Result<TypesetResult, TypesetError> {
-        validate_input(source, font_size)?;
+        validate_input(source, mode, font_size)?;
 
         let cache_key = cache_key(source, mode, font_size);
         if let Some(cached) = self
@@ -262,12 +262,18 @@ impl TypesetEngine {
         let (tx, rx) = mpsc::channel();
         let shared = Arc::clone(&self.shared);
         let source = source.to_owned();
-        std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                typeset_inner(&shared, &source, mode, font_size)
-            }));
-            let _ = tx.send(result);
-        });
+        std::thread::Builder::new()
+            .name("typeset".into())
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    typeset_inner(&shared, &source, mode, font_size)
+                }));
+                let _ = tx.send(result);
+            })
+            .map_err(|err| {
+                TypesetError::Internal(format!("cannot spawn typesetting worker: {err}"))
+            })?;
 
         let result = match rx.recv_timeout(TYPESET_TIMEOUT) {
             Ok(Ok(Ok(result))) => result,
@@ -294,7 +300,7 @@ impl TypesetEngine {
 }
 
 /// Reject inputs that could take disproportionate time or memory to typeset.
-fn validate_input(source: &str, font_size: f32) -> Result<(), TypesetError> {
+fn validate_input(source: &str, mode: MathMode, font_size: f32) -> Result<(), TypesetError> {
     if source.is_empty() || source.trim().is_empty() {
         return Err(TypesetError::InvalidInput("source is empty"));
     }
@@ -303,6 +309,48 @@ fn validate_input(source: &str, font_size: f32) -> Result<(), TypesetError> {
     }
     if !font_size.is_finite() || font_size <= 0.0 || font_size > MAX_FONT_SIZE {
         return Err(TypesetError::InvalidInput("font size out of range"));
+    }
+    let mut depth = [0usize; 3];
+    let mut environments = 0usize;
+    let mut chars = source.char_indices().peekable();
+    while let Some((offset, ch)) = chars.next() {
+        match ch {
+            '%' if mode == MathMode::Latex => {
+                for (_, c) in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            }
+            '\\' => {
+                let rest = &source[offset + 1..];
+                if rest
+                    .strip_prefix("begin")
+                    .is_some_and(|s| s.trim_start().starts_with('{'))
+                {
+                    environments += 1;
+                }
+                if rest
+                    .strip_prefix("end")
+                    .is_some_and(|s| s.trim_start().starts_with('{'))
+                {
+                    environments = environments.saturating_sub(1);
+                }
+                if chars.peek().is_some_and(|(_, c)| !c.is_ascii_alphabetic()) {
+                    chars.next();
+                }
+            }
+            '{' => depth[0] += 1,
+            '(' => depth[1] += 1,
+            '[' => depth[2] += 1,
+            '}' => depth[0] = depth[0].saturating_sub(1),
+            ')' => depth[1] = depth[1].saturating_sub(1),
+            ']' => depth[2] = depth[2].saturating_sub(1),
+            _ => {}
+        }
+        if depth.iter().sum::<usize>() + environments > 64 {
+            return Err(TypesetError::InvalidInput("nesting is too deep"));
+        }
     }
     Ok(())
 }
@@ -869,6 +917,41 @@ mod tests {
     fn invalid_latex_is_a_clear_error() {
         let err = typeset_latex(r"\frac{a}{b").unwrap_err();
         assert!(matches!(err, TypesetError::InvalidLatex(_)), "got {err}");
+    }
+
+    #[test]
+    fn excessive_nesting_is_rejected_before_layout() {
+        for source in [
+            format!("{}x{}", r"\sqrt{".repeat(250), "}".repeat(250)),
+            format!(
+                "{}x{}",
+                r"\begin{matrix}".repeat(65),
+                r"\end{matrix}".repeat(65)
+            ),
+        ] {
+            assert!(matches!(
+                typeset_latex(&source),
+                Err(TypesetError::InvalidInput(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn commented_closing_braces_do_not_hide_latex_nesting() {
+        let source = format!("{}x{}", "\\sqrt{%}\n".repeat(65), "}".repeat(65));
+        assert!(matches!(
+            typeset_latex(&source),
+            Err(TypesetError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn nested_roots_fit_worker_stack() {
+        let source = format!("{}x{}", r"\sqrt{".repeat(64), "}".repeat(64));
+        assert!(
+            !typeset_latex(&source).unwrap().paths.is_empty(),
+            "nested roots produced no outlines"
+        );
     }
 
     #[test]

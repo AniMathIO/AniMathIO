@@ -41,6 +41,7 @@ fn scene(fit: Fit, video: bool) -> Scene {
     let asset = asset();
     Scene {
         canvas: (90, 160),
+        background: [0; 4],
         clips: vec![SceneClip {
             id: ClipId(1),
             track: TrackId(1),

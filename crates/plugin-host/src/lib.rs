@@ -1119,6 +1119,7 @@ impl PluginHost {
     pub fn resolve(&mut self, scene: &CoreScene, canvas_size: (u32, u32)) -> CoreScene {
         let mut resolved_scene = CoreScene {
             canvas: scene.canvas,
+            background: scene.background,
             clips: Vec::with_capacity(scene.clips.len()),
         };
 

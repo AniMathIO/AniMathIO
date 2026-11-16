@@ -15,6 +15,7 @@ fn render_effect(kind: &str, params: &[(&str, f64)], name: &str) {
     }
     let scene = Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(0),
@@ -141,6 +142,7 @@ impl animathio_core::EffectProcessor for Stub {
 fn effect_scene(bytes: &[u8], effects: Vec<EffectInstance>) -> Scene {
     Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(7),

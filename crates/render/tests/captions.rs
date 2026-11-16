@@ -29,6 +29,7 @@ fn scene(style: &str, extra: &serde_json::Value, time_ms: i64) -> Scene {
     }
     Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(0),

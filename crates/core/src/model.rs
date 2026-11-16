@@ -724,6 +724,9 @@ impl Project {
 /// Resolved input to future visual renderers and the audio mixer.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
+    /// Straight-alpha sRGB project background.
+    #[serde(default)]
+    pub background: [u8; 4],
     /// Active clips in back-to-front track order.
     pub clips: Vec<SceneClip>,
     /// Project resolution in pixels, or `(0, 0)` when unset; native-pixel [`Fit::Original`]
@@ -774,6 +777,7 @@ impl SceneClip {
 pub fn evaluate(project: &Project, time: Time) -> Scene {
     let mut scene = Scene {
         canvas: (project.width, project.height),
+        background: project.background,
         ..Scene::default()
     };
     let any_solo = project.tracks.iter().any(Track::is_solo);

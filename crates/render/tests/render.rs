@@ -46,6 +46,7 @@ fn normalized_transform_rotation_mirroring_opacity_and_z_order() {
     );
     let scene = Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![background.clone(), foreground.clone()],
     };
     let frame = render(&scene, &mut RenderCtx::default(), (100, 80)).unwrap();
@@ -55,6 +56,7 @@ fn normalized_transform_rotation_mirroring_opacity_and_z_order() {
     let reverse = render(
         &Scene {
             canvas: (0, 0),
+            background: [0; 4],
             clips: vec![foreground, background],
         },
         &mut RenderCtx::default(),
@@ -74,6 +76,7 @@ fn normalized_transform_rotation_mirroring_opacity_and_z_order() {
     let frame = render(
         &Scene {
             canvas: (0, 0),
+            background: [0; 4],
             clips: vec![rotated],
         },
         &mut RenderCtx::default(),
@@ -122,6 +125,7 @@ fn transparent_images_preserve_straight_alpha_and_mirrored_orientation() {
     let id = ctx.resources.add(bytes);
     let scene = Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![layer(
             0,
             ClipKind::Image(id),
@@ -216,6 +220,7 @@ fn malformed_decoder_frame_is_an_error() {
     let mut ctx = RenderCtx::new(animathio_render::CpuBackend::default(), BadSource);
     let scene = Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![layer(
             0,
             ClipKind::Video(AssetId::of(b"video")),
@@ -249,6 +254,7 @@ proptest! {
 fn vector_scenes_render_pixel_space_paths() {
     let scene = Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![layer(
             0,
             ClipKind::Vector(VectorScene {
@@ -271,4 +277,26 @@ fn vector_scenes_render_pixel_space_paths() {
     // The default clip transform is the identity for pixel-space vector scenes.
     assert_eq!(pixel(&frame, 20, 20), &[255, 0, 0, 255]);
     assert_eq!(pixel(&frame, 0, 0), &[0, 0, 0, 0]);
+}
+
+#[test]
+fn project_background_survives_resolution_and_compositing() {
+    let mut project = Project::default();
+    for background in [[240, 230, 210, 255], [80, 120, 160, 128], [0; 4]] {
+        Command::SetSettings {
+            width: 32,
+            height: 24,
+            frame_rate: FrameRate::new(30, 1).unwrap(),
+            background,
+            duration: Time(TICKS_PER_SECOND),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let scene = evaluate(&project, Time(0));
+        assert_eq!(scene.background, background);
+        let frame = render(&scene, &mut RenderCtx::default(), (32, 24)).unwrap();
+        for (actual, expected) in frame.pixels[..4].iter().zip(background) {
+            assert!(actual.abs_diff(expected) <= 1);
+        }
+    }
 }

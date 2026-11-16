@@ -154,6 +154,11 @@ jobs:
             "deb-root/usr/bin/$exe" --version
           done
           ls deb-root/usr/lib/animathio/plugins/*.amplugin >/dev/null
+          for root in squashfs-root deb-root; do
+            env -u ANIMATHIO_PLUGIN_DIR "$root/usr/bin/animathio-cli" new-sample -o "$root/sample.amio"
+            env -u ANIMATHIO_PLUGIN_DIR "$root/usr/bin/animathio-cli" render "$root/sample.amio" --frame 0 -o "$root/frame.png"
+            test -s "$root/frame.png"
+          done
           dpkg-deb -I "$deb" | sed -n '/Package:/p;/Depends:/p'
       - name: Smoke test installer (Windows)
         if: runner.os == 'Windows'

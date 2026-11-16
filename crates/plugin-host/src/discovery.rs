@@ -59,6 +59,10 @@ fn search_dirs(
             });
         }
         dirs.push(PluginDirectory {
+            path: bin.join("..").join("lib/animathio/plugins"),
+            allow_reserved_ids: true,
+        });
+        dirs.push(PluginDirectory {
             path: bin.join("..").join("Resources").join("plugins"),
             allow_reserved_ids: true,
         });
@@ -124,6 +128,23 @@ mod tests {
         // resources in `Contents/Resources/`.
         assert!(paths.contains(&PathBuf::from("/opt/app/bin/../lib/animathio/plugins")));
         assert!(paths.contains(&PathBuf::from("/opt/app/bin/../Resources/plugins")));
+    }
+
+    #[test]
+    fn installed_cli_finds_shared_bundles() {
+        let root =
+            std::env::temp_dir().join(format!("animathio-cli-layout-{}", std::process::id()));
+        let plugins = root.join("usr/lib/animathio/plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(root.join("usr/bin")).unwrap();
+        let dirs = search_dirs(None, Some(&root.join("usr/bin/animathio-cli")), None);
+        assert!(dirs.iter().any(|dir| dir.allow_reserved_ids
+            && dir.path.canonicalize().ok() == plugins.canonicalize().ok()));
+        assert!(
+            dirs.iter()
+                .any(|dir| dir.path.ends_with("lib/animathio-cli/plugins"))
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

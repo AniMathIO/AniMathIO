@@ -304,7 +304,7 @@ impl RenderCtx {
     }
 }
 
-/// Rasterize a scene onto a transparent canvas. Evaluation is shared with preview/export.
+/// Rasterize a scene over its project background. Evaluation is shared with preview/export.
 /// Rendering is fallible so missing assets and invalid dimensions become diagnostics.
 pub fn render(scene: &Scene, ctx: &mut RenderCtx, size: Size) -> Result<Frame, Error> {
     let _timer = animathio_core::timing::Timer::new("render-inclusive");
@@ -355,6 +355,7 @@ pub fn render_preview(
     let mut probes_left = MAX_EFFECT_PROBES;
     let alone = |clip: &animathio_core::SceneClip| Scene {
         canvas: scene.canvas,
+        background: scene.background,
         clips: vec![clip.clone()],
     };
     for clip in &mut repaired.clips {

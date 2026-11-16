@@ -16,8 +16,7 @@ undo step. There is no schema change. Headings use `apply_animation_preset` with
 Each directory contains its entry-point `build.py`, recording manifest and golden
 frames. Shared mechanics live in `common.py`. Both 16:9 and 9:16 have deliberate
 vector layouts: a media crop/reframe would cut off equations and diagrams. An
-explicit shape background keeps transparent PNG rendering and opaque MP4 deliveries
-consistent. Output is 1920×1080 / 1080×1920 at 30 fps, with a smaller CI mode. The
+explicit shape background matches the project background for PNG and MP4 output. Output is 1920×1080 / 1080×1920 at 30 fps, with a smaller CI mode. The
 examples use LaTeX write-on, parametric curves, graph draw-on, normalized shapes,
 keyframes, animation presets, caption styles, markers and beat-synced cuts.
 Track-level dissolves join equations and successive Fourier sums.
