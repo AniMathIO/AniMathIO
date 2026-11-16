@@ -293,17 +293,19 @@ fn error_scene(message: &str, shorter: f32, size: Size) -> Result<Scene, Diagnos
         b: 107,
         a: 255,
     };
-    let font = (shorter * 0.05).max(12.0);
+    let font = (shorter * 0.035).max(12.0);
     let friendly = if let Some((_, name)) = message.split_once("unknown variable: ") {
         format!("unsupported LaTeX command near {name} ({message})")
     } else {
         message.to_string()
     };
-    let reason: String = friendly.chars().take(140).collect();
+    let reason: Vec<char> = friendly.chars().take(240).collect();
+    let mut lines = vec!["LaTeX error".to_string()];
+    lines.extend(reason.chunks(55).map(|chunk| chunk.iter().collect::<String>()));
     let mut elements = Vec::new();
-    for (line, text) in ["LaTeX error", reason.as_str()].into_iter().enumerate() {
+    for (line, text) in lines.iter().enumerate() {
         let x = size.width as f32 * 0.05;
-        let y = size.height as f32 * 0.5 + font * 1.4 * line as f32;
+        let y = size.height as f32 * 0.35 + font * 1.4 * line as f32;
         let shifted = host::shape_text(text, font)
             .unwrap_or_default()
             .into_iter()
