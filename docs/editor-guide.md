@@ -242,7 +242,6 @@ them there, each as one undo step. The same actions are `animathio-cli markers` 
 FFmpeg chapter lists. See the [CLI reference](cli.md#beats) and
 [MCP reference](mcp.md#markers-and-beat-sync).
 
-![Timeline marker edited through the dialog and the Markers and beats panel](../docs/screenshots/editor-markers.png)
 
 Automatic cuts for recordings are available through Clip > Automatic cuts,
 `animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence
@@ -250,7 +249,6 @@ ranges on the timeline before applying one undoable linked audio/video ripple ed
 Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see the
 [CLI reference](cli.md#autocut) and [review rules](mcp.md#automatic-cut-review).
 
-![Automatic cuts review panel with proposed silences shaded on the timeline](../docs/screenshots/editor-autocut.png)
 
 Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto duck…,
 `animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks or clips,

@@ -29,8 +29,8 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
   text-size slider (`TextScaleFactor`); Linux reads KDE forceFontDPI, Xresources
   Xft.dpi or GNOME text-scaling-factor. Component rem spacing, panel rows and
   timeline track heights follow UI scale; timeline time coordinates remain independent.
-  Reference screenshots at [100%](../docs/screenshots/editor-scale-100.png) and
-  [150%](../docs/screenshots/editor-scale-150.png) use a private 1600×1000 Xvfb display.
+  The reference screenshot at [100%](../docs/screenshots/editor-scale-100.png) uses a private
+  1920×1080 Xvfb display; 150% needs a proportionally larger display to leave room for the preview.
 - **Spacing:** 4px grid. Panel padding 8–12. Control and panel row spacing follows the theme rem size.
 - **Motion:** 120–180ms ease-out for hover, selection, tab and panel changes, popovers
   and toasts (gpui `with_animation`). Nothing animates during playback except the
