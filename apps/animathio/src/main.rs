@@ -122,7 +122,12 @@ fn main() {
                             cx, window, project, assets, path, recovered, control, bench,
                         )
                     });
-                    view.update(cx, |editor, _cx| {
+                    view.update(cx, |editor, cx| {
+                        if let Some(panel) = std::env::args().find_map(|arg| {
+                            arg.strip_prefix("--screenshot-panel=").map(str::to_owned)
+                        }) {
+                            editor.open_screenshot_panel(&panel, cx);
+                        }
                         let mut local = window_bounds.get_bounds();
                         local.origin -= display_bounds.origin;
                         let seed = if matches!(window_bounds, gpui::WindowBounds::Maximized(_)) {
