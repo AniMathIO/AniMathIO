@@ -381,8 +381,10 @@ pub(crate) fn read_message(
     limit: usize,
 ) -> io::Result<Option<Vec<u8>>> {
     let mut chunk = [0_u8; 8192];
+    let mut searched = 0;
     loop {
-        if let Some(position) = buffer.iter().position(|&byte| byte == b'\n') {
+        if let Some(offset) = buffer[searched..].iter().position(|&byte| byte == b'\n') {
+            let position = searched + offset;
             if position > limit {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -396,6 +398,13 @@ pub(crate) fn read_message(
             }
             return Ok(Some(message));
         }
+        if buffer.len() > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "control message exceeds size limit",
+            ));
+        }
+        searched = buffer.len();
         let read = reader.read(&mut chunk)?;
         if read == 0 {
             if buffer.is_empty() {
@@ -407,15 +416,6 @@ pub(crate) fn read_message(
             ));
         }
         buffer.extend_from_slice(&chunk[..read]);
-        // The cap applies to the message being assembled; bytes after a
-        // newline belong to later messages and are checked when they reach
-        // the front of the buffer.
-        if !buffer.contains(&b'\n') && buffer.len() > limit {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "control message exceeds size limit",
-            ));
-        }
     }
 }
 
@@ -625,6 +625,29 @@ mod tests {
             read_message(&mut reader, &mut buffer, 1024),
             Err(ref error) if error.kind() == io::ErrorKind::UnexpectedEof
         ));
+    }
+
+    #[test]
+    fn read_message_handles_fragmentation_and_exact_limit() {
+        // Every read ends before the newline, including an exact-limit frame.
+        struct Fragmented<'a>(&'a [u8]);
+        impl Read for Fragmented<'_> {
+            fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+                let count = out.len().min(1);
+                self.0.read(&mut out[..count])
+            }
+        }
+        let mut reader = Fragmented(b"1234\nxy\n");
+        let mut buffer = Vec::new();
+        assert_eq!(
+            read_message(&mut reader, &mut buffer, 4).unwrap().unwrap(),
+            b"1234"
+        );
+        assert_eq!(
+            read_message(&mut reader, &mut buffer, 4).unwrap().unwrap(),
+            b"xy"
+        );
+        assert!(read_message(&mut reader, &mut buffer, 4).unwrap().is_none());
     }
 
     #[test]

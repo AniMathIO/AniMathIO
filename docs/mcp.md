@@ -38,8 +38,10 @@ Newline-delimited JSON-RPC 2.0. `method` + `params` form a tagged enum
 
 Requests are capped at 16 MiB; responses at 64 MiB (renders can be several
 megabytes). A client may pipeline requests: several newline-delimited requests
-sent in one write are each answered in order. A request without the token, or
-with a mismatched `jsonrpc` version, gets a JSON-RPC error instead of a result.
+sent in one write are each answered in order. Each connection executes one
+request at a time: a slow request (including a deferred job once accepted)
+blocks later pipelined requests on that connection until its reply is sent.
+A request without the token, or with a mismatched `jsonrpc` version, gets a JSON-RPC error instead of a result.
 
 ### Editor acceptance and completion
 

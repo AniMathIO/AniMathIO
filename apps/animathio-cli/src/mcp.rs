@@ -3083,6 +3083,47 @@ mod animation_tests {
     }
 
     #[tokio::test]
+    async fn in_animations_clamp_keys_to_a_nonzero_start_clip() {
+        for kind in ["fadeIn", "slideIn"] {
+            let (server, clip_len) = clip_with_server();
+            server
+                .backend
+                .lock()
+                .await
+                .command_apply(Command::MoveClip {
+                    id: ClipId(1),
+                    track: TrackId(1),
+                    start: Time(2 * TICKS_PER_SECOND),
+                })
+                .unwrap();
+            let result = server
+                .add_animation(Parameters(
+                    serde_json::from_value(
+                        json!({"target_id":"1", "kind":kind, "duration_ms":10000.0}),
+                    )
+                    .unwrap(),
+                ))
+                .await
+                .unwrap();
+            assert!(
+                result.content[0]
+                    .as_text()
+                    .unwrap()
+                    .text
+                    .contains("\"clamped_to_clip\":true")
+            );
+            let project = server.backend.lock().await.project_get().unwrap().project;
+            let clip = find_clip(&project, ClipId(1)).unwrap();
+            for animation in &clip.animations {
+                assert_eq!(
+                    animation.keys.keys().keys().copied().collect::<Vec<_>>(),
+                    vec![Time(0), Time(clip_len)]
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn durations_longer_than_the_clip_are_clamped() {
         let (server, clip_len) = clip_with_server();
         let result = server

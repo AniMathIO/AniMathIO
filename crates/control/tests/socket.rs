@@ -279,6 +279,9 @@ fn pipelined_requests_in_one_write_each_get_a_reply() {
         .spawn(HeadlessHandler::new())
         .unwrap();
     let mut stream = std::os::unix::net::UnixStream::connect(&spec.path).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
     let token = std::fs::read_to_string(&spec.token_file).unwrap();
     // Two complete requests leave the client in a single write.
     let request = |id: u64| {
