@@ -243,7 +243,7 @@ impl TypesetEngine {
         mode: MathMode,
         font_size: f32,
     ) -> Result<TypesetResult, TypesetError> {
-        validate_input(source, font_size)?;
+        validate_input(source, mode, font_size)?;
 
         let cache_key = cache_key(source, mode, font_size);
         if let Some(cached) = self
@@ -300,7 +300,7 @@ impl TypesetEngine {
 }
 
 /// Reject inputs that could take disproportionate time or memory to typeset.
-fn validate_input(source: &str, font_size: f32) -> Result<(), TypesetError> {
+fn validate_input(source: &str, mode: MathMode, font_size: f32) -> Result<(), TypesetError> {
     if source.is_empty() || source.trim().is_empty() {
         return Err(TypesetError::InvalidInput("source is empty"));
     }
@@ -315,6 +315,13 @@ fn validate_input(source: &str, font_size: f32) -> Result<(), TypesetError> {
     let mut chars = source.char_indices().peekable();
     while let Some((offset, ch)) = chars.next() {
         match ch {
+            '%' if mode == MathMode::Latex => {
+                for (_, c) in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            }
             '\\' => {
                 let rest = &source[offset + 1..];
                 if rest
@@ -874,9 +881,21 @@ mod tests {
     }
 
     #[test]
+    fn commented_closing_braces_do_not_hide_latex_nesting() {
+        let source = format!("{}x{}", "\\sqrt{%}\n".repeat(65), "}".repeat(65));
+        assert!(matches!(
+            typeset_latex(&source),
+            Err(TypesetError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
     fn nested_roots_fit_worker_stack() {
         let source = format!("{}x{}", r"\sqrt{".repeat(64), "}".repeat(64));
-        assert!(!typeset_latex(&source).unwrap().paths.is_empty());
+        assert!(
+            !typeset_latex(&source).unwrap().paths.is_empty(),
+            "nested roots produced no outlines"
+        );
     }
 
     #[test]
