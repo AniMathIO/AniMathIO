@@ -27,9 +27,37 @@ are excluded. The load gate refuses measurement on timeout.
 
 <!-- results:BEGIN -->
 
-Results pending completion of the measured run.
+| Metric | Unit | v1 (Electron/TypeScript) | v2 (Rust) |
+| --- | --- | --- | --- |
+| cold start to usable window | s | 0.81 (0.74–1.08) | 0.20 (0.20–5.20) |
+| project load, 10 s scene open | s | 1.08 (1.07–1.13) | 0.21 (0.20–0.23) |
+| idle memory, 10 s scene open (RSS sum median) | MiB | 923 (919–926) | 487 (485–526) |
+| project load, 60-element project | s | 1.11 (1.07–1.21) | 0.20 (0.20–0.22) |
+| idle memory, 60-element project (RSS sum median) | MiB | 931 (930–933) | 495 (494–495) |
+| export, 10 s 1080p30 MP4 | s | 20.43 (20.38–20.52) | 6.47 (6.42–6.47) |
+| peak memory during 10 s export (RSS sum max) | MiB | 1252 (1250–1286) | 128 (127–129) |
+| exported MP4 size, 10 s project | KiB | 503 (478–534) | 343 |
+| export, 60 s 1080p30 MP4 | s | 116.75 (116.09–116.75) | 37.42 (37.42–37.67) |
+| peak memory during 60 s export (RSS sum max) | MiB | 1321 (1288–1335) | 129 (129–129) |
+| exported MP4 size, 60 s project | KiB | 1533 (1531–1552) | 1762 |
+| seek round-trip p50 | ms | 2.3 (2.3–2.3) | 24.1 (23.8–24.1) |
+| seek round-trip p95 | ms | 6.1 (5.5–6.2) | 36.8 (36.7–37.7) |
+
+## Sizes
+
+Published v1 animathio-v1.8.3 download sizes: AniMathIO-1.8.3.AppImage 221 MiB, AniMathIO-1.8.3.flatpak 138 MiB, AniMathIO.Setup.1.8.3.exe 181 MiB, AniMathIO.Setup.1.8.3.exe.blockmap 0 MiB, animathio_1.8.3_amd64.deb 163 MiB, animathio_1.8.3_amd64.snap 188 MiB.
+- v1 local artifacts (reused origin/main checkout build): .deb 166 MiB, AppImage 221 MiB, on disk (linux-unpacked) 658 MiB.
+- v2 on disk (from-source install): editor 175 MiB + CLI 118 MiB + first-party plugin bundles 0.7 MiB = **293 MiB**.
+- v2 reproducible gzip payload (editor + CLI + plugins, not an official installer): 90.4 MiB.
 
 <!-- results:END -->
+
+Raw evidence: [benchmark-results.json](benchmark-results.json). Completion load ranged
+from 1.05 to 5.31; the gate applies before each scenario, not throughout it.
+One v1 60-second attempt produced **60 fps / 3,600 frames** despite the source
+requesting 30 fps. It is preserved with `valid: false` and excluded from the
+1080p30 statistics. A replacement attempt passed validation, giving three valid
+runs. Do not omit this exclusion when interpreting reproducibility.
 
 ## Methodology and limits
 

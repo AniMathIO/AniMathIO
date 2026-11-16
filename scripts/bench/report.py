@@ -118,10 +118,11 @@ def main() -> None:
 
     table_rows: list[tuple[str, str, str, str]] = []
     for scenario, metrics in SCENARIOS.items():
-        rows = load_rows(raw, scenario)
+        all_rows = load_rows(raw, scenario)
+        rows = [r for r in all_rows if r.get("valid", True)]
         if not rows:
             continue
-        entry: dict = {"metrics": {}, "memory": {}, "rows": rows}
+        entry: dict = {"metrics": {}, "memory": {}, "rows": all_rows}
         for metric, label, unit, digits in metrics:
             stats = metric_stats(rows, metric)
             cell = {
@@ -164,7 +165,7 @@ def main() -> None:
             f"{machine.get('distro')}, kernel {machine.get('kernel')}. **Display:** {machine.get('display')}. **Audio:** {machine.get('audio')}."
         )
     lines.append("")
-    lines.append("Every value is the **median of N runs (min–max)**; N and the load average each run saw are in `results.json`. All GUI numbers are Xvfb, and every run was gated on a 1-minute load average below the threshold recorded in the raw rows.")
+    lines.append("Every value is the **median of N runs (min–max)**; N and the load average each run saw are in `results.json`. All GUI numbers are Xvfb, and every run was gated on a 1-minute load average at most 4 by default (raw rows record completion load, which can rise during work).")
     lines.append("")
     lines.append("| Metric | Unit | v1 (Electron/TypeScript) | v2 (Rust) |")
     lines.append("| --- | --- | --- | --- |")
@@ -187,7 +188,7 @@ def main() -> None:
             parts.append(f"AppImage {v1s['appimage']['bytes'] / KB / KB:.0f} MiB")
         if "unpacked_dir" in v1s:
             parts.append(f"on disk (linux-unpacked) {v1s['unpacked_dir']['bytes'] / KB / KB:.0f} MiB")
-        lines.append(f"- v1 artifacts (built here from origin/main): {', '.join(parts)}.")
+        lines.append(f"- v1 local artifacts (reused origin/main checkout build): {', '.join(parts)}.")
     if v2s := sizes_v2.get("v2", {}):
         lines.append(
             f"- v2 on disk (from-source install): editor {v2s.get('animathio_editor_bytes', 0) / KB / KB:.0f} MiB"
