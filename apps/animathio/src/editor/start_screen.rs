@@ -18,7 +18,10 @@ fn modified_label(modified: Option<SystemTime>) -> String {
 
 impl Editor {
     pub(super) fn is_start_screen(&self) -> bool {
-        self.path.is_none() && self.project.tracks().is_empty() && self.project.assets().is_empty()
+        !self.canvas_chosen
+            && self.path.is_none()
+            && self.project.tracks().is_empty()
+            && self.project.assets().is_empty()
     }
 
     pub(super) fn start_screen(&mut self, cx: &mut Context<Self>) -> Div {

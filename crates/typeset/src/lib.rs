@@ -906,6 +906,39 @@ mod tests {
     }
 
     #[test]
+    fn tfrac_matches_typst_text_style() {
+        let engine = TypesetEngine::new().unwrap();
+        for (latex, typst) in [
+            (r"\tfrac{1}{2}", "inline(frac(1, 2))"),
+            (r"\tfrac{a+b}{c}", "inline(frac(a+b, c))"),
+        ] {
+            assert_eq!(
+                engine.typeset(latex, MathMode::Latex, 48.0).unwrap(),
+                engine.typeset(typst, MathMode::Typst, 48.0).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn tfrac_renders_smaller_than_dfrac() {
+        let engine = TypesetEngine::new().unwrap();
+        let tfrac = engine
+            .typeset(r"\tfrac{1}{2}", MathMode::Latex, 48.0)
+            .unwrap();
+        let dfrac = engine
+            .typeset(r"\dfrac{1}{2}", MathMode::Latex, 48.0)
+            .unwrap();
+        let tfrac_height = tfrac.bbox.max_y - tfrac.bbox.min_y;
+        let dfrac_height = dfrac.bbox.max_y - dfrac.bbox.min_y;
+        // Text style reduces operands, while rule thickness and style-specific
+        // gaps remain at the surrounding font size. Total height is not 0.7x.
+        assert!(
+            tfrac_height < dfrac_height,
+            "tfrac height {tfrac_height} not smaller than dfrac height {dfrac_height}"
+        );
+    }
+
+    #[test]
     fn typst_mode_matches_latex_style_output() {
         let engine = TypesetEngine::new().unwrap();
         let result = engine.typeset("frac(a,b)", MathMode::Typst, 48.0).unwrap();

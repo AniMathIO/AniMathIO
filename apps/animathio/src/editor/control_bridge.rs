@@ -599,6 +599,9 @@ impl Editor {
                     &call,
                     self.plugin_host.as_ref(),
                 )?;
+                if importing {
+                    self.canvas_chosen = true;
+                }
                 if replace {
                     self.reset_project_session();
                     self.path = None;
@@ -674,6 +677,7 @@ impl Editor {
         let _ = self.clock.pause();
         self.audio_generation = self.audio_generation.wrapping_add(1);
         self.reset_project_session();
+        self.canvas_chosen = true;
         self.project = project;
         self.history = History::default();
         self.assets = Arc::new(assets.into_iter().map(|a| (a.id, a.bytes)).collect());

@@ -525,6 +525,13 @@ impl Editor {
     }
 
     /// Persistent project summary; transient results are notifications.
+    ///
+    /// While the launcher is shown no project or canvas has been chosen, so
+    /// the placeholder resolution and duration chips are hidden.
+    pub(super) fn status_summary_visible(&self) -> bool {
+        !self.is_start_screen()
+    }
+
     pub(super) fn status_line(&self, cx: &mut Context<Self>) -> StatusBar {
         let (width, height) = project_size(&self.project);
         let duration = timecode::format_timecode(
@@ -553,20 +560,21 @@ impl Editor {
         } else {
             "Save to enable autosave".to_owned()
         };
-        StatusBar::new()
-            .h(gpui::rems(2.267))
-            .flex_shrink_0()
-            .px_3()
-            .left(chip(IconName::Monitor, format!("{width} x {height}")))
-            .left(chip(
-                IconName::Clapperboard,
-                frame_rate_label(self.project.frame_rate()),
-            ))
-            .left(
-                div()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .child(chip(IconName::Clock, duration)),
-            )
+        let mut status = StatusBar::new().h(gpui::rems(2.267)).flex_shrink_0().px_3();
+        if self.status_summary_visible() {
+            status = status
+                .left(chip(IconName::Monitor, format!("{width} x {height}")))
+                .left(chip(
+                    IconName::Clapperboard,
+                    frame_rate_label(self.project.frame_rate()),
+                ))
+                .left(
+                    div()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(chip(IconName::Clock, duration)),
+                );
+        }
+        status
             .right(
                 div()
                     .flex()

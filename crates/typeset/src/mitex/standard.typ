@@ -234,7 +234,8 @@
   // todo: cfrac, dfrac are same?
   cfrac: define-cmd(2, handle: (num, den) => $display((num)/(den))$),
   dfrac: define-cmd(2, handle: (num, den) => $display((num)/(den))$),
-  tfrac: define-cmd(2, handle: (num, den) => $inline((num)/(den))$),
+  // Text style keeps the math axis and rule weight while reducing operands.
+  tfrac: define-cmd(2, handle: (num, den) => math.inline(math.frac(num, den))),
   binom: define-cmd(2),
   dbinom: define-cmd(2, handle: (n, k) => $display(binom(#n, #k))$),
   tbinom: define-cmd(2, handle: (n, k) => $inline(binom(#n, #k))$),
