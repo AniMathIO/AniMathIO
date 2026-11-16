@@ -38,6 +38,7 @@ mod style;
 mod subtitle_job;
 mod timecode;
 mod timeline;
+mod window_state;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -76,23 +77,42 @@ fn main() {
             })
             .detach();
 
-            let available = cx
-                .primary_display()
-                .map_or(size(px(1400.), px(900.)), |display| display.bounds().size);
-            let scale = style::ui_scale();
-            let bounds = Bounds::centered(
-                None,
-                size(
-                    px(1400. * scale).min(available.width * 0.95),
-                    px(900. * scale).min(available.height * 0.95),
-                ),
-                cx,
+            let displays = cx.displays();
+            let saved = window_state::WindowState::load();
+            let primary = cx.primary_display();
+            let primary_index = displays
+                .iter()
+                .position(|display| {
+                    primary
+                        .as_ref()
+                        .is_some_and(|primary| primary.id() == display.id())
+                })
+                .unwrap_or(0);
+            let ids: Vec<_> = displays
+                .iter()
+                .map(|display| display.uuid().ok().map(|uuid| *uuid.as_bytes()))
+                .collect();
+            let index = window_state::restore_display(saved, &ids, primary_index);
+            let display = displays.get(index);
+            let display_bounds = display.map_or(
+                Bounds {
+                    origin: point(px(0.), px(0.)),
+                    size: size(px(2560.), px(1440.)),
+                },
+                |display| window_state::native_display_bounds(display.as_ref()),
             );
+            // The native minimum never exceeds the selected display's usable area, so a
+            // small display still gets a usable window (smaller than 1280x720 there).
+            let min_size =
+                window_state::min_size_for_display(window_state::MIN_WINDOW_SIZE, display_bounds);
+            let window_bounds =
+                window_state::initial_window_bounds(saved, display_bounds, min_size);
             editor::actions::init(cx);
             cx.open_window(
                 WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(900.), px(600.))),
+                    window_bounds: Some(window_bounds),
+                    display_id: display.map(|display| display.id()),
+                    window_min_size: Some(min_size),
                     window_decorations: Some(WindowDecorations::Client),
                     ..gpui_component::TitleBar::window_options()
                 },
@@ -101,6 +121,16 @@ fn main() {
                         editor::Editor::new(
                             cx, window, project, assets, path, recovered, control, bench,
                         )
+                    });
+                    view.update(cx, |editor, _cx| {
+                        let mut local = window_bounds.get_bounds();
+                        local.origin -= display_bounds.origin;
+                        let seed = if matches!(window_bounds, gpui::WindowBounds::Maximized(_)) {
+                            gpui::WindowBounds::Maximized(local)
+                        } else {
+                            gpui::WindowBounds::Windowed(local)
+                        };
+                        editor.seed_window_tracker(seed, ids.get(index).copied().flatten());
                     });
                     // `Root` hosts the popover layers that gpui-component widgets
                     // (select, colour picker) render into.

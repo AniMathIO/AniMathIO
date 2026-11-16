@@ -182,6 +182,7 @@ impl Editor {
             ReplaceProject::ImportV1 => self.import_legacy(cx),
             ReplaceProject::CloseWindow => {
                 self.dirty = false;
+                self.window_tracker.persist();
                 window.remove_window();
             }
         }

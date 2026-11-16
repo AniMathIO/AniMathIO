@@ -641,6 +641,12 @@ pub(crate) struct Editor {
     context_menu: Option<ContextMenu>,
     context_menu_pos: Option<Point<Pixels>>,
     pool_drag: Option<PoolDrag>,
+    /// Window geometry observed so far (see `window_state::BoundsTracker`): the maximized
+    /// flag and the last non-maximized bounds, captured continuously so a maximized window
+    /// still remembers its normal size at save time.
+    window_tracker: crate::window_state::BoundsTracker,
+    /// Pending debounced window-state save (see `schedule_window_state_save`).
+    window_save_task: Option<Task<()>>,
     pool_drag_pos: Point<Pixels>,
     fields: fields::FieldPool,
     waveforms: std::cell::RefCell<BTreeMap<AssetId, Arc<Waveform>>>,
@@ -819,6 +825,8 @@ impl Editor {
             context_menu: None,
             context_menu_pos: None,
             pool_drag: None,
+            window_tracker: crate::window_state::BoundsTracker::default(),
+            window_save_task: None,
             pool_drag_pos: Point::default(),
             fields: fields::FieldPool::default(),
             waveforms: std::cell::RefCell::default(),
@@ -840,12 +848,41 @@ impl Editor {
             }
         })
         .detach();
+        this.window_tracker.save_path = this
+            .env
+            .config_dir
+            .as_ref()
+            .map(|dir| dir.join(crate::window_state::FILE_NAME));
         this.request_render(Time(0));
+        // Remember the window geometry continuously (see `window_state::BoundsTracker`)
+        // and save it when the geometry settles: platform quit paths (Cmd+Q, WM session
+        // end, `--bench-viewport`) never run the window should-close handler.
+        this.window_tracker.observe_window(window, cx);
+        cx.observe_window_bounds(window, |this, window, cx| {
+            this.window_tracker.observe_window(window, cx);
+            this.schedule_window_state_save(cx);
+        })
+        .detach();
+        cx.on_app_quit(|this, _cx| {
+            let state = this.window_tracker.state();
+            let path = this.window_tracker.save_path.clone();
+            async move {
+                let result = path
+                    .as_ref()
+                    .map_or_else(|| state.save(), |path| state.write_to(path));
+                if let Err(error) = result {
+                    eprintln!("warning: could not save window state on quit: {error}");
+                }
+            }
+        })
+        .detach();
         // A window-manager close asks before dropping unsaved work.
         let close_view = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             close_view
                 .update(cx, |this, cx| {
+                    this.window_tracker.observe_window(window, cx);
+                    this.window_tracker.persist();
                     if this.dirty {
                         this.replace_project(ReplaceProject::CloseWindow, window, cx);
                     }
@@ -905,6 +942,28 @@ impl Editor {
         .detach();
         cx.notify();
         this
+    }
+
+    /// Schedule the debounced window-state save (see
+    /// [`crate::window_state::SAVE_DEBOUNCE`]): one trailing write after the geometry
+    /// stops changing. A pending save reads the freshest tracker state when it fires, so
+    /// resize/move bursts collapse into a single write.
+    pub(crate) fn schedule_window_state_save(&mut self, cx: &mut Context<Self>) {
+        if self.window_save_task.is_some() {
+            return;
+        }
+        self.window_save_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(crate::window_state::SAVE_DEBOUNCE)
+                .await;
+            // The editor may already be gone (window closed before the timer fired);
+            // the close/quit paths persist in that case.
+            this.update(cx, |this, _cx| {
+                this.window_save_task = None;
+                this.window_tracker.persist();
+            })
+            .ok();
+        }));
     }
 }
 
@@ -1034,5 +1093,17 @@ impl Render for Editor {
             root = root.child(ghost);
         }
         actions::attach(root, cx)
+    }
+}
+
+impl Editor {
+    pub(crate) fn seed_window_tracker(
+        &mut self,
+        bounds: gpui::WindowBounds,
+        uuid: Option<[u8; 16]>,
+    ) {
+        let path = self.window_tracker.save_path.take();
+        self.window_tracker = crate::window_state::BoundsTracker::seeded(bounds, uuid);
+        self.window_tracker.save_path = path;
     }
 }
