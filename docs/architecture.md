@@ -871,3 +871,30 @@ backends paint it before clips; preview, PNG rendering and video export share th
 policy. New default projects remain transparent; templates retain their configured
 backgrounds. Math input nesting is limited to 64 levels and native typesetting
 workers use an explicit 64 MiB stack.
+
+## Bundled effects and presets
+
+Text, shapes and the eight clip effects (grayscale, sepia, invert, saturate, brightness,
+contrast, blur, opacity) use the bundled WASM components end to end, including CLI renders
+and exports. Build them with `scripts/build-plugins.sh`; schema-1 and schema-2 projects
+migrate automatically to plugin clips and plugin effects when loaded.
+
+Animation presets are plugins too: `org.animathio.animations` offers fade, slide, zoom,
+pop, spin, bounce, wipe and typewriter in/out presets plus breathe, shake, spin, hop and
+flash emphasis. Pick them in the inspector's **Animations** section (In / Out / Emphasis,
+with a duration stepper) or the Effects library, through the `apply_animation_preset` MCP
+tool or `animathio-cli animations apply`. A preset becomes ordinary keyframes in one undo
+step, so projects render and export without the plugin.
+
+Audio effects are plugins too: `org.animathio.audio-basic` provides gain/trim, a 3-band EQ,
+compressor, noise gate, high-pass filter, a voice-cleanup preset (high-pass + gentle gate +
+de-esser) and `denoise` (spectral gating that learns the noise from the quietest frames). Clips and tracks carry ordered, undoable audio-effect chains that run in the shared
+mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
+Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools. Open a track header’s
+**Audio effects** context-menu entry to edit its chain with the same controls. Clip audio-effect
+parameters have keyframe controls, and parameter drags update playback live (throttled snapshots for the mix worker, never the
+device callback). Video effects in the inspector have a bypass switch like audio effects.
+
+Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
+the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
+and 256-byte display strings.
