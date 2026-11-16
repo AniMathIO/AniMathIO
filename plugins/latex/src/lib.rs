@@ -85,7 +85,7 @@ impl Guest for LatexPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "latex".to_string(),
-            version: "1.2.2".to_string(),
+            version: "1.2.3".to_string(),
             description: "LaTeX/Typst math typeset by the host into vector outlines".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -293,19 +293,26 @@ fn error_scene(message: &str, shorter: f32, size: Size) -> Result<Scene, Diagnos
         b: 107,
         a: 255,
     };
-    let font = (shorter * 0.05).max(12.0);
-    let reason: String = message.chars().take(60).collect();
+    let font = (shorter * 0.035).max(12.0);
+    let friendly = if let Some((_, name)) = message.split_once("unknown variable: ") {
+        format!("unsupported LaTeX command near {name} ({message})")
+    } else {
+        message.to_string()
+    };
+    let reason: Vec<char> = friendly.chars().take(240).collect();
+    let mut lines = vec!["LaTeX error".to_string()];
+    lines.extend(reason.chunks(55).map(|chunk| chunk.iter().collect::<String>()));
     let mut elements = Vec::new();
-    for (line, text) in ["LaTeX error", reason.as_str()].into_iter().enumerate() {
+    for (line, text) in lines.iter().enumerate() {
         let x = size.width as f32 * 0.05;
-        let y = size.height as f32 * 0.5 + font * 1.4 * line as f32;
-        for contour in host::shape_text(text, font).unwrap_or_default() {
-            let shifted: Vec<PathVerb> = contour
-                .iter()
-                .map(|verb| offset_verb(verb, x, y, 1.0))
-                .collect();
-            elements.push(DrawCommand::FillPath((shifted, red)));
-        }
+        let y = size.height as f32 * 0.35 + font * 1.4 * line as f32;
+        let shifted = host::shape_text(text, font)
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .map(|verb| offset_verb(&verb, x, y, 1.0))
+            .collect();
+        elements.push(DrawCommand::FillPath((shifted, red)));
     }
     Ok(Scene {
         coordinate_space: CoordinateSpace::Canvas,
