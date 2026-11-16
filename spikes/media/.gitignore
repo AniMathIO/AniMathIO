@@ -1,0 +1,5 @@
+# Generated test media. Regenerate with scripts/gen_corpus.sh.
+corpus/
+out.mp4
+target/
+*.log

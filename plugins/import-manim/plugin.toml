@@ -1,0 +1,7 @@
+api_version = "1.1.0"
+id = "org.animathio.import-manim"
+name = "Manim Import"
+version = "1.0.0"
+description = "Import a supported subset of Manim Community scene scripts (.py)"
+kinds = ["importer"]
+capabilities = []

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="286" viewBox="0 0 840 286" role="img" aria-label="Cadence p95 in milliseconds; release fits within the 16.667 ms budget">
+<rect width="840" height="286" fill="#131927"/>
+<g font-family="sans-serif" font-size="15" fill="#ffffff">
+<text x="22" y="28" font-size="19">1080p random scrub — cadence p95 (ms, lower is better)</text>
+<text x="22" y="85">Debug Wayland</text>
+<rect x="185" y="65" width="518.81" height="28" rx="3" fill="#e9a151"/>
+<text x="713.81" y="85">115.291</text>
+<text x="22" y="131">Release Wayland</text>
+<rect x="185" y="111" width="27.81" height="28" rx="3" fill="#37cbbb"/>
+<text x="222.81" y="131">6.181</text>
+<text x="22" y="177">Debug XWayland</text>
+<rect x="185" y="157" width="518.65" height="28" rx="3" fill="#e9a151"/>
+<text x="713.65" y="177">115.255</text>
+<text x="22" y="223">Release XWayland</text>
+<rect x="185" y="203" width="53.97" height="28" rx="3" fill="#37cbbb"/>
+<text x="248.97" y="223">11.994</text>
+<path d="M260.00 48 V242" stroke="#ffffff" stroke-dasharray="4 4"/>
+<text x="190" y="270" fill="#cbd5e1">Dashed line: 16.667 ms / 60 fps budget. One short run per configuration.</text>
+</g></svg>

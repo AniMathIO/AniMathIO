@@ -1,0 +1,724 @@
+use animathio_core::{
+    ClipId, ClipKind, FrameRate, MarkerId, Project, Rounding, TICKS_PER_SECOND, Time, Track,
+    TrackId,
+};
+
+/// Timeline presentation order: foreground first, with audio-only tracks below
+/// all visual (including empty) tracks. The core's back-to-front order is unchanged.
+pub(crate) fn display_tracks(project: &Project) -> Vec<&Track> {
+    project
+        .tracks()
+        .iter()
+        .rev()
+        .filter(|track| !is_audio_only(track))
+        .chain(project.tracks().iter().filter(|track| is_audio_only(track)))
+        .collect()
+}
+
+/// A track that holds only audio clips (a non-empty track, so empty tracks stay visual).
+pub(crate) fn is_audio_only(track: &Track) -> bool {
+    !track.clips().is_empty()
+        && track
+            .clips()
+            .values()
+            .all(|clip| matches!(clip.kind, ClipKind::Audio(_)))
+}
+
+/// Pixel geometry shared by timeline painting and hit-testing. All coordinates are
+/// relative to the timeline canvas origin (not the window origin); callers add the
+/// canvas offset before painting or subtract it after a pointer event.
+pub(crate) struct TimelineLayout {
+    pub(crate) width: f32,
+    pub(crate) ruler_height: f32,
+    pub(crate) row_height: f32,
+    pub(crate) duration_ticks: i64,
+    pub(crate) pixels_per_tick: f64,
+    pub(crate) scroll_x: f64,
+    /// When set, pointer times land on this rate's frame boundaries, so the
+    /// playhead, blade, drags and trims never produce mid-frame edits.
+    pub(crate) frame_rate: Option<FrameRate>,
+}
+impl TimelineLayout {
+    /// Quantize pointer times to `rate`'s frames.
+    pub(crate) fn with_frame_rate(mut self, rate: FrameRate) -> Self {
+        self.frame_rate = Some(rate);
+        self
+    }
+
+    /// Build a layout with an explicit zoom (pixels-per-tick multiplier) and a
+    /// horizontal scroll offset, both clamped to sane bounds.
+    pub(crate) fn zoomed(
+        width: f32,
+        ruler_height: f32,
+        row_height: f32,
+        duration_ticks: i64,
+        zoom: f32,
+        scroll_x: f32,
+    ) -> Self {
+        let width = width.max(1.0);
+        let pixels_per_tick =
+            f64::from(width) / duration_ticks.max(1) as f64 * f64::from(zoom.clamp(1.0, 64.0));
+        let max_scroll =
+            (duration_ticks.max(1) as f64 * pixels_per_tick - f64::from(width)).max(0.0);
+        Self {
+            width,
+            ruler_height,
+            row_height,
+            duration_ticks,
+            pixels_per_tick,
+            scroll_x: f64::from(scroll_x).clamp(0.0, max_scroll),
+            frame_rate: None,
+        }
+    }
+}
+
+/// Whether a clip intersects the horizontal viewport.
+pub(crate) fn visible_span(layout: &TimelineLayout, start: Time, end: Time) -> bool {
+    time_to_x(layout, end) >= 0.0 && time_to_x(layout, start) <= layout.width
+}
+
+/// Cursor-anchored zoom. The time under the cursor stays fixed except at edges.
+pub(crate) fn zoom_at(layout: &TimelineLayout, zoom: f32, anchor_x: f32) -> (f32, f32) {
+    let zoom = zoom.clamp(1.0, 64.0);
+    let current = layout.pixels_per_tick * layout.duration_ticks as f64 / f64::from(layout.width);
+    let scroll = ((layout.scroll_x + f64::from(anchor_x)) * f64::from(zoom) / current
+        - f64::from(anchor_x)) as f32;
+    (zoom, scroll.clamp(0.0, layout.width * (zoom - 1.0)))
+}
+
+/// A 54px slider spans linear gain 0–2. Commit the final value as one command.
+pub(crate) fn gain_from_drag(original: f64, delta: f32) -> f64 {
+    (original + f64::from(delta) / 54.0 * 2.0).clamp(0.0, 2.0)
+}
+
+/// Ruler tick positions (multiples of `minor`) inside the visible range only.
+/// The walk is bounded by `width / 4` iterations and uses `checked_add`, so a
+/// huge duration, a tiny zoom or a degenerate step can never stall the UI.
+pub(crate) fn ruler_ticks(layout: &TimelineLayout, minor: i64) -> Vec<i64> {
+    let minor = minor.max(1);
+    let ppt = layout.pixels_per_tick;
+    if !(ppt.is_finite() && ppt > 0.0) {
+        return Vec::new();
+    }
+    let first = (layout.scroll_x / ppt).floor().max(0.0) as i64;
+    let last = (((layout.scroll_x + f64::from(layout.width)) / ppt).ceil())
+        .min(layout.duration_ticks as f64) as i64;
+    let max_iterations = (layout.width / 4.0).ceil().max(1.0) as usize + 2;
+    let mut ticks = Vec::new();
+    let mut tick = first.div_euclid(minor).saturating_mul(minor).max(0);
+    while ticks.len() < max_iterations && tick <= last {
+        ticks.push(tick);
+        let Some(next) = tick.checked_add(minor) else {
+            break;
+        };
+        tick = next;
+    }
+    ticks
+}
+
+/// A clip under the pointer, in back-to-front track order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClipHit {
+    pub(crate) track: TrackId,
+    pub(crate) clip: ClipId,
+}
+
+/// Project playback length: the furthest clip end, rounded up to whole seconds
+/// and at least one second so an empty timeline still has a usable ruler.
+pub(crate) fn project_duration(project: &Project) -> i64 {
+    let mut end = project.duration().0.max(TICKS_PER_SECOND);
+    for track in project.tracks() {
+        for clip in track.clips().values() {
+            end = end.max(clip.range.end.0);
+        }
+    }
+    let seconds = end.saturating_add(TICKS_PER_SECOND - 1) / TICKS_PER_SECOND;
+    seconds.saturating_mul(TICKS_PER_SECOND)
+}
+
+/// The editable timeline span: the content rounded up to a second plus headroom
+/// (10%, at least five seconds), so clips can be dragged, trimmed and dropped past
+/// the current end in one gesture.
+pub(crate) fn timeline_span(project: &Project) -> i64 {
+    let content = project_duration(project);
+    let headroom = (content / 10).max(5 * TICKS_PER_SECOND);
+    let span = content.saturating_add(headroom);
+    span.saturating_add(TICKS_PER_SECOND - 1) / TICKS_PER_SECOND * TICKS_PER_SECOND
+}
+
+/// Map a timeline x (relative to the canvas left edge) to a tick, clamped to the
+/// project range. Sub-tick pointer positions land on the nearest integer tick.
+pub(crate) fn x_to_time(layout: &TimelineLayout, x: f32) -> Time {
+    let ticks = (f64::from(x) + layout.scroll_x) / layout.pixels_per_tick;
+    let time = Time(ticks.clamp(0.0, layout.duration_ticks as f64) as i64);
+    layout
+        .frame_rate
+        .and_then(|rate| {
+            let frame = rate.time_to_frame(time, Rounding::Nearest).ok()?;
+            rate.frame_to_time(frame, Rounding::Nearest).ok()
+        })
+        .map_or(time, |snapped| {
+            Time(snapped.0.clamp(0, layout.duration_ticks))
+        })
+}
+
+/// Map a tick to a timeline x (relative to the canvas left edge).
+pub(crate) fn time_to_x(layout: &TimelineLayout, time: Time) -> f32 {
+    (time.0 as f64 * layout.pixels_per_tick - layout.scroll_x) as f32
+}
+
+/// Horizontal distance (in pixels) a zoomed timeline can scroll.
+pub(crate) fn max_scroll(layout: &TimelineLayout) -> f32 {
+    (layout.duration_ticks as f64 * layout.pixels_per_tick - f64::from(layout.width)).max(0.0)
+        as f32
+}
+
+/// Snap threshold converted from pixels to ticks.
+fn snap_threshold_ticks(layout: &TimelineLayout) -> i64 {
+    (8.0 / layout.pixels_per_tick) as i64
+}
+
+/// Snap a candidate clip start to the playhead and to every other clip's edges.
+/// The closest snap within the pixel threshold wins; ties keep the candidate.
+pub(crate) fn snap_start(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: ClipId,
+    playhead: Time,
+    candidate: Time,
+) -> Time {
+    snap_start_among(layout, project, &[exclude], playhead, candidate)
+}
+
+/// [`snap_start`] for a dragged group: none of the group's own edges attract.
+pub(crate) fn snap_start_among(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: &[ClipId],
+    playhead: Time,
+    candidate: Time,
+) -> Time {
+    snap_target_among(layout, project, exclude, playhead, candidate).unwrap_or(candidate)
+}
+
+/// The engaged snap target, including an exact hit on an edge.
+pub(crate) fn snap_target(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: Option<ClipId>,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
+    snap_target_among(layout, project, exclude.as_slice(), playhead, candidate)
+}
+
+/// [`snap_target`] ignoring every clip in `exclude`.
+pub(crate) fn snap_target_among(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: &[ClipId],
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
+    snap_target_excluding(layout, project, exclude, None, playhead, candidate)
+}
+
+/// Snap target for dragging marker `marker`: the playhead, clip edges and every other
+/// marker attract; the dragged marker itself does not.
+pub(crate) fn snap_marker(
+    layout: &TimelineLayout,
+    project: &Project,
+    marker: MarkerId,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
+    snap_target_excluding(layout, project, &[], Some(marker), playhead, candidate)
+}
+
+/// Snapping core: the playhead, clip edges and markers (the start and, for ranges, the
+/// end of each) are targets, except the excluded clips and marker.
+fn snap_target_excluding(
+    layout: &TimelineLayout,
+    project: &Project,
+    exclude: &[ClipId],
+    exclude_marker: Option<MarkerId>,
+    playhead: Time,
+    candidate: Time,
+) -> Option<Time> {
+    let threshold = snap_threshold_ticks(layout);
+    let mut best = None;
+    let mut best_distance = i64::MAX;
+    let mut consider = |edge: Time| {
+        let distance = edge.0.abs_diff(candidate.0);
+        if distance <= threshold as u64 && distance < best_distance as u64 {
+            best = Some(edge);
+            best_distance = i64::try_from(distance).expect("bounded by snap threshold");
+        }
+    };
+    consider(playhead);
+    for track in project.tracks() {
+        for clip in track.clips().values() {
+            if !exclude.contains(&clip.id) {
+                consider(clip.range.start);
+                consider(clip.range.end);
+            }
+        }
+    }
+    for marker in project.markers() {
+        if Some(marker.id) != exclude_marker {
+            consider(marker.time);
+            if marker.duration.is_some() {
+                consider(marker.end());
+            }
+        }
+    }
+    best
+}
+
+/// Width in pixels of a marker's grab area, either side of its line.
+const MARKER_GRAB: f32 = 6.0;
+
+/// The marker whose flag or line is under a canvas-relative point on the ruler. When
+/// several overlap, the latest one on the timeline wins (it is drawn on top).
+pub(crate) fn hit_marker(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+) -> Option<MarkerId> {
+    if !(0.0..layout.ruler_height).contains(&y) {
+        return None;
+    }
+    project
+        .markers()
+        .iter()
+        .rev()
+        .find(|m| (time_to_x(layout, m.time) - x).abs() <= MARKER_GRAB)
+        .map(|m| m.id)
+}
+
+/// Position a newly dropped clip with the same snapping rules as a timeline edit.
+pub(crate) fn drop_start(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    playhead: Time,
+    snap: bool,
+) -> Time {
+    let candidate = x_to_time(layout, x);
+    if snap {
+        snap_target(layout, project, None, playhead, candidate).unwrap_or(candidate)
+    } else {
+        candidate
+    }
+}
+
+/// Resolve OS and internal drops using the same scroll, zoom, ruler and snap geometry.
+pub(crate) fn drop_placement(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+    playhead: Time,
+    snap: bool,
+) -> Option<(TrackId, Time)> {
+    if y < layout.ruler_height || x < 0.0 || x > layout.width {
+        return None;
+    }
+    let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+    let track = *display_tracks(project).get(row)?;
+    Some((track.id(), drop_start(layout, project, x, playhead, snap)))
+}
+
+/// A trim handle at a clip's left or right edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrimEdge {
+    /// Left (start) edge.
+    Left,
+    /// Right (end) edge.
+    Right,
+}
+
+/// Return a trim handle under a canvas-relative point, preferring the left edge
+/// on very narrow clips. The handle is roughly six pixels wide.
+pub(crate) fn hit_trim_edge(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+) -> Option<(ClipHit, TrimEdge)> {
+    if y < layout.ruler_height {
+        return None;
+    }
+    let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+    let track = *display_tracks(project).get(row)?;
+    for clip in track.clips().values() {
+        let start_x = time_to_x(layout, clip.range.start);
+        let end_x = time_to_x(layout, clip.range.end);
+        let margin = 6.0_f32.min((end_x - start_x).max(0.0) / 3.0);
+        let hit = ClipHit {
+            track: track.id(),
+            clip: clip.id,
+        };
+        if (x - start_x).abs() <= margin {
+            return Some((hit, TrimEdge::Left));
+        }
+        if (x - end_x).abs() <= margin {
+            return Some((hit, TrimEdge::Right));
+        }
+    }
+    None
+}
+
+/// Return the clip under a canvas-relative point, or `None` for the ruler and
+/// empty track space.
+pub(crate) fn hit_test(
+    layout: &TimelineLayout,
+    project: &Project,
+    x: f32,
+    y: f32,
+) -> Option<ClipHit> {
+    if y < layout.ruler_height {
+        return None;
+    }
+    let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
+    let track = *display_tracks(project).get(row)?;
+    for clip in track.clips().values() {
+        let start_x = time_to_x(layout, clip.range.start);
+        let end_x = time_to_x(layout, clip.range.end);
+        if x >= start_x && x < end_x {
+            return Some(ClipHit {
+                track: track.id(),
+                clip: clip.id,
+            });
+        }
+    }
+    None
+}
+
+/// Map a drag pointer x to a new clip start, preserving the grab offset captured
+/// when the drag began. The result never goes negative.
+pub(crate) fn drag_start(layout: &TimelineLayout, grab_offset: i64, x: f32) -> Time {
+    Time(x_to_time(layout, x).0.saturating_sub(grab_offset).max(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use animathio_core::ClipKind;
+    use animathio_core::{
+        Clip, ClipId, Command, Project, TICKS_PER_SECOND, Time, TimeRange, Track, TrackId,
+    };
+
+    fn sample_project() -> Project {
+        let mut project = Project::default();
+        let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND * 2)).unwrap();
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "A"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: TrackId(1),
+            clip: Clip::new(
+                ClipId(10),
+                animathio_plugin_api::sources::shape(
+                    animathio_plugin_api::sources::Shape::Rect,
+                    None,
+                    None,
+                ),
+                range,
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+        project
+    }
+
+    fn layout() -> TimelineLayout {
+        TimelineLayout::zoomed(
+            1000.0,
+            24.0,
+            40.0,
+            project_duration(&sample_project()),
+            1.0,
+            0.0,
+        )
+    }
+
+    fn snap_tick(layout: &TimelineLayout) -> i64 {
+        (8.0 / layout.pixels_per_tick) as i64
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn zoom_keeps_cursor_time_and_gain_drag_is_bounded() {
+        let layout = TimelineLayout::zoomed(1000., 28., 64., TICKS_PER_SECOND * 20, 2., 250.);
+        let anchor = x_to_time(&layout, 400.);
+        let (zoom, scroll) = zoom_at(&layout, 4., 400.);
+        let zoomed = TimelineLayout::zoomed(1000., 28., 64., layout.duration_ticks, zoom, scroll);
+        assert!((time_to_x(&zoomed, anchor) - 400.).abs() < 0.01);
+        assert_eq!(zoom_at(&zoomed, 1., 400.), (1., 0.));
+        assert!((gain_from_drag(1., 13.5) - 1.5).abs() < f64::EPSILON);
+        assert_eq!(gain_from_drag(1., -1000.), 0.);
+        assert_eq!(gain_from_drag(1., 1000.), 2.);
+    }
+
+    #[test]
+    fn two_hundred_clip_layout_cost() {
+        let mut project = Project::default();
+        Command::AddTrack {
+            track: Track::new(TrackId(1), "Synthetic"),
+            index: 0,
+        }
+        .apply(&mut project)
+        .unwrap();
+        for index in 0..200 {
+            Command::AddClip {
+                track: TrackId(1),
+                clip: Clip::new(
+                    ClipId(index + 10),
+                    ClipKind::Error("synthetic".into()),
+                    TimeRange::new(
+                        Time(i64::try_from(index).unwrap() * TICKS_PER_SECOND),
+                        Time(i64::try_from(index + 1).unwrap() * TICKS_PER_SECOND),
+                    )
+                    .unwrap(),
+                ),
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let started = std::time::Instant::now();
+        let mut visible = 0;
+        for _ in 0..1000 {
+            let layout =
+                TimelineLayout::zoomed(1600., 28., 64., project_duration(&project), 10., 6400.);
+            visible = project
+                .tracks()
+                .iter()
+                .flat_map(|track| track.clips().values())
+                .filter(|clip| visible_span(&layout, clip.range.start, clip.range.end))
+                .count();
+            std::hint::black_box(&layout);
+            std::hint::black_box(visible);
+        }
+        eprintln!(
+            "200-clip layout + culling: {:?}/iteration (1000 iterations)",
+            started.elapsed() / 1000
+        );
+        assert_eq!(
+            visible, 22,
+            "20 visible clips plus the two touching the viewport edges"
+        );
+    }
+
+    #[test]
+    fn os_drop_placement_respects_rows_scroll_zoom_and_ruler() {
+        let mut project = Project::new(animathio_core::FrameRate::new(30, 1).unwrap());
+        for (index, id) in [TrackId(1), TrackId(2)].into_iter().enumerate() {
+            animathio_core::Command::AddTrack {
+                track: animathio_core::Track::new(id, "Track"),
+                index,
+            }
+            .apply(&mut project)
+            .unwrap();
+        }
+        let layout = TimelineLayout::zoomed(100., 28., 44., 1000, 2., 50.);
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 73., Time(0), false),
+            Some((TrackId(1), Time(500)))
+        );
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 27., Time(0), false),
+            None
+        );
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 117., Time(0), false),
+            None
+        );
+        assert_eq!(
+            drop_placement(&layout, &project, 50., 73., Time(510), true),
+            Some((TrackId(1), Time(510)))
+        );
+    }
+
+    #[test]
+    fn ruler_walks_only_the_visible_range_even_for_absurd_durations() {
+        // Fully zoomed-out over a near-i64::MAX project: still bounded.
+        let huge = TimelineLayout::zoomed(1200.0, 24.0, 40.0, i64::MAX / 2, 1.0, 0.0);
+        let ticks = ruler_ticks(&huge, 1);
+        assert!(ticks.len() <= 1200 / 4 + 2, "{}", ticks.len());
+        // Degenerate steps and overflow-prone starts terminate too.
+        assert!(ruler_ticks(&huge, 0).len() <= 1200 / 4 + 2);
+        assert!(ruler_ticks(&huge, i64::MAX).len() <= 2);
+        // A zoomed-in view starts at the scroll position, not at tick zero.
+        let zoomed =
+            TimelineLayout::zoomed(1000.0, 24.0, 40.0, TICKS_PER_SECOND * 600, 64.0, 5000.0);
+        let step = TICKS_PER_SECOND;
+        let ticks = ruler_ticks(&zoomed, step);
+        assert!(ticks.first().copied().unwrap() > 0);
+        assert!(ticks.windows(2).all(|pair| pair[1] - pair[0] == step));
+        let first_x = time_to_x(&zoomed, Time(ticks[0]));
+        assert!(first_x <= 1.0 && first_x > -(step as f64 * zoomed.pixels_per_tick) as f32 - 1.0);
+    }
+
+    #[test]
+    fn duration_rounds_up_to_whole_seconds_with_a_floor() {
+        assert_eq!(project_duration(&Project::default()), TICKS_PER_SECOND);
+        // The editable span leaves room past the end.
+        assert_eq!(timeline_span(&Project::default()), 6 * TICKS_PER_SECOND);
+        assert!(timeline_span(&sample_project()) > project_duration(&sample_project()));
+        assert_eq!(project_duration(&sample_project()), TICKS_PER_SECOND * 2);
+    }
+
+    #[test]
+    fn time_and_x_round_trip_and_clamp() {
+        let layout = layout();
+        for time in [Time(0), Time(TICKS_PER_SECOND), Time(TICKS_PER_SECOND * 2)] {
+            let x = time_to_x(&layout, time);
+            assert_eq!(x_to_time(&layout, x), time);
+        }
+        assert_eq!(x_to_time(&layout, -5.0), Time(0));
+        // With a frame rate every pointer time is a frame boundary.
+        let rate = FrameRate::new(30, 1).unwrap();
+        let framed = self::layout().with_frame_rate(rate);
+        for x in [0.0, 13.7, 401.3, 999.9] {
+            let time = x_to_time(&framed, x);
+            let frame = rate.time_to_frame(time, Rounding::Nearest).unwrap();
+            assert_eq!(rate.frame_to_time(frame, Rounding::Nearest).unwrap(), time);
+        }
+        assert_eq!(x_to_time(&layout, 10_000.0), Time(layout.duration_ticks));
+    }
+
+    #[test]
+    fn hit_test_finds_clips_in_rows_and_ignores_ruler_and_gaps() {
+        let project = sample_project();
+        let layout = layout();
+        // Inside the first (only) row and inside the clip [0, 2s).
+        let hit = hit_test(&layout, &project, 100.0, 40.0).unwrap();
+        assert_eq!(hit.clip, ClipId(10));
+        assert_eq!(hit.track, TrackId(1));
+        // Ruler and empty track space.
+        assert!(hit_test(&layout, &project, 100.0, 10.0).is_none());
+        assert!(hit_test(&layout, &project, 100.0, 80.0).is_none());
+    }
+
+    #[test]
+    fn drag_start_preserves_grab_offset_and_clamps_to_zero() {
+        let layout = layout();
+        let grab = 100;
+        let start = drag_start(&layout, grab, 300.0);
+        assert_eq!(start.0, x_to_time(&layout, 300.0).0 - grab);
+        assert_eq!(drag_start(&layout, grab, 0.0), Time(0));
+    }
+
+    #[test]
+    fn snap_start_prefers_the_nearest_playhead_or_other_clip_edge() {
+        let mut project = sample_project();
+        // Extend the single clip to make room and add a neighbour with a known edge.
+        Command::TrimClip {
+            id: ClipId(10),
+            range: TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+            source_offset: Time(0),
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: TrackId(1),
+            clip: Clip::new(
+                ClipId(11),
+                animathio_plugin_api::sources::shape(
+                    animathio_plugin_api::sources::Shape::Rect,
+                    None,
+                    None,
+                ),
+                TimeRange::new(Time(TICKS_PER_SECOND), Time(TICKS_PER_SECOND * 2)).unwrap(),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let layout = TimelineLayout::zoomed(1000.0, 24.0, 40.0, TICKS_PER_SECOND * 3, 1.0, 0.0);
+        let playhead = Time(TICKS_PER_SECOND * 3 / 2);
+        // Close to the shared 1s edge, but nearer to it than the playhead.
+        let near_edge = Time(TICKS_PER_SECOND - snap_tick(&layout) / 2);
+        assert_eq!(
+            snap_start(&layout, &project, ClipId(10), playhead, near_edge),
+            Time(TICKS_PER_SECOND)
+        );
+        // Close to the playhead snaps there instead.
+        let near_head = Time(playhead.0 - snap_tick(&layout) / 2);
+        assert_eq!(
+            snap_start(&layout, &project, ClipId(10), playhead, near_head),
+            playhead
+        );
+        // Far from every edge keeps the candidate.
+        let far = Time(TICKS_PER_SECOND / 2);
+        assert_eq!(
+            snap_start(&layout, &project, ClipId(10), playhead, far),
+            far
+        );
+    }
+
+    #[test]
+    fn drop_start_snaps_to_playhead_and_clip_edges_or_keeps_candidate() {
+        let mut project = sample_project();
+        Command::TrimClip {
+            id: ClipId(10),
+            range: TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+            source_offset: Time(0),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let layout = TimelineLayout::zoomed(1000.0, 24.0, 40.0, TICKS_PER_SECOND * 3, 1.0, 0.0);
+        let playhead = Time(TICKS_PER_SECOND / 2);
+        // A drop near the clip's end edge (1s) snaps to it.
+        let edge_x = time_to_x(&layout, Time(TICKS_PER_SECOND - snap_tick(&layout) / 2));
+        assert_eq!(
+            drop_start(&layout, &project, edge_x, playhead, true),
+            Time(TICKS_PER_SECOND)
+        );
+        // A drop near the playhead snaps there.
+        let head_x = time_to_x(&layout, Time(playhead.0 - snap_tick(&layout) / 2));
+        assert_eq!(
+            drop_start(&layout, &project, head_x, playhead, true),
+            playhead
+        );
+        // With snapping off the raw tick under the pointer is used.
+        let raw_x = 250.0;
+        assert_eq!(
+            drop_start(&layout, &project, raw_x, playhead, false),
+            x_to_time(&layout, raw_x)
+        );
+    }
+
+    #[test]
+    fn markers_are_snap_targets_and_hit_on_the_ruler_only() {
+        use animathio_core::{Marker, MarkerId};
+        let mut project = sample_project();
+        Command::AddMarker {
+            marker: Marker::new(MarkerId(1), Time(TICKS_PER_SECOND * 3 / 2)),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let layout = layout();
+        let marker_x = time_to_x(&layout, Time(TICKS_PER_SECOND * 3 / 2));
+        let near = x_to_time(&layout, marker_x + 2.0);
+        assert_eq!(
+            snap_target(&layout, &project, None, Time(0), near),
+            Some(Time(TICKS_PER_SECOND * 3 / 2))
+        );
+        // The dragged marker does not attract itself.
+        assert_eq!(
+            snap_marker(&layout, &project, MarkerId(1), Time(0), near),
+            None
+        );
+        assert_eq!(
+            hit_marker(&layout, &project, marker_x + 3.0, 10.0),
+            Some(MarkerId(1))
+        );
+        assert_eq!(hit_marker(&layout, &project, marker_x + 30.0, 10.0), None);
+        assert_eq!(hit_marker(&layout, &project, marker_x, 200.0), None);
+    }
+}

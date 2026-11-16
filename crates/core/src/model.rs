@@ -1,0 +1,907 @@
+use crate::{EffectId, EffectInstance, Error, FrameRate, Keyframes, ParamValue, Time, invalid};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Stable clip identity, allocated by the command caller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ClipId(pub u64);
+/// Stable track identity, allocated by the command caller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TrackId(pub u64);
+
+/// Lowercase BLAKE3 content hash, serialized as 64 hex characters.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AssetId(String);
+impl AssetId {
+    /// Hash asset bytes without opening or retaining any resource.
+    #[must_use]
+    pub fn of(bytes: &[u8]) -> Self {
+        Self(blake3::hash(bytes).to_hex().to_string())
+    }
+    /// Canonical hash used as the archive entry name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl TryFrom<String> for AssetId {
+    type Error = Error;
+    fn try_from(value: String) -> Result<Self, Error> {
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(invalid("asset id must be a lowercase BLAKE3 hash"));
+        }
+        Ok(Self(value))
+    }
+}
+impl From<AssetId> for String {
+    fn from(value: AssetId) -> Self {
+        value.0
+    }
+}
+
+/// Resource-free asset metadata. Bytes live in the format/engine layers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Asset {
+    /// Human-readable filename.
+    pub name: String,
+    /// Declared media type; decoders must probe the actual bytes.
+    pub media_type: String,
+}
+
+/// Half-open nonnegative interval [start, end), measured in timeline ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeRange {
+    /// Inclusive start.
+    pub start: Time,
+    /// Exclusive end.
+    pub end: Time,
+}
+impl TimeRange {
+    /// Construct a nonempty, nonnegative range.
+    pub fn new(start: Time, end: Time) -> Result<Self, Error> {
+        let range = Self { start, end };
+        range.validate()?;
+        Ok(range)
+    }
+    pub(crate) fn validate(self) -> Result<(), Error> {
+        if self.start.0 < 0 || self.end <= self.start {
+            return Err(invalid("invalid time range"));
+        }
+        Ok(())
+    }
+}
+
+/// Resolution-independent transform. Position and scale are fractions of the canvas;
+/// off-canvas positions and negative scale (mirroring) are allowed. Rotation is radians.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Transform {
+    /// Horizontal canvas fraction.
+    pub x: f64,
+    /// Vertical canvas fraction.
+    pub y: f64,
+    /// Horizontal scale relative to canvas width.
+    pub scale_x: f64,
+    /// Vertical scale relative to canvas height.
+    pub scale_y: f64,
+    /// Rotation in radians.
+    pub rotation: f64,
+    /// Opacity in [0, 1].
+    pub opacity: f64,
+}
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            x: 0.5,
+            y: 0.5,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            rotation: 0.0,
+            opacity: 1.0,
+        }
+    }
+}
+impl Transform {
+    fn valid(self) -> bool {
+        [
+            self.x,
+            self.y,
+            self.scale_x,
+            self.scale_y,
+            self.rotation,
+            self.opacity,
+        ]
+        .iter()
+        .all(|x| x.is_finite())
+            && (0.0..=1.0).contains(&self.opacity)
+    }
+    pub(crate) fn set(&mut self, property: TransformProperty, value: f64) {
+        *match property {
+            TransformProperty::X => &mut self.x,
+            TransformProperty::Y => &mut self.y,
+            TransformProperty::ScaleX => &mut self.scale_x,
+            TransformProperty::ScaleY => &mut self.scale_y,
+            TransformProperty::Rotation => &mut self.rotation,
+            TransformProperty::Opacity => &mut self.opacity,
+        } = value;
+    }
+}
+
+/// How an image or video source is placed inside its clip's frame (the canvas-sized unit
+/// square that [`Transform`] positions and scales). Resolution independent: the fitted
+/// rectangle depends only on the source and canvas aspect ratios (and, for
+/// [`Fit::Original`], on the source size relative to the project resolution). Other clip
+/// kinds ignore it.
+///
+/// New media defaults to [`Fit::Contain`]. The format migrator explicitly assigns
+/// [`Fit::Stretch`] to pre-schema-6 media to preserve existing projects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Fit {
+    /// Show the whole source at its aspect ratio, letterboxed inside the frame ("fit").
+    #[default]
+    #[serde(alias = "fit")]
+    Contain,
+    /// Cover the whole frame at the source aspect ratio, cropping what overflows ("fill").
+    #[serde(alias = "fill")]
+    Cover,
+    /// Distort the source to exactly fill the frame (pre-schema-6 behaviour).
+    Stretch,
+    /// One source pixel per project pixel, centred in the frame.
+    #[serde(alias = "none")]
+    Original,
+}
+impl Fit {
+    /// Every mode, in UI order.
+    pub const ALL: [Self; 4] = [Self::Contain, Self::Cover, Self::Stretch, Self::Original];
+    /// Stable lowercase name, as serialized.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Contain => "contain",
+            Self::Cover => "cover",
+            Self::Stretch => "stretch",
+            Self::Original => "original",
+        }
+    }
+    /// Parse a serialized name or one of its aliases (`fit`, `fill`, `none`).
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "contain" | "fit" => Self::Contain,
+            "cover" | "fill" => Self::Cover,
+            "stretch" => Self::Stretch,
+            "original" | "none" => Self::Original,
+            _ => return None,
+        })
+    }
+    /// The source rectangle `[x0, y0, width, height]` inside the unit frame square, for a
+    /// `source` of `(width, height)` pixels on a physical fit target of `canvas` pixels.
+    /// Native pixel fitting uses project resolution. Degenerate sizes fall
+    /// back to the full frame.
+    #[must_use]
+    pub fn unit_rect(self, source: (u32, u32), canvas: (u32, u32)) -> [f64; 4] {
+        self.rect(source, canvas, Transform::default())
+    }
+    /// Source placement inside the transformed clip frame. Nonuniform clip scales
+    /// change the frame's aspect ratio, as in template placeholders. Original keeps
+    /// source pixels at project resolution even when the preview is downsampled.
+    #[must_use]
+    pub fn rect(self, source: (u32, u32), canvas: (u32, u32), transform: Transform) -> [f64; 4] {
+        let cw = f64::from(canvas.0) * transform.scale_x.abs();
+        let ch = f64::from(canvas.1) * transform.scale_y.abs();
+        if cw <= 0.0 || ch <= 0.0 || source.0 == 0 || source.1 == 0 {
+            return [0.0, 0.0, 1.0, 1.0];
+        }
+        let ratio = (f64::from(source.0) / f64::from(source.1)) / (cw / ch);
+        if !ratio.is_finite() || ratio <= 0.0 {
+            return [0.0, 0.0, 1.0, 1.0];
+        }
+        let (w, h) = match self {
+            Self::Stretch => (1.0, 1.0),
+            Self::Contain if ratio > 1.0 => (1.0, 1.0 / ratio),
+            Self::Contain => (ratio, 1.0),
+            Self::Cover if ratio > 1.0 => (ratio, 1.0),
+            Self::Cover => (1.0, 1.0 / ratio),
+            Self::Original => (
+                f64::from(source.0) / f64::from(canvas.0),
+                f64::from(source.1) / f64::from(canvas.1),
+            ),
+        };
+        [(1.0 - w) / 2.0, (1.0 - h) / 2.0, w, h]
+    }
+
+    /// Visible source bounds after clipping to the unit frame, shared by gizmos
+    /// and picking. The renderer uses the same rectangle before clipping.
+    #[must_use]
+    pub fn visible_rect(
+        self,
+        source: (u32, u32),
+        canvas: (u32, u32),
+        transform: Transform,
+    ) -> [f64; 4] {
+        let [x, y, w, h] = self.rect(source, canvas, transform);
+        let (left, top) = (x.max(0.0), y.max(0.0));
+        [left, top, (x + w).min(1.0) - left, (y + h).min(1.0) - top]
+    }
+}
+
+/// Core media or an opaque plugin source, preserved even without that plugin installed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ClipKind {
+    /// Decoded video source.
+    Video(AssetId),
+    /// Still image source.
+    Image(AssetId),
+    /// Audio source, included in the scene for a future audio mixer.
+    Audio(AssetId),
+    /// Namespaced plugin identity and opaque, plugin-versioned JSON data.
+    Plugin {
+        /// Reverse-domain plugin identifier.
+        plugin_id: String,
+        /// Preserved verbatim; typed automation lives in `Clip::params`.
+        params: serde_json::Value,
+    },
+    /// Resolved vector scene, e.g. produced by a plugin or vector clip source.
+    Vector(crate::VectorScene),
+    /// Errored clip, containing an error message.
+    Error(String),
+}
+
+/// A transform component that can be animated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TransformProperty {
+    /// Horizontal position.
+    X,
+    /// Vertical position.
+    Y,
+    /// Horizontal scale.
+    ScaleX,
+    /// Vertical scale.
+    ScaleY,
+    /// Rotation in radians.
+    Rotation,
+    /// Opacity.
+    Opacity,
+}
+/// Typed animation target.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Target {
+    /// Transform component.
+    Transform(TransformProperty),
+    /// Named parameter; plugin curves may override an implicit schema default.
+    Param(String),
+    /// Parameter of one effect instance, addressed by its stable effect id.
+    Effect {
+        /// Effect identity within the clip.
+        effect: EffectId,
+        /// Parameter name within that effect.
+        param: String,
+    },
+}
+/// One typed animation in clip-local ticks (keyframes may extend beyond a trim).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Animation {
+    /// Property to override.
+    pub target: Target,
+    /// Ordered keyframes.
+    pub keys: Keyframes<ParamValue>,
+}
+
+/// A draft clip. Once inserted, only commands can change the project's copy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Clip {
+    /// Stable identity, unique across the project.
+    pub id: ClipId,
+    /// Clips with the same group move and edit together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_group: Option<ClipId>,
+    /// Source data.
+    pub kind: ClipKind,
+    /// Timeline placement.
+    pub range: TimeRange,
+    /// Source offset at the clip's start (also used by plugins).
+    pub source_offset: Time,
+    /// Exact timeline-to-source playback mapping.
+    #[serde(default)]
+    pub time_map: crate::ClipTimeMap,
+    /// Base transform.
+    pub transform: Transform,
+    /// Placement of an image or video source inside the frame; new clips default to contain.
+    #[serde(default)]
+    pub fit: Fit,
+    /// Named base typed parameters (e.g. gain or a graph coefficient).
+    pub params: BTreeMap<String, ParamValue>,
+    /// Ordered visual effects, applied after rasterizing the clip source.
+    #[serde(default)]
+    pub effects: Vec<EffectInstance>,
+    /// Ordered audio effects, applied to the clip's own signal in the mixer. Effect ids
+    /// are unique across `effects` and `audio_effects`, so [`Target::Effect`] animations
+    /// address either chain unambiguously.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_effects: Vec<EffectInstance>,
+    /// Typed curves in clip-local time, sorted by unique target.
+    pub animations: Vec<Animation>,
+}
+impl Clip {
+    /// Construct a draft clip with an identity transform and no automation. Image and
+    /// video clips get [`Fit::Contain`]; every other kind ignores the fit mode.
+    #[must_use]
+    pub fn new(id: ClipId, kind: ClipKind, range: TimeRange) -> Self {
+        let fit = if matches!(kind, ClipKind::Image(_) | ClipKind::Video(_)) {
+            Fit::Contain
+        } else {
+            Fit::Stretch
+        };
+        Self {
+            id,
+            link_group: None,
+            kind,
+            range,
+            source_offset: Time(0),
+            time_map: crate::ClipTimeMap::default(),
+            transform: Transform::default(),
+            fit,
+            params: BTreeMap::new(),
+            effects: Vec::new(),
+            audio_effects: Vec::new(),
+            animations: Vec::new(),
+        }
+    }
+
+    /// The audio-effect chain resolved at clip-local `time`: bypassed effects are dropped and
+    /// keyframed [`Target::Effect`] parameters are sampled. Pure and order independent.
+    #[must_use]
+    pub fn audio_effects_at(&self, time: Time) -> Vec<EffectInstance> {
+        let mut chain: Vec<EffectInstance> = self
+            .audio_effects
+            .iter()
+            .filter(|effect| !effect.bypass)
+            .cloned()
+            .collect();
+        for animation in &self.animations {
+            if let Target::Effect { effect, param } = &animation.target
+                && let Some(instance) = chain.iter_mut().find(|instance| instance.id == *effect)
+                && let Some(number) = animation.keys.sample(time).and_then(|v| v.as_number())
+            {
+                instance.params.insert(param.clone(), number);
+            }
+        }
+        chain
+    }
+}
+
+/// Ordered compositing layer. Read access never exposes mutable project state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Track {
+    pub(crate) id: TrackId,
+    pub(crate) name: String,
+    pub(crate) clips: BTreeMap<ClipId, Clip>,
+    #[serde(default = "unity_gain")]
+    pub(crate) gain: f64,
+    /// Muted layers are silent in the mix and hidden from rendering.
+    #[serde(default)]
+    pub(crate) muted: bool,
+    /// Soloed layers are the only ones audible/visible while any layer is soloed.
+    #[serde(default)]
+    pub(crate) solo: bool,
+    /// Locked layers reject clip edits (add, move, trim, split, delete, effects).
+    #[serde(default)]
+    pub(crate) locked: bool,
+    /// Edit-point transitions between adjacent clips of this track, sorted by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) transitions: Vec<crate::Transition>,
+    /// Ordered audio effects applied to the sum of this track's clips, before its gain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) audio_effects: Vec<EffectInstance>,
+}
+impl Track {
+    /// Construct an empty layer.
+    #[must_use]
+    pub fn new(id: TrackId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            clips: BTreeMap::new(),
+            gain: 1.0,
+            muted: false,
+            solo: false,
+            locked: false,
+            transitions: Vec::new(),
+            audio_effects: Vec::new(),
+        }
+    }
+    /// Ordered audio effects applied to the sum of this track's clips (before the gain).
+    #[must_use]
+    pub fn audio_effects(&self) -> &[EffectInstance] {
+        &self.audio_effects
+    }
+    /// Linear audio gain (unity by default).
+    #[must_use]
+    pub fn gain(&self) -> f64 {
+        self.gain
+    }
+    /// Whether the layer is muted.
+    #[must_use]
+    pub const fn is_muted(&self) -> bool {
+        self.muted
+    }
+    /// Whether the layer is soloed.
+    #[must_use]
+    pub const fn is_solo(&self) -> bool {
+        self.solo
+    }
+    /// Whether the layer rejects clip edits.
+    #[must_use]
+    pub const fn is_locked(&self) -> bool {
+        self.locked
+    }
+    /// Stable layer identity.
+    #[must_use]
+    pub fn id(&self) -> TrackId {
+        self.id
+    }
+    /// Layer label.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    /// Clips on this layer.
+    #[must_use]
+    pub fn clips(&self) -> &BTreeMap<ClipId, Clip> {
+        &self.clips
+    }
+}
+
+/// Serializable, resource-free project. Mutations go through `Command::apply`.
+/// A resolution of `(0, 0)` means the project has no explicit output size yet.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "ProjectData", into = "ProjectData")]
+pub struct Project {
+    pub(crate) frame_rate: FrameRate,
+    pub(crate) tracks: Vec<Track>,
+    pub(crate) assets: BTreeMap<AssetId, Asset>,
+    /// Output width in pixels, or `0` when unset.
+    pub(crate) width: u32,
+    /// Output height in pixels, or `0` when unset.
+    pub(crate) height: u32,
+    /// Straight-alpha sRGB canvas background; alpha `0` is transparent.
+    pub(crate) background: [u8; 4],
+    /// Explicit project duration in ticks; `0` means derive from clips.
+    pub(crate) duration: Time,
+    /// Timeline markers, sorted by `(time, id)`.
+    pub(crate) markers: Vec<crate::Marker>,
+}
+#[derive(Serialize, Deserialize)]
+struct ProjectData {
+    frame_rate: FrameRate,
+    tracks: Vec<Track>,
+    assets: BTreeMap<AssetId, Asset>,
+    #[serde(default)]
+    width: u32,
+    #[serde(default)]
+    height: u32,
+    #[serde(default)]
+    background: [u8; 4],
+    #[serde(default)]
+    duration: Time,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    markers: Vec<crate::Marker>,
+}
+impl From<Project> for ProjectData {
+    fn from(p: Project) -> Self {
+        Self {
+            frame_rate: p.frame_rate,
+            tracks: p.tracks,
+            assets: p.assets,
+            width: p.width,
+            height: p.height,
+            background: p.background,
+            duration: p.duration,
+            markers: p.markers,
+        }
+    }
+}
+impl TryFrom<ProjectData> for Project {
+    type Error = Error;
+    fn try_from(p: ProjectData) -> Result<Self, Error> {
+        let mut project = Self {
+            frame_rate: p.frame_rate,
+            tracks: p.tracks,
+            assets: p.assets,
+            width: p.width,
+            height: p.height,
+            background: p.background,
+            duration: p.duration,
+            markers: p.markers,
+        };
+        project.markers.sort_by_key(|m| (m.time, m.id));
+        for track in &mut project.tracks {
+            track.transitions.sort_by_key(|t| t.id);
+        }
+        project.validate()?;
+        Ok(project)
+    }
+}
+impl Project {
+    /// Empty project at the requested frame rate.
+    #[must_use]
+    pub fn new(frame_rate: FrameRate) -> Self {
+        Self {
+            frame_rate,
+            ..Self::default()
+        }
+    }
+    /// Output frame rate.
+    #[must_use]
+    pub fn frame_rate(&self) -> FrameRate {
+        self.frame_rate
+    }
+    /// Layers in back-to-front compositing order.
+    #[must_use]
+    pub fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+    /// Content-addressed asset metadata.
+    #[must_use]
+    pub fn assets(&self) -> &BTreeMap<AssetId, Asset> {
+        &self.assets
+    }
+    /// Output width in pixels; `0` means no explicit resolution is set.
+    #[must_use]
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+    /// Output height in pixels; `0` means no explicit resolution is set.
+    #[must_use]
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+    /// Straight-alpha sRGB canvas background.
+    #[must_use]
+    pub const fn background(&self) -> [u8; 4] {
+        self.background
+    }
+    /// Explicit project duration in ticks; `0` means derive from clips.
+    #[must_use]
+    pub const fn duration(&self) -> Time {
+        self.duration
+    }
+    /// Timeline markers, sorted by `(time, id)`.
+    #[must_use]
+    pub fn markers(&self) -> &[crate::Marker] {
+        &self.markers
+    }
+    /// The marker with this id.
+    #[must_use]
+    pub fn marker(&self, id: crate::MarkerId) -> Option<&crate::Marker> {
+        self.markers.iter().find(|m| m.id == id)
+    }
+    /// An unused marker id (one past the largest existing id).
+    #[must_use]
+    pub fn next_marker_id(&self) -> crate::MarkerId {
+        crate::MarkerId(
+            self.markers
+                .iter()
+                .map(|m| m.id.0)
+                .max()
+                .map_or(1, |m| m + 1),
+        )
+    }
+    /// Check identities, references, finite values and nonoverlapping half-open ranges.
+    #[allow(clippy::too_many_lines)] // Keep project invariants in one validation pass.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.width > 65_535 || self.height > 65_535 {
+            return Err(invalid("invalid resolution"));
+        }
+        if self.width != 0
+            && self.height != 0
+            && u64::from(self.width) * u64::from(self.height) > 32 * 1024 * 1024
+        {
+            return Err(invalid("resolution exceeds 32 megapixels"));
+        }
+        if self.duration.0 < 0 {
+            return Err(invalid("negative project duration"));
+        }
+        if self.markers.len() > crate::MAX_MARKERS {
+            return Err(invalid("too many markers"));
+        }
+        let mut marker_ids = BTreeSet::new();
+        for marker in &self.markers {
+            marker.validate()?;
+            if !marker_ids.insert(marker.id) {
+                return Err(invalid("duplicate marker id"));
+            }
+        }
+        if self
+            .markers
+            .windows(2)
+            .any(|p| (p[0].time, p[0].id) > (p[1].time, p[1].id))
+        {
+            return Err(invalid("markers must be sorted by time"));
+        }
+        let mut track_ids = BTreeSet::new();
+        let mut clip_ids = BTreeSet::new();
+        let mut transition_ids = BTreeSet::new();
+        for track in &self.tracks {
+            if !track_ids.insert(track.id) {
+                return Err(invalid("duplicate track id"));
+            }
+            if !track.gain.is_finite() || track.gain < 0.0 {
+                return Err(invalid("invalid track gain"));
+            }
+            let mut ranges = Vec::new();
+            for (id, clip) in &track.clips {
+                if id != &clip.id || !clip_ids.insert(*id) {
+                    return Err(invalid("duplicate or mismatched clip id"));
+                }
+                clip.range.validate()?;
+                clip.time_map
+                    .validate(clip.range.end.0 - clip.range.start.0)?;
+                let (source_start, source_end) = clip.source_bounds();
+                let source_span = if clip.time_map.hold {
+                    1
+                } else if let Some(length) = clip.time_map.source_length {
+                    length.0
+                } else if clip.time_map == crate::ClipTimeMap::default() {
+                    clip.range.end.0 - clip.range.start.0
+                } else {
+                    clip.time_map
+                        .integrated(Time(
+                            clip.time_map.phase.0 + clip.range.end.0 - clip.range.start.0,
+                        ))
+                        .0
+                };
+                if clip.source_offset.0 < 0
+                    || source_start.0 < 0
+                    || source_end < source_start
+                    || clip.source_offset.0.checked_add(source_span).is_none()
+                {
+                    return Err(invalid("invalid source time range"));
+                }
+                if !clip.transform.valid() || clip.params.values().any(|v| !v.valid()) {
+                    return Err(invalid("invalid transform or parameter"));
+                }
+                match &clip.kind {
+                    ClipKind::Video(id) | ClipKind::Image(id) | ClipKind::Audio(id) => {
+                        if !self.assets.contains_key(id) {
+                            return Err(invalid("missing asset"));
+                        }
+                    }
+                    ClipKind::Plugin { plugin_id, .. } if plugin_id.is_empty() => {
+                        return Err(invalid("empty plugin id"));
+                    }
+                    ClipKind::Plugin { .. } | ClipKind::Error(_) => {}
+                    ClipKind::Vector(scene) => scene.validate()?,
+                }
+                validate_clip_effects_and_animations(clip)?;
+                let parameter_values = clip.params.values().chain(
+                    clip.animations
+                        .iter()
+                        .flat_map(|animation| animation.keys.0.values().map(|key| &key.value)),
+                );
+                for id in parameter_values.filter_map(ParamValue::asset_reference) {
+                    if !self.assets.contains_key(id) {
+                        return Err(Error(format!(
+                            "missing asset {} referenced by clip {} parameter or keyframe",
+                            id.as_str(),
+                            clip.id.0
+                        )));
+                    }
+                }
+                // Video and audio EffectInstance params are f64 only; their
+                // keyframes above are also required to be numeric.
+                ranges.push(clip.range);
+            }
+            ranges.sort_by_key(|r| r.start);
+            if ranges.windows(2).any(|pair| pair[0].end > pair[1].start) {
+                return Err(invalid("overlapping clips"));
+            }
+            let mut track_effect_ids = BTreeSet::new();
+            for effect in &track.audio_effects {
+                if !track_effect_ids.insert(effect.id) {
+                    return Err(invalid("duplicate track audio effect id"));
+                }
+                effect.validate()?;
+            }
+            track.validate_transitions()?;
+            if !track
+                .transitions
+                .iter()
+                .all(|t| transition_ids.insert(t.id))
+            {
+                return Err(invalid("duplicate transition id"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Resolved input to future visual renderers and the audio mixer.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Scene {
+    /// Straight-alpha sRGB project background.
+    #[serde(default)]
+    pub background: [u8; 4],
+    /// Active clips in back-to-front track order.
+    pub clips: Vec<SceneClip>,
+    /// Project resolution in pixels, or `(0, 0)` when unset; native-pixel [`Fit::Original`]
+    /// uses it even in smaller previews (renderers fall back to the output size).
+    #[serde(default)]
+    pub canvas: (u32, u32),
+}
+/// One resolved active clip, containing no runtime resources.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneClip {
+    /// Layer identity.
+    pub track: TrackId,
+    /// Clip identity.
+    pub id: ClipId,
+    /// Source description, including preserved plugin data.
+    pub kind: ClipKind,
+    /// Source-local tick position.
+    pub source_time: Time,
+    /// Evaluated transform.
+    pub transform: Transform,
+    /// Placement of an image or video source inside the frame.
+    #[serde(default)]
+    pub fit: Fit,
+    /// Evaluated typed parameters.
+    pub params: BTreeMap<String, ParamValue>,
+    /// Evaluated effect chain, with keyframed parameters resolved.
+    #[serde(default)]
+    pub effects: Vec<EffectInstance>,
+    /// Transition state when this clip is inside a transition window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<crate::SceneTransition>,
+}
+
+impl SceneClip {
+    /// Whether any effect in the chain will actually run (bypassed ones are skipped).
+    #[must_use]
+    pub fn has_active_effects(&self) -> bool {
+        self.effects.iter().any(|effect| !effect.bypass)
+    }
+}
+
+/// Resolve active clips at `time`, independently of previous calls or seek order.
+/// Ranges are half-open; audio sources are included for the future mixer.
+/// Inside a transition window both the outgoing and the incoming clip are active and
+/// carry the same [`crate::SceneTransition`]. The incoming clip's local time is then
+/// negative; its source time is clamped to zero (holding the first source frame).
+#[must_use]
+pub fn evaluate(project: &Project, time: Time) -> Scene {
+    let mut scene = Scene {
+        canvas: (project.width, project.height),
+        background: project.background,
+        ..Scene::default()
+    };
+    let any_solo = project.tracks.iter().any(Track::is_solo);
+    for track in &project.tracks {
+        if track.muted || (any_solo && !track.solo) {
+            continue;
+        }
+        for clip in track.clips.values() {
+            let span = track.clip_span(clip);
+            if time < span.range.start || time >= span.range.end {
+                continue;
+            }
+            let local_time = Time(time.0 - clip.range.start.0);
+            let mut resolved = SceneClip {
+                track: track.id,
+                id: clip.id,
+                kind: clip.kind.clone(),
+                source_time: Time(clip.source_time(local_time).0.max(0)),
+                transform: clip.transform,
+                fit: clip.fit,
+                params: clip.params.clone(),
+                effects: clip.effects.iter().filter(|e| !e.bypass).cloned().collect(),
+                transition: span.transition_at(clip, time),
+            };
+            for animation in &clip.animations {
+                if let Some(value) = animation.keys.sample(local_time) {
+                    match &animation.target {
+                        Target::Transform(property) => {
+                            if let Some(number) = value.as_number() {
+                                resolved.transform.set(*property, number);
+                            }
+                        }
+                        Target::Param(name) => {
+                            resolved.params.insert(name.clone(), value);
+                        }
+                        Target::Effect { effect, param } => {
+                            if let Some(instance) = resolved
+                                .effects
+                                .iter_mut()
+                                .find(|instance| instance.id == *effect)
+                                && let Some(number) = value.as_number()
+                            {
+                                instance.params.insert(param.clone(), number);
+                            }
+                        }
+                    }
+                }
+            }
+            scene.clips.push(resolved);
+        }
+    }
+    scene
+}
+
+fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {
+    let mut effect_ids = BTreeSet::new();
+    for effect in clip.effects.iter().chain(&clip.audio_effects) {
+        if !effect_ids.insert(effect.id) {
+            return Err(invalid("duplicate effect id"));
+        }
+        effect.validate()?;
+    }
+    if clip
+        .animations
+        .windows(2)
+        .any(|pair| pair[0].target >= pair[1].target)
+    {
+        return Err(invalid("animations must be sorted by target"));
+    }
+    for animation in &clip.animations {
+        if animation.keys.0.is_empty() {
+            return Err(invalid("empty animation"));
+        }
+        match &animation.target {
+            Target::Param(name) => {
+                if !clip.params.contains_key(name) && !matches!(&clip.kind, ClipKind::Plugin { .. })
+                {
+                    return Err(invalid("animation parameter missing"));
+                }
+            }
+            Target::Effect { effect, param } => {
+                let instance = clip
+                    .effects
+                    .iter()
+                    .chain(&clip.audio_effects)
+                    .find(|instance| instance.id == *effect)
+                    .ok_or_else(|| invalid("animation effect missing"))?;
+                if !instance.params.contains_key(param) {
+                    return Err(invalid("animation effect parameter missing"));
+                }
+            }
+            Target::Transform(_) => {}
+        }
+        let first = &animation
+            .keys
+            .0
+            .first_key_value()
+            .expect("nonempty animation")
+            .1
+            .value;
+        if let Target::Param(name) = &animation.target
+            && let Some(base) = clip.params.get(name)
+            && !base.same_type(first)
+        {
+            return Err(invalid("keyframe type differs from base parameter"));
+        }
+        for (time, key) in &animation.keys.0 {
+            let valid_value = match &animation.target {
+                Target::Transform(TransformProperty::Opacity) => key
+                    .value
+                    .as_number()
+                    .is_some_and(|v| (0.0..=1.0).contains(&v)),
+                Target::Transform(_) => key.value.as_number().is_some(),
+                Target::Param(_) => true,
+                Target::Effect { .. } => key.value.as_number().is_some_and(f64::is_finite),
+            };
+            if time.0 < 0 || !key.value.valid() || !key.value.same_type(first) || !valid_value {
+                return Err(invalid("invalid or mixed-type keyframe"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unity_gain() -> f64 {
+    1.0
+}

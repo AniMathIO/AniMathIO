@@ -1,0 +1,835 @@
+//! Ripple planning. A ripple edit closes (or opens) a gap by sliding later clips,
+//! either on the edited track only or linked across every unlocked track. Plans are
+//! plain `Command` batches, so a ripple is always a single undo step.
+
+use std::collections::BTreeSet;
+
+use animathio_core::{
+    Clip, ClipId, Command, MarkerRipple, Project, Time, TimeRange, Track, TrackId,
+    ripple_marker_commands, ripple_marker_insert_commands,
+};
+
+use crate::editing;
+use crate::selection::{batch, existing, with_companions};
+use crate::timeline::TrimEdge;
+
+/// Which tracks a ripple edit slides.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum RippleScope {
+    /// Only the track being edited.
+    #[default]
+    ThisTrack,
+    /// Every unlocked track, so cross-track sync is preserved.
+    AllTracks,
+}
+
+impl RippleScope {
+    pub(crate) fn toggled(self) -> Self {
+        match self {
+            Self::ThisTrack => Self::AllTracks,
+            Self::AllTracks => Self::ThisTrack,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::ThisTrack => "Ripple: this track only",
+            Self::AllTracks => "Ripple: all tracks",
+        }
+    }
+}
+
+/// Merge half-open `(start, end)` intervals that overlap or touch.
+fn merge(mut gaps: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
+    gaps.sort_unstable();
+    let mut merged: Vec<(i64, i64)> = Vec::new();
+    for gap in gaps {
+        match merged.last_mut() {
+            Some(last) if gap.0 <= last.1 => last.1 = last.1.max(gap.1),
+            _ => merged.push(gap),
+        }
+    }
+    merged
+}
+
+/// Slide the clips of `track` by `offset(start)` (negative = earlier) without ever
+/// overlapping the clip before them: a clip that would collide is held back.
+/// `skip` clips are neither moved nor tracked (they are being removed);
+/// `fixed` is a clip whose post-edit range is already decided and must still
+/// bound its neighbours.
+fn slide_track(
+    track: &Track,
+    skip: &BTreeSet<ClipId>,
+    fixed: Option<(ClipId, TimeRange)>,
+    offset: &dyn Fn(i64) -> i64,
+) -> Option<Vec<Command>> {
+    let mut clips: Vec<&Clip> = track
+        .clips()
+        .values()
+        .filter(|clip| !skip.contains(&clip.id))
+        .collect();
+    clips.sort_by_key(|clip| clip.range.start);
+    let mut commands = Vec::new();
+    let mut previous_end = i64::MIN;
+    for clip in clips {
+        if let Some((id, range)) = fixed
+            && id == clip.id
+        {
+            previous_end = range.end.0;
+            continue;
+        }
+        let start = clip.range.start.0;
+        let moved = start.checked_add(offset(start))?.max(previous_end).max(0);
+        let length = clip.range.end.0 - start;
+        if moved != start {
+            commands.push(Command::MoveClip {
+                id: clip.id,
+                track: track.id(),
+                start: Time(moved),
+            });
+        }
+        previous_end = moved.checked_add(length)?;
+    }
+    Some(commands)
+}
+
+/// Delete `ids` and close the gaps they leave. With [`RippleScope::ThisTrack`] each
+/// deleted clip only pulls later clips of its own track; with
+/// [`RippleScope::AllTracks`] every deleted span pulls every unlocked track
+/// (locked tracks neither move nor may hold a deleted clip).
+pub(crate) fn delete_command(
+    project: &Project,
+    ids: &BTreeSet<ClipId>,
+    scope: RippleScope,
+    markers: MarkerRipple,
+) -> Option<Command> {
+    // Removing a linked clip removes its companions, so their tracks must ripple too.
+    let removed = with_companions(project, &existing(project, ids));
+    if removed.is_empty() {
+        return None;
+    }
+    let spans = |track: &Track| -> Vec<(i64, i64)> {
+        track
+            .clips()
+            .values()
+            .filter(|clip| removed.contains(&clip.id))
+            .map(|clip| (clip.range.start.0, clip.range.end.0))
+            .collect()
+    };
+    let all_spans = merge(project.tracks().iter().flat_map(spans).collect());
+    let mut commands: Vec<Command> = removed
+        .iter()
+        .map(|&id| Command::RemoveClip { id })
+        .collect();
+    let mut affected: Vec<TrackId> = Vec::new();
+    for track in project.tracks() {
+        let gaps = match scope {
+            RippleScope::ThisTrack => merge(spans(track)),
+            RippleScope::AllTracks if track.is_locked() => continue,
+            RippleScope::AllTracks => all_spans.clone(),
+        };
+        if gaps.is_empty() {
+            continue;
+        }
+        let pulled = |start: i64| {
+            -gaps
+                .iter()
+                .filter(|gap| gap.1 <= start)
+                .map(|gap| gap.1 - gap.0)
+                .sum::<i64>()
+        };
+        affected.push(track.id());
+        commands.extend(slide_track(track, &removed, None, &pulled)?);
+    }
+    if let Some(first) = all_spans.first()
+        && markers.rides(project, Time(first.0), Some(&affected))
+    {
+        let gaps: Vec<TimeRange> = all_spans
+            .iter()
+            .filter_map(|g| TimeRange::new(Time(g.0), Time(g.1)).ok())
+            .collect();
+        commands.extend(ripple_marker_commands(project, &gaps));
+    }
+    batch(commands)
+}
+
+/// Trim one edge of a clip to `at`, rippling later clips by the length change. With
+/// [`RippleScope::AllTracks`] every unlocked track slides, not only the clip's own.
+pub(crate) fn trim_command(
+    project: &Project,
+    id: ClipId,
+    edge: TrimEdge,
+    at: Time,
+    scope: RippleScope,
+    markers: MarkerRipple,
+) -> Option<Command> {
+    let command = trim_tracks(project, id, edge, at, scope)?;
+    let clip = crate::selection::track_of(project, id)?.clips().get(&id)?;
+    let (old, new) = (
+        clip.range.end.0 - clip.range.start.0,
+        match edge {
+            TrimEdge::Left => clip.range.end.0 - at.0,
+            TrimEdge::Right => at.0 - clip.range.start.0,
+        },
+    );
+    let own = crate::selection::track_of(project, id)?.id();
+    let affected: Vec<TrackId> = match scope {
+        RippleScope::ThisTrack => vec![own],
+        RippleScope::AllTracks => project
+            .tracks()
+            .iter()
+            .filter(|t| !t.is_locked() || t.id() == own)
+            .map(Track::id)
+            .collect(),
+    };
+    let from = clip.range.end;
+    if new == old || !markers.rides(project, from, Some(&affected)) {
+        return Some(command);
+    }
+    let marker_commands = if new < old {
+        TimeRange::new(Time(from.0 - (old - new)), from)
+            .map_or_default(|gap| ripple_marker_commands(project, &[gap]))
+    } else {
+        ripple_marker_insert_commands(project, from, new - old)
+    };
+    let mut commands = match command {
+        Command::Batch { commands } => commands,
+        other => vec![other],
+    };
+    commands.extend(marker_commands);
+    batch(commands)
+}
+
+/// Which side of the playhead a ripple trim closes: the previous edit (Premiere's
+/// Q) or the next one (W).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrimSide {
+    Previous,
+    Next,
+}
+
+/// Ripple-trim to the playhead, Premiere's Q/W, on one track: the selected clip's
+/// (the "targeted" track), else the first track the playhead is inside, else the
+/// first track that can trim. With the playhead inside a clip the edge under it
+/// is trimmed with the usual ripple semantics; in a gap the segment between the
+/// playhead and the neighbouring edit closes, sliding later clips left.
+pub(crate) fn trim_to_playhead_command(
+    project: &Project,
+    selected: Option<ClipId>,
+    at: Time,
+    side: TrimSide,
+    markers: MarkerRipple,
+) -> Option<Command> {
+    fn covering(track: &Track, at: Time) -> Option<&Clip> {
+        track
+            .clips()
+            .values()
+            .find(|clip| clip.range.start < at && at < clip.range.end)
+    }
+    let can_trim = |track: &Track| {
+        track.clips().values().any(|clip| match side {
+            TrimSide::Previous => clip.range.start < at,
+            TrimSide::Next => clip.range.end > at,
+        })
+    };
+    let track = selected
+        .and_then(|id| crate::selection::track_of(project, id))
+        .or_else(|| {
+            project
+                .tracks()
+                .iter()
+                .find(|track| covering(track, at).is_some())
+                .or_else(|| project.tracks().iter().find(|track| can_trim(track)))
+        })?;
+    if let Some(clip) = covering(track, at) {
+        let edge = match side {
+            TrimSide::Previous => TrimEdge::Left,
+            TrimSide::Next => TrimEdge::Right,
+        };
+        return trim_command(project, clip.id, edge, at, RippleScope::ThisTrack, markers);
+    }
+    let previous_end = track
+        .clips()
+        .values()
+        .filter(|clip| clip.range.end <= at)
+        .map(|clip| clip.range.end.0)
+        .max()?;
+    let next_start = track
+        .clips()
+        .values()
+        .filter(|clip| clip.range.start >= at)
+        .map(|clip| clip.range.start.0)
+        .min()?;
+    let (removed_start, removed_end) = match side {
+        TrimSide::Previous => (previous_end, at.0),
+        TrimSide::Next => (at.0, next_start),
+    };
+    let delta = removed_end.saturating_sub(removed_start);
+    if delta <= 0 {
+        return None;
+    }
+    let mut commands: Vec<Command> = track
+        .clips()
+        .values()
+        .filter(|clip| clip.range.start >= at)
+        .map(|clip| Command::MoveClip {
+            id: clip.id,
+            track: track.id(),
+            start: Time(clip.range.start.0 - delta),
+        })
+        .collect();
+    if commands.is_empty() {
+        return None;
+    }
+    let affected = vec![track.id()];
+    if markers.rides(project, Time(removed_start), Some(&affected))
+        && let Some(gap) = TimeRange::new(Time(removed_start), Time(removed_end)).ok()
+    {
+        commands.extend(ripple_marker_commands(project, &[gap]));
+    }
+    batch(commands)
+}
+
+fn trim_tracks(
+    project: &Project,
+    id: ClipId,
+    edge: TrimEdge,
+    at: Time,
+    scope: RippleScope,
+) -> Option<Command> {
+    if scope == RippleScope::ThisTrack {
+        return editing::trim_command(project, id, edge, at, true);
+    }
+    let own = crate::selection::track_of(project, id)?;
+    let clip = own.clips().get(&id)?;
+    let plain = editing::trim_command(project, id, edge, at, false)?;
+    let Command::TrimClip { range, .. } = &plain else {
+        return None;
+    };
+    // After a left trim the clip is moved back to where it started so the cut
+    // collapses instead of leaving a gap at its head.
+    let settled = match edge {
+        TrimEdge::Left => TimeRange::new(
+            clip.range.start,
+            Time(clip.range.start.0 + (range.end.0 - range.start.0)),
+        )
+        .ok()?,
+        TrimEdge::Right => *range,
+    };
+    let delta = (range.end.0 - range.start.0) - (clip.range.end.0 - clip.range.start.0);
+    let from = clip.range.end.0;
+    let later = |start: i64| if start >= from { delta } else { 0 };
+    let mut commands = vec![plain];
+    if edge == TrimEdge::Left {
+        commands.push(Command::MoveClip {
+            id,
+            track: own.id(),
+            start: clip.range.start,
+        });
+    }
+    let skip = BTreeSet::new();
+    for track in project.tracks() {
+        if track.is_locked() && track.id() != own.id() {
+            continue;
+        }
+        let fixed = (track.id() == own.id()).then_some((id, settled));
+        commands.extend(slide_track(track, &skip, fixed, &later)?);
+    }
+    batch(commands)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::selection::tests::project_with;
+    use animathio_core::{History, TrackId};
+
+    fn set(ids: &[u64]) -> BTreeSet<ClipId> {
+        ids.iter().copied().map(ClipId).collect()
+    }
+
+    fn starts(project: &Project) -> Vec<(u64, i64, i64)> {
+        let mut out: Vec<_> = project
+            .tracks()
+            .iter()
+            .flat_map(|track| {
+                track
+                    .clips()
+                    .values()
+                    .map(|clip| (clip.id.0, clip.range.start.0, clip.range.end.0))
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    fn lock(project: &mut Project, id: u64) {
+        Command::SetTrackLocked {
+            id: TrackId(id),
+            locked: true,
+        }
+        .apply(project)
+        .unwrap();
+    }
+
+    fn run(project: &mut Project, command: &Command) -> Project {
+        let before = project.clone();
+        let mut history = History::default();
+        history.execute(project, command).unwrap();
+        let after = project.clone();
+        history.undo(project).unwrap();
+        assert_eq!(*project, before, "one undo step restores the project");
+        *project = after.clone();
+        after
+    }
+
+    #[test]
+    fn scope_toggles_and_defaults_to_this_track() {
+        assert_eq!(RippleScope::default(), RippleScope::ThisTrack);
+        assert_eq!(RippleScope::ThisTrack.toggled(), RippleScope::AllTracks);
+        assert_eq!(RippleScope::AllTracks.toggled(), RippleScope::ThisTrack);
+        assert_ne!(
+            RippleScope::ThisTrack.label(),
+            RippleScope::AllTracks.label()
+        );
+    }
+
+    #[test]
+    fn this_track_delete_only_pulls_the_clips_own_track() {
+        let mut project = project_with(&[
+            (1, &[(1, 0, 10), (2, 10, 20), (3, 20, 30)][..]),
+            (2, &[(4, 10, 20), (5, 25, 35)][..]),
+        ]);
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(
+            starts(&after),
+            [(1, 0, 10), (3, 10, 20), (4, 10, 20), (5, 25, 35)]
+        );
+    }
+
+    #[test]
+    fn linked_delete_pulls_every_unlocked_track_and_respects_locks() {
+        let mut project = project_with(&[
+            (1, &[(1, 0, 10), (2, 10, 20), (3, 20, 30)][..]),
+            (2, &[(4, 25, 35)][..]),
+            (3, &[(5, 30, 40)][..]),
+        ]);
+        lock(&mut project, 3);
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(
+            starts(&after),
+            [(1, 0, 10), (3, 10, 20), (4, 15, 25), (5, 30, 40)],
+            "track 3 is locked and stays put"
+        );
+    }
+
+    #[test]
+    fn linked_delete_holds_back_clips_that_would_collide_with_a_straddler() {
+        // Track 2's clip straddles the deleted span, so its later neighbour can only
+        // close up to the straddler instead of overlapping it.
+        let mut project =
+            project_with(&[(1, &[(1, 10, 20)][..]), (2, &[(2, 5, 25), (3, 30, 40)][..])]);
+        let command = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(starts(&after), [(2, 5, 25), (3, 25, 35)]);
+    }
+
+    #[test]
+    fn multi_delete_merges_gaps_and_pulls_by_the_total() {
+        let mut project = project_with(&[
+            (1, &[(1, 0, 10), (2, 10, 20), (3, 20, 30), (4, 30, 40)][..]),
+            (2, &[(5, 40, 50)][..]),
+        ]);
+        let command = delete_command(
+            &project,
+            &set(&[2, 3]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(starts(&after), [(1, 0, 10), (4, 10, 20), (5, 20, 30)]);
+        // This-track mode with deletes on two tracks pulls each track independently.
+        let command = delete_command(
+            &project,
+            &set(&[1, 5]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(starts(&after), [(4, 0, 10)]);
+    }
+
+    #[test]
+    fn deleting_on_a_locked_track_is_refused() {
+        let mut project = project_with(&[(1, &[(1, 0, 10), (2, 10, 20)][..])]);
+        lock(&mut project, 1);
+        let command = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        assert!(History::default().execute(&mut project, &command).is_err());
+        assert!(
+            delete_command(
+                &project,
+                &set(&[77]),
+                RippleScope::ThisTrack,
+                MarkerRipple::Auto
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn linked_trim_shifts_other_tracks_for_both_edges() {
+        let base = project_with(&[
+            (1, &[(1, 0, 10), (2, 10, 20)][..]),
+            (2, &[(3, 10, 20), (4, 20, 30)][..]),
+            (3, &[(5, 12, 18)][..]),
+        ]);
+        // Shorten clip 1 from the right: everything starting at or after 10 slides.
+        let mut project = base.clone();
+        let command = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(6),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(
+            starts(&after),
+            [(1, 0, 6), (2, 6, 16), (3, 6, 16), (4, 16, 26), (5, 8, 14)]
+        );
+        // Lengthen it instead.
+        let mut project = base.clone();
+        let command = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(14),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(after.tracks()[1].clips()[&ClipId(3)].range.start, Time(14));
+        // Left trim collapses the head and pulls the rest.
+        let mut project = base.clone();
+        let command = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Left,
+            Time(4),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(
+            starts(&after),
+            [(1, 0, 6), (2, 6, 16), (3, 6, 16), (4, 16, 26), (5, 8, 14)]
+        );
+        // The single-track scope is the existing behaviour.
+        let command = trim_command(
+            &base,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(6),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        assert_eq!(
+            Some(command),
+            editing::trim_command(&base, ClipId(1), TrimEdge::Right, Time(6), true)
+        );
+    }
+
+    #[test]
+    fn linked_trim_leaves_locked_tracks_alone() {
+        let mut project = project_with(&[(1, &[(1, 0, 10)][..]), (2, &[(2, 10, 20)][..])]);
+        lock(&mut project, 2);
+        let command = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(5),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(starts(&after), [(1, 0, 5), (2, 10, 20)]);
+    }
+
+    #[test]
+    fn all_tracks_delete_of_a_linked_clip_ripples_the_companions_track() {
+        // Clip 1 (track 1) is linked to clip 2 (track 2); clip 4 follows on track 2 with
+        // an unlinked clip 3 on track 1. Deleting only clip 1 must close both gaps.
+        let mut project = project_with(&[
+            (1, &[(1, 10, 20), (3, 20, 30)][..]),
+            (2, &[(2, 10, 20), (4, 20, 30)][..]),
+        ]);
+        crate::selection::tests::link(&mut project, &[1, 2]);
+        let command = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let after = run(&mut project, &command);
+        assert_eq!(starts(&after), [(3, 10, 20), (4, 10, 20)]);
+    }
+
+    fn marker_times(project: &Project) -> Vec<i64> {
+        project.markers().iter().map(|m| m.time.0).collect()
+    }
+    fn with_markers(project: &mut Project, times: &[i64]) {
+        for (i, t) in times.iter().enumerate() {
+            Command::AddMarker {
+                marker: animathio_core::Marker::new(
+                    animathio_core::MarkerId(i as u64 + 1),
+                    Time(*t),
+                ),
+            }
+            .apply(project)
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn markers_ride_a_ripple_delete_in_the_same_undo_step() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 10, 20), (3, 20, 30)][..])]);
+        let mut project = base.clone();
+        with_markers(&mut project, &[5, 12, 25]);
+        let before = project.clone();
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &command).unwrap();
+        // 12 was inside the removed clip: collapsed onto the cut. 25 slid by 10.
+        assert_eq!(marker_times(&project), [5, 10, 15]);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before, "one undo restores clips and markers");
+        // Opting out leaves markers alone.
+        let command = delete_command(
+            &project,
+            &set(&[2]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Stay,
+        )
+        .unwrap();
+        command.apply(&mut project).unwrap();
+        assert_eq!(marker_times(&project), [5, 12, 25]);
+    }
+
+    #[test]
+    fn this_track_ripple_keeps_markers_when_another_track_has_later_content() {
+        let mut project =
+            project_with(&[(1, &[(1, 0, 10), (2, 10, 20)][..]), (2, &[(3, 0, 40)][..])]);
+        with_markers(&mut project, &[25]);
+        let this = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        this.apply(&mut project.clone()).unwrap();
+        let mut a = project.clone();
+        this.apply(&mut a).unwrap();
+        assert_eq!(
+            marker_times(&a),
+            [25],
+            "track 2 is not rippled: markers stay"
+        );
+        let all = delete_command(
+            &project,
+            &set(&[1]),
+            RippleScope::AllTracks,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut b = project;
+        all.apply(&mut b).unwrap();
+        assert_eq!(marker_times(&b), [15], "every track rippled: markers ride");
+    }
+
+    #[test]
+    fn markers_follow_ripple_trims() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 10, 20)][..])]);
+        let mut project = base;
+        with_markers(&mut project, &[4, 8, 15]);
+        let before = project.clone();
+        let shorten = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(6),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &shorten).unwrap();
+        assert_eq!(marker_times(&project), [4, 6, 11]);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before);
+        let lengthen = trim_command(
+            &project,
+            ClipId(1),
+            TrimEdge::Right,
+            Time(14),
+            RippleScope::ThisTrack,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        lengthen.apply(&mut project).unwrap();
+        assert_eq!(marker_times(&project), [4, 8, 19]);
+    }
+
+    #[test]
+    fn trim_to_playhead_trims_the_clip_under_the_playhead() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..])]);
+        // Playhead inside clip 1: Q ripple-trims its head, W its tail.
+        let mut project = base.clone();
+        let q = trim_to_playhead_command(
+            &project,
+            None,
+            Time(6),
+            TrimSide::Previous,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        run(&mut project, &q);
+        assert_eq!(starts(&project), vec![(1, 0, 4), (2, 8, 14)]);
+        let w =
+            trim_to_playhead_command(&project, None, Time(2), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 2), (2, 6, 12)]);
+    }
+
+    #[test]
+    fn trim_to_playhead_closes_gaps_to_the_playhead() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..])]);
+        // Q closes [10, 12): everything from the playhead slides left.
+        let mut project = base.clone();
+        let q = trim_to_playhead_command(
+            &project,
+            None,
+            Time(12),
+            TrimSide::Previous,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        run(&mut project, &q);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 12, 18)]);
+        // W closes [12, 14): the next clip starts at the playhead.
+        let mut project = base.clone();
+        let w =
+            trim_to_playhead_command(&project, None, Time(12), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 12, 18)]);
+        // On an edit point Q has nothing before it to remove; W closes the
+        // whole gap after the playhead.
+        assert!(
+            trim_to_playhead_command(
+                &base,
+                Some(ClipId(1)),
+                Time(10),
+                TrimSide::Previous,
+                MarkerRipple::Auto
+            )
+            .is_none()
+        );
+        let mut project = base;
+        let w =
+            trim_to_playhead_command(&project, None, Time(10), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 10, 16)]);
+    }
+
+    #[test]
+    fn trim_to_playhead_targets_the_selected_track_first() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..]), (2, &[(3, 0, 20)][..])]);
+        // The selected clip's track wins even though track 1 also covers the playhead.
+        let mut project = base;
+        let w = trim_to_playhead_command(
+            &project,
+            Some(ClipId(3)),
+            Time(12),
+            TrimSide::Next,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        run(&mut project, &w);
+        assert_eq!(starts(&project), vec![(1, 0, 10), (2, 14, 20), (3, 0, 12)]);
+    }
+
+    #[test]
+    fn trim_to_playhead_moves_markers_over_removed_gaps() {
+        let base = project_with(&[(1, &[(1, 0, 10), (2, 14, 20)][..])]);
+        let mut project = base;
+        with_markers(&mut project, &[11, 16]);
+        let before = project.clone();
+        let q = trim_to_playhead_command(
+            &project,
+            None,
+            Time(12),
+            TrimSide::Previous,
+            MarkerRipple::Auto,
+        )
+        .unwrap();
+        let mut history = History::default();
+        history.execute(&mut project, &q).unwrap();
+        assert_eq!(marker_times(&project), [10, 14]);
+        assert!(history.undo(&mut project).unwrap());
+        assert_eq!(project, before);
+    }
+    #[test]
+    fn trim_to_playhead_prefers_covering_track_over_earlier_gap() {
+        let mut project =
+            project_with(&[(1, &[(1, 0, 4), (2, 14, 20)][..]), (2, &[(3, 0, 20)][..])]);
+        let command =
+            trim_to_playhead_command(&project, None, Time(10), TrimSide::Next, MarkerRipple::Auto)
+                .unwrap();
+        run(&mut project, &command);
+        assert_eq!(starts(&project), vec![(1, 0, 4), (2, 14, 20), (3, 0, 10)]);
+    }
+}

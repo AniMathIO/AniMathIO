@@ -1,0 +1,4 @@
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+adapter: AdapterInfo { name: "AMD Radeon RX 9070 XT (RADV GFX1201)", vendor: 4098, device: 30032, device_type: DiscreteGpu, device_pci_bus_id: "0000:08:00.0", driver: "radv", driver_info: "Mesa 26.2.6-arch3.1", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+WARNING: radv is not a conformant Vulkan implementation, testing use only.
+BENCH random_scrub seed=0x123456789abcdef warmup=2s requested=10s actual=10.002s samples=1565 fps=156.47 cadence_p50_ms=6.064 cadence_p95_ms=11.994 pipeline_p50_ms=2.505 pipeline_p95_ms=3.703 over_16.667ms=0

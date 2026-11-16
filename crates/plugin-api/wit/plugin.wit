@@ -1,0 +1,582 @@
+package animathio:plugin@1.1.0;
+
+/// Shared data types for vector graphics, parameter schemas and plugin manifests.
+interface types {
+    /// 2D dimensions in integer pixels.
+    record size {
+        width: u32,
+        height: u32,
+    }
+
+    /// Finite 2D coordinates: x right, y down. Scene.coordinate-space selects units.
+    record point {
+        x: f32,
+        y: f32,
+    }
+
+    /// Straight-alpha 8-bit RGBA color.
+    record color {
+        r: u8,
+        g: u8,
+        b: u8,
+        a: u8,
+    }
+
+    /// Path segment command.
+    variant path-verb {
+        move-to(point),
+        line-to(point),
+        quad-to(tuple<point, point>),
+        cubic-to(tuple<point, point, point>),
+        close,
+    }
+
+    /// Sequence of path commands forming one or more contours.
+    type path = list<path-verb>;
+
+    /// Line cap style at path endpoints.
+    enum stroke-cap {
+        butt,
+        round,
+        square,
+    }
+
+    /// Line join style at path vertices.
+    enum stroke-join {
+        miter,
+        round,
+        bevel,
+    }
+
+    /// Outline styling parameters.
+    record stroke-style {
+        width: f32,
+        color: color,
+        cap: stroke-cap,
+        join: stroke-join,
+    }
+
+    /// Horizontal alignment in the available canvas width.
+    enum text-alignment { left, center, right }
+
+    /// Text run layout element.
+    record text-element {
+        align: text-alignment,
+        text: string,
+        font-size: f32,
+        x: f32,
+        y: f32,
+        color: color,
+    }
+
+    /// Vector drawing command.
+    variant draw-command {
+        fill-path(tuple<path, color>),
+        stroke-path(tuple<path, stroke-style>),
+        text-run(text-element),
+    }
+
+    /// canvas: pixels on the requested render canvas. normalized: local unit square,
+    /// with x scaled by width and y by height. Strokes are outlined in local
+    /// units then transformed with the paths (nonuniform scaling is allowed).
+    /// Normalized text-run font-size is a fraction of canvas height; x/y are
+    /// offsets from the centered text block. Values outside 0..1 are allowed.
+    enum coordinate-space { canvas, normalized }
+
+    /// Evaluated vector scene composed of ordered draw commands.
+    record scene {
+        coordinate-space: coordinate-space,
+        elements: list<draw-command>,
+    }
+
+    /// Axis-aligned bounding box in canvas coordinates.
+    record bbox {
+        min-x: f32,
+        min-y: f32,
+        max-x: f32,
+        max-y: f32,
+    }
+
+    /// Result of host-side math typesetting.
+    record typeset-result {
+        paths: list<path>,
+        bbox: bbox,
+    }
+
+    /// Input language for host-side math typesetting.
+    enum math-mode {
+        latex,
+        typst,
+    }
+
+    /// Finite inclusive range; min <= default <= max and step > 0 (UI hint).
+    record number-range {
+        min: f64,
+        max: f64,
+        default: f64,
+        step: f64,
+    }
+
+    /// Color parameter declaration.
+    record color-param {
+        default: color,
+    }
+
+    /// Text string parameter declaration.
+    record string-param {
+        default: string,
+    }
+
+    /// Multiple-choice enum parameter declaration.
+    record enum-param {
+        options: list<string>,
+        default: string,
+    }
+
+    /// Boolean toggle parameter declaration.
+    record bool-param {
+        default: bool,
+    }
+
+    /// 2D point parameter declaration.
+    record point-param {
+        default: point,
+    }
+
+    /// Asset reference parameter declaration.
+    record asset-ref-param {
+        media-type: string,
+        default-asset: option<string>,
+    }
+
+    /// Supported parameter types.
+    variant param-kind {
+        %number(number-range),
+        %color(color-param),
+        %string(string-param),
+        enum-choice(enum-param),
+        %bool(bool-param),
+        %point(point-param),
+        asset-ref(asset-ref-param),
+    }
+
+    /// Stable id, fallback human label and typed schema. Labels are not identifiers.
+    /// Translation keys and units may be supplied in manifest.metadata.
+    record param-spec {
+        id: string,
+        label: string,
+        kind: param-kind,
+    }
+
+    /// Concrete value assigned to a parameter at evaluation time.
+    variant param-value {
+        %number(f64),
+        %color(color),
+        %string(string),
+        enum-choice(string),
+        %bool(bool),
+        %point(point),
+        asset-ref(string),
+    }
+
+    /// Key-value parameter entry.
+    record param-entry {
+        id: string,
+        value: param-value,
+    }
+
+    /// Map of parameter values passed to plugin invocations.
+    type param-map = list<param-entry>;
+
+    /// Open classification: clip-source, effect, audio-effect, animation-preset
+    /// (1.1) or importer (1.1). The legacy animation kind has no execution world.
+    /// Unknown strings are metadata, never permission to invoke an unknown world.
+    type plugin-kind = string;
+
+    /// Optional, namespaced advisory metadata. Unknown keys must be ignored.
+    /// Keys are unique; values are UTF-8, never executable content. Reserved
+    /// conventions: label-key, description-key, param.<id>.unit,
+    /// param.<id>.label-key and param.<id>.option.<value>.label-key;
+    /// prefix with effect.<id>. for effect descriptors. No localization service
+    /// is implied: plain labels/messages remain mandatory fallbacks.
+    type metadata = list<tuple<string, string>>;
+
+    /// Extensible error code plus fallback diagnostic text and advisory details.
+    /// Known codes: invalid-input, limit-exceeded, service-failed, plugin-error.
+    /// Unknown codes are displayed using message; callers must not parse messages.
+    record diagnostic {
+        code: string,
+        message: string,
+        metadata: metadata,
+    }
+
+    /// Plugin metadata and parameter schema.
+    record manifest {
+        name: string,
+        version: string,
+        description: string,
+        kinds: list<plugin-kind>,
+        metadata: metadata,
+        params: list<param-spec>,
+    }
+}
+
+/// Host-provided services imported by plugins.
+interface host {
+    use types.{path, math-mode, typeset-result, diagnostic};
+
+    /// Text shaping via host font engine. Size is pixels; positive and finite.
+    /// Returns glyph outline paths or an explicit diagnostic.
+    shape-text: func(text: string, font-size: f32) -> result<list<path>, diagnostic>;
+
+    /// Typeset math via the host typesetting engine. Returns glyph and rule
+    /// outline paths plus a tight bounding box.
+    typeset-math: func(source: string, mode: math-mode, font-size: f32) -> result<typeset-result, diagnostic>;
+
+    /// Extract double-quoted d attributes from SVG path elements, or accept raw
+    /// SVG path data. This is not a complete SVG renderer: transforms, styles,
+    /// other primitives and external resources are not interpreted. Empty input
+    /// succeeds with no paths; unsupported/non-path input returns a diagnostic.
+    svg-to-paths: func(svg-xml: string) -> result<list<path>, diagnostic>;
+
+    /// Hard limits configured for this host, as unique key/value pairs.
+    /// Stable keys: ticks-per-second, max-memory-bytes, max-table-elements,
+    /// fuel-per-call, epoch-interval-ms, epoch-deadline-ticks, max-effect-pixels,
+    /// effect-memory-bytes, effect-fuel-per-pixel, effect-epoch-deadline-ticks,
+    /// max-audio-block-frames, max-audio-state-bytes, audio-memory-bytes,
+    /// audio-fuel-per-sample, audio-epoch-deadline-ticks, max-audio-channels,
+    /// max-audio-sample-rate, max-shape-text-chars, max-shape-text-verbs,
+    /// max-svg-input-bytes, max-svg-verbs, max-typeset-verbs,
+    /// max-typeset-source-bytes, max-typeset-font-size-px, typeset-timeout-ms,
+    /// max-log-message-bytes, max-log-entries, max-effects-per-plugin (added in 1.0.x); since 1.1 also max-import-source-bytes,
+    /// import-memory-bytes, import-fuel-per-byte, import-epoch-deadline-ticks,
+    /// max-import-output-bytes, max-import-commands, max-sibling-file-bytes,
+    /// max-sibling-total-bytes, max-sibling-files, max-preset-keys.
+    /// Keys and units are specified in docs/plugins.md; unknown keys are ignored.
+    /// This reports policy, not remaining fuel or memory. Budgets reset per call.
+    limits: func() -> list<tuple<string, u64>>;
+
+    /// Host logging for diagnostic and debug output.
+    log: func(message: string);
+}
+
+/// Pixel-filter effects, added in API 0.2.1.
+///
+/// A frame effect receives one straight-alpha sRGB RGBA8 frame and returns a
+/// frame of the same size. The host enforces size, fuel, wall-clock and memory
+/// limits on every call; see `SandboxLimits` in `plugin-host`.
+interface frame-effects {
+    use types.{size, param-map, param-spec, diagnostic};
+
+    /// One filter offered by an effect plugin.
+    record effect-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`), stored in projects.
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Numeric parameters with range, default and step. Only `number` kinds are
+        /// supported; effect parameters are keyframeable numbers.
+        params: list<param-spec>,
+    }
+
+    /// List the filters this plugin provides.
+    list-effects: func() -> list<effect-descriptor>;
+
+    /// Apply filter `effect` to `pixels`: `size.width * size.height * 4` bytes of
+    /// row-major straight-alpha sRGB RGBA8. Must return exactly the same number
+    /// of bytes. `time-ticks` is the clip-local source time. The call is a pure
+    /// function of its arguments. Returns a diagnostic on invalid input.
+    apply-frame: func(effect: string, pixels: list<u8>, size: size, params: param-map, time-ticks: s64) -> result<list<u8>, diagnostic>;
+}
+
+/// Audio effects, added in API 0.2.2.
+///
+/// An audio effect receives one block of interleaved f32 PCM and returns a block of
+/// the same size. The host splits longer signals into contiguous blocks and carries an
+/// opaque `state` blob from each call to the next, so filters, envelope followers and
+/// other stateful processors work across block boundaries without the plugin keeping any
+/// memory between calls. The host enforces block size, state size, fuel, wall-clock and
+/// memory limits on every call; see `SandboxLimits` in `plugin-host`.
+interface audio-effects {
+    use types.{param-map, param-spec, diagnostic};
+
+    /// One audio filter offered by an audio-effect plugin.
+    record audio-effect-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`), stored in projects.
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Numeric parameters with range, default and step; keyframeable on clip chains.
+        /// Only `number` kinds are supported.
+        params: list<param-spec>,
+    }
+
+    /// A block of interleaved 32-bit float PCM.
+    record audio-block {
+        /// Frames per second (1..=768000).
+        sample-rate: u32,
+        /// Interleaved channel count (1..=32).
+        channels: u16,
+        /// Time of the first frame in the chain's own timeline, in ticks: clip-local for a
+        /// clip chain, project time for a track chain.
+        start-ticks: s64,
+        /// `frames * channels` finite samples, frame-major interleaving. Unclipped;
+        /// values may exceed 1.0. Preserve channel order (stereo is left, right).
+        /// No channel-layout negotiation or planar format is implied.
+        samples: list<f32>,
+    }
+
+    /// Result of processing one block.
+    record block-output {
+        /// Exactly as many samples as the input block.
+        samples: list<f32>,
+        /// State to hand back with the next contiguous block, or none for stateless filters.
+        state: option<list<u8>>,
+    }
+
+    /// List the audio filters this plugin provides.
+    list-audio-effects: func() -> list<audio-effect-descriptor>;
+
+    /// Process one block with filter `effect`. `state` is `none` for the first block of a
+    /// signal; an empty blob is equivalent to none. Otherwise it is exactly the
+    /// nonempty blob the previous call returned. The call is a pure
+    /// function of its arguments. Returns a diagnostic on invalid input.
+    process-block: func(effect: string, block: audio-block, params: param-map, state: option<list<u8>>) -> result<block-output, diagnostic>;
+}
+
+/// Animation presets, added in API 1.1.0.
+///
+/// A preset plugin turns a preset choice into ordinary keyframe curves. The host
+/// converts the curves into one `Command::Batch` of keyframe edits, so rendering never
+/// calls the plugin and undo restores the previous keyframes exactly.
+interface animation-presets {
+    use types.{param-map, param-spec, diagnostic};
+
+    /// Where a preset sits in a clip's lifetime. The host places the window:
+    /// entrance at the clip start, exit at the clip end, emphasis centred on the clip.
+    enum preset-role {
+        entrance,
+        exit,
+        emphasis,
+    }
+
+    /// One preset offered by an animation-preset plugin.
+    record preset-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`).
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Window placement.
+        role: preset-role,
+        /// Clip kinds the preset applies to; empty means every visual clip. Kind ids:
+        /// `video`, `image`, `vector` and `plugin:<plugin-id>`.
+        applies-to: list<string>,
+        /// Default window length in ticks (positive).
+        default-duration-ticks: s64,
+        /// Preset options: number, enum-choice or bool kinds only.
+        params: list<param-spec>,
+    }
+
+    /// The clip a preset is generated for.
+    record clip-info {
+        /// Clip kind id, as in `applies-to`.
+        kind: string,
+        /// Visible clip length in ticks (positive).
+        duration-ticks: s64,
+        /// Length of one project frame in ticks (positive); a sampling hint.
+        frame-ticks: s64,
+        /// Current value of every animatable numeric target at the window's rest
+        /// point: the end of an entrance window, the start of an exit or emphasis
+        /// window. Keys are the curve target ids below.
+        rest: list<tuple<string, f64>>,
+    }
+
+    /// Interpolation toward the next key, matching core keyframes.
+    enum curve-interpolation {
+        hold,
+        linear,
+        ease-in-out,
+    }
+
+    /// One keyframe. `time-ticks` is relative to the window start, 0..=window.
+    record curve-key {
+        time-ticks: s64,
+        value: f64,
+        interpolation: curve-interpolation,
+    }
+
+    /// Keyframes for one target: `opacity`, `x`, `y`, `scale-x`, `scale-y`,
+    /// `rotation` (radians) or `param:<name>` for a numeric clip parameter.
+    record curve {
+        target: string,
+        keys: list<curve-key>,
+    }
+
+    /// List the presets this plugin provides.
+    list-presets: func() -> list<preset-descriptor>;
+
+    /// Generate the curves for `preset` over a window of `window-ticks` (positive,
+    /// at most the clip duration). Pure in its arguments. Returns a diagnostic on
+    /// invalid input, e.g. a preset that does not apply to the clip kind.
+    generate: func(preset: string, clip: clip-info, window-ticks: s64, params: param-map) -> result<list<curve>, diagnostic>;
+}
+
+/// Bounded reads of files next to an imported source, added in API 1.1.0.
+/// Only importer components import this interface.
+interface import-files {
+    use types.{diagnostic};
+
+    /// Read a file relative to the directory the host granted for this import.
+    /// `relative-path` uses `/` separators; absolute paths, `..` components and
+    /// paths that resolve (through symlinks) outside the directory are refused.
+    /// Per-file, total-byte and file-count caps apply per call; without a granted
+    /// directory every read fails with `invalid-input`.
+    read-sibling: func(relative-path: string) -> result<list<u8>, diagnostic>;
+}
+
+/// Project importers, added in API 1.1.0.
+///
+/// An importer turns source bytes into a versioned command document that the host
+/// validates and replays onto a fresh project, plus content-addressed asset bytes.
+interface importer {
+    use types.{param-map, param-spec, diagnostic};
+
+    /// One import format offered by an importer plugin.
+    record importer-descriptor {
+        /// Stable identifier, unique within the plugin (`[a-z0-9_-]`).
+        id: string,
+        /// Human-readable name for menus.
+        name: string,
+        /// One-line description for tooltips.
+        description: string,
+        /// Lower-case file extensions without the dot, e.g. `py`.
+        extensions: list<string>,
+        /// Import options: string, number, enum-choice or bool kinds only.
+        params: list<param-spec>,
+    }
+
+    /// The source being imported.
+    record import-source {
+        /// File name hint without directories (may be empty).
+        file-name: string,
+        /// Raw source bytes.
+        bytes: list<u8>,
+    }
+
+    /// One asset referenced by the command document.
+    record imported-asset {
+        /// Lower-case hex BLAKE3 hash of `bytes`; the host recomputes it.
+        id: string,
+        /// Human-readable filename hint.
+        name: string,
+        /// Declared media type; decoders still probe the bytes.
+        media-type: string,
+        bytes: list<u8>,
+    }
+
+    /// Non-fatal message severity.
+    enum message-severity {
+        info,
+        warning,
+    }
+
+    /// One non-fatal observation; line and column are one-based, 0 when unknown.
+    record import-message {
+        severity: message-severity,
+        line: u32,
+        column: u32,
+        message: string,
+        snippet: string,
+    }
+
+    /// A successful import.
+    record import-output {
+        /// UTF-8 JSON `{"version": 1, "commands": [...]}`: AniMathIO core commands
+        /// in their control-protocol serialization, replayed in order on an empty
+        /// project. Every command is validated; any failure rejects the import.
+        commands: string,
+        assets: list<imported-asset>,
+        messages: list<import-message>,
+    }
+
+    /// List the formats this plugin imports.
+    list-importers: func() -> list<importer-descriptor>;
+
+    /// Import `source` with format `importer`. Pure apart from `read-sibling`.
+    run-import: func(importer: string, source: import-source, params: param-map) -> result<import-output, diagnostic>;
+}
+
+/// World for animation-preset plugins (`kinds = ["animation-preset"]`), API 1.1.0.
+world animation-preset-plugin {
+    import host;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The presets themselves.
+    export animation-presets;
+}
+
+/// World for importer plugins (`kinds = ["importer"]`), API 1.1.0.
+world importer-plugin {
+    import host;
+    import import-files;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The import formats themselves.
+    export importer;
+}
+
+/// World for audio-effect plugins (`kinds = ["audio-effect"]`): describe plus audio filters.
+world audio-effect-plugin {
+    import host;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The audio filters themselves.
+    export audio-effects;
+}
+
+/// World for effect plugins (`kinds = ["effect"]`): describe plus pixel filters.
+/// Components for this world need no clip-source or animation exports.
+world effect-plugin {
+    import host;
+
+    use types.{manifest};
+
+    /// Describe the plugin and its kinds.
+    export describe: func() -> manifest;
+
+    /// The pixel filters themselves.
+    export frame-effects;
+}
+
+/// Pure vector generators. Frame and audio effects use their own worlds.
+world source-plugin {
+    import host;
+
+    use types.{manifest, scene, param-map, size, diagnostic};
+
+    /// Describe the plugin, its kinds and its parameter schema.
+    export describe: func() -> manifest;
+
+    /// Render a vector scene, pure in its arguments. time-ticks is clip-local source
+    /// time in integer flicks (705600000 ticks/second). size is the render canvas.
+    /// An empty scene is valid; invalid geometry or traps fail the call.
+    export render-clip: func(params: param-map, time-ticks: s64, size: size) -> result<scene, diagnostic>;
+}

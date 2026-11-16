@@ -1,0 +1,32 @@
+[package]
+name = "animathio-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+animathio-audio = { path = "../audio" }
+animathio-core = { workspace = true }
+thiserror = { workspace = true }
+
+# FilmCraft codec stack (0.9.0). `filmcraft-codecs` is the container + codec hub; the
+# lower-level crates are pulled in directly for explicit colour conversion (h264 SPS VUI),
+# MP4 muxing, H.264 and AAC encoding.
+filmcraft-aac = "0.9.0"
+filmcraft-bitstream = "0.9.0"
+filmcraft-codecs = "0.9.0"
+filmcraft-color = "0.9.0"
+filmcraft-frame = "0.9.0"
+filmcraft-h264 = "0.9.0"
+filmcraft-h264enc = "0.9.0"
+filmcraft-isobmff = "0.9.0"
+filmcraft-matroska = "0.9.0"
+filmcraft-media = "0.9.0"
+filmcraft-time = "0.9.0"
+
+crossbeam-channel = "0.5"
+
+[lints]
+workspace = true

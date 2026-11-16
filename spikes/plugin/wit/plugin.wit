@@ -1,0 +1,142 @@
+package animathio:plugin@0.1.0;
+
+interface types {
+    record size {
+        width: u32,
+        height: u32,
+    }
+
+    record point {
+        x: f32,
+        y: f32,
+    }
+
+    record color {
+        r: u8,
+        g: u8,
+        b: u8,
+        a: u8,
+    }
+
+    variant path-verb {
+        move-to(point),
+        line-to(point),
+        quad-to(tuple<point, point>),
+        cubic-to(tuple<point, point, point>),
+        close,
+    }
+
+    type path = list<path-verb>;
+
+    enum stroke-cap {
+        butt,
+        round,
+        square,
+    }
+
+    enum stroke-join {
+        miter,
+        round,
+        bevel,
+    }
+
+    record stroke-style {
+        width: f32,
+        color: color,
+        cap: stroke-cap,
+        join: stroke-join,
+    }
+
+    record text-element {
+        text: string,
+        font-size: f32,
+        x: f32,
+        y: f32,
+        color: color,
+    }
+
+    variant draw-command {
+        fill-path(tuple<path, color>),
+        stroke-path(tuple<path, stroke-style>),
+        text-run(text-element),
+    }
+
+    record scene {
+        elements: list<draw-command>,
+    }
+
+    record number-range {
+        min: f64,
+        max: f64,
+        default: f64,
+        step: f64,
+    }
+
+    record color-param {
+        default: color,
+    }
+
+    record string-param {
+        default: string,
+    }
+
+    record enum-param {
+        options: list<string>,
+        default: string,
+    }
+
+    record bool-param {
+        default: bool,
+    }
+
+    variant param-kind {
+        %number(number-range),
+        %color(color-param),
+        %string(string-param),
+        enum-choice(enum-param),
+        %bool(bool-param),
+    }
+
+    record param-spec {
+        id: string,
+        label: string,
+        kind: param-kind,
+    }
+
+    record manifest {
+        name: string,
+        version: string,
+        description: string,
+        params: list<param-spec>,
+    }
+
+    variant param-value {
+        %number(f64),
+        %color(color),
+        %string(string),
+        enum-choice(string),
+        %bool(bool),
+    }
+
+    record param-entry {
+        id: string,
+        value: param-value,
+    }
+
+    type param-map = list<param-entry>;
+}
+
+interface host {
+    use types.{path};
+    shape-text: func(text: string, font-size: f32) -> list<path>;
+    log: func(message: string);
+}
+
+world plugin {
+    import host;
+
+    use types.{manifest, scene, param-map, size};
+
+    export describe: func() -> manifest;
+    export render: func(params: param-map, time-ticks: s64, size: size) -> scene;
+}

@@ -1,218 +1,478 @@
-<p align="center">
-  <p align=center>
-    <img src="./resources/icon.ico" alt="AniMathIO Logo"/>
-  </p>
-  <h1 align="center">AniMathIO</h1>
-</p>
+# AniMathIO 2.0
 
-AniMathIO revolutionizes the creation of mathematical videos, tailored for educators, students, and professionals seeking to bring complex concepts to life
+> AniMathIO 2.0 is a from-scratch **Rust** rewrite of AniMathIO, an editor for Manim-like math animation videos. The plugin component ABI is 1.1.0 (1.0.0 frozen and still loaded unchanged). The 1.x Electron app lives on, read-only, in the [`legacy`](https://github.com/AniMathIO/AniMathIO/tree/legacy) branch.
 
-## Special thanks for these projects
+The full plan, architecture and roadmap live in **[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)**. Read it before proposing structure.
 
-They are core part of the AniMathIO software! Check them out!
+**Looking for the current app?** AniMathIO 1.x lives on [`main`](https://github.com/AniMathIO/AniMathIO/tree/main). The [releases page](https://github.com/AniMathIO/AniMathIO/releases) still carries the 1.x Electron installers; no 2.0 release exists yet, so 2.0 is built from source (see [Building](#building)) or from the installer artifacts of the `Package` workflow.
 
-- [mafs](https://github.com/stevenpetryk/mafs)
-- [nextron](https://github.com/saltyshiomix/nextron)
+## What 2.0 is
 
-## Table of Contents
+The core is a small, reliable video editor: media clips, a multi-track timeline, transforms and keyframes, audio, preview and export. Nothing math-specific lives in the core. Text, LaTeX, graphs, frame effects and audio effects are sandboxed WebAssembly components (wasmtime, Component Model, WIT). Importers and the MCP/control integration currently run as native crates and a sidecar; they have no frozen WIT world yet.
 
-- [Special thanks for these projects](#special-thanks-for-these-projects)
-- [Table of Contents](#table-of-contents)
-- [OS Support](#os-support)
-- [Installation](#installation)
-- [AI Agent Integration (MCP)](#ai-agent-integration-mcp)
-- [Development build](#development-build)
-  - [Canvas build fix](#canvas-build-fix)
-    - [NOTE: If you want proper development you will need to follow the steps regarding the canvas build and install all the necessary dependencies](#note-if-you-want-proper-development-you-will-need-to-follow-the-steps-regarding-the-canvas-build-and-install-all-the-necessary-dependencies)
-  - [Running the app](#running-the-app)
-- [Contributing](#contributing)
-- [Star History](#star-history)
+The architectural rules from #156:
 
-## OS Support
+- **Rendering is one pure function,** `render(&Project, Time) -> Frame`, shared by preview, export and tests.
+- **Every mutation is a serializable, invertible `Command`.** Undo/redo, the control protocol, MCP and plugins all go through it.
+- **Time is integer ticks + rational frame rates.** No `f64` seconds and no absolute pixels in the model.
+- **The core owns its domain types.** Third-party crates (FilmCraft codecs, vello, GPUI) sit behind adapters.
 
-We are supporting the following operating systems: Windows, Linux (via AppImage, Snap, Flatpak, DEB packages, and AUR).
+## Status
 
-**NOTE**: macOS is currently **unsupported**. Due to the lack of available resources, the latest version of AniMathIO that supports macOS is the legacy 1.3.0 version.
+Editor and headless engine prototype. What works today:
 
-## Installation
-
-### Windows
-
-1. Download the latest `AniMathIO.Setup.X.X.X.exe` installer from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
-2. Run the installer and follow the installation wizard
-3. Launch AniMathIO from the Start Menu or desktop shortcut
-
-Alternatively, you can download `win-unpacked.zip` for a portable version (no installation required).
-
-### Linux
-
-AniMathIO is available in multiple formats for Linux distributions:
-
-#### AppImage (Universal Linux)
-
-1. Download `AniMathIO-X.X.X.AppImage` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
-2. Make it executable:
-
-   ```bash
-   chmod +x AniMathIO-X.X.X.AppImage
-   ```
-
-3. Run it:
-
-   ```bash
-   ./AniMathIO-X.X.X.AppImage
-   ```
-
-#### Snap Package (Universal Linux)
-
-Install via snap:
-
-```bash
-sudo snap install animathio
-```
-
-Or download the `.snap` file from the [release page](https://github.com/AniMathIO/AniMathIO/releases) and install it:
-
-```bash
-sudo snap install --dangerous animathio_X.X.X_amd64.snap
-```
-
-#### Flatpak (Experimental)
-
-**Note**: Flatpak support is experimental and may have limitations.
-
-1. Download `AniMathIO-X.X.X-x86_64.flatpak` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
-2. Install it:
-
-   ```bash
-   flatpak install AniMathIO-X.X.X-x86_64.flatpak
-   ```
-
-#### DEB Package (Debian/Ubuntu-based)
-
-1. Download `animathio_X.X.X_amd64.deb` from the [release page](https://github.com/AniMathIO/AniMathIO/releases)
-2. Install it:
-
-   ```bash
-   sudo dpkg -i animathio_X.X.X_amd64.deb
-   sudo apt-get install -f  # Install any missing dependencies
-   ```
-
-#### Arch Linux (AUR)
-
-AniMathIO is available in the AUR as `animathio-bin`:
-
-```bash
-# Using yay (recommended)
-yay -S animathio-bin
-
-# Or using paru
-paru -S animathio-bin
-
-# Or manually with makepkg
-git clone https://aur.archlinux.org/animathio-bin.git
-cd animathio-bin
-makepkg -si
-```
-
-**AUR Package**: [animathio-bin](https://aur.archlinux.org/packages/animathio-bin)
-
-#### Portable Linux
-
-Download `linux-unpacked.tar.gz` from the [release page](https://github.com/AniMathIO/AniMathIO/releases), extract it, and run the executable directly.
-
-### macOS
-
-⚠️ **macOS is currently unsupported**. The latest version of AniMathIO that supports macOS is the legacy 1.3.0 version, available on the [release page](https://github.com/AniMathIO/AniMathIO/releases).
-
----
-
-**Alternative Download**: You can also download binaries from our website: [https://animathio.com/](https://animathio.com)
-
-## AI Agent Integration (MCP)
-
-AniMathIO includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server, so AI agents such as Claude can drive the editor while you watch changes appear on the canvas.
-
-The server runs inside the Electron main process, so AniMathIO must be running with a project open. It is **disabled by default** — enable it under **Settings**, which shows the endpoint and an auth token.
-
-- **Endpoint:** `http://127.0.0.1:<port>/mcp` (default port `4517`, loopback only)
-- **Auth:** bearer token, shown in Settings
-- **Transport:** HTTP MCP, not stdio
-
-### Available tools
-
-| Tool | Purpose |
+| Area | Status |
 | --- | --- |
-| `get_project_state` | Read canvas, timeline, elements and animations |
-| `add_text` | Add a text element |
-| `add_math` | Add a LaTeX fragment, typeset via KaTeX |
-| `import_manim_scene` | Convert a whole Manim Community script into timeline elements |
-| `add_animation` | Attach fadeIn/fadeOut/slideIn/slideOut/breathe/mafsReveal |
-| `update_element` / `remove_element` | Change or delete an element |
-| `set_canvas` | Canvas size, background colour, timeline duration |
-| `seek` / `set_playing` | Move the playhead, start/stop playback |
-| `save_project` | Save the open project |
-| `add_media` | Import an image, video, or audio file from an absolute local path into the project |
-| `export_video` | Render the project to an absolute `.mp4` or `.webm` path |
+| Project model, commands, undo/redo | ✅ `core` |
+| `.amio` / `project.json` format | ✅ `format` (schema version 7) |
+| Deterministic CPU rendering (Vello CPU backend) | ✅ `render` |
+| PNG frame / sequence rendering | ✅ `animathio-cli` |
+| Audio decoding (streaming; Opus included), mixing, playback (cpal) | ✅ `audio` |
+| Plugin system (wasmtime Component Model) | ✅ ABI 1.1.0 (1.0.0 frozen, plus animation-preset and importer worlds); first-party plugins and explicit 0.2.x compatibility through AniMathIO 2.1 |
+| Host math typesetting (Typst + MiTeX) | ✅ `typeset` |
+| Local control protocol + MCP sidecar | ✅ `control` + `animathio-cli mcp` |
+| Scene-change cuts and markers (review, linked audio, undo) | ✅ editor, CLI and MCP |
+| Auto-reframe to portrait/square (offline subject tracking) | ✅ editor, CLI and MCP |
+| Automatic subtitles (local Whisper, SRT/WebVTT) | ✅ `transcribe` (opt-in `whisper` feature) |
+| v1 and Manim importers | ✅ `import-v1` (native), Manim via the sandboxed `org.animathio.import-manim` plugin |
+| GPUI desktop editor | 🚧 dockable NLE: shuttle, in/out, blade/ripple tools, OS drops, project launcher and workflow dialogs |
+| Media decoding / video export | ✅ native decoding and offline H.264/AAC MP4 export |
 
-`import_manim_scene` is the highest-leverage one: it builds an entire scene in a single call.
+Text, shapes and the eight clip effects (grayscale, sepia, invert, saturate, brightness,
+contrast, blur, opacity) use the bundled WASM components end to end, including CLI renders
+and exports. Build them with `scripts/build-plugins.sh`; schema-1 and schema-2 projects
+migrate automatically to plugin clips and plugin effects when loaded.
 
-`add_media` takes a required `path` on the machine running AniMathIO and returns the created element IDs; a video creates both video and audio elements. It selects the matching resource panel and waits for the media to decode. Unsupported file types, missing files, and decoding failures report an error.
+Animation presets are plugins too: `org.animathio.animations` offers fade, slide, zoom,
+pop, spin, bounce, wipe and typewriter in/out presets plus breathe, shake, spin, hop and
+flash emphasis. Pick them in the inspector's **Animations** section (In / Out / Emphasis,
+with a duration stepper) or the Effects library, through the `apply_animation_preset` MCP
+tool or `animathio-cli animations apply`. A preset becomes ordinary keyframes in one undo
+step, so projects render and export without the plugin.
 
-`export_video` takes a required absolute `path` ending in `.mp4` or `.webm` and an optional `format` that must match the extension (otherwise the extension determines the format). The parent directory must exist; an existing destination is overwritten. Export records in **real time**: a 30-second project takes at least 30 seconds, plus conversion and writing. MP4 conversion fetches the FFmpeg core if needed. Allow a long client timeout, keep the project open, and avoid editing during export. The tool returns after the file is written.
+Audio effects are plugins too: `org.animathio.audio-basic` provides gain/trim, a 3-band EQ,
+compressor, noise gate, high-pass filter, a voice-cleanup preset (high-pass + gentle gate +
+de-esser) and `denoise` (spectral gating that learns the noise from the quietest frames). Clips and tracks carry ordered, undoable audio-effect chains that run in the shared
+mixer, so preview and export sound identical; edit them in the inspector's Audio section, the
+Effects library or the `list_audio_effects` / `add_audio_effect` MCP tools. Open a track header’s
+**Audio effects** context-menu entry to edit its chain with the same controls. Clip audio-effect
+parameters have keyframe controls, and parameter drags update playback live (throttled snapshots for the mix worker, never the
+device callback). Video effects in the inspector have a bypass switch like audio effects.
 
-> **Security:** a connected agent can read local media, modify the open project, and write files. Keep the token private, and enable the server only while you are using it.
+Pixel effects accept project-sized frames up to 32 Mpx, with a 200 ms preview backstop and
+the existing export budget. The host bounds guest metadata to 64 effects, 32 parameters
+and 256-byte display strings.
 
-### Testing the connection
+## Clip speed and frame holds
 
-```console
-node scripts/mcp-smoke.mjs --token <token>                  # list tools
-node scripts/mcp-smoke.mjs --token <token> --tool get_project_state
+Select a clip and open **Clip → Speed/Duration…** (Ctrl+R in the timeline), or the
+inspector's **Speed** section. Set 6.25–1600%, reverse, duration in project frames,
+or linear ramp keys (`frame:percent, frame:percent`). Source ranges stay fixed;
+linked audio follows using pitch-shifting varispeed. Optional ripple shifts
+trailing clips on unlocked tracks; without ripple, overlapping results fail.
+**Insert frame hold segment…** splits at the playhead and inserts a held picture
+with silent companion audio as one undo step. CLI: `animathio-cli set-clip-speed`
+and `animathio-cli freeze-frame`; MCP: `set_clip_speed` and `freeze_frame`.
+See [retiming rules and limits](docs/architecture.md#clip-retiming).
+
+## Auto-reframe
+
+**Clip, Auto reframe…** follows motion and visual contrast in selected video clips
+(or all videos when none are selected). Choose 9:16, 1:1 or 4:5 and tracking
+smoothness, then Reframe. Progress and Cancel run alongside the editor. No models
+or downloads are needed. The canvas changes in place; video position/scale keys
+are replaced in one undo step. Other layers retain their normalized transforms.
+CLI: `animathio-cli reframe landscape.amio -o vertical.amio --aspect 9:16`.
+MCP `auto_reframe` provides the same operation. See [limitations](docs/mcp.md#auto-reframe).
+
+![Auto-reframe settings and vertical video preview](docs/screenshots/editor-auto-reframe.png)
+
+## Automatic subtitles
+
+CapCut-style captions, fully local: **Clip, Generate subtitles…** transcribes the project's
+audio (or the selected clip, or the in/out range) with Whisper and adds the result as
+caption-bar clips on a new `Subtitles` track, as one undo step; progress and cancel live in
+a status-bar popover like the export queue. `animathio-cli transcribe talk.mp4 --srt
+talk.srt`, the `auto_subtitles` / `export_subtitles` / `import_subtitles` MCP tools and SRT
+or WebVTT import and export work the same way.
+
+Captions can be animated CapCut-style from Whisper's per-word timings: **Classic bar**,
+**Word highlight**, **Karaoke fill**, **Pop**, **One word at a time** and **Bold outline**
+(big type with a thick outline, centred for 9:16). Pick one in the Generate dialog, or in the
+inspector of a selected caption (it restyles every caption on the track as one undo step; font
+size, colours, top/middle/bottom position and words per line included). On the command line
+use `transcribe lesson.amio --style karaoke -o out.amio`; over MCP pass `style` to
+`auto_subtitles` or call `set_caption_style` on existing captions.
+
+![Generated subtitles on a Subtitles track with the progress popover](docs/screenshots/subtitles.png)
+
+The speech engine is whisper.cpp, built only with `--features whisper` on `animathio`
+and `animathio-cli` (needs cmake, a C++ compiler and libclang; the installers are built
+with it). No model ships with the app: pick `tiny` (78 MB), `base` (148 MB, default) or
+`small` (488 MB) and AniMathIO downloads it once on your confirmation, verifies its SHA-256 and
+stores it in the user data directory. The opt-in integration test runs the real tiny model:
+`cargo test -p animathio-transcribe --features whisper --test whisper_tiny -- --ignored`.
+
+## Screenshot
+
+The DaVinci-style editor shell (dark theme, media pool, viewer
+with transport controls, resizable inspector and vertically scrolling timeline):
+
+![AniMathIO 2.0 editor](docs/screenshots/editor-main.png)
+
+| Start screen | Export |
+| --- | --- |
+| ![Start screen](docs/screenshots/editor-start.png) | ![Export dialog](docs/screenshots/editor-export.png) |
+
+| Viewer and inspector | Timeline |
+| --- | --- |
+| ![Viewer and inspector](docs/screenshots/editor-viewer.png) | ![Timeline](docs/screenshots/editor-timeline.png) |
+
+| Multi-selection (rubber band, inspector summary) | Media pool (thumbnail grid) |
+| --- | --- |
+| ![Multi-selection](docs/screenshots/editor-multiselect.png) | ![Media pool](docs/screenshots/editor-media.png) |
+
+| Titles tab and a lower third (inspector text fields) | Export queue (status-bar popover) |
+| --- | --- |
+| ![Titles](docs/screenshots/editor-titles.png) | ![Export queue](docs/screenshots/editor-export-queue.png) |
+
+| Missing effect plugin warning (badge, inspector row, toast) |
+| --- |
+| ![Effect warning](docs/screenshots/editor-effect-warning.png) |
+
+| Media fit modes (Fit, Fill, Stretch, 1:1) and the Fit inspector control |
+| --- |
+| ![Media fit modes](docs/screenshots/media-fit-modes.png) |
+| ![Fit control in the inspector](docs/screenshots/editor-media-fit.png) |
+
+## Documentation
+
+- [`docs/architecture.md`](docs/architecture.md) — crate map, time model, engine rules and data flow
+- [`docs/plugins.md`](docs/plugins.md) — plugin authoring guide
+- [`docs/cli.md`](docs/cli.md) — every `animathio-cli` subcommand
+- [`docs/mcp.md`](docs/mcp.md) — control protocol and MCP tool surface
+- [`docs/migrating-from-v1.md`](docs/migrating-from-v1.md) — what maps from 1.x and what doesn't
+- [`docs/design.md`](docs/design.md) — visual design tokens and UI rules
+- [`docs/release-checklist.md`](docs/release-checklist.md) — what is left before the 2.0 swap
+- [`docs/release-notes-2.0.md`](docs/release-notes-2.0.md) — the 2.0 release notes draft
+
+## Installing
+
+There is no published 2.0 release yet. Until `v2.0.0` is tagged, get an installer from the
+`Package` workflow (Actions tab, run on `main`, artifacts `installers-linux`, `installers-windows`
+and `installers-macos`), or build from source below. Each installer ships both `animathio` and
+`animathio-cli` plus the first-party plugins:
+
+| Platform | Artifact | Notes |
+| --- | --- | --- |
+| Linux | `animathio_<version>_<arch>.AppImage` | the host provides the runtime libraries |
+| Linux (Debian/Ubuntu) | `animathio_<version>_amd64.deb` | declares its runtime libraries as dependencies |
+| Windows | `animathio_<version>_x64-setup.exe` | NSIS installer, unsigned (SmartScreen warns) |
+| macOS | `AniMathIO_<version>_<arch>.dmg` | unsigned and not notarized: right-click, Open |
+
+Verify with `animathio --version` and `animathio-cli --version`. The `Package` workflow also
+publishes a `SHA256SUMS` artifact covering every installer it built. Download the installers and
+that file into the same directory, then check them with:
+
+```bash
+sha256sum -c SHA256SUMS
 ```
 
-## Development build
+Provenance of CI-built installers is attested with `actions/attest-build-provenance`
+(`gh attestation verify <file> --repo AniMathIO/AniMathIO`).
 
-Clone project
+## Building
 
-```console
-git clone
+Stable Rust (edition 2024). On shared Linux machines keep the resource limits shown
+below; on other platforms run the same Cargo commands directly. Linux builds also
+need `libasound2-dev` (CI installs it) for the audio crate.
+
+Build the bundled WASM components before rendering text or shapes:
+
+```bash
+scripts/build-plugins.sh
 ```
 
-Install dependencies
+Debug binaries discover `target/plugins` relative to the executable. For an
+unpackaged release binary, set `ANIMATHIO_PLUGIN_DIR=target/plugins` explicitly.
+Installed packages discover the components in their bundled resource directories.
 
-```console
-cd AniMathIO
-npm install
+### The desktop editor
+
+```bash
+cargo run -p animathio                 # start screen with presets and recent projects
+cargo run -p animathio -- --sample     # open the shared sample project
+cargo run -p animathio -- file.amio    # open a project
+cargo run -p animathio -- --control    # also start the control socket (see docs/mcp.md)
 ```
 
-### Canvas build fix
+The preview renders on the GPU (Vello on wgpu) when an adapter is available and
+falls back to the CPU reference otherwise. Toggle it with **View → GPU preview**
+(persisted), or force it for one run with `ANIMATHIO_RENDER=cpu` or `ANIMATHIO_RENDER=gpu`.
+Export always uses the CPU renderer.
 
-Temporary fix for canvas build errors
+The editor is a thin GPUI shell over the command-only core. Playback, timeline
+editing, generated plugin controls and the control socket share the same model.
 
-```console
-# if canvas errors occur regardig node mismatch run the following line
-npm rebuild canvas --update-binary
+The title bar provides File/Edit/View/Playback/Tools/Clip/Help menus, project status, the control
+socket badge and Export. Drag panel dividers to resize; View toggles panel visibility.
+The layout and S/M/L timeline track heights persist between sessions.
+
+Ctrl+Alt+N creates a project (Cmd+Alt+N on macOS). Use Ctrl/Cmd with O/S/I/M
+for Open/Save/Import/Export and Z or Shift+Z for Undo/Redo. In the timeline, Ctrl/Cmd+K splits the selected clips at the
+playhead and Delete removes the selection; Shift+Delete ripple-deletes it (or the in/out
+range across all tracks when no clip is selected). Space, Left/Right, Up/Down
+and Home/End control playback, frame stepping, edit-point stepping and project bounds.
+J/K/L shuttle backward/stop/forward; repeated J/L doubles the speed up to 16x. Holding K
+while pressing J or L jogs at half speed. Audio follows the shuttle and stays the master
+clock: forward 1x/2x/4x/8x and reverse 1x/2x/4x are audible (varispeed, so pitch follows
+speed); faster rates are muted while video keeps pace.
+
+**Selection and clipboard.** Click selects a clip; Ctrl/Cmd+click toggles it, Shift+click
+adds the clips between it and the last-selected clip on the same track, and dragging a
+rubber band over empty track space (Shift/Ctrl extends the selection) selects every
+clip it touches. Ctrl/Cmd+A selects all, Esc clears (and first cancels a drag, menu or
+rename). The inspector shows the clip count, kinds, tracks and time span, and its
+Transform fields (plus Gain for all-audio selections) edit every selected clip at once.
+Dragging, nudging (Alt+Left/Right = 1 frame), deleting and splitting act on the
+whole selection as one undo step. Ctrl/Cmd+C/X copy/cut, Ctrl/Cmd+V pastes at the playhead
+on the original tracks (a missing, locked or occupied track gets a new one, so a paste
+never overwrites), and Ctrl/Cmd+Shift+/ duplicates the selection right after itself. The clip
+JSON is also written to the system clipboard, so it can be pasted into another project
+window.
+
+**Context menus.** Right-clicking a clip, track header or keyframe opens a menu whose items
+show their real keyboard shortcut (the same bindings as the menu bar and Help > Keyboard
+shortcuts), for example Cut, Copy, Duplicate, Split, Delete, Ripple delete and Unlink
+(Ctrl/Cmd+L also links unlinked selected clips).
+
+**Adding elements.** Text, shapes, LaTeX and graphs from the library (click a card, or drag
+it onto the timeline) are overlays: they land on the dropped row or the first free track above
+everything they overlap, and a new track is created when none is free, so you never have to
+move the playhead past existing media. Track and clip are one undo step. MCP `add_math` and
+`add_graph` do the same. A new formula starts at 14 % of the shorter frame edge, centred, so it reads
+the same on 16:9 and 9:16.
+
+**Viewer, inspector and media pool.** The selected visual clip shows an on-canvas
+transform gizmo: drag inside to move (snapping to the canvas centre and edges, with
+accent guide lines), drag a corner or edge handle to scale (Shift keeps the aspect
+ratio), drag the handle above the box to rotate (Shift snaps to 15 degrees). A small
+pill shows the live values. A drag previews without touching the history and lands as
+one undo step on release. The viewer header has the zoom menu, safe-area, rule-of-thirds
+and checkerboard toggles. The transport shows a large timecode (click it to type one),
+prev/next edit, frame step, the circular play button, loop, the shuttle-speed badge,
+the duration and a monitor-only volume (it never changes export). Inspector sections are
+collapsible cards with a reset button each. Drag a field label (Shift = fine, Ctrl =
+coarse) or the grip beside a value to scrub it as one undo step; 0 to 1 parameters also get a slider;
+every animatable property has a keyframe diamond with previous/next-key arrows. The
+media pool offers a grid or list, a search field, kind filter chips, per-card type
+badges, duration and resolution, audio waveforms, and hover-scrubbing of video posters.
+
+**Tracks.** Double-click a track name to rename it inline (Enter commits, Esc cancels).
+Drag a track header onto another to reorder, or use the header's right-click menu
+(Rename, Move up, Move down).
+
+**Ripple.** The toolbar link button (Tools → Ripple all tracks) switches ripple edits
+between "this track only" (default) and "all tracks". With all tracks, ripple delete and
+Ripple trim (B, or Ctrl+edge-drag) slide later clips on every unlocked track, never into
+a neighbouring clip; locked tracks stay put.
+
+I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Ctrl/Cmd+Shift+X clears them. The ruler highlights
+the range; looping uses it and export defaults to it. Select (V), Blade (C), Ripple
+trim (B), Rate Stretch (R), Slip (Y), Slide (U), Rolling Edit (N) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
+splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later clips
+on the same track as one undo step. S toggles snapping and an engaged snap draws an
+yellow line. The additional edit tools preserve source intervals (Rate Stretch),
+shift source in/out (Slip), compensate touching neighbours (Slide) or move a shared
+edit point (Rolling Edit). These edge tools also work at the fade-handle corners.
+Each drag is one undo step; the floating readout shows
+the delta, speed and source timecodes. Equals/minus zooms and backslash fits the timeline.
+Shift+Left/Right steps the playhead five frames; Ctrl/Cmd+Shift+K adds edits on all unlocked tracks.
+Q and W ripple-trim the previous/next edit to the playhead, Ctrl/Cmd+D applies the default
+transition (1 s fades) to the selection, Ctrl/Cmd+Shift+D to audio clips and Shift+D to both,
+and Ctrl/Cmd+G groups (links) a multi-selection. The full Premiere-style table lives in
+[docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md).
+Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
+tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
+waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
+clip to show its keyframe diamonds. Track headers have mute/solo/lock buttons and
+a horizontal gain slider (drag to adjust, double-click to reset to unity); a drag
+is one undo step. Use large tracks for the most detailed clip previews.
+
+Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
+`youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` and `portrait` presets (30 fps, CRF 18).
+Presets apply to an export snapshot, keeping project settings unchanged. Existing
+files require confirmation. Exports never block the editor: "Add to queue" or "Export now"
+snapshots the project into a job, and the Export queue popover (status bar, View menu) runs
+jobs one at a time with progress, ETA, cancel, show-in-folder/open and error text; toasts
+announce completion or failure.
+File → Project settings edits resolution, rational fps and background. Preferences
+(Ctrl/Cmd+,) saves the preview renderer, autosave interval (0 disables), default export
+folder, UI scale, density and reduced motion in the application config directory,
+separately from projects. Interface → UI scale defaults to the desktop's text scaling
+(KDE forceFontDPI/Xft.dpi, GNOME text-scaling-factor, Windows text-size slider), can be
+set to 80–200% in 10% steps and applies live; `ANIMATHIO_UI_SCALE=150` overrides it for
+a run.
+In custom dialogs, Enter runs the primary action and Escape cancels. Invalid values
+keep the form open and show an error inside it. Math source fields accept
+Shift+Enter for a new line.
+
+**Import media** (Ctrl/Cmd+I or the library's plus button) adds files to the library
+without inserting clips or changing the playhead. Drag a library card onto a timeline
+track to place it, or click it to add at the playhead. Use **Add track** in the timeline
+header to create an empty foreground layer at the top; adding a track is undoable.
+Foreground visual tracks appear above background tracks, with audio-only tracks below.
+Track headers, drops, selection and reorder gestures use this same display order; the
+project file keeps its existing back-to-front layer order. The ruler and marker lane
+stay fixed while track rows scroll vertically.
+Drop OS media files on the pool to import assets, or on a timeline track to import
+and place them at that position. Multiple files are placed consecutively. The Plugins
+tab's **Write on…** action replaces a selected LaTeX clip's reveal animation with
+0-to-1 keyframes over a chosen duration, in one undo step. Help → Keyboard shortcuts
+shows the registered bindings. Text fields support selection, paste and IME.
+
+### Titles and social formats
+
+The library's **Titles** tab offers eight animated compositions: centered title,
+title + subtitle, lower third, caption bar, chapter card, end card, kinetic word
+pop and math title. Double-click a card to add five seconds at the playhead, or
+drag it to a timeline position. The inspector exposes the linked composition's
+text fields. All layers move together and insertion undoes in one step.
+Thumbnails render on the CPU in the background and are cached per canvas size.
+Text/shapes plugins are required; math titles also need the LaTeX plugin.
+
+New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
+launcher. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
+another tile starts that format. The launcher, project settings and export dialog
+share 1080p, 4K, 9:16, square and 4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
+and `fields`; see [the control guide](docs/mcp.md#title-preset-library).
+
+### The CLI
+
+```bash
+cargo build -p animathio-cli --locked
+./target/debug/animathio-cli new-sample -o sample.amio
+./target/debug/animathio-cli validate sample.amio
+./target/debug/animathio-cli render sample.amio --frame 30 -o frame.png
+./target/debug/animathio-cli render sample.amio --time 1.25 --width 1280 --height 720 -o timed.png
+./target/debug/animathio-cli render-seq sample.amio --from 0 --to 90 -o frames/
 ```
 
-#### NOTE: If you want proper development you will need to follow the steps regarding the canvas build and install all the necessary dependencies
+`--frame`, `--from` and `--to` use zero-based project frame indices; sequence end is
+exclusive. `--time` accepts exact decimal seconds or integer ticks with a `ticks`
+suffix (705,600,000 ticks/second). Output uses the project's canvas size (640×360 when
+it is unset); `--width`/`--height` override it. See [`docs/cli.md`](docs/cli.md)
+for the full reference, including `export`, `import-media` and `mcp`.
 
-- [All platforms](https://github.com/Automattic/node-canvas/wiki)
-- [Windows](https://github.com/Automattic/node-canvas/wiki/Installation:-Windows)
+## Importing projects
 
-### Running the app
+Convert a v1 (Electron/TypeScript) `.animathio` project to a 2.0 `.amio` archive:
 
-```console
-# development mode
-npm run dev
-
-# production build
-npm run build
+```bash
+./target/debug/animathio-cli import-v1 project.animathio -o imported.amio
 ```
+
+Convert a Manim Community scene script to a `.amio` archive:
+
+```bash
+./target/debug/animathio-cli import-manim scene.py -o imported.amio
+./target/debug/animathio-cli import-manim scene.py --scene MyScene -o imported.amio
+```
+
+The Manim importer runs inside the `org.animathio.import-manim` plugin, so build the
+plugins first; it reads `ImageMobject` files only from the script's folder.
+
+Apply an animation preset to a clip from the command line:
+
+```bash
+./target/debug/animathio-cli animations list
+./target/debug/animathio-cli animations apply imported.amio --clip 1 --preset slide-in \
+    --duration 0.75 --option direction=top -o animated.amio
+```
+
+Both importers rebuild the project exclusively through `Command`s and print
+non-fatal warnings to stderr. What maps and what doesn't is documented in
+[`docs/migrating-from-v1.md`](docs/migrating-from-v1.md).
+
+Video imports include a linked companion audio clip when the file contains audio. Linked clips move, trim, split and delete together; use **Unlink** in the clip context menu to edit them independently. Headless import is available through MCP `add_media` or `animathio-cli import-media INPUT -o OUTPUT.amio`.
 
 ## Contributing
 
-We welcome contributions to AniMathIO. Please read our [contributing guidelines](./CONTRIBUTING.md) to get started.
+Pull requests target **`main`**. The 1.x Electron app is frozen in the read-only `legacy` branch. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and `AGENTS.md` for branch rules, automation and commands. Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
 
-## Star History
+## License
 
-[![Star History Chart](https://api.star-history.com/svg?repos=animathio/animathio&type=Date)](https://star-history.com/#animathio/animathio&Date)
+[MIT](LICENSE)
+
+Timeline markers and beat sync: press M to drop a coloured marker on the ruler at the
+playhead (Shift+M / Ctrl+Shift+M, or Cmd+Shift+M on macOS, jump to the next / previous
+marker). Click a flag to select it (Shift/Ctrl-click for several), drag to move the
+selection, double-click to edit a name, colour and note, press Delete to remove, the arrow
+keys to nudge by a frame, and Ctrl+C / Ctrl+V to copy and paste markers at the playhead
+(markers snap, and clips and the playhead snap to markers). Markers ride along with ripple
+edits and autocut. Clip > Markers and beat
+sync opens a panel that lists the markers, detects the tempo and beats of the project
+audio (or the selected clip) offline, adds markers at every beat, every Nth beat or the
+downbeats, and snaps the selected clips' cut points to beats and markers or splits
+them there, each as one undo step. The same actions are `animathio-cli markers` /
+`animathio-cli beats` and MCP `list_markers`, `add_marker`, `remove_marker`,
+`detect_beats` and `sync_cuts_to_beats`; `animathio-cli markers chapters`,
+`export --chapters` and MCP `export_chapters` write the markers as YouTube / WebVTT /
+FFmpeg chapter lists. See the [CLI reference](docs/cli.md#beats) and
+[MCP reference](docs/mcp.md#markers-and-beat-sync).
+
+![Timeline marker edited through the dialog and the Markers and beats panel](docs/screenshots/editor-markers.png)
+
+Automatic cuts for recordings are available through Clip > Automatic cuts,
+`animathio-cli autocut`, and MCP `propose_autocuts` / `apply_autocuts`. Review silence
+ranges on the timeline before applying one undoable linked audio/video ripple edit.
+Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see the
+[CLI reference](docs/cli.md#autocut) and [review rules](docs/mcp.md#automatic-cut-review).
+
+![Automatic cuts review panel with proposed silences shaded on the timeline](docs/screenshots/editor-autocut.png)
+
+Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto duck…,
+`animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks or clips,
+tune depth and attack/release, and review the ducked spans on the timeline first; see the
+[CLI reference](docs/cli.md#duck) and [rules](docs/mcp.md#auto-ducking).
+Only audio/video selections default to the voice source. The review panel scrolls
+in shorter windows so its actions stay reachable. Clip targets show the asset name,
+track name and start timecode, so repeated uses of the same asset remain identifiable.
+
+In clip and track audio-effect cards, Denoise keeps its sixteen learned noise-band
+controls in an **Advanced** section, collapsed initially. Expanding it preserves the
+usual parameter editing and keyframe controls.
+
+The launcher lists five bundled project templates and saved user templates, with CPU
+thumbnail cards. Creating one opens Fill placeholders for text and picked media;
+media supports cover/contain and replacement is one undoable batch. File > Save as
+template stores the current project and selected placeholder clips in the user data
+library; user cards have Delete. The CLI keeps `templates list` and
+`new --template quote -o quote.amio`; MCP adds `list_templates` and
+`create_from_template`. Template card hover lifts use the shared surface tokens.
+
+The launcher, editor title bar and application icons use the restored original
+AniMathIO logo, preserved in `apps/animathio/assets/brand.svg`. UI actions keep
+the violet-to-cyan accent. See [the design guide](docs/design.md).
+
+[Keyboard shortcuts](docs/keyboard-shortcuts.md) — Premiere Pro defaults.
+
+The library's **Math** tab provides preview cards for LaTeX, text, points, lines,
+vectors, polygons, plots, circles, ellipses and Cartesian/polar grids. Click a
+card for typed fields and a live preview, use its plus button for defaults, or
+drag it onto the timeline. Double-click an existing object to edit it. LaTeX has
+snippets, formula templates and a Write on preset. See the
+[math workflow](docs/architecture.md#mathematical-object-workflow) and the
+[CLI guide](docs/cli.md) for automation equivalents.
+
+![Math library](docs/screenshots/editor-math-panel.png)
+![Math object editor](docs/screenshots/editor-math-dialog.png)
+
+## Reproducible math showcases
+
+[Three short math explainers](examples/showcase/README.md) exercise the public CLI/MCP
+authoring surface, CPU golden frames and H.264/AAC export offline. Each includes
+landscape and vertical layouts; the opt-in `scripts/showcase-export.sh` produces
+full deliveries using checksum-pinned public-domain recordings.
+
+Scene detection: **Clip → Split at scene changes…** reviews sampled hard cuts with thumbnails and toggles, then splits linked video/audio or adds markers in one undo step. CLI `scenes` and headless MCP expose the same analysis.

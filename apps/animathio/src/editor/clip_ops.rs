@@ -1,0 +1,481 @@
+//! Multi-selection, clipboard, grouped edits and track management.
+//!
+//! The view state lives on [`Editor`]; every decision that does not need a window
+//! is planned by the pure [`crate::selection`], [`crate::clipboard`] and
+//! [`crate::ripple`] modules, so each edit here is one `Command` (usually a
+//! `Batch`) and therefore one undo step.
+
+use gpui_component::input::{InputEvent, InputState};
+
+use super::*;
+
+impl Editor {
+    /// Expose the core's track creation in the timeline, including after the
+    /// last track was undone. Later model tracks composite over earlier ones.
+    pub(super) fn add_timeline_track(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self
+            .project
+            .tracks()
+            .iter()
+            .map(|track| track.id().0)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+        else {
+            self.error = Some("Cannot add another track: track IDs exhausted".into());
+            cx.notify();
+            return;
+        };
+        self.execute(
+            &Command::AddTrack {
+                track: Track::new(TrackId(id), format!("Track {id}")),
+                index: self.project.tracks().len(),
+            },
+            cx,
+        );
+    }
+
+    /// The reconciled selection. The primary clip always belongs to it, and a
+    /// selection set that went stale (the primary was set directly) collapses to
+    /// the primary alone.
+    pub(super) fn selected_ids(&self) -> BTreeSet<ClipId> {
+        let Some(primary) = self.selected.filter(|id| self.find_clip(*id).is_some()) else {
+            return BTreeSet::new();
+        };
+        let ids = selection::existing(&self.project, &self.selection);
+        if ids.contains(&primary) {
+            ids
+        } else {
+            BTreeSet::from([primary])
+        }
+    }
+
+    /// Replace the selection. `primary` defaults to the first member.
+    pub(super) fn set_selection(
+        &mut self,
+        ids: BTreeSet<ClipId>,
+        primary: Option<ClipId>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selection != ids || self.selected != primary {
+            self.commit_pending_inspector_inputs(cx);
+        }
+        let ids = selection::existing(&self.project, &ids);
+        let primary = primary
+            .filter(|id| ids.contains(id))
+            .or_else(|| ids.iter().next().copied());
+        if self.selected != primary {
+            self.selected_field = None;
+            self.selected_keyframe = None;
+        }
+        self.audio_inspector_track = None;
+        self.selected = primary;
+        self.selection = ids;
+        if self.selected.is_some() {
+            self.marker_selection.clear();
+        }
+    }
+
+    pub(super) fn select_only(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.set_selection(BTreeSet::from([id]), Some(id), cx);
+    }
+
+    pub(super) fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.commit_pending_inspector_inputs(cx);
+        self.marker_selection.clear();
+        self.audio_inspector_track = None;
+        self.selected = None;
+        self.selection.clear();
+        self.selected_field = None;
+        self.selected_keyframe = None;
+    }
+
+    /// Drop clips that no longer exist after an edit, keeping a primary clip.
+    pub(super) fn prune_selection(&mut self) {
+        if self.selected.is_none() {
+            self.selection.clear();
+            return;
+        }
+        let mut ids = selection::existing(&self.project, &self.selection);
+        let primary = self.selected.filter(|id| self.find_clip(*id).is_some());
+        match primary {
+            Some(primary) if !ids.contains(&primary) => ids = BTreeSet::from([primary]),
+            Some(_) => {}
+            None => self.selected = ids.iter().next().copied(),
+        }
+        self.selection = ids;
+    }
+
+    pub(super) fn select_all(&mut self, cx: &mut Context<Self>) {
+        let ids = selection::all_clips(&self.project);
+        let primary = self.selected;
+        self.set_selection(ids, primary, cx);
+        cx.notify();
+    }
+
+    /// Escape: close transient UI first, then drop the selection.
+    pub(super) fn escape(&mut self, cx: &mut Context<Self>) {
+        if self.track_rename.is_some() {
+            self.finish_track_rename(false, cx);
+        } else if self.context_menu.take().is_some() {
+        } else if self.gesture.take().is_some() || self.keyframe_drag.take().is_some() {
+            self.snap_line = None;
+        } else {
+            self.clear_selection(cx);
+        }
+        cx.notify();
+    }
+
+    // ---- clipboard -------------------------------------------------------
+
+    /// Copy the selection to the in-app clipboard and the system clipboard.
+    pub(super) fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.selected_ids().is_empty()
+            && let Some(board) =
+                crate::marker_edit::MarkerBoard::copy(&self.project, &self.marker_selection)
+        {
+            self.marker_clipboard = Some(board);
+            self.clipboard = None;
+            cx.notify();
+            return true;
+        }
+        let Some(board) = Clipboard::copy_linked(&self.project, &self.selected_ids()) else {
+            return false;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(board.to_json()));
+        self.clipboard = Some(board);
+        self.marker_clipboard = None;
+        cx.notify();
+        true
+    }
+
+    pub(super) fn cut_selection(&mut self, cx: &mut Context<Self>) {
+        if self.copy_selection(cx) {
+            self.delete_selected(cx);
+        }
+    }
+
+    /// The system clipboard if it holds our clips, else the in-app copy.
+    fn clipboard_contents(&self, cx: &App) -> Option<Clipboard> {
+        cx.read_from_clipboard()
+            .and_then(|item| item.text())
+            .and_then(|text| Clipboard::from_json(&text))
+            .or_else(|| self.clipboard.clone())
+    }
+
+    pub(super) fn paste_clips(&mut self, cx: &mut Context<Self>) {
+        if let Some(markers) = self.marker_clipboard.clone() {
+            if let Some((command, created)) = markers.paste(&self.project, self.position)
+                && self.try_execute(&command, cx)
+            {
+                self.clear_selection(cx);
+                self.marker_selection = created.into_iter().collect();
+                cx.notify();
+            }
+            return;
+        }
+        let Some(board) = self.clipboard_contents(cx) else {
+            return;
+        };
+        let at = self.position;
+        self.apply_placement(|project, next| board.paste(project, at, next), cx);
+    }
+
+    /// Duplicate the selection right after itself.
+    pub(super) fn duplicate_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(board) = Clipboard::copy_linked(&self.project, &self.selected_ids()) else {
+            return;
+        };
+        self.apply_placement(|project, next| board.duplicate(project, next), cx);
+    }
+
+    /// Run a planner that allocates fresh ids, apply its command and select the
+    /// clips it created.
+    fn apply_placement(
+        &mut self,
+        plan: impl FnOnce(&Project, &mut dyn FnMut() -> u64) -> Option<(Command, BTreeSet<ClipId>)>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut next = self.next_id;
+        let mut allocate = || {
+            let id = next;
+            next = next.saturating_add(1);
+            id
+        };
+        let planned = plan(&self.project, &mut allocate);
+        self.next_id = next;
+        let Some((command, created)) = planned else {
+            return;
+        };
+        if self.try_execute(&command, cx) {
+            self.set_selection(created, None, cx);
+            cx.notify();
+        }
+    }
+
+    // ---- grouped edits ---------------------------------------------------
+
+    /// Delete the whole selection as one undo step.
+    pub(super) fn delete_selected(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selected_ids();
+        if ids.is_empty()
+            && let Some(command) =
+                crate::marker_edit::delete_command(&self.project, &self.marker_selection)
+        {
+            if self.try_execute(&command, cx) {
+                self.marker_selection.clear();
+            }
+            return;
+        }
+        let Some(command) = selection::delete_command(&self.project, &ids) else {
+            return;
+        };
+        if self.try_execute(&command, cx) {
+            self.clear_selection(cx);
+        }
+    }
+
+    /// Delete the selection and close the gaps, or ripple-delete the marked range
+    /// when nothing is selected.
+    pub(super) fn ripple_delete_selection(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selected_ids();
+        let command = if ids.is_empty() {
+            let range = self
+                .marks
+                .marked()
+                .then(|| {
+                    self.marks
+                        .range(animathio_export::duration(&self.project).0)
+                })
+                .flatten();
+            editing::ripple_delete_command(None, range, self.marker_ripple)
+        } else {
+            ripple::delete_command(&self.project, &ids, self.ripple_scope, self.marker_ripple)
+        };
+        if let Some(command) = command
+            && self.try_execute(&command, cx)
+        {
+            self.clear_selection(cx);
+        }
+    }
+
+    /// Nudge the selection by `frames` (negative = earlier). Returns whether there
+    /// was a selection to nudge, so callers can fall back to moving the playhead.
+    pub(super) fn nudge_selection(&mut self, frames: i64, cx: &mut Context<Self>) -> bool {
+        let ids = self.selected_ids();
+        if ids.is_empty() {
+            if self.marker_selection.is_empty() {
+                return false;
+            }
+            let rate = self.project.frame_rate();
+            if let Ok(span) = rate.frame_to_time(frames.abs(), Rounding::Nearest)
+                && let Some(command) = crate::marker_edit::move_command(
+                    &self.project,
+                    &self.marker_selection,
+                    span.0 * frames.signum(),
+                )
+            {
+                self.try_execute(&command, cx);
+            }
+            return true;
+        }
+        let rate = self.project.frame_rate();
+        if let Ok(span) = rate.frame_to_time(frames.abs(), Rounding::Nearest)
+            && let Some(command) =
+                selection::move_command(&self.project, &ids, span.0 * frames.signum(), 0)
+        {
+            self.try_execute(&command, cx);
+        }
+        true
+    }
+
+    pub(super) fn toggle_marker_ripple(&mut self, cx: &mut Context<Self>) {
+        self.marker_ripple = if self.marker_ripple == animathio_core::MarkerRipple::Stay {
+            animathio_core::MarkerRipple::Auto
+        } else {
+            animathio_core::MarkerRipple::Stay
+        };
+        self.notices.push(crate::style::Toast::info(
+            if self.marker_ripple == animathio_core::MarkerRipple::Stay {
+                "Markers stay put during ripple edits"
+            } else {
+                "Markers follow ripple edits"
+            },
+        ));
+        cx.notify();
+    }
+
+    pub(super) fn toggle_ripple_scope(&mut self, cx: &mut Context<Self>) {
+        self.ripple_scope = self.ripple_scope.toggled();
+        self.notices
+            .push(crate::style::Toast::info(self.ripple_scope.label()));
+        cx.notify();
+    }
+
+    /// Delete one clip, or the whole selection when it is part of one.
+    pub(super) fn delete_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        if self.selected_ids().contains(&id) {
+            self.delete_selected(cx);
+        } else {
+            self.try_execute(&Command::RemoveClip { id }, cx);
+        }
+    }
+
+    /// Duplicate one clip, or the whole selection when it is part of one.
+    pub(super) fn duplicate_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.adopt_clip(id, cx);
+        self.duplicate_selection(cx);
+    }
+
+    /// Make a context-menu target part of the selection (keeping an existing
+    /// multi-selection that already contains it).
+    fn adopt_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        if !self.selected_ids().contains(&id) {
+            self.select_only(id, cx);
+        }
+    }
+
+    pub(super) fn copy_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.adopt_clip(id, cx);
+        self.copy_selection(cx);
+    }
+
+    pub(super) fn cut_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.adopt_clip(id, cx);
+        self.cut_selection(cx);
+    }
+
+    pub(super) fn ripple_delete_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {
+        self.adopt_clip(id, cx);
+        self.ripple_delete_selection(cx);
+    }
+
+    // ---- tracks ----------------------------------------------------------
+
+    pub(super) fn start_track_rename(
+        &mut self,
+        id: TrackId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(name) = self
+            .project
+            .tracks()
+            .iter()
+            .find(|track| track.id() == id)
+            .map(|track| track.name().to_owned())
+        else {
+            return;
+        };
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this, _state, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                    this.finish_track_rename(true, cx);
+                }
+            },
+        );
+        let focus = input.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        self.context_menu = None;
+        self.track_rename = Some(TrackRename {
+            id,
+            input,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
+    /// End an inline rename, committing the typed name as a `RenameTrack`.
+    pub(super) fn finish_track_rename(&mut self, commit: bool, cx: &mut Context<Self>) {
+        let Some(rename) = self.track_rename.take() else {
+            return;
+        };
+        if commit {
+            let name = rename.input.read(cx).value().trim().to_owned();
+            let unchanged = self
+                .project
+                .tracks()
+                .iter()
+                .find(|track| track.id() == rename.id)
+                .is_none_or(|track| track.name() == name);
+            if !name.is_empty() && !unchanged {
+                self.try_execute(
+                    &Command::RenameTrack {
+                        id: rename.id,
+                        name,
+                    },
+                    cx,
+                );
+            }
+        }
+        cx.notify();
+    }
+
+    /// Move a track to `index` (its position after the move).
+    pub(super) fn move_track_to(&mut self, id: TrackId, index: usize, cx: &mut Context<Self>) {
+        if self
+            .project
+            .tracks()
+            .iter()
+            .position(|track| track.id() == id)
+            .is_some_and(|from| from != index)
+        {
+            self.try_execute(&Command::MoveTrack { id, index }, cx);
+        }
+    }
+
+    /// Move `id` to the display row `to`, staying inside its visual/audio section.
+    pub(super) fn move_track_to_row(&mut self, id: TrackId, to: usize, cx: &mut Context<Self>) {
+        let tracks = timeline::display_tracks(&self.project);
+        let Some(from) = tracks.iter().position(|track| track.id() == id) else {
+            return;
+        };
+        let last = tracks.len().saturating_sub(1);
+        let (lo, hi) = display_section(&tracks, from);
+        let to = to.clamp(lo, hi).min(last);
+        if to == from {
+            return;
+        }
+        let index = self
+            .project
+            .tracks()
+            .iter()
+            .position(|track| track.id() == tracks[to].id());
+        if let Some(index) = index {
+            self.move_track_to(id, index, cx);
+        }
+    }
+
+    /// Move one visual row, keeping visual and audio stacks separate.
+    pub(super) fn move_track_by(&mut self, id: TrackId, delta: isize, cx: &mut Context<Self>) {
+        let tracks = timeline::display_tracks(&self.project);
+        let Some(from) = tracks.iter().position(|track| track.id() == id) else {
+            return;
+        };
+        let last = tracks.len().saturating_sub(1);
+        let row = if delta < 0 {
+            from.saturating_sub(delta.unsigned_abs())
+        } else {
+            from.saturating_add(delta.unsigned_abs()).min(last)
+        };
+        self.move_track_to_row(id, row, cx);
+    }
+}
+
+/// The inclusive display-row bounds of the section containing `row`: video rows stay above
+/// the first audio-only row, audio rows below it.
+pub(super) fn display_section(tracks: &[&Track], row: usize) -> (usize, usize) {
+    let boundary = tracks
+        .iter()
+        .position(|track| timeline::is_audio_only(track))
+        .unwrap_or(tracks.len());
+    let last = tracks.len().saturating_sub(1);
+    if row < boundary {
+        (0, boundary.saturating_sub(1))
+    } else {
+        (boundary.min(last), last)
+    }
+}

@@ -1,0 +1,696 @@
+//! Exercise the installed command surface and the shared preview/export render path.
+use animathio_format::{Limits, read_amio, write_json};
+use std::{
+    fs::{self, File},
+    path::Path,
+    process::{Command, Output},
+};
+use tempfile::tempdir;
+
+/// A minimal valid 1x1 transparent PNG (67 bytes).
+const MINIMAL_PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+];
+
+fn cli(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .args(args)
+        .env(
+            "ANIMATHIO_PLUGIN_DIR",
+            animathio_plugin_host::test_support::plugin_dir(),
+        )
+        .output()
+        .unwrap()
+}
+fn ok(args: &[&str]) {
+    let output = cli(args);
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+fn path(path: &Path) -> &str {
+    path.to_str().unwrap()
+}
+#[test]
+fn sample_archive_validates_and_json_and_frame_time_inputs_match() {
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    ok(&["validate", path(&archive)]);
+    let bundle = read_amio(File::open(&archive).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 6);
+    assert!(
+        bundle
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .all(|c| !c.animations.is_empty())
+    );
+    let json = dir.path().join("project.json");
+    write_json(File::create(&json).unwrap(), &bundle.project).unwrap();
+    fs::create_dir(dir.path().join("assets")).unwrap();
+    for (id, bytes) in &bundle.assets {
+        fs::write(dir.path().join("assets").join(id.as_str()), bytes).unwrap();
+    }
+    ok(&["validate", path(&json)]);
+    let a = dir.path().join("frame.png");
+    let b = dir.path().join("time.png");
+    ok(&[
+        "render",
+        path(&archive),
+        "--frame",
+        "30",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&a),
+    ]);
+    ok(&[
+        "render",
+        path(&json),
+        "--time",
+        "1.0",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&b),
+    ]);
+    assert_eq!(fs::read(&a).unwrap(), fs::read(&b).unwrap());
+    let mut ctx = animathio_render::RenderCtx::default();
+    for (id, bytes) in bundle.assets {
+        ctx.resources.insert(id, bytes).unwrap();
+    }
+    let frame = animathio_render::render(
+        &animathio_plugin_host::test_support::resolve(
+            &animathio_core::evaluate(
+                &bundle.project,
+                animathio_core::Time(animathio_core::TICKS_PER_SECOND),
+            ),
+            (160, 90),
+        ),
+        &mut ctx,
+        (160, 90),
+    )
+    .unwrap();
+    let mut expected = Vec::new();
+    frame.write_png(&mut expected).unwrap();
+    assert_eq!(fs::read(&a).unwrap(), expected);
+}
+#[test]
+fn sequence_steps_the_same_path_and_uses_exclusive_end() {
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    let sequence = dir.path().join("sequence");
+    ok(&[
+        "render-seq",
+        path(&archive),
+        "--from",
+        "29",
+        "--to",
+        "32",
+        "--width",
+        "64",
+        "--height",
+        "36",
+        "-o",
+        path(&sequence),
+    ]);
+    assert_eq!(fs::read_dir(&sequence).unwrap().count(), 3);
+    let single = dir.path().join("single.png");
+    ok(&[
+        "render",
+        path(&archive),
+        "--frame",
+        "30",
+        "--width",
+        "64",
+        "--height",
+        "36",
+        "-o",
+        path(&single),
+    ]);
+    assert_eq!(
+        fs::read(&single).unwrap(),
+        fs::read(sequence.join("frame_000030.png")).unwrap()
+    );
+    assert_ne!(
+        fs::read(sequence.join("frame_000029.png")).unwrap(),
+        fs::read(sequence.join("frame_000031.png")).unwrap()
+    );
+}
+#[test]
+fn invalid_arguments_and_projects_fail_without_creating_output() {
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    let output = dir.path().join("output");
+    for args in [
+        vec!["render", path(&archive), "-o", path(&output)],
+        vec![
+            "render",
+            path(&archive),
+            "--frame",
+            "1",
+            "--time",
+            "1",
+            "-o",
+            path(&output),
+        ],
+        vec![
+            "render",
+            path(&archive),
+            "--time",
+            "-1",
+            "-o",
+            path(&output),
+        ],
+        vec![
+            "render",
+            path(&archive),
+            "--frame",
+            "0",
+            "--width",
+            "0",
+            "-o",
+            path(&output),
+        ],
+        vec![
+            "render-seq",
+            path(&archive),
+            "--from",
+            "2",
+            "--to",
+            "1",
+            "-o",
+            path(&output),
+        ],
+        vec![
+            "render-seq",
+            path(&archive),
+            "--to",
+            "2",
+            "--height",
+            "0",
+            "-o",
+            path(&output),
+        ],
+    ] {
+        assert!(!cli(&args).status.success(), "accepted {args:?}");
+        assert!(!output.exists());
+    }
+    let invalid = dir.path().join("bad.json");
+    fs::write(&invalid, b"{}").unwrap();
+    assert!(!cli(&["validate", path(&invalid)]).status.success());
+    let bundle = read_amio(File::open(&archive).unwrap(), Limits::default()).unwrap();
+    write_json(File::create(&invalid).unwrap(), &bundle.project).unwrap();
+    fs::create_dir(dir.path().join("assets")).unwrap();
+    for id in bundle.assets.keys() {
+        fs::write(dir.path().join("assets").join(id.as_str()), b"tampered").unwrap();
+    }
+    assert!(!cli(&["validate", path(&invalid)]).status.success());
+}
+
+#[test]
+fn import_v1_writes_a_valid_archive() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("old.animathio");
+    let output = dir.path().join("out.amio");
+    // Uncompressed v1 JSON (the importer also accepts the pre-deflate format)
+    // with a single text element, which needs no embedded media.
+    fs::write(
+        &input,
+        br##"{
+            "backgroundColor": "#111111",
+            "editorElements": [{
+                "id": "text-1",
+                "type": "text",
+                "name": "Text 1",
+                "placement": { "x": 10, "y": 20, "width": 200, "height": 40, "rotation": 0, "scaleX": 1, "scaleY": 1 },
+                "timeFrame": { "start": 0, "end": 2000 },
+                "properties": { "text": "hello", "fontSize": 24, "fontWeight": 400, "color": "#ffffff" }
+            }],
+            "maxTime": 3000,
+            "animations": [],
+            "fps": 30,
+            "canvas_width": 800,
+            "canvas_height": 600,
+            "mediaFiles": []
+        }"##,
+    )
+    .unwrap();
+    ok(&["import-v1", path(&input), "-o", path(&output)]);
+    ok(&["validate", path(&output)]);
+    ok(&[
+        "render",
+        path(&output),
+        "--frame",
+        "1",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&dir.path().join("import.png")),
+    ]);
+    ok(&[
+        "export",
+        path(&output),
+        "--to",
+        "0.1",
+        "-o",
+        path(&dir.path().join("import.mp4")),
+    ]);
+    let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 1);
+    assert_eq!(bundle.project.width(), 800);
+    assert_eq!(bundle.project.height(), 600);
+    assert_eq!(bundle.project.background(), [17, 17, 17, 255]);
+}
+
+#[test]
+fn import_manim_writes_a_valid_archive_and_selects_scenes() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("scene.py");
+    let output = dir.path().join("out.amio");
+    fs::write(
+        &input,
+        r#"
+from manim import *
+
+class First(Scene):
+    def construct(self):
+        self.wait(1)
+
+class Second(Scene):
+    def construct(self):
+        title = Text("hello", color=WHITE)
+        self.play(Write(title), run_time=2)
+        self.wait(1)
+"#,
+    )
+    .unwrap();
+
+    ok(&[
+        "import-manim",
+        path(&input),
+        "--scene",
+        "Second",
+        "-o",
+        path(&output),
+    ]);
+    ok(&["validate", path(&output)]);
+    ok(&[
+        "render",
+        path(&output),
+        "--frame",
+        "1",
+        "--width",
+        "160",
+        "--height",
+        "90",
+        "-o",
+        path(&dir.path().join("import.png")),
+    ]);
+    ok(&[
+        "export",
+        path(&output),
+        "--to",
+        "0.1",
+        "-o",
+        path(&dir.path().join("import.mp4")),
+    ]);
+    let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 1);
+    assert_eq!(bundle.project.width(), 1920);
+    assert_eq!(bundle.project.height(), 1080);
+    assert_eq!(bundle.project.background(), [0, 0, 0, 255]);
+    assert_eq!(
+        bundle.project.duration(),
+        animathio_core::Time(animathio_core::TICKS_PER_SECOND * 3)
+    );
+    apply_animation_presets(dir.path(), &output);
+}
+
+/// Apply a preset to the first clip of an imported archive through the CLI.
+fn apply_animation_presets(dir: &Path, output: &Path) {
+    let bundle = read_amio(File::open(output).unwrap(), Limits::default()).unwrap();
+    let clip = *bundle.project.tracks()[0].clips().keys().next().unwrap();
+    let listed = cli(&["animations", "list"]);
+    assert!(listed.status.success());
+    let presets: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert!(
+        presets
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["preset"] == "typewriter-in")
+    );
+    let animated = dir.join("animated.amio");
+    ok(&[
+        "animations",
+        "apply",
+        path(output),
+        "--clip",
+        &clip.0.to_string(),
+        "--preset",
+        "slide-in",
+        "--duration",
+        "0.5",
+        "--option",
+        "direction=bottom",
+        "--option",
+        "fade=true",
+        "-o",
+        path(&animated),
+    ]);
+    let after = read_amio(File::open(&animated).unwrap(), Limits::default()).unwrap();
+    let clip = &after.project.tracks()[0].clips()[&clip];
+    assert!(clip.animations.iter().any(
+        |a| a.target == animathio_core::Target::Transform(animathio_core::TransformProperty::Y)
+    ));
+    let failed = cli(&[
+        "animations",
+        "apply",
+        path(output),
+        "--clip",
+        "999",
+        "--preset",
+        "fade-in",
+        "-o",
+        path(&animated),
+    ]);
+    assert!(!failed.status.success());
+}
+
+#[test]
+fn import_manim_reports_embedded_images() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("scene.py");
+    let output = dir.path().join("out.amio");
+    fs::write(dir.path().join("photo.png"), MINIMAL_PNG).unwrap();
+    fs::write(
+        &input,
+        r#"
+class S(Scene):
+    def construct(self):
+        img = ImageMobject("photo.png")
+        self.add(img)
+        self.wait(1)
+"#,
+    )
+    .unwrap();
+
+    let out = cli(&["import-manim", path(&input), "-o", path(&output)]);
+    assert!(
+        out.status.success(),
+        "{}:
+{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("info:"), "expected an info line: {stderr}");
+    assert!(
+        stderr.contains("photo.png"),
+        "expected the embedded file name: {stderr}"
+    );
+}
+
+#[test]
+fn export_creates_missing_parents_and_never_overwrites_silently() {
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    let output = dir.path().join("deep/nested/clip.mp4");
+    let base = ["export", path(&archive), "--to", "0.5"];
+
+    let mut args = base.to_vec();
+    args.extend(["-o", path(&output)]);
+    ok(&args);
+    assert!(output.is_file());
+    // Only the finished MP4 is in the generated directory: no temp file survives.
+    let entries: Vec<_> = fs::read_dir(output.parent().unwrap()).unwrap().collect();
+    assert_eq!(entries.len(), 1);
+    let original = fs::read(&output).unwrap();
+
+    let rejected = cli(&args);
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("already exists"), "{stderr}");
+    assert_eq!(fs::read(&output).unwrap(), original);
+
+    let mut args = base.to_vec();
+    args.extend(["-o", path(&output), "--overwrite"]);
+    ok(&args);
+    assert!(output.is_file());
+}
+
+#[test]
+fn import_media_preserves_companion_audio_and_video_only_sources() {
+    use animathio_core::{ClipKind, FrameRate};
+    use animathio_media::{EncoderConfig, Mp4Encoder, VideoConfig};
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source.mp4");
+    let output = dir.path().join("import.amio");
+    fs::write(
+        &source,
+        include_bytes!("../../../crates/media/tests/fixtures/sample.mp4"),
+    )
+    .unwrap();
+    ok(&[
+        "import-media",
+        source.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+    ]);
+    let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+    let clips: Vec<_> = bundle
+        .project
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips().values())
+        .collect();
+    assert_eq!(clips.len(), 2);
+    assert!(matches!(clips[0].kind, ClipKind::Video(_)));
+    assert!(matches!(clips[1].kind, ClipKind::Audio(_)));
+    assert_eq!(clips[0].range, clips[1].range);
+    assert_eq!(clips[0].link_group, clips[1].link_group);
+    assert!(clips[0].link_group.is_some());
+    let mut encoder = Mp4Encoder::new(EncoderConfig::video_only(VideoConfig::new(
+        16,
+        16,
+        FrameRate::new(30, 1).unwrap(),
+    )))
+    .unwrap();
+    encoder.encode_video_frame(&[255; 16 * 16 * 4]).unwrap();
+    fs::write(&source, encoder.finish().unwrap()).unwrap();
+    ok(&[
+        "import-media",
+        source.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+    ]);
+    let bundle = read_amio(File::open(output).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.tracks().len(), 1);
+    assert_eq!(bundle.project.tracks()[0].clips().len(), 1);
+}
+
+#[test]
+fn markers_list_add_remove_and_beats_errors_without_audio() {
+    let dir = tempdir().unwrap();
+    let project = dir.path().join("sample.amio");
+    ok(&["new-sample", "-o", path(&project)]);
+    ok(&[
+        "markers",
+        path(&project),
+        "add",
+        "--time",
+        "1.5",
+        "--name",
+        "Drop",
+        "--color",
+        "red",
+        "--note",
+        "chorus",
+    ]);
+    ok(&["markers", path(&project), "add", "--time", "0.5"]);
+    let listed = cli(&["markers", path(&project), "list"]);
+    assert!(listed.status.success());
+    let markers: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(markers.as_array().unwrap().len(), 2);
+    assert_eq!(markers[0]["seconds"], 0.5, "sorted by time");
+    assert_eq!(markers[1]["name"], "Drop");
+    assert_eq!(markers[1]["color"], "red");
+    // The saved archive is schema 5 and loads with its markers.
+    let bundle = read_amio(File::open(&project).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.markers().len(), 2);
+
+    // Bad colour, duplicate-free ids and removal.
+    assert!(
+        !cli(&[
+            "markers",
+            path(&project),
+            "add",
+            "--time",
+            "1",
+            "--color",
+            "magenta"
+        ])
+        .status
+        .success()
+    );
+    ok(&["markers", path(&project), "remove", "2"]);
+    assert!(
+        !cli(&["markers", path(&project), "remove", "2"])
+            .status
+            .success()
+    );
+    let bundle = read_amio(File::open(&project).unwrap(), Limits::default()).unwrap();
+    assert_eq!(bundle.project.markers().len(), 1);
+
+    // The sample has no audio, so beat detection fails cleanly and changes nothing.
+    let before = fs::read(&project).unwrap();
+    let beats = cli(&["beats", path(&project), "--add-markers"]);
+    assert!(!beats.status.success());
+    assert_eq!(fs::read(&project).unwrap(), before);
+}
+
+#[test]
+fn v1_serializer_corpus_imports_and_renders() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/import-v1/tests/fixtures");
+    let dir = tempdir().unwrap();
+    let mut count = 0;
+    for entry in fs::read_dir(fixtures).unwrap() {
+        let input = entry.unwrap().path();
+        if input.extension().and_then(|s| s.to_str()) != Some("animathio") {
+            continue;
+        }
+        count += 1;
+        let output = dir.path().join(format!("{count}.amio"));
+        ok(&["import-v1", path(&input), "-o", path(&output)]);
+        ok(&["validate", path(&output)]);
+        for frame in [0, 15, 60] {
+            ok(&[
+                "render",
+                path(&output),
+                "--frame",
+                &frame.to_string(),
+                "--width",
+                "160",
+                "--height",
+                "90",
+                "-o",
+                path(&dir.path().join(format!("{count}-{frame}.png"))),
+            ]);
+        }
+        if [
+            "media-effects-animations",
+            "unicode-styles",
+            "manim-translated",
+        ]
+        .iter()
+        .any(|name| input.file_stem().unwrap() == *name)
+        {
+            let golden = input.with_extension("png");
+            let actual = dir.path().join(format!("{count}-15.png"));
+            if std::env::var_os("UPDATE_GOLDEN").is_some() {
+                fs::copy(&actual, &golden).unwrap();
+            }
+            let expected = image::open(&golden).unwrap().into_rgba8();
+            let actual = image::open(actual).unwrap().into_rgba8();
+            assert_eq!(actual.dimensions(), expected.dimensions());
+            assert!(
+                actual
+                    .as_raw()
+                    .iter()
+                    .zip(expected.as_raw())
+                    .all(|(a, b)| a.abs_diff(*b) <= 2),
+                "{}",
+                golden.display()
+            );
+        }
+        if input.file_stem().unwrap() == "media-effects-animations" {
+            let bundle = read_amio(File::open(&output).unwrap(), Limits::default()).unwrap();
+            let clip = bundle.project.tracks()[0].clips().values().next().unwrap();
+            assert!((clip.transform.scale_x - 80.0 * 0.75 / 320.0).abs() < f64::EPSILON);
+            assert!((clip.transform.scale_y - 50.0 * 1.25 / 180.0).abs() < f64::EPSILON);
+            assert_eq!(bundle.assets.len(), 3);
+        }
+    }
+    assert_eq!(count, 6);
+}
+
+#[test]
+fn math_catalog_adds_every_kind_and_rejects_invalid_latex_without_saving() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("empty.json");
+    write_json(
+        File::create(&input).unwrap(),
+        &animathio_core::Project::default(),
+    )
+    .unwrap();
+    let list = cli(&["math-objects", "list"]);
+    assert!(list.status.success());
+    let drafts: Vec<animathio_control::MathObjectDraft> =
+        serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(drafts.len(), animathio_control::MathObjectKind::ALL.len());
+    for draft in drafts {
+        let kind = serde_json::to_value(draft.kind).unwrap();
+        let kind = kind.as_str().unwrap();
+        let output = dir.path().join(format!("{kind}.amio"));
+        let mut args = vec![
+            "math-objects",
+            "add",
+            path(&input),
+            "--kind",
+            kind,
+            "-o",
+            path(&output),
+        ];
+        if kind == "latex" {
+            args.push("--write-on");
+        }
+        ok(&args);
+        let bundle = read_amio(File::open(output).unwrap(), Limits::default()).unwrap();
+        let clip = bundle.project.tracks()[0].clips().values().next().unwrap();
+        assert_eq!(
+            animathio_control::math_object_draft(
+                clip,
+                animathio_export::resolution(&bundle.project)
+            )
+            .unwrap()
+            .kind,
+            draft.kind
+        );
+        if kind == "latex" {
+            assert_eq!(clip.animations.len(), 1);
+        }
+    }
+    let output = dir.path().join("invalid.amio");
+    let result = cli(&[
+        "math-objects",
+        "add",
+        path(&input),
+        "--kind",
+        "latex",
+        "--field",
+        r"source=\frac{",
+        "-o",
+        path(&output),
+    ]);
+    assert!(!result.status.success());
+    assert!(!output.exists());
+}

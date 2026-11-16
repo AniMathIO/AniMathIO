@@ -1,0 +1,103 @@
+{
+  "format": "animathio",
+  "schemaVersion": 3,
+  "frame_rate": {
+    "numerator": 30,
+    "denominator": 1
+  },
+  "tracks": [
+    {
+      "id": 1,
+      "name": "Centered title / title",
+      "clips": {
+        "2": {
+          "id": 2,
+          "link_group": 2,
+          "kind": {
+            "Plugin": {
+              "plugin_id": "org.animathio.text",
+              "params": {
+                "text": "Your title",
+                "font_size": 0.09,
+                "color": [
+                  255,
+                  255,
+                  255,
+                  255
+                ],
+                "units": "normalized",
+                "align": "center",
+                "fit_width": 0.84,
+                "fit_height": 0.18,
+                "_title_preset": "centered_title",
+                "_title_field": "title"
+              }
+            }
+          },
+          "range": {
+            "start": 3528000000,
+            "end": 7056000000
+          },
+          "source_offset": 0,
+          "transform": {
+            "x": 0.5,
+            "y": 0.52,
+            "scale_x": 0.84,
+            "scale_y": 0.18,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "params": {},
+          "effects": [],
+          "animations": [
+            {
+              "target": {
+                "Transform": "Opacity"
+              },
+              "keys": {
+                "0": {
+                  "value": {
+                    "Number": 0.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "235200000": {
+                  "value": {
+                    "Number": 1.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "3292800000": {
+                  "value": {
+                    "Number": 1.0
+                  },
+                  "interpolation": "EaseInOut"
+                },
+                "3528000000": {
+                  "value": {
+                    "Number": 0.0
+                  },
+                  "interpolation": "EaseInOut"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "gain": 1.0,
+      "muted": false,
+      "solo": false,
+      "locked": false
+    }
+  ],
+  "assets": {},
+  "width": 1920,
+  "height": 1080,
+  "background": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "duration": 0
+}

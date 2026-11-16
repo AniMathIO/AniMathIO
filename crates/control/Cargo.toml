@@ -1,0 +1,41 @@
+[package]
+name = "animathio-control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Link the whisper.cpp speech engine for automatic subtitles (needs cmake and a C++ toolchain).
+whisper = ["animathio-transcribe/whisper"]
+
+[dependencies]
+animathio-plugin-api = { path = "../plugin-api" }
+animathio-audio = { path = "../audio" }
+animathio-media = { path = "../media" }
+animathio-export = { path = "../export" }
+animathio-core.workspace = true
+animathio-format = { path = "../format" }
+animathio-import-v1 = { path = "../import-v1" }
+animathio-plugin-host = { path = "../plugin-host" }
+animathio-render = { path = "../render" }
+animathio-transcribe = { path = "../transcribe" }
+animathio-typeset = { path = "../typeset" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+base64 = "0.22"
+directories = "6"
+getrandom = "0.3"
+interprocess = "2.4"
+rustix = { version = "1", features = ["fs", "process"] }
+subtle = "2"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+animathio-plugin-host = { path = "../plugin-host", features = ["test-support"] }
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,0 +1,30 @@
+[package]
+name = "animathio-transcribe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Local speech recognition through whisper.cpp. Needs cmake, a C++ toolchain and libclang
+# at build time, so it is opt-in; without it every engine entry point returns
+# `Error::EngineUnavailable` and everything else (cue splitting, SRT/WebVTT, model
+# downloads, audio preparation) still works.
+whisper = ["dep:whisper-rs"]
+
+[dependencies]
+animathio-audio = { path = "../audio" }
+animathio-core.workspace = true
+directories = "6"
+sha2 = "0.10"
+thiserror.workspace = true
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+whisper-rs = { version = "0.16", optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

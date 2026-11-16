@@ -1,0 +1,84 @@
+# git-cliff configuration for the AniMathIO 2.x changelog.
+#
+# Single source of truth: release-plz reads this file (`changelog_config` in
+# release-plz.toml) and `git cliff` can run it standalone, so a local dry run shows
+# exactly what the release PR will contain:
+#
+#   git cliff --config cliff.toml --tag v2.0.0 origin/main..origin/v2   # first release preview
+#
+# Conventions (Conventional Commits, squash-merged PR titles `type(scope): subject (#123)`):
+#   * shown:  feat -> Added, fix -> Fixed, perf -> Performance, `*(security)` -> Security,
+#             revert -> Reverted
+#   * hidden: chore, ci, build, docs, test, style, refactor, and any scope that is
+#             build/CI/dev plumbing (ci, dev, spikes, package, deps)
+#   * breaking changes (`type!:`) are never hidden by type: they get their own group.
+#     (git-cliff's `protect_breaking_commits` would also resurrect the v1-tree removal
+#     below, so the rule is spelled out in `commit_parsers` instead)
+#   * v1 tags (`animathio-v1.x.y`, `v1.x.y`) never count as releases
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to AniMathIO 2.x are documented in this file. It is generated
+from [Conventional Commits](https://www.conventionalcommits.org) by release-plz and
+git-cliff. Changes to 1.x are in the \
+[v1 release notes](https://github.com/AniMathIO/AniMathIO/releases?q=animathio-v1).
+
+"""
+# Tera template. `release_link` only exists inside release-plz, hence the guards.
+body = """
+{% if version -%}
+## {% if release_link %}[{{ version | trim_start_matches(pat="v") }}]({{ release_link }}){% else %}{{ version | trim_start_matches(pat="v") }}{% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{%- else -%}
+## [unreleased]
+{%- endif %}
+{% if version and version | trim_start_matches(pat="v") == "2.0.0" %}
+AniMathIO 2.0 is a from-scratch Rust rewrite of the editor: a small video editor core
+(media clips, multi-track timeline, keyframes, audio, preview, export) with text, shapes,
+effects, LaTeX, graphs, Manim and v1 import and MCP as sandboxed WebAssembly plugins or
+sidecars. Projects use the new `.amio` format; open a 1.x project with
+`animathio-cli import-v1` (see `docs/migrating-from-v1.md`).
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope and commit.scope | lower != group | striptags | trim | lower %}*({{ commit.scope }})* {% endif %}{% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }}
+{%- endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = false
+filter_commits = true
+sort_commits = "oldest"
+# Only 2.x tags are release boundaries. v1 history stays reachable after the swap
+# (`git merge -s ours main`), so the first release is generated from the v2-only range.
+tag_pattern = "^v2\\.[0-9]+\\.[0-9]+"
+commit_preprocessors = [
+  # `(#123)` -> `([#123](pull-request url))`
+  { pattern = '\(#([0-9]+)\)', replace = "([#${1}](https://github.com/AniMathIO/AniMathIO/pull/${1}))" },
+]
+commit_parsers = [
+  { message = "^chore\\(release\\)", skip = true },
+  # The commit that deleted the v1 tree starts the rewrite; the 2.0.0 intro covers it.
+  { message = "^chore!: clear the v1 tree", skip = true },
+  # Build, CI and developer-tooling scopes are noise for users, whatever the type.
+  { message = "^[a-z]+\\((ci|dev|spikes|package|deps)\\)", skip = true },
+  # Lint-appeasement fixes (`fix: use X for newer clippy`) are not user-facing.
+  { message = "(?i)\\bclippy\\b", skip = true },
+  # The HTML comment fixes the order of the groups; the template strips it.
+  { message = "^[a-z]+(\\([^)]*\\))?!:", group = "<!-- 0 -->Breaking changes" },
+  { message = "^(feat|fix)\\(security\\)", group = "<!-- 1 -->Security" },
+  { message = "^security", group = "<!-- 1 -->Security" },
+  { message = "^feat", group = "<!-- 2 -->Added" },
+  { message = "^fix", group = "<!-- 3 -->Fixed" },
+  { message = "^perf", group = "<!-- 4 -->Performance" },
+  { message = "^revert", group = "<!-- 5 -->Reverted" },
+  { message = "^(chore|ci|build|docs|test|style|refactor)", skip = true },
+]

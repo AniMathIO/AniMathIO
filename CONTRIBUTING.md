@@ -1,52 +1,74 @@
-# Contributing Guidelines
+# Contributing to AniMathIO 2.0
 
-Thank you for considering contributing to our project! Please follow these guidelines to ensure smooth collaboration.
+Thanks for helping. This is the 2.0 Rust rewrite. The plan and architecture are in
+[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156); [`AGENTS.md`](AGENTS.md) is the
+working guide for commands, automation and conventions (coding agents and humans alike), and
+[`docs/architecture.md`](docs/architecture.md) is the crate map.
 
-## General Guidelines
+## Branches
 
-### Forking the Repository
+- Pull requests target **`main`**. The 1.x Electron app is frozen in the read-only `legacy`
+  branch and takes no changes.
+- Work on a topic branch in your fork (or a branch of the repo), named for what it does, for
+  example `timeline-snap`.
 
-1. Fork the repository.
-2. Clone the forked repository to your local machine.
-3. Implement your changes.
-4. Push your changes to your forked repository.
-5. Create a pull request to the main repository.
-6. Wait for the pull request to be reviewed and merged by the repository owner.
+## Build and check
 
-## Versioning Specifications and Styles
+Stable Rust, edition 2024; Linux also needs `libasound2-dev`. Build the first-party plugins
+before rendering text or shapes:
 
-### GitHub Issues
+```bash
+scripts/build-plugins.sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+scripts/check-docs.sh          # after changing the CLI, MCP, control methods or crate layout
+```
 
-1. Create GitHub issues for each task.
-2. Please add detailed descriptions to the issues.
+On a shared machine use the resource limits from `AGENTS.md` (`CARGO_BUILD_JOBS=3`, `nice`,
+`ionice`). CI runs the same checks on Linux and Windows, and the golden render tests allow at
+most 2 per RGBA channel; regenerate goldens only on purpose (`UPDATE_GOLDEN=1`) and commit the
+reviewed PNGs with their fixtures.
 
-### Feature Branches
+## Testing the editor GUI
 
-1. Create feature branches for each task from Trello.
-2. Branch naming convention:
-   - The branch name should start with the GitHub issue number.
-   - After the issue number, use the issue title in lowercase separated with "-" symbol.
-   - Example: `13-login-system` for GitHub issue #13 with the title "Login system".
-   - [Optional things to consider](https://tilburgsciencehub.com/building-blocks/collaborate-and-share-your-work/use-github/naming-git-branches/)
+Never open windows on your real desktop from scripts or agents. Run every GUI launch, bench and
+screenshot through the virtual display wrapper, which starts a private Xvfb:
 
-### Commits
+```bash
+ANIMATHIO_PLUGIN_DIR=target/plugins scripts/virtual-display.sh ./target/release/animathio --bench-viewport
+```
 
-1. Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for all commits.
-2. Format: `<type>[optional scope]: <description>`
-3. Types:
-   - `fix`: Bugfixes, code fixes.
-   - `feat`: Feature implementation.
-   - `chore`: Code cleanup.
-4. Example: `feat(api)!: send an email to the customer when a product is shipped`
-   - The "!" flag is optional and indicates breaking changes.
+## Code rules (short version)
 
-### Pull Requests
+- Every model mutation is a serializable, invertible `Command`; use `Command::Batch` so a
+  compound edit is one undo step.
+- Time is integer ticks with rational frame rates; coordinates are resolution-independent. No
+  `f64` seconds or absolute pixels in the model.
+- Rendering is the pure `render(&Project, Time) -> Frame`; never put runtime resources in
+  `Project`.
+- UI icons come from gpui-component's Lucide set, never emoji or Unicode glyphs.
+- Add tests for new commands and logic, and update `README.md` / `docs/*.md` with behaviour
+  changes. Docs must match the code (`scripts/check-docs.sh`).
 
-1. Submit your changes via pull requests.
-2. Reference the relevant GitHub issue in your pull request.
-3. Provide a clear and concise description of your changes.
-   **NOTE**: The pull request should only be merged after reviewing it by (at least) another team member. If there are no related review comments, then the reviewer should merge the PR. This review step ensures the quality and consistency of the codebase.
+## Writing a plugin
 
-## Variable Naming Conventions
+Text, shapes, effects and audio effects are WebAssembly components. Start with
+[`docs/plugins.md`](docs/plugins.md); the minimal example under `plugins/examples/hello` must keep
+compiling for `wasm32-wasip2`.
 
-Follow NextJS and React TypeScript naming conventions as much as possible. Resource: [https://medium.com/@mirazhs/naming-conventions-in-next-js-boosting-seo-and-code-maintainability-d4150fe7e6e](https://medium.com/@mirazhs/naming-conventions-in-next-js-boosting-seo-and-code-maintainability-d4150fe7e6e)
+## Commits and pull requests
+
+- Use [Conventional Commits](https://www.conventionalcommits.org/): `feat(scope): ...`,
+  `fix(scope): ...`, `perf`, `docs`, `test`, `refactor`, `chore`, `ci`, `build`; add `!` for
+  breaking changes. release-plz builds the version and changelog from them (see `cliff.toml`).
+- Keep a PR focused, describe what changed and why, link the issue, and list anything you left
+  out. Fill in the pull request template.
+- Squash or merge as the maintainer prefers; PRs are reviewed before merging.
+
+## Reporting bugs and vulnerabilities
+
+Use the issue templates for bugs and feature requests. Report security problems privately, as
+described in [`SECURITY.md`](SECURITY.md).
+
+By contributing you agree that your work is released under the project's [MIT license](LICENSE).

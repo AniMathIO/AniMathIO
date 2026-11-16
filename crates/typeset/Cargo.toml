@@ -1,0 +1,21 @@
+[package]
+name = "animathio-typeset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "LaTeX and Typst math typesetting to vector paths for AniMathIO 2.0"
+
+[dependencies]
+blake3.workspace = true
+kurbo = "0.13.1"
+lru = "0.19.0"
+mitex = "0.2.4"
+thiserror.workspace = true
+ttf-parser = "0.25.1"
+typst = "0.15.1"
+typst-layout = "0.15.1"
+
+[lints]
+workspace = true

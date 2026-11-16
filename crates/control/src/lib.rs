@@ -1,0 +1,124 @@
+//! Local JSON-RPC 2.0 control protocol over a user-only socket or named pipe.
+//!
+//! The control layer is the single API for the editor UI, the CLI, plugins and
+//! the MCP sidecar. Mutations are [`animathio_core::Command`]s applied through
+//! the same [`animathio_core::History`] as UI edits; reads resolve pure
+//! evaluation. The transport is a Unix-domain socket in `$XDG_RUNTIME_DIR` on
+//! Unix and a named pipe on Windows, never a listening TCP port.
+//!
+//! Authentication is a random token written to a `0600` file next to the
+//! socket; clients must send it with every request and it is compared in
+//! constant time.
+
+mod noise;
+pub use noise::{learn_noise_command, noise_bands};
+mod animations;
+mod authoring;
+mod math_objects;
+pub use math_objects::{
+    LATEX_SNIPPETS, LATEX_TEMPLATES, MathObjectDraft, MathObjectField, MathObjectKind,
+    math_object_command, math_object_draft, math_object_range,
+};
+mod beats;
+pub use beats::{
+    BeatDetectParams, BeatDetection, BeatInfo, BeatMarkerOptions, BeatMarkersParams,
+    BeatMarkersResult, BeatSelection, CutShift, MarkerAddParams, MarkerAdded, SyncCutsParams,
+    SyncCutsResult, SyncMode, SyncSource, add_marker_command, analyze_beats, apply_beat_markers,
+    apply_sync_cuts, markers_at_beats_command, select_beats, sync_cuts_command,
+};
+mod autocut;
+mod chapters;
+pub use chapters::{
+    Chapter, ChapterFormat, ChaptersExportParams, ChaptersExportResult, chapters, export_chapters,
+    format_chapters,
+};
+mod limits;
+pub use autocut::{
+    Autocut, AutocutParams, AutocutProposal, AutocutReason, SilenceMetric, apply_autocuts,
+    autocut_command, detect_filler_words, detect_silent_samples, propose_autocuts,
+    propose_autocuts_cancellable,
+};
+mod ducking;
+pub use ducking::{
+    ClipDuck, DuckKey, DuckParams, DuckProposal, DuckResult, apply_duck, detect_voice_samples,
+    duck_command, duck_envelope, merge_voice, propose_duck,
+};
+mod reframe;
+pub use limits::{SourceLimits, SourceSnapshot};
+pub use reframe::{ReframeDraft, ReframeParams, analyse_reframe, auto_reframe, reframe_command};
+mod client;
+mod edit;
+mod effects;
+mod error;
+mod export_presets;
+mod handler;
+mod headless;
+mod media_import;
+mod method;
+pub use media_import::prepare_media_import;
+mod captions;
+mod path;
+mod placement;
+pub use placement::{Slot, place_visual_clip, visual_slot};
+mod server;
+mod subtitles;
+mod title_presets;
+mod token;
+pub use title_presets::{
+    TitleAddParams, TitleCurve, TitleCurveSpace, TitleLayer, TitlePreset, title_preset_command,
+    title_presets,
+};
+
+pub use captions::{
+    CaptionPosition, CaptionPreset, CaptionStyleInfo, CaptionStyleParams, SubtitleStyleParams,
+    SubtitleStyleResult, apply_caption_style, caption_preset_dir, caption_presets,
+    caption_presets_at, caption_style_command, caption_styles, caption_text_edit_command,
+    clip_caption_style, delete_caption_preset, delete_caption_preset_at, parse_caption_color,
+    save_caption_preset, save_caption_preset_at,
+};
+pub use subtitles::{
+    ProgressFn, SUBTITLE_TRACK, SubtitleCueInfo, SubtitleDraft, SubtitleExportParams,
+    SubtitleExportResult, SubtitleGenerateParams, SubtitleImportParams, SubtitleProgress,
+    SubtitleResult, SubtitleSplit, SubtitlesAdded, apply_cues, export_subtitles,
+    generate_subtitles, import_subtitles, subtitle_command, track_cues, transcribe_project,
+};
+
+pub use animations::{
+    ANIMATIONS_PLUGIN_ID, AnimationApplied, AnimationApplyParams, AnimationOptionInfo,
+    AnimationPresetInfo, animation_preset_command, animation_preset_infos,
+};
+pub use authoring::{
+    MANIM_IMPORT_PLUGIN_ID, MANIM_IMPORTER_ID, apply_authoring_call, import_manim_with_plugin,
+};
+pub use client::ControlClient;
+pub use edit::{
+    TitleStyle, TrimSilenceParams, TrimSilenceResult, content_end, describe_timeline,
+    detect_silence, timecode, title_command, trim_silence,
+};
+pub use effects::{
+    AudioEffectAddParams, AudioEffectAdded, EffectAddParams, EffectAdded, EffectInfo,
+    EffectParamInfo, add_audio_effect_command, add_effect_command, effect_infos,
+};
+pub use error::ControlError;
+pub use export_presets::ExportPreset;
+pub use handler::{ControlHandler, dispatch, from_value};
+pub use headless::HeadlessHandler;
+pub use method::{
+    AssetInfo, Call, ClipAdded, ClipInfo, ExportParams, GraphAddParams, ImportManimParams,
+    ImportManimResult, MathAddParams, ProjectState, RenderFrameParams, RenderFrameResult, Timeline,
+    TrackInfo, clip_kind_label, media_type_of, timeline_of,
+};
+pub use path::{read_bounded, validate_existing_file, validate_output_file};
+pub use server::{
+    ControlServer, MAX_REQUEST_BYTES, RunningServer, SocketSpec, default_socket_spec,
+};
+
+mod templates;
+pub use templates::{
+    MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, delete_user_template,
+    project_templates, save_user_template, template_catalog, template_library_dir,
+};
+
+mod scene_detector;
+mod scenes;
+pub use scenes::{SceneCut, SceneDraft, SceneParams, detect_scenes, scene_command};

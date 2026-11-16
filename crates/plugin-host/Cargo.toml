@@ -1,0 +1,62 @@
+[package]
+name = "animathio-plugin-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "WebAssembly Component Model plugin host runtime and registry for AniMathIO 2.0"
+
+[dependencies]
+animathio-core = { workspace = true }
+animathio-plugin-api = { path = "../plugin-api" }
+animathio-typeset = { path = "../typeset" }
+wasmtime = { version = "50.0.1", features = ["component-model"] }
+wasmtime-wasi = "50.0.1"
+skrifa = "0.49.0"
+kurbo = "0.13.1"
+blake3 = { version = "1.8", default-features = false }
+getrandom = "0.3"
+lru = "0.19.0"
+rustix = { version = "1", features = ["fs", "process"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = "0.4"
+directories = "6"
+tempfile = "3"
+
+[dev-dependencies]
+animathio-core = { workspace = true }
+animathio-plugin-api = { path = "../plugin-api" }
+animathio-import-manim = { path = "../import-manim" }
+animathio-render = { path = "../render" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = { workspace = true }
+wat = "1"
+
+[features]
+test-support = []
+
+[[test]]
+name = "first_party"
+required-features = ["test-support"]
+
+[[test]]
+name = "effects"
+required-features = ["test-support"]
+
+[[test]]
+name = "audio_effects"
+required-features = ["test-support"]
+
+[[test]]
+name = "abi_conformance"
+required-features = ["test-support"]
+
+[[test]]
+name = "worlds_1_1"
+required-features = ["test-support"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

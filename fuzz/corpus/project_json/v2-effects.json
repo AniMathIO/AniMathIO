@@ -1,0 +1,132 @@
+{
+  "assets": {},
+  "background": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "duration": 0,
+  "format": "animathio",
+  "frame_rate": {
+    "denominator": 1,
+    "numerator": 30
+  },
+  "height": 0,
+  "schemaVersion": 2,
+  "tracks": [
+    {
+      "clips": {
+        "1": {
+          "animations": [
+            {
+              "keys": {
+                "0": {
+                  "interpolation": "Linear",
+                  "value": {
+                    "Number": 0.0
+                  }
+                },
+                "705600000": {
+                  "interpolation": "Linear",
+                  "value": {
+                    "Number": 1.0
+                  }
+                }
+              },
+              "target": {
+                "Effect": {
+                  "effect": 1,
+                  "param": "amount"
+                }
+              }
+            }
+          ],
+          "effects": [
+            {
+              "id": 1,
+              "kind": "Grayscale",
+              "params": {
+                "amount": 1.0
+              }
+            },
+            {
+              "id": 2,
+              "kind": "Sepia",
+              "params": {
+                "amount": 1.0
+              }
+            },
+            {
+              "id": 3,
+              "kind": "Invert",
+              "params": {
+                "amount": 1.0
+              }
+            },
+            {
+              "id": 4,
+              "kind": "Saturate",
+              "params": {
+                "amount": 2.0
+              }
+            },
+            {
+              "id": 5,
+              "kind": "Brightness",
+              "params": {
+                "amount": 1.0
+              }
+            },
+            {
+              "id": 6,
+              "kind": "Contrast",
+              "params": {
+                "amount": 1.0
+              }
+            },
+            {
+              "id": 7,
+              "kind": "Blur",
+              "params": {
+                "radius": 0.02
+              }
+            },
+            {
+              "id": 8,
+              "kind": "Opacity",
+              "params": {
+                "amount": 1.0
+              }
+            }
+          ],
+          "id": 1,
+          "kind": {
+            "Error": "effect fixture"
+          },
+          "params": {},
+          "range": {
+            "end": 705600000,
+            "start": 0
+          },
+          "source_offset": 0,
+          "transform": {
+            "opacity": 1.0,
+            "rotation": 0.0,
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "x": 0.5,
+            "y": 0.5
+          }
+        }
+      },
+      "gain": 1.0,
+      "id": 1,
+      "locked": false,
+      "muted": false,
+      "name": "fx",
+      "solo": false
+    }
+  ],
+  "width": 0
+}

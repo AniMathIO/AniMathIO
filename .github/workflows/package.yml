@@ -1,0 +1,275 @@
+name: Package
+
+# Builds + smoke-tests the installers for the canonical desktop package
+# (`apps/animathio`, which also ships `animathio-cli`).
+#
+# Runs:
+#   * manually (workflow_dispatch),
+#   * on release-plz release PRs (branches named `release-plz-*`), so every
+#     release PR proves the installers build, install/extract and run before
+#     the release is merged, and
+#   * on pull requests that touch packaging inputs (this file, the packaged
+#     crates, the icon assets or the plugin build script), so packaging changes
+#     are verified before they land.
+#
+# Every job installs the bundle, then runs `animathio --version` and
+# `animathio-cli --version` headlessly and checks that the bundled `.amplugin`
+# bundles arrived next to (or lib-relative to) the executable. A final job
+# collects all three installer artifacts and publishes a `SHA256SUMS` file for
+# them (#156, "Release integrity").
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/package.yml
+      - Cargo.toml
+      - Cargo.lock
+      - apps/animathio/Cargo.toml
+      - apps/animathio/assets/**
+      - apps/animathio-cli/Cargo.toml
+      - scripts/build-plugins.sh
+
+permissions:
+  contents: read
+  id-token: write # for build provenance attestations
+  attestations: write
+
+concurrency:
+  group: package-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_BUILD_JOBS: 3
+  # Number of first-party `.amplugin` bundles `scripts/build-plugins.sh` writes.
+  PLUGIN_COUNT: 8
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            formats: appimage,deb
+            artifact: linux
+            # Read by actions/attest-build-provenance; one glob per line.
+            subject: |
+              target/packages/*.AppImage
+              target/packages/*.deb
+          - os: windows-latest
+            formats: nsis
+            artifact: windows
+            subject: target/packages/*.exe
+          - os: macos-latest
+            formats: dmg
+            artifact: macos
+            subject: target/packages/*.dmg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Install Linux development headers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-xkb-dev \
+            libxcb-randr0-dev \
+            libxcb-render0-dev \
+            libxcb-xinput-dev \
+            libxcb-sync-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            cmake \
+            libclang-dev \
+            pkg-config
+      - name: Build plugin bundles
+        # The editor loads `.amplugin` files from `plugins/` next to the
+        # executable, so the bundles must exist before cargo-packager collects
+        # the configured resources.
+        shell: bash
+        run: ./scripts/build-plugins.sh
+      - name: Check plugin bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          bundles=(target/plugins/*.amplugin)
+          if [ "${#bundles[@]}" -ne "${PLUGIN_COUNT}" ]; then
+            echo "expected ${PLUGIN_COUNT} plugin bundles, found ${#bundles[@]}" >&2
+            ls -l target/plugins >&2 || true
+            exit 1
+          fi
+          printf '%s\n' "${bundles[@]}"
+      - name: Install cargo-packager
+        run: cargo install cargo-packager@0.11.8 --locked
+      - name: Build and package installers
+        env:
+          # linuxdeploy ships an old binutils whose `strip` cannot parse modern
+          # glibc libraries (`.relr.dyn` sections) and aborts the AppImage build
+          # when it tries. Harmless on the other platforms.
+          NO_STRIP: 1
+        run: cargo packager --release --packages animathio --formats ${{ matrix.formats }}
+      - name: Smoke test installers (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # AppImage: self-extract (runners have no FUSE) and run the binaries
+          # from the extracted tree.
+          appimage="$(find target/packages -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          chmod +x "$appimage"
+          rm -rf squashfs-root
+          "$appimage" --appimage-extract >/dev/null
+          for exe in animathio animathio-cli; do
+            test -x "squashfs-root/usr/bin/$exe"
+            "squashfs-root/usr/bin/$exe" --version
+          done
+          ls squashfs-root/usr/lib/animathio/plugins/*.amplugin >/dev/null
+
+          # deb: extract and run the same binaries.
+          deb="$(find target/packages -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$deb"
+          rm -rf deb-root
+          mkdir -p deb-root
+          dpkg-deb -x "$deb" deb-root
+          for exe in animathio animathio-cli; do
+            test -x "deb-root/usr/bin/$exe"
+            "deb-root/usr/bin/$exe" --version
+          done
+          ls deb-root/usr/lib/animathio/plugins/*.amplugin >/dev/null
+          for root in squashfs-root deb-root; do
+            env -u ANIMATHIO_PLUGIN_DIR "$root/usr/bin/animathio-cli" new-sample -o "$root/sample.amio"
+            env -u ANIMATHIO_PLUGIN_DIR "$root/usr/bin/animathio-cli" render "$root/sample.amio" --frame 0 -o "$root/frame.png"
+            test -s "$root/frame.png"
+          done
+          dpkg-deb -I "$deb" | sed -n '/Package:/p;/Depends:/p'
+      - name: Smoke test installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem 'target/packages/*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'no installer produced in target/packages' }
+          $dest = 'C:\animathio'
+          Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$dest") -Wait
+          $exe = Join-Path $dest 'animathio.exe'
+          $cli = Join-Path $dest 'animathio-cli.exe'
+          if (-not (Test-Path $exe)) {
+            Get-ChildItem -Recurse -Force $dest | Out-String | Write-Host
+            throw "$exe missing after install"
+          }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "animathio --version exited $LASTEXITCODE" }
+          & $cli --version
+          if ($LASTEXITCODE -ne 0) { throw "animathio-cli --version exited $LASTEXITCODE" }
+          $plugins = Get-ChildItem (Join-Path $dest 'plugins') -Filter *.amplugin
+          if ($plugins.Count -ne $env:PLUGIN_COUNT) {
+            throw "expected $env:PLUGIN_COUNT plugins in $dest\plugins, found $($plugins.Count)"
+          }
+      - name: Smoke test bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # cargo-packager removes the intermediate `AniMathIO.app` once the dmg
+          # is built, so test the bundle a user gets out of the image.
+          dmg="$(find target/packages -maxdepth 1 -name '*.dmg' -print -quit)"
+          echo "dmg=$dmg"
+          test -n "$dmg"
+
+          check_bundle() {
+            local bundle="$1"
+            echo "== checking $bundle"
+            ls -la "$bundle/Contents/MacOS"
+            for exe in animathio animathio-cli; do
+              test -x "$bundle/Contents/MacOS/$exe" || { echo "missing $exe" >&2; return 1; }
+              "$bundle/Contents/MacOS/$exe" --version
+            done
+            ls "$bundle/Contents/Resources/plugins"/*.amplugin
+          }
+
+          # The bundled LICENSE becomes a dmg EULA; answer its prompt with `yes`
+          # (process substitution, so yes's SIGPIPE doesn't trip pipefail).
+          mountroot="$(mktemp -d)"
+          hdiutil imageinfo "$dmg" | sed -n 1,20p || true
+          hdiutil attach "$dmg" -nobrowse -readonly -noverify -mountroot "$mountroot" < <(yes) > /dev/null || { echo "hdiutil attach failed with $?" >&2; exit 1; }
+          find "$mountroot" -maxdepth 2 -print
+          trap 'hdiutil detach -force "$mountroot"/* -quiet || true' EXIT
+          mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
+          test -n "$mounted_app"
+          plutil -p "$mounted_app/Contents/Info.plist"
+          check_bundle "$mounted_app"
+      - name: Attest build provenance
+        # `id-token: write` is not granted to pull requests from forks.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: ${{ matrix.subject }}
+      - name: Upload installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installers-${{ matrix.artifact }}
+          path: target/packages/*
+          if-no-files-found: error
+
+  checksums:
+    name: checksums
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(*)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no installer files were downloaded" >&2
+            exit 1
+          fi
+          # One line per installer, sorted by name, in the format `sha256sum -c`
+          # expects. All three platform artifacts are merged into this directory.
+          # Exclude any pre-existing SHA256SUMS so a re-run cannot hash itself.
+          installers=()
+          for f in "${files[@]}"; do
+            [ "$f" = "SHA256SUMS" ] && continue
+            installers+=("$f")
+          done
+          if [ "${#installers[@]}" -eq 0 ]; then
+            echo "no installer files were downloaded" >&2
+            exit 1
+          fi
+          printf '%s\0' "${installers[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: SHA256SUMS
+          path: installers/SHA256SUMS
+          if-no-files-found: error

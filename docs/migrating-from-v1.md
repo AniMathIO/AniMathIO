@@ -1,0 +1,101 @@
+# Migrating from v1
+
+`crates/import-v1` is a **one-way** importer for v1 (Electron/TypeScript)
+`.animathio` projects. v1 serialized a project as pako-deflated JSON (the earliest
+releases used plain JSON) with media embedded as base64 data URLs. The importer
+inflates, parses leniently, decodes media into content-addressed BLAKE3 assets and
+rebuilds a v2 `Project` exclusively through `animathio_core::Command`s.
+
+```bash
+animathio-cli import-v1 project.animathio -o imported.amio
+```
+
+Warnings go to stderr; the import succeeds as long as the project is structurally
+usable. Resource limits guard untrusted input: ≤ 2 GiB inflated JSON, ≤ 1 GiB per
+embedded asset, ≤ 10,000 media entries.
+
+## What maps
+
+| v1 | v2 |
+| --- | --- |
+| Canvas width/height/background/maxTime, fps | `Command::SetSettings` (width, height, background, duration, frame rate) |
+| `editor_elements` z-order | One `Track` per element, in the same order |
+| Embedded media (base64 data URLs) | Deduplicated content-addressed assets (`AssetId` = BLAKE3), registered via `AddAsset` |
+| `image` element | `ClipKind::Image` |
+| `video` element | `ClipKind::Video` (decoded by the `media` crate) |
+| `audio` element | `ClipKind::Audio` with `gain` + `muted` clip params; `masterVolume` → `SetTrackGain` |
+| `text` element | `ClipKind::Plugin` (`org.animathio.text`) with normalized font size and color |
+| `mafs` graph element | `ClipKind::Image` (see gaps below) |
+| `fadeIn` / `fadeOut` | Opacity keyframes |
+| `slideIn` / `slideOut` | X/Y keyframes (directions `left`/`right`/`top`/`bottom`) |
+| `breathe` | ScaleX/ScaleY keyframes (bounded by slide-in/out window) |
+| `mafsReveal` | Opacity keyframes as a fallback |
+| Effects (`blackAndWhite`, `sepia`, `invert`, `saturate`) | One `EffectInstance` per clip (`grayscale`/`sepia`/`invert`, and `saturate` with `amount = 2`) from the `org.animathio.effects-basic` plugin, run in the plugin sandbox |
+
+v1 stores milliseconds and pixels as `f64`; v2 stores integer ticks and normalized
+canvas fractions. The conversion is exact-but-lossy by design, with bounds checked
+where they matter.
+
+## What doesn't map (known gaps)
+
+- **Mafs graphs become static images.** v1 rasterized graphs to a PNG and never
+  stored the graph definition, so only a marker (`v1.mafs`) survives for a future
+  graph plugin. A warning is emitted.
+- **Unknown effects are ignored** with a warning. The four v1 presets become
+  real, renderable plugin effects (`grayscale`/`sepia`/`invert`, `saturate` with
+  `amount = 2`; the plugin must be installed to render them).
+- **Rotation is approximated as center-based.** v1 rotated around the Konva
+  top-left corner; the importer warns and uses the element center.
+- **`fontWeight` is dropped** — the v2 text component has no weight
+  equivalent.
+- **Per-character text animation is flattened.** A character-level slide is
+  imported as a whole-element slide (warning).
+- **`mafsReveal` is a fallback.** It becomes an opacity fade, not a path reveal.
+- **Animations with no `targetId`, unknown types, or invalid durations are
+  skipped**, as are animations targeting missing elements. A slide/fade whose
+  duration exceeds the clip is clamped to the clip length.
+- **Fractional or invalid fps is rounded** (fractional to the nearest integer,
+  invalid to 60). Invalid `maxTime` falls back to 30 s; invalid canvas values
+  fall back or clamp to 65535.
+- **Unknown top-level fields, element/property/media/animation fields and
+  element types are ignored** with warnings, never fatal.
+- **Duplicate element ids**: animations target the last element with that id
+  (warning).
+
+## Not covered by this importer
+
+- **WebM export.** Video clips import as ordinary video clips and export to H.264 + AAC
+  MP4 like any other project; WebM output is not implemented.
+- **Manim import** is a separate importer (`crates/import-manim`), run inside the
+  `org.animathio.import-manim` plugin and used via `animathio-cli import-manim`, the
+  editor's **Import Manim scene…** dialog or the MCP `import_manim_scene` tool.
+- **v1's Animations panel** (fade, slide, breathe, Mafs reveal) maps to the
+  `org.animathio.animations` presets in the inspector's Animations section: `fade-in`,
+  `fade-out`, `slide-in`, `slide-out`, `breathe` and `zoom-in`/`zoom-out` (reveal). v1's
+  clip-path slide and per-character slide have no preset; `typewriter-in` reveals text
+  one character at a time instead.
+- **Round-tripping.** Import is one-way; there is no v2 → v1 export.
+
+## Verifying an import
+
+```bash
+animathio-cli import-v1 project.animathio -o imported.amio
+animathio-cli validate imported.amio
+animathio-cli render imported.amio --frame 0 -o frame.png
+```
+
+`validate` checks model invariants and asset hashes; it does not decode video.
+
+## Serializer fixture corpus
+
+The checked-in corpus under `crates/import-v1/tests/fixtures` is produced by
+running v1's own serializer on constructed store state. Public CLI integration
+coverage imports and renders every compressed project at three times, including
+all v1 element, animation and effect types, embedded media, missing media,
+Unicode, non-unit scales, empty and very long projects, and a v1 Manim Text
+translation. Placement reads v1's `scaleX`/`scaleY` names (older snake-case
+inputs remain accepted).
+
+This is not yet the complete M4 corpus: actual DOM-rasterized LaTeX/graph
+captures, historical serializers and user-authored projects remain to be added.
+The fixture README records provenance and regeneration instructions.
