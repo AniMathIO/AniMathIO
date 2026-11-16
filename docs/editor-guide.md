@@ -47,8 +47,8 @@ use `transcribe lesson.amio --style karaoke -o out.amio`; over MCP pass `style` 
 ![Imported captions on a Subtitles track](../docs/screenshots/subtitles.png)
 
 The speech engine is whisper.cpp, built only with `--features whisper` on `animathio`
-and `animathio-cli` (needs cmake, a C++ compiler and libclang; the installers are built
-with it). No model ships with the app: pick `tiny` (78 MB), `base` (148 MB, default) or
+and `animathio-cli` (needs cmake, a C++ compiler and libclang). No model ships with
+the app: pick `tiny` (78 MB), `base` (148 MB, default) or
 `small` (488 MB) and AniMathIO downloads it once on your confirmation, verifies its SHA-256 and
 stores it in the user data directory. The opt-in integration test runs the real tiny model:
 `cargo test -p animathio-transcribe --features whisper --test whisper_tiny -- --ignored`.
