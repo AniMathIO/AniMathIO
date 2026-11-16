@@ -224,6 +224,15 @@ pub fn save_json(path: impl AsRef<std::path::Path>, project: &Project) -> Result
     atomic_write(path.as_ref(), |file| write_json(file, project))
 }
 
+/// Atomically replace one `assets/<id>` file of a JSON project directory. A
+/// crash mid-save leaves either the old or the new file, never a short mix.
+pub fn save_asset(path: impl AsRef<std::path::Path>, bytes: &[u8]) -> Result<(), Error> {
+    atomic_write(path.as_ref(), |file| {
+        file.write_all(bytes)?;
+        Ok(())
+    })
+}
+
 fn atomic_write(
     path: &std::path::Path,
     write: impl FnOnce(&mut std::fs::File) -> Result<(), Error>,
