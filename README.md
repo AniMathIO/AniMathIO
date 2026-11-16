@@ -1,6 +1,6 @@
 # AniMathIO 2.0
 
-> **Pre-release, rewrite in progress.** This is the `v2` branch: a from-scratch **Rust** rewrite of AniMathIO, an editor for Manim-like math animation videos. The plugin component ABI is 1.1.0 (1.0.0 frozen and still loaded unchanged); the file format and CLI may change until 2.0 ships.
+> AniMathIO 2.0 is a from-scratch **Rust** rewrite of AniMathIO, an editor for Manim-like math animation videos. The plugin component ABI is 1.1.0 (1.0.0 frozen and still loaded unchanged). The 1.x Electron app lives on, read-only, in the [`legacy`](https://github.com/AniMathIO/AniMathIO/tree/legacy) branch.
 
 The full plan, architecture and roadmap live in **[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)**. Read it before proposing structure.
 
@@ -115,7 +115,7 @@ stores it in the user data directory. The opt-in integration test runs the real 
 
 ## Screenshot
 
-The DaVinci-style editor shell on the `v2` branch (dark theme, media pool, viewer
+The DaVinci-style editor shell (dark theme, media pool, viewer
 with transport controls, resizable inspector and vertically scrolling timeline):
 
 ![AniMathIO 2.0 editor](docs/screenshots/editor-main.png)
@@ -159,7 +159,7 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 ## Installing
 
 There is no published 2.0 release yet. Until `v2.0.0` is tagged, get an installer from the
-`Package` workflow (Actions tab, run on `v2`, artifacts `installers-linux`, `installers-windows`
+`Package` workflow (Actions tab, run on `main`, artifacts `installers-linux`, `installers-windows`
 and `installers-macos`), or build from source below. Each installer ships both `animathio` and
 `animathio-cli` plus the first-party plugins:
 
@@ -398,7 +398,7 @@ Video imports include a linked companion audio clip when the file contains audio
 
 ## Contributing
 
-Pull requests for 2.0 target **`v2`**, not `main` or `staging`. When 2.0 ships, this branch is merged into `main` and 1.x moves to a read-only `legacy` branch. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and `AGENTS.md` for branch rules, automation and commands. Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
+Pull requests target **`main`**. The 1.x Electron app is frozen in the read-only `legacy` branch. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and `AGENTS.md` for branch rules, automation and commands. Report vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md).
 
 ## License
 

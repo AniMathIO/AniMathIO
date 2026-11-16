@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working on the `v2` branch. `CLAUDE.md` imports this file.
+Guidance for coding agents working on AniMathIO 2.x (`main`). `CLAUDE.md` imports this file.
 
 ## What this branch is
 
@@ -40,18 +40,17 @@ The minimal plugin example under `plugins/examples/hello` must keep compiling fo
 
 ## Branch rules
 
-- 2.0 PRs target **`v2`**. Never target `main` or `staging`: those serve v1 until the 2.0 swap.
-- Don't merge `main`/`staging` into `v2`. The only planned merge is the one-time `git merge -s ours main` at the 2.0 swap (see #156, "Repository and branch plan").
+- PRs target **`main`**. The 1.x Electron app is frozen in the read-only `legacy` branch (from tag `animathio-v1.8.3`); never merge it back. The 2.0 swap (see #156, "Repository and branch plan") is done.
 - Use Conventional Commits. release-plz will derive versions and the changelog from them.
 
 ## Automation
 
-Automation is configured in `renovate.json`, `release-plz.toml` and `.github/workflows/{release-plz,package,security-audit}.yml`. It is scoped to the `v2` branch and stays in "release-PR only" mode until the 2.0 swap.
+Automation is configured in `renovate.json`, `release-plz.toml` and `.github/workflows/{release-plz,package,security-audit}.yml`. It is scoped to `main`.
 
-- **Renovate** (`renovate.json`) targets `baseBranchPatterns: ["v2"]` (Renovate's current name for what was formerly `baseBranches`). Patch/minor/security updates are grouped and auto-merged once CI passes (GitHub auto-merge); majors are never auto-merged and get a `needs-human` label. Lockfile maintenance runs weekly and vulnerability alerts are on. GitHub Actions are pinned by digest.
-  - **Manual step:** the GitHub **Renovate** app must be enabled for the repo (an agent cannot enable it). Renovate reads config from the default branch, so it activates when `v2` becomes the default at the swap; change `baseBranchPatterns` to `["main"]` then. Auto-merge needs "Allow auto-merge" enabled in the repo settings and CI as a required status check.
-- **Dependabot is v1-only.** `.github/dependabot.yml` lives on `main`/`staging`; do not add one on `v2` — Renovate covers it.
-- **release-plz** (`release-plz.toml` + `.github/workflows/release-plz.yml`) opens a release PR (version bump + git-cliff changelog) on pushes to `v2` **once a `v2.*` tag exists**; until the baseline `v2.0.0` tag is created at the swap it is a no-op (verified with a local `release-plz update`). Tagging, GitHub releases and crates.io publishing are disabled until the swap; the single tag is `v{{version}}`, starting at `2.0.0` (workspace version is already `2.0.0`, unreleased). Enablement and bootstrap steps are commented in both files and listed in `docs/release-checklist.md`.
+- **Renovate** (`renovate.json`) targets `baseBranchPatterns: ["main"]` (Renovate's current name for what was formerly `baseBranches`). Patch/minor/security updates are grouped and auto-merged once CI passes (GitHub auto-merge); majors are never auto-merged and get a `needs-human` label. Lockfile maintenance runs weekly and vulnerability alerts are on. GitHub Actions are pinned by digest.
+  - **Manual step:** the GitHub **Renovate** app must be enabled for the repo (an agent cannot enable it). Renovate reads config from the default branch (`main`). Auto-merge needs "Allow auto-merge" enabled in the repo settings and CI as a required status check.
+- **No Dependabot.** Do not add `.github/dependabot.yml`; Renovate covers it.
+- **release-plz** (`release-plz.toml` + `.github/workflows/release-plz.yml`) opens a release PR (version bump + git-cliff changelog) on pushes to `main`; merging it tags `v{{version}}` and creates the GitHub release (the `v2.0.0` baseline was tagged by hand at the swap). crates.io publishing stays off.
   - **Changelog rules live in `cliff.toml`** (read by release-plz via `changelog_config`, runnable standalone): `feat`→Added, `fix`→Fixed, `perf`→Performance, `*(security)`→Security, breaking `type!:` kept; `chore`, `ci`, `build`, `docs`, `test`, `style`, `refactor`, clippy fixes and the `ci`/`dev`/`spikes`/`package`/`deps` scopes are hidden; v1 tags never count as releases. Preview with `git cliff --config cliff.toml --tag v2.0.0 origin/main..origin/v2` (install with `cargo install --locked git-cliff`).
 - **Packaging** (`apps/animathio/Cargo.toml` `[package.metadata.packager]` + `.github/workflows/package.yml`) builds the installers for the canonical desktop package, which ships both `animathio` and `animathio-cli`: AppImage + deb on Linux, an NSIS installer on Windows, and an unsigned dmg on macOS. Each job builds the first-party plugin bundles with `scripts/build-plugins.sh` first (cargo-packager's `resources` target `plugins`), then runs `cargo packager --release --packages animathio`, installs/extracts the result, runs `animathio --version` and `animathio-cli --version` headlessly, counts the packaged `.amplugin` files, and attests build provenance. It runs on `workflow_dispatch`, on release PRs and on PRs touching packaging inputs.
   - Config paths are relative to `apps/animathio` (cargo-packager `cd`s there), so `out-dir` is `../../target/packages` and resources are `../../target/plugins`; `binaries` paths are relative to the workspace `target/release`.

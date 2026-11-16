@@ -7,11 +7,10 @@ working guide for commands, automation and conventions (coding agents and humans
 
 ## Branches
 
-- 2.0 pull requests target **`v2`**. Never target `main` or `staging`: they serve v1 until the
-  2.0 swap. Do not merge `main` or `staging` into `v2`.
+- Pull requests target **`main`**. The 1.x Electron app is frozen in the read-only `legacy`
+  branch and takes no changes.
 - Work on a topic branch in your fork (or a branch of the repo), named for what it does, for
-  example `v2-timeline-snap`.
-- Fixes for the 1.x Electron app go to `main` until the swap; ask in an issue first.
+  example `timeline-snap`.
 
 ## Build and check
 
