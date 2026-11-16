@@ -18,9 +18,88 @@ jobs:
       CARGO_BUILD_JOBS: 3
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
+      # Full history so the docs-only detection below can diff a pull request or
+      # push against its base commit (base object plus common history).
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      # Docs-only changes skip the whole Rust pipeline; the required `check`
+      # contexts still report success on every PR because the job itself runs.
+      # Keep the matrix and job name unchanged: they own the required checks.
+      - name: Detect docs-only changes
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          zero=0000000000000000000000000000000000000000
+          base='' head=''
+          case "$EVENT_NAME" in
+            pull_request) base="$BASE_SHA"; head="$HEAD_SHA" ;;
+            push)         head="$GITHUB_SHA"; [[ "$BEFORE_SHA" == "$zero" ]] || base="$BEFORE_SHA" ;;
+          esac
+
+          full_run() {
+            echo "full checks: ${*:-unspecified reason}"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          # A new branch (all-zero `before`), a force push or a missing base
+          # object has no reliable base commit; run the full checks.
+          [[ -n "$base" ]] || full_run 'no base commit (new branch or unsupported event)'
+          git cat-file -e "$base^{commit}" 2>/dev/null || full_run "base commit $base is not present locally (force-pushed away?)"
+          if [[ "$EVENT_NAME" == push ]]; then
+            git merge-base --is-ancestor "$base" "$head" 2>/dev/null || full_run "base commit $base is not an ancestor of the pushed commit (force push)"
+          fi
+          # --no-renames so a renamed path also lists its old name: a code file
+          # renamed to .md must not slip onto the fast path via the new name alone.
+          changed=$(git diff --name-only --no-renames "$base...$head" 2>/dev/null) || full_run 'diff against the base commit failed'
+
+          # Docs-only = every changed path is documentation. Why each pattern is
+          # safe to skip the Rust build for:
+          #   *.md                            Markdown anywhere (README, AGENTS, docs/*.md, ...)
+          #   docs/* except docs/plugins.md   prose, benchmark data and screenshots;
+          #     the exception is a test fixture: crates/plugin-api/tests/api.rs
+          #     embeds docs/plugins.md verbatim and asserts on it under cargo test
+          #   LICENSE*                        root license texts
+          #   .github/ISSUE_TEMPLATE/*        issue form templates
+          #   .github/PULL_REQUEST_TEMPLATE*  pull request templates (file or directory)
+          docs_only=true
+          while IFS= read -r path; do
+            [[ -n "$path" ]] || continue
+            case "$path" in
+              docs/plugins.md) docs_only=false ;;
+              docs/*) ;;
+              *.md) ;;
+              LICENSE*) ;;
+              .github/ISSUE_TEMPLATE/*) ;;
+              .github/PULL_REQUEST_TEMPLATE*|.github/pull_request_template*) ;;
+              *) docs_only=false ;;
+            esac
+          done <<<"$changed"
+
+          if [[ "$docs_only" == true ]]; then
+            echo 'docs-only change; running the docs checks only:'
+          else
+            echo 'not docs-only; running the full checks:'
+          fi
+          printf '%s\n' "$changed"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+      # Fast path: validate the docs against the sources without building the
+      # CLI. Without --require-binary the script skips the `--help` block
+      # comparison (it notes that it checks subcommand names against main.rs
+      # instead) but still checks paths, links, anchors, MCP tools, control
+      # methods, environment variables, plugin ids, commands, WIT items and
+      # Rust symbols against the code.
+      - name: Check docs (docs-only fast path)
+        if: steps.changes.outputs.docs_only == 'true' && runner.os == 'Linux'
+        run: scripts/check-docs.sh
       - name: Install Linux development headers
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -45,46 +124,54 @@ jobs:
             libclang-dev \
             pkg-config
       - name: Install stable toolchain
+        if: steps.changes.outputs.docs_only != 'true'
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - name: Install wasm32-wasip2 target
+        if: steps.changes.outputs.docs_only != 'true'
         run: rustup target add wasm32-wasip2
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.changes.outputs.docs_only != 'true'
         with:
           workspaces: .
       - name: Build plugins
+        if: steps.changes.outputs.docs_only != 'true'
         shell: bash
         run: ./scripts/build-plugins.sh
       - name: Build plugin authoring example
+        if: steps.changes.outputs.docs_only != 'true'
         run: cargo build --manifest-path plugins/examples/hello/Cargo.toml --target wasm32-wasip2 --release --locked
       - name: Check formatting
+        if: steps.changes.outputs.docs_only != 'true'
         run: cargo fmt --all --check
       - name: Clippy
+        if: steps.changes.outputs.docs_only != 'true'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
+        if: steps.changes.outputs.docs_only != 'true'
         run: cargo test --workspace --locked --no-fail-fast
       # The whisper.cpp speech engine (cargo feature `whisper`) needs cmake, a C++ toolchain and
       # libclang, so it is not part of the default workspace build. Build, lint and test it
       # here on both OSes; the model-backed test is #[ignore]d, CI never downloads a model.
       - name: Speech engine (whisper feature)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         run: |
           cargo clippy -p animathio-transcribe -p animathio-cli --features animathio-transcribe/whisper,animathio-cli/whisper --all-targets --locked -- -D warnings
           cargo test -p animathio-transcribe --features whisper --locked
       - name: Speech engine (whisper feature, Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.changes.outputs.docs_only != 'true'
         env:
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
         run: |
           cargo build -p animathio-cli --features whisper --locked
           cargo test -p animathio-transcribe --features whisper --locked
       - name: Check docs against the code
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         run: |
           cargo build -p animathio-cli --locked
           scripts/check-docs.sh --require-binary
       - name: Showcase offline E2E
         timeout-minutes: 15
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         env:
           ANIMATHIO_PLUGIN_DIR: ${{ github.workspace }}/target/plugins
         # Use the interpreter that owns apt's python3-pil, independent of runner PATH.
@@ -96,8 +183,10 @@ jobs:
           name: showcase-e2e-failure
           path: target/showcase-e2e
           if-no-files-found: ignore
+      # Licenses cannot change in a docs-only PR (Cargo.lock/Cargo.toml are
+      # never in the docs-only set), so this is skipped on the fast path too.
       - name: Check licenses
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check licenses
