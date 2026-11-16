@@ -86,3 +86,35 @@ once enabled.
 7. From then on release-plz opens normal release PRs (`2.1.0`, ...); the package workflow smoke-tests the installers on each; merging one tags and publishes. Update the website download links and publish the AniMathIODocs launch post.
 
 `scripts/swap-rehearsal.sh` exercises steps 2 to 6 end to end on a scratch clone, including the changelog bootstrap and a release-plz dry run.
+
+## Workspace changelog regression check
+
+The workflow pins release-plz **0.4.3**. In that version,
+[`packages_to_process` and the include-history snapshot](https://github.com/release-plz/release-plz/blob/release-plz-v0.4.3/crates/release_plz_core/src/command/update/updater.rs)
+only collect histories for packages participating in release analysis.
+`publish = false` members need `git_only = true`; `changelog_include` alone cannot
+restore their missing histories. `release = false` removes a member even earlier.
+Workspace `changelog_update = false` suppresses extra changelog files without
+removing histories. All members use the shared tag pattern, while only the CLI
+enables tag and GitHub release creation and writes the root changelog.
+The include list must cover every other workspace member. Existing `cliff.toml`
+filters still hide chore/CI/docs commits.
+
+To check changes, install the workflow's exact version with
+`cargo install --locked release-plz@0.4.3` using the resource limits in AGENTS.md.
+Use a disposable local clone with the existing `v2.0.0` tag and complete history;
+remove its push remote, copy in the proposed configuration, and commit it.
+Make a new conventional `fix:` commit changing only a file under `crates/core`,
+then run `release-plz update` there. Version 0.4.3 has no update/release-pr dry-run
+flag: `update` is the local-only equivalent and changes the disposable clone's
+manifests, lockfile and changelog without opening a PR or creating tags/releases.
+Assert that root `CHANGELOG.md` includes the synthetic fix and the fixes from
+#263, #264, #268, #271 and #274, and that no member changelog was created.
+Repeat with the old configuration as a negative control: the core-only fix must
+be missing. Never run `release-pr` for this check against the live repository.
+
+Verified 2026-11-16 with release-plz 0.4.3 installed via `cargo install --locked`:
+the proposed configuration generated 2.0.1 with the synthetic core-only fix and
+all five previously missing PRs; only the root changelog, root manifest and root
+lockfile changed. The original configuration omitted the synthetic fix and all
+five PRs. No live release PR, tag or GitHub release was changed.
