@@ -2,11 +2,11 @@
 
 wit_bindgen::generate!({
     path: "../../crates/plugin-api/wit",
-    world: "source-plugin",
+    world: "colored-source-plugin",
 });
 
-use animathio::plugin::host;
 use animathio::plugin::types::*;
+use animathio::plugin::{host, math_colors};
 
 struct LatexPlugin;
 
@@ -85,7 +85,7 @@ impl Guest for LatexPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "latex".to_string(),
-            version: "1.2.3".to_string(),
+            version: "1.3.0".to_string(),
             description: "LaTeX/Typst math typeset by the host into vector outlines".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -205,7 +205,7 @@ impl Guest for LatexPlugin {
         // A formula that does not typeset (mid-edit, unbalanced braces...) draws its message in
         // place instead of failing the whole frame, so the preview and export stay usable and
         // the problem is visible right where the formula would be.
-        let result = match host::typeset_math(&source, math_mode, font_size) {
+        let result = match math_colors::typeset_math_colored(&source, math_mode, font_size) {
             Ok(result) => result,
             Err(diagnostic) => {
                 if params.iter().any(|entry| {
@@ -249,14 +249,18 @@ impl Guest for LatexPlugin {
         let partial = reveal > 0.0 && reveal < 1.0 && full_count < path_count;
 
         // Each host path is a complete glyph, including oppositely wound counters.
-        // Fill them together so holes in letters such as a, b and theta stay open.
-        let mut filled = Vec::new();
-        let mut elements = Vec::with_capacity(2);
+        // Keep each glyph's contours together so counters stay open, with its own paint.
+        let mut elements = Vec::with_capacity(path_count);
         for (index, path) in result.paths.iter().enumerate() {
             if index >= full_count && !(partial && index == full_count) {
                 continue;
             }
+            let mut path_color = path.color.unwrap_or(color);
+            if path.color.is_some() {
+                path_color.a = ((u16::from(path_color.a) * u16::from(color.a) + 127) / 255) as u8;
+            }
             let offset: Vec<PathVerb> = path
+                .outline
                 .iter()
                 .map(|verb| offset_verb(verb, x_offset, y_offset, scale))
                 .collect();
@@ -265,17 +269,14 @@ impl Guest for LatexPlugin {
                     offset,
                     StrokeStyle {
                         width: (font_size * 0.03).max(0.5),
-                        color,
+                        color: path_color,
                         cap: StrokeCap::Round,
                         join: StrokeJoin::Round,
                     },
                 )));
             } else {
-                filled.extend(offset);
+                elements.push(DrawCommand::FillPath((offset, path_color)));
             }
-        }
-        if !filled.is_empty() {
-            elements.insert(0, DrawCommand::FillPath((filled, color)));
         }
 
         Ok(Scene {
@@ -301,7 +302,11 @@ fn error_scene(message: &str, shorter: f32, size: Size) -> Result<Scene, Diagnos
     };
     let reason: Vec<char> = friendly.chars().take(240).collect();
     let mut lines = vec!["LaTeX error".to_string()];
-    lines.extend(reason.chunks(55).map(|chunk| chunk.iter().collect::<String>()));
+    lines.extend(
+        reason
+            .chunks(55)
+            .map(|chunk| chunk.iter().collect::<String>()),
+    );
     let mut elements = Vec::new();
     for (line, text) in lines.iter().enumerate() {
         let x = size.width as f32 * 0.05;

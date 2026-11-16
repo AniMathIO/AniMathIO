@@ -1,4 +1,4 @@
-package animathio:plugin@1.1.0;
+package animathio:plugin@1.2.0;
 
 /// Shared data types for vector graphics, parameter schemas and plugin manifests.
 interface types {
@@ -579,4 +579,28 @@ world source-plugin {
     /// time in integer flicks (705600000 ticks/second). size is the render canvas.
     /// An empty scene is valid; invalid geometry or traps fail the call.
     export render-clip: func(params: param-map, time-ticks: s64, size: size) -> result<scene, diagnostic>;
+}
+
+/// ABI 1.2: optional solid paints without changing the frozen typeset-result.
+interface math-colors {
+    use types.{path, color, bbox, math-mode, diagnostic};
+
+    record colored-path {
+        outline: path,
+        /// None inherits the clip colour; non-solid paints also return None.
+        color: option<color>,
+    }
+
+    record colored-typeset-result {
+        paths: list<colored-path>,
+        bbox: bbox,
+    }
+
+    typeset-math-colored: func(source: string, mode: math-mode, font-size: f32) -> result<colored-typeset-result, diagnostic>;
+}
+
+/// ABI 1.2 source plugins that need per-glyph math paints.
+world colored-source-plugin {
+    include source-plugin;
+    import math-colors;
 }
