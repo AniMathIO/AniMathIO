@@ -1991,7 +1991,13 @@ fn library_tabs_have_distinct_contents_and_scoped_search(cx: &mut TestAppContext
     search_library(&mut ui, LeftTab::Titles, "caption");
     assert!(ui.cx.debug_bounds("title-caption").is_some());
     assert!(ui.cx.debug_bounds("title-centered_title").is_none());
+    // Transitions live in Effects and are filtered by its search like everything else.
+    ui.update(|e, _, cx| e.select_left_tab(LeftTab::Effects, cx));
+    for key in ["video", "audio", "both"] {
+        assert!(bounds_of(&mut ui, format!("library-transition-{key}")).is_some());
+    }
     search_library(&mut ui, LeftTab::Effects, "invert");
+    assert!(ui.cx.debug_bounds("library-transition-video").is_none());
     assert!(
         ui.cx
             .debug_bounds("effect-item-org.animathio.effects-basic-invert")
@@ -2016,6 +2022,11 @@ fn library_tabs_have_distinct_contents_and_scoped_search(cx: &mut TestAppContext
     assert!(ui.cx.debug_bounds("media-kind-filters").is_none());
 }
 
+/// `debug_bounds` wants a `'static` selector; the leak is a few bytes in a test.
+fn bounds_of(ui: &mut Ui, selector: String) -> Option<gpui::Bounds<gpui::Pixels>> {
+    ui.cx.debug_bounds(Box::leak(selector.into_boxed_str()))
+}
+
 fn search_library(ui: &mut Ui, tab: LeftTab, query: &str) {
     ui.update(|e, _, cx| e.select_left_tab(tab, cx));
     ui.update(|e, window, cx| {
@@ -2023,6 +2034,9 @@ fn search_library(ui: &mut Ui, tab: LeftTab, query: &str) {
             .clone()
             .expect("rendered search");
         input.update(cx, |state, cx| state.set_value(query, window, cx));
+        // `set_value` does not emit `InputEvent::Change`; mirror what the subscription stores.
+        e.media_view.queries[tab as usize] = query.to_owned();
+        cx.notify();
     });
 }
 
@@ -2055,7 +2069,7 @@ fn library_plugins_lists_all_eight_kinds_without_duplicate_element_sources(
     for id in ids {
         search_library(&mut ui, LeftTab::Plugins, &id);
         assert!(
-            ui.cx.debug_bounds(&format!("installed-{id}")).is_some(),
+            bounds_of(&mut ui, format!("installed-{id}")).is_some(),
             "missing {id}"
         );
         assert!(ui.read(|e| {
@@ -2079,11 +2093,7 @@ fn library_plugins_lists_all_eight_kinds_without_duplicate_element_sources(
         assert_eq!(sources, ["org.animathio.shapes"]);
     });
     for id in ["text", "latex", "graph"] {
-        assert!(
-            ui.cx
-                .debug_bounds(&format!("element-plugin-org.animathio.{id}"))
-                .is_none()
-        );
+        assert!(bounds_of(&mut ui, format!("element-plugin-org.animathio.{id}")).is_none());
     }
     // A third-party clip source belongs to Elements, not to Titles or Effects.
     ui.update(|e, _, cx| {
@@ -2123,10 +2133,8 @@ fn library_elements_plus_buttons_add_latex_text_and_shape_and_undo(cx: &mut Test
         search_library(&mut ui, LeftTab::Elements, query);
         let before = ui.read(|e| e.project.clone());
         let count = ui.read(clip_count);
-        let bounds = ui
-            .cx
-            .debug_bounds(&format!("element-default-{index}"))
-            .expect("visible add button");
+        let bounds =
+            bounds_of(&mut ui, format!("element-default-{index}")).expect("visible add button");
         ui.click(bounds.center(), gpui::Modifiers::default());
         assert_eq!(ui.read(clip_count), count + 1);
         ui.read(|e| {
@@ -2137,16 +2145,16 @@ fn library_elements_plus_buttons_add_latex_text_and_shape_and_undo(cx: &mut Test
         assert_eq!(ui.read(|e| e.project.clone()), before);
     }
     // View destinations reopen a hidden panel, including the existing Effects action.
-    ui.update(|e, _, cx| {
-        e.dock.left_open = false;
-        cx.notify();
-    });
+    ui.dispatch(actions::ToggleMediaPool);
+    assert!(!ui.read(|e| e.dock.left_open));
+    // The hidden panel took its focus with it; the user is working elsewhere.
+    ui.update(|e, window, cx| window.focus(&e.panel_focus[0], cx));
     ui.dispatch(actions::ShowElements);
     assert!(ui.read(|e| e.dock.left_open && e.left_tab == LeftTab::Elements));
-    ui.update(|e, _, cx| {
-        e.dock.left_open = false;
-        cx.notify();
-    });
+    ui.dispatch(actions::ToggleMediaPool);
+    assert!(!ui.read(|e| e.dock.left_open));
+    // The hidden panel took its focus with it; the user is working elsewhere.
+    ui.update(|e, window, cx| window.focus(&e.panel_focus[0], cx));
     ui.dispatch(actions::ShowTitles);
     assert!(ui.read(|e| e.dock.left_open && e.left_tab == LeftTab::Titles));
     ui.dispatch(actions::ShowPlugins);
