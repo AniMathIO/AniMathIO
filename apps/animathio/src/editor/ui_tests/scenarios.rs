@@ -1940,3 +1940,27 @@ fn headless_environment_never_checks_for_updates(cx: &mut TestAppContext) {
     let state = super::config_dir().join(super::update_check::STATE_FILE);
     assert!(!state.exists(), "the harness never contacts the network");
 }
+
+#[gpui::test]
+fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| editor.open_screenshot_panel("markers", cx));
+    assert!(ui.read(|editor| editor.marker_panel.is_some()));
+    ui.update(|editor, _, cx| editor.open_screenshot_panel("autocut", cx));
+    ui.settle();
+    ui.read(|editor| {
+        assert_eq!(editor.selected, Some(VOICE_CLIP));
+        let proposal = editor
+            .autocut_review
+            .as_ref()
+            .expect("review")
+            .proposal
+            .as_ref()
+            .expect("analysis completed");
+        assert!(
+            !proposal.cuts.is_empty(),
+            "voice pause detected despite music bed"
+        );
+    });
+}

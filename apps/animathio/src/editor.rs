@@ -659,6 +659,29 @@ pub(crate) struct Editor {
 }
 
 impl Editor {
+    /// Developer capture hook: use the same handlers as the editor menus.
+    pub(crate) fn open_screenshot_panel(&mut self, panel: &str, cx: &mut Context<Self>) {
+        match panel {
+            "markers" => self.open_marker_panel(cx),
+            "autocut" => {
+                let audio = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .flat_map(|track| track.clips().values())
+                    .find(|clip| matches!(clip.kind, animathio_core::ClipKind::Audio(_)))
+                    .map(|clip| clip.id);
+                if let Some(id) = audio {
+                    self.select_only(id, cx);
+                } else {
+                    self.clear_selection(cx);
+                }
+                self.open_autocut(cx);
+            }
+            _ => eprintln!("unknown screenshot panel {panel:?}; expected markers or autocut"),
+        }
+    }
+
     pub(crate) fn new(
         cx: &mut Context<Self>,
         window: &mut Window,
