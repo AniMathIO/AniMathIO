@@ -1361,3 +1361,30 @@ fn reducing_history_limit_bounds_redo_and_keeps_nearest_future() {
     assert!(!history.redo(&mut project).unwrap());
     assert!(!history.undo(&mut project).unwrap());
 }
+
+#[test]
+fn history_cap_keeps_batches_as_single_undo_steps() {
+    let mut project = base();
+    let mut history = History::with_limit(1);
+    let move_to = |time| Command::MoveClip {
+        id: ClipId(0),
+        track: TrackId(0),
+        start: Time(time),
+    };
+    history.execute(&mut project, &move_to(10)).unwrap();
+    let before_batch = project.clone();
+    history
+        .execute(
+            &mut project,
+            &Command::Batch {
+                commands: vec![move_to(20), move_to(30)],
+            },
+        )
+        .unwrap();
+    let after_batch = project.clone();
+    assert!(history.undo(&mut project).unwrap());
+    assert_eq!(project, before_batch);
+    assert!(!history.undo(&mut project).unwrap());
+    assert!(history.redo(&mut project).unwrap());
+    assert_eq!(project, after_batch);
+}

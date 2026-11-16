@@ -711,9 +711,11 @@ impl Editor {
         let worker = match RenderWorker::spawn() {
             Ok(worker) => worker,
             Err(spawn_error) => {
-                if error.is_none() {
-                    error = Some(format!("preview renderer could not start: {spawn_error}"));
-                }
+                let message = format!("preview renderer could not start: {spawn_error}");
+                error = Some(match error {
+                    Some(previous) => format!("{previous}\n{message}"),
+                    None => message,
+                });
                 RenderWorker::disabled()
             }
         };
