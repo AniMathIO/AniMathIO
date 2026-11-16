@@ -106,8 +106,9 @@ CI-built installers also carry a build-provenance attestation, verifiable with
 - **Flatpak, AUR and Flathub are not shipped yet.**
 - **Mafs graphs from v1 import as static images**, because v1 never stored the graph
   definition. See the migration guide for the full list of import gaps.
-- **No in-app update check.** Installers are unsigned, so the operating system does not
-  verify the publisher.
+- **Update notices only.** Since 2.0.1 the editor checks GitHub at most once a day and
+  shows a notice when a newer 2.x release exists (opt out in Preferences or with
+  `ANIMATHIO_NO_UPDATE_CHECK=1`). It never downloads or installs anything itself.
 
 ## Migrating from v1
 
