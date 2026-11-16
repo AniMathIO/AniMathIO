@@ -245,6 +245,9 @@ fn atomic_write(
     write(temporary.as_file_mut())?;
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|e| e.error)?;
+    // Persist the directory entry as well as the file contents on Unix.
+    #[cfg(unix)]
+    std::fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
 

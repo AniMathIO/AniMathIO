@@ -275,7 +275,19 @@ impl HeadlessHandler {
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("json"))
         {
-            save_json(&target, &self.project)?;
+            // Validate the entire asset set before publishing any file.
+            for id in self.project.assets().keys() {
+                if self
+                    .assets
+                    .get(id)
+                    .is_none_or(|bytes| AssetId::of(bytes) != *id)
+                {
+                    return Err(ControlError::Unsupported(format!(
+                        "missing or mismatched asset bytes: {}",
+                        id.as_str()
+                    )));
+                }
+            }
             let assets_dir = target.parent().unwrap_or(Path::new(".")).join("assets");
             fs::create_dir_all(&assets_dir)?;
             // Same manifest rule as the archive writer: only referenced bytes.
@@ -284,6 +296,9 @@ impl HeadlessHandler {
                 // save, so a crash mid-loop never leaves a short asset file.
                 animathio_format::save_asset(assets_dir.join(id.as_str()), &bytes)?;
             }
+            // Publish the manifest only after every content-addressed sidecar.
+            // A failed save may add unused assets, but preserves the old project.
+            save_json(&target, &self.project)?;
         } else {
             save_amio(&target, &self.project, &self.assets)?;
         }
@@ -704,6 +719,9 @@ mod tests {
         let entries: Vec<_> = fs::read_dir(&assets_dir).unwrap().collect();
         assert_eq!(entries.len(), 1, "no temp file survives the save");
 
+        handler.handle(Call::ProjectSave { path: None }).unwrap();
+        assert_eq!(fs::read(assets_dir.join(id.as_str())).unwrap(), bytes);
+
         // Re-saving with new bytes replaces the asset set in place, still
         // leaving only complete, hash-named files.
         let next = b"replacement";
@@ -739,10 +757,8 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn failed_asset_write_leaves_previous_files_intact() {
-        use std::os::unix::fs::PermissionsExt;
         let bytes = b"original-media";
         let id = AssetId::of(bytes);
         let mut handler = json_project_with_asset(bytes);
@@ -756,12 +772,7 @@ mod tests {
         let assets_dir = dir.path().join("assets");
         assert_eq!(fs::read(assets_dir.join(id.as_str())).unwrap(), bytes);
 
-        // Make the assets directory unwritable so the atomic save cannot
-        // create its temp file; the save must fail without touching the
-        // previously saved asset or the project file.
-        let mut permissions = fs::metadata(&assets_dir).unwrap().permissions();
-        permissions.set_mode(0o555);
-        fs::set_permissions(&assets_dir, permissions).unwrap();
+        let previous_json = fs::read(&json).unwrap();
 
         let replacement = b"replacement-media";
         let replacement_id = AssetId::of(replacement);
@@ -777,7 +788,7 @@ mod tests {
         handler
             .handle(Call::CommandApply {
                 command: Command::AddAsset {
-                    id: replacement_id,
+                    id: replacement_id.clone(),
                     asset: Asset {
                         name: "media2.bin".to_owned(),
                         media_type: "application/octet-stream".to_owned(),
@@ -785,14 +796,15 @@ mod tests {
                 },
             })
             .unwrap();
+        // An existing directory at the destination makes persist fail on
+        // every platform, including privileged test runners.
+        let blocked = assets_dir.join(replacement_id.as_str());
+        fs::create_dir(&blocked).unwrap();
         assert!(handler.handle(Call::ProjectSave { path: None }).is_err());
-
-        let mut permissions = fs::metadata(&assets_dir).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&assets_dir, permissions).unwrap();
-
+        assert_eq!(fs::read(&json).unwrap(), previous_json);
+        fs::remove_dir(blocked).unwrap();
         let entries: Vec<_> = fs::read_dir(&assets_dir).unwrap().collect();
-        assert_eq!(entries.len(), 1, "the failed save added no files");
+        assert_eq!(entries.len(), 1, "the failed save added no temp files");
         assert_eq!(
             entries[0].as_ref().unwrap().file_name(),
             std::ffi::OsStr::new(AssetId::of(b"original-media").as_str())
@@ -803,6 +815,22 @@ mod tests {
             "the previous asset is intact"
         );
         assert!(json.is_file(), "the previous project file is intact");
+    }
+
+    #[test]
+    fn json_save_rejects_missing_bytes_before_publishing_manifest() {
+        let mut handler = json_project_with_asset(b"asset");
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("project.json");
+        handler
+            .handle(Call::ProjectSave {
+                path: Some(json.clone()),
+            })
+            .unwrap();
+        let previous = fs::read(&json).unwrap();
+        handler.assets.clear();
+        assert!(handler.handle(Call::ProjectSave { path: None }).is_err());
+        assert_eq!(fs::read(json).unwrap(), previous);
     }
 
     #[test]
