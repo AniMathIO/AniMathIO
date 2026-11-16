@@ -245,9 +245,13 @@ fn atomic_write(
     write(temporary.as_file_mut())?;
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|e| e.error)?;
-    // Persist the directory entry as well as the file contents on Unix.
+    // Persist the directory entry as well as the file contents on Unix. Best
+    // effort: the rename already succeeded, and some filesystems reject
+    // directory fsync, which must not turn a completed save into an error.
     #[cfg(unix)]
-    std::fs::File::open(parent)?.sync_all()?;
+    if let Ok(directory) = std::fs::File::open(parent) {
+        let _ = directory.sync_all();
+    }
     Ok(())
 }
 
