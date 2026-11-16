@@ -13,7 +13,7 @@ git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMa
 
 ### Security
 
-- Update zip-dependent readers and clear open dependency advisories ([#268](https://github.com/AniMathIO/AniMathIO/pull/268))
+- Clear open dependency advisories ([#268](https://github.com/AniMathIO/AniMathIO/pull/268))
 
 ### Fixed
 
