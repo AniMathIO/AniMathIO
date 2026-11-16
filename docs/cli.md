@@ -225,7 +225,7 @@ animathio-cli import-media interview.mp4 -o interview.amio
 
 ## `import-v1`
 
-Convert a v1 (Electron/TypeScript) `.animathio` project to a 2.0 `.amio` archive.
+Convert a v1 (Electron/TypeScript) `.animathio` project to an AniMathIO 2 `.amio` archive.
 Non-fatal warnings are printed to stderr. See
 [`docs/migrating-from-v1.md`](migrating-from-v1.md) for what maps.
 
@@ -250,7 +250,7 @@ animathio-cli import-v1 project.animathio -o imported.amio
 
 ## `import-manim`
 
-Convert a Manim Community scene script (`.py`) to a 2.0 `.amio` archive.
+Convert a Manim Community scene script (`.py`) to an AniMathIO 2 `.amio` archive.
 
 <!-- help:import-manim -->
 ```text

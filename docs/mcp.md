@@ -1,6 +1,6 @@
 # Control protocol and MCP
 
-AniMathIO 2.0 exposes two related surfaces:
+AniMathIO 2 exposes two related surfaces:
 
 1. **The control protocol** — a local, authenticated JSON-RPC 2.0 socket that is
    the single API for the editor UI, the CLI, plugins and the MCP sidecar.
