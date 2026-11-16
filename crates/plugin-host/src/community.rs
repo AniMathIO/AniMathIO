@@ -442,11 +442,44 @@ impl CommunityStore {
     }
 }
 
+// Recheck identity on the bytes that will actually be compiled: the entry may have
+// been replaced since list() selected its enabled manifest.
+pub(crate) fn read_selected_package(
+    path: &Path,
+    expected_id: &str,
+) -> Result<PluginPackage, CommunityError> {
+    let package = read_package_file(path)?;
+    if package.manifest.id != expected_id {
+        return Err(CommunityError::InvalidId(package.manifest.id));
+    }
+    Ok(package)
+}
+
 pub(crate) fn read_package_file(path: &Path) -> Result<PluginPackage, CommunityError> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(
+            (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK)
+                .bits()
+                .cast_signed(),
+        );
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.file_type().is_file() {
+        return Err(
+            io::Error::new(io::ErrorKind::InvalidInput, "plugin must be a regular file").into(),
+        );
+    }
     let mut bytes = Vec::new();
-    fs::File::open(path)?
-        .take(MAX_PACKAGE_BYTES + 1)
-        .read_to_end(&mut bytes)?;
+    file.take(MAX_PACKAGE_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_PACKAGE_BYTES {
         return Err(CommunityError::TooLarge);
     }
@@ -554,6 +587,41 @@ mod tests {
             .unwrap()
             .create_bytes()
             .unwrap()
+    }
+
+    #[test]
+    fn replaced_entry_cannot_bypass_selected_identity() {
+        let (_root, store) = store();
+        let path = store.install_bytes(HELLO, None, false).unwrap().path;
+        assert!(read_selected_package(&path, "com.example.hello").is_ok());
+        fs::write(&path, package("com.example.disabled")).unwrap();
+        assert!(matches!(
+            read_selected_package(&path, "com.example.hello"),
+            Err(CommunityError::InvalidId(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn community_entries_cannot_be_symlinks_or_fifos() {
+        let (root, store) = store();
+        fs::create_dir_all(store.dir()).unwrap();
+        let outside = root.path().join("outside.amplugin");
+        fs::write(&outside, HELLO).unwrap();
+        let link = store.dir().join("link.amplugin");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(read_package_file(&link).is_err());
+        let fifo = store.dir().join("fifo.amplugin");
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            0,
+        )
+        .unwrap();
+        assert!(read_package_file(&fifo).is_err());
+        assert!(store.list().0.is_empty());
     }
 
     #[test]
