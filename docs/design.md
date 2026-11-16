@@ -1,4 +1,4 @@
-# AniMathIO 2.0 visual design
+# AniMathIO 2 visual design
 
 The editor should feel like a modern pro NLE (DaVinci Resolve 19, Final Cut Pro,
 Premiere 2025): calm dark surfaces, floating rounded panels, one vivid accent,

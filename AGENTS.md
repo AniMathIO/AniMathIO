@@ -4,7 +4,7 @@ Guidance for coding agents working on AniMathIO 2.x (`main`). `CLAUDE.md` import
 
 ## What this branch is
 
-AniMathIO 2.0 is a from-scratch Rust rewrite of AniMathIO, an editor for Manim-like math animation videos. The full plan, architecture and roadmap are in [issue #156](https://github.com/AniMathIO/AniMathIO/issues/156). Read it before proposing structure. The short version:
+AniMathIO 2 is a from-scratch Rust rewrite of AniMathIO, an editor for Manim-like math animation videos. The full plan, architecture and roadmap are in [issue #156](https://github.com/AniMathIO/AniMathIO/issues/156). Read it before proposing structure. The short version:
 
 - **The core is a simple video editor:** media clips, a multi-track timeline, transforms + keyframes, audio, preview and export. Nothing math-specific lives in the core.
 - **Everything else is a plugin:** sandboxed WebAssembly components (wasmtime, Component Model, WIT). This includes text, LaTeX, graphs, Manim import, effects, the v1 importer and MCP.
@@ -18,7 +18,7 @@ AniMathIO 2.0 is a from-scratch Rust rewrite of AniMathIO, an editor for Manim-l
 Docs live in `docs/` and are kept accurate against the code — every command and
 API they describe must exist. Update them alongside behaviour changes:
 
-- `README.md` — what 2.0 is, status, build/run and import instructions
+- `README.md` — what AniMathIO 2 is, status, build/run and import instructions
 - `docs/architecture.md` — crate map, layering, time model, engine rules, data flow
 - `docs/plugins.md` — plugin authoring guide (WIT world, host imports, schema, sandbox, example)
 - `docs/cli.md` — every `animathio-cli` subcommand (regenerate from `--help`)
@@ -26,7 +26,7 @@ API they describe must exist. Update them alongside behaviour changes:
 - `docs/migrating-from-v1.md` — what maps from 1.x and known gaps
 - `docs/benchmarks.md` — v1 vs v2 benchmark methodology, results and caveats (`scripts/bench-v1-v2.sh`)
 - `docs/dependency-advisories.md` — dependency advisory baseline and exception reachability evidence
-- `docs/release-checklist.md` — manual and automatable steps left before the 2.0 swap
+- `docs/release-checklist.md` — historical 2.0 swap checklist and release automation follow-ups
 
 `scripts/check-docs.sh` fails when a document names a path, `animathio-cli` subcommand
 or flag, MCP tool, control method, environment variable, cargo target, plugin id, core
@@ -66,16 +66,16 @@ Automation is configured in `renovate.json`, `release-plz.toml` and `.github/wor
 
 ## Porting from v1
 
-The v1 implementation (Electron/TypeScript) is still on `main` and is a useful reference. Read it without checking it out:
+The v1 implementation (Electron/TypeScript) is frozen on `legacy` and is a useful reference. Read it without checking it out:
 
 ```bash
-git show origin/main:renderer/utils/manim/translator.ts    # Manim subset translator (to port to the manim-import plugin)
-git show origin/main:renderer/types.ts                     # v1 element/animation model (input to the import-v1 plugin)
-git show origin/main:renderer/states/stores/ProjectStore.ts # v1 .animathio (de)serialization
-git show origin/main:main/mcp/tool-schemas.ts              # v1 MCP tool surface (parity target)
+git show origin/legacy:renderer/utils/manim/translator.ts    # Manim subset translator (to port to the manim-import plugin)
+git show origin/legacy:renderer/types.ts                     # v1 element/animation model (input to the import-v1 plugin)
+git show origin/legacy:renderer/states/stores/ProjectStore.ts # v1 .animathio (de)serialization
+git show origin/legacy:main/mcp/tool-schemas.ts              # v1 MCP tool surface (parity target)
 ```
 
-Port behavior, not structure. The v1 store/component layout is exactly what 2.0 replaces.
+Port behavior, not structure. The v1 store/component layout is exactly what AniMathIO 2 replaces.
 
 ## GUI testing: always use a virtual display
 

@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-AniMathIO 2.0 defaults to Adobe Premiere Pro's Windows/Linux shortcuts, with
+AniMathIO 2 defaults to Adobe Premiere Pro's Windows/Linux shortcuts, with
 Ctrl mapped to Cmd (`secondary`) on macOS, following [Adobe's official default
 list](https://helpx.adobe.com/premiere-pro/using/keyboard-shortcuts.html).
 Help → Keyboard shortcuts (Ctrl+Alt+K) opens a searchable dialog over the same

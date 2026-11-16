@@ -1,14 +1,14 @@
-# AniMathIO 2.0
+# AniMathIO 2
 
 AniMathIO is a desktop editor for math animation videos. Combine media, editable
-LaTeX, graphs and shapes on a multi-track timeline, then export a video. Version
-2.0 rebuilds the editor and rendering engine in Rust.
+LaTeX, graphs and shapes on a multi-track timeline, then export a video. AniMathIO 2
+rebuilds the editor and rendering engine in Rust.
 
 ![AniMathIO editor](docs/screenshots/editor-main.png)
 
 ## Installing
 
-Download the installers from the [v2.0.0 release](https://github.com/AniMathIO/AniMathIO/releases/tag/v2.0.0).
+Download the installers from the [latest release](https://github.com/AniMathIO/AniMathIO/releases/latest).
 Visit [docs.animathio.com](https://docs.animathio.com) for documentation.
 
 Linux packages include AppImage and deb; Windows uses an NSIS installer and macOS

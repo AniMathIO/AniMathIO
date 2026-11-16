@@ -1,6 +1,6 @@
 # Editor guide
 
-Desktop workflows, controls and examples for AniMathIO 2.0. See also the
+Desktop workflows, controls and examples for AniMathIO 2. See also the
 [keyboard shortcuts](keyboard-shortcuts.md) and [architecture](architecture.md).
 
 ## Clip speed and frame holds
@@ -58,7 +58,7 @@ stores it in the user data directory. The opt-in integration test runs the real 
 The editor shell (dark theme, media pool, viewer
 with transport controls, resizable inspector and vertically scrolling timeline):
 
-![AniMathIO 2.0 editor](../docs/screenshots/editor-main.png)
+![AniMathIO 2 editor](../docs/screenshots/editor-main.png)
 
 | Start screen | Export |
 | --- | --- |

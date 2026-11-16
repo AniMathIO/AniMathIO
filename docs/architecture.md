@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the 2.0 crate map, the layering rules, the time model and
+This document describes the AniMathIO 2 crate map, the layering rules, the time model and
 the render/audio/export data flow. The authority for these rules is
 [issue #156](https://github.com/AniMathIO/AniMathIO/issues/156).
 
@@ -185,7 +185,7 @@ also try to sync the containing directory after replacement (best effort).
 
 ## Time model (integer ticks)
 
-AniMathIO 2.0 uses **integer ticks** at a fixed rate, with **rational frame rates**
+AniMathIO 2 uses **integer ticks** at a fixed rate, with **rational frame rates**
 on top. The rate is 705,600,000 ticks per second — the *flicks* constant, chosen so
 frame and audio-sample boundaries are always exact:
 
@@ -215,7 +215,7 @@ boundary.
 
 Each rule exists because of a specific v1 failure, and each is enforced by a test.
 
-| v1 failure | 2.0 rule | Enforced by |
+| v1 failure | AniMathIO 2 rule | Enforced by |
 | --- | --- | --- |
 | Live Konva nodes, `<video>`/`<audio>` elements and `AudioContext` source nodes stored next to project data; leaked contexts and silent preview after export. | **The project is plain data.** Decoders, GPU textures and audio streams live in an engine-owned resource pool keyed by asset hash. Removing a clip never has to release anything. | `core` has no IO/GPU deps; after deleting every clip and running GC the pool is empty. |
 | Animations in a separate anime.js timeline seeked in parallel with the store. | **Animated values are always computed from (project, t)** and never kept in a second stateful object. Keyframes are data. | Property test: rendering at `t` is independent of which times were rendered or seeked before. |

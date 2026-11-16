@@ -1,8 +1,10 @@
-# 2.0 release checklist
+# 2.0 release checklist (historical)
 
-What is left between the `v2` branch and a published AniMathIO 2.0, grouped by who has to
-act. The plan is in [issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)
-(milestone M5, "Repository and branch plan"); this page is the operational list.
+The branch swap and the `v2.0.0` launch are complete; `v2.1.0` has also been released.
+This page preserves the pre-launch checklist and release automation follow-ups, grouped
+by owner. The statuses below record the pre-launch audit, not current release blockers.
+The plan is in [issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)
+(milestone M5, "Repository and branch plan"); this page records its operational checklist.
 
 State was checked on **2026-11-14** against the repository settings (`gh api`) and the
 tree. "Automatable" means a script, `gh` command or agent can do it; "Manual" needs an
