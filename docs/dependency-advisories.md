@@ -21,27 +21,8 @@ GitHub has closed them before merge and rescan.
 
 ## Reviewed exceptions
 
-| Advisory | Disposition and reason |
-| --- | --- |
-| RUSTSEC-2024-0320 | yaml-rust is transitive via syntect in Typst; unmaintained notice, no vulnerability or compatible replacement. Retire with the upstream dependency. |
-| RUSTSEC-2024-0384 | instant is transitive in the GUI stack; maintenance-only notice, no vulnerability. Replacement requires upstream migration to web-time. |
-| RUSTSEC-2024-0436 | paste is used by transitive macros; maintenance-only notice, no vulnerability. Replacement requires upstream macro migration. |
-| RUSTSEC-2024-0449 | unsafe-libyaml is pulled by serde_yaml in the typesetting stack; maintenance-only notice, no vulnerability. Await upstream parser migration. |
-| RUSTSEC-2025-0057 | fxhash is transitive in the typesetting stack; maintenance-only notice, no vulnerability and no compatible replacement. |
-| RUSTSEC-2025-0134 | rustls-pemfile is transitive in GUI HTTP dependencies; maintenance-only notice, no vulnerability. Await upstream rustls-pki-types migration. |
-| RUSTSEC-2025-0141 | bincode is transitive in Typst; maintenance-only notice, no vulnerability. Format migration belongs upstream. |
-| RUSTSEC-2026-0192 | ttf-parser is used directly and by font/layout dependencies; maintenance-only notice, no vulnerability. Replacing the font API requires a separate migration. |
-| RUSTSEC-2026-0206 | rustybuzz is transitive in text shaping; maintenance-only notice, no vulnerability. Await upstream harfrust migration. |
-| RUSTSEC-2026-0370 | zvariant 5 is required by the GPUI Linux D-Bus stack; maintenance-only notice. zbus 6 migration must happen upstream. |
-| RUSTSEC-2026-0371 | zbus_names 4 is required by the GPUI Linux D-Bus stack; maintenance-only notice. zbus 6 migration must happen upstream. |
-| RUSTSEC-2026-0372 | zvariant_derive 5 is required by the GPUI Linux D-Bus stack; maintenance-only notice. zbus 6 migration must happen upstream. |
-| RUSTSEC-2025-0052 | async-std exists only in the historical unshipped viewport spike via gpui 0.2.2; maintenance-only notice, no vulnerability. |
-| RUSTSEC-2026-0173 | proc-macro-error2 exists only in the historical unshipped viewport spike; maintenance-only build-time macro notice. |
-| RUSTSEC-2026-0441 | pin-utils exists only in the historical unshipped viewport spike; maintenance-only notice, no vulnerability. |
-| RUSTSEC-2026-0194 | quick-xml 0.38 is pinned by citationberg 0.7 via Typst. MathWorld denies all external files and accepts only a generated math source, so attacker-supplied CSL/XML is inaccessible. No compatible patched release. |
-| RUSTSEC-2026-0195 | quick-xml 0.38 is pinned by citationberg 0.7 via Typst. MathWorld denies all external files; namespace parsing of attacker-supplied CSL/XML is inaccessible. No compatible patched release. |
-| RUSTSEC-2026-0235 | rkyv 0.7 is pinned by mitex-spec 0.2.4. MiTeX reads only its compile-time embedded default command specification; user input is LaTeX text, never archive bytes. No compatible patched release. |
-| GHSA-38c5-483c-4qqp | grid 0.18 is pinned by taffy 0.9 via gpui 0.2.2 only in the unshipped viewport spike. Taffy uses Grid::new/from_vec and rebuilds storage in expand_to_fit_range; it never calls expand_rows. Shipped workspace has no grid dependency. Reassess on spike dependency changes. |
+The authoritative, reason-bearing exception list is in `deny.toml`. The
+reachability evidence below supplements that policy.
 
 There are 15 RustSec advisory IDs in the workspace (three vulnerability IDs
 and twelve maintenance notices), and three additional maintenance IDs in the

@@ -16,7 +16,7 @@ blake3 = { version = "1.8", default-features = false, features = ["pure"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
-zip = { version = "9", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 proptest = "1"
 # GPUI Kit's GPUI distribution (lib name `gpui`); the editor uses gpui-component
 # widgets on top of it. Version is pinned to the exact `gpui-pre` release that
