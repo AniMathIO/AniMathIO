@@ -28,7 +28,7 @@ right-click → Open. Verify installation with `animathio --version` and
   to it; opt out in Preferences or with `ANIMATHIO_NO_UPDATE_CHECK=1` (no telemetry, no
   automatic download).
 
-![Math library](docs/screenshots/editor-math-panel.png)
+![Elements library](docs/screenshots/editor-math-panel.png)
 
 ![Math object editor](docs/screenshots/editor-math-dialog.png)
 

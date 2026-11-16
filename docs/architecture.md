@@ -871,7 +871,7 @@ preset. Plugin errors appear inline and disable Add/Apply.
 The cards and fields follow the interface text scale; the dialog widens with UI
 scale and bounds its scrolling form to leave the preview and action buttons visible.
 
-![Math library](screenshots/editor-math-panel.png)
+![Elements library](screenshots/editor-math-panel.png)
 ![Math object dialog](screenshots/editor-math-dialog.png)
 
 ## Scene cuts

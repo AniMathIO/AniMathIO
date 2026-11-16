@@ -17,7 +17,7 @@ touches files, sockets, the GPU or a font engine directly. Everything it needs i
 provided by **host imports**.
 
 The editor's Library → Plugins tab lists every loaded plugin kind, version, id,
-enabled status and source bundle path. Clip-source creation cards live in
+first-party or third-party origin, enabled status and source bundle file (full path on hover). Clip-source creation cards live in
 Elements (third-party sources under Plugins); title presets live in Titles and
 effects/animations in Effects. Install a bundle in a discovery directory and
 restart the editor to load it. The inventory also shows package load failures.
