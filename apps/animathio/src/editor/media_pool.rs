@@ -4,6 +4,9 @@ use super::*;
 use crate::style::{color, hex};
 use gpui_component::input::{Input, InputEvent, InputState};
 
+/// Search text for the Effects tab's built-in Write on button.
+const WRITE_ON_SEARCH: &str = "Animations Write on LaTeX";
+
 #[derive(Default)]
 pub(super) struct MediaView {
     list: bool,
@@ -763,12 +766,27 @@ impl Editor {
                     .any(|label| {
                         self.library_matches(LeftTab::Effects, &format!("Transitions {label}"))
                     });
-                if effects.is_empty()
-                    && audio_effects.is_empty()
-                    && animations.is_empty()
-                    && !has_transitions
-                {
-                    body = body.child(empty_state("No effect plugins loaded", cx));
+                let searching = !self.media_view.queries[LeftTab::Effects as usize]
+                    .trim()
+                    .is_empty();
+                let no_plugin_rows =
+                    effects.is_empty() && audio_effects.is_empty() && animations.is_empty();
+                // Transitions and Write on are built in, so they never count as loaded plugins.
+                if searching {
+                    if no_plugin_rows
+                        && !has_transitions
+                        && !self.library_matches(LeftTab::Effects, WRITE_ON_SEARCH)
+                    {
+                        body = body.child(
+                            empty_state("No matching effects", cx)
+                                .debug_selector(|| "effects-empty".into()),
+                        );
+                    }
+                } else if no_plugin_rows {
+                    body = body.child(
+                        empty_state("No effect plugins loaded", cx)
+                            .debug_selector(|| "effects-empty".into()),
+                    );
                 }
                 let group = |label: &'static str| {
                     div()
@@ -908,7 +926,7 @@ impl Editor {
                     );
                 }
                 body = body.children(animations);
-                if self.library_matches(LeftTab::Effects, "Animations Write on LaTeX") {
+                if self.library_matches(LeftTab::Effects, WRITE_ON_SEARCH) {
                     body = body.child(
                         Button::new("write-on-preset")
                             .debug_selector(|| "library-write-on".into())

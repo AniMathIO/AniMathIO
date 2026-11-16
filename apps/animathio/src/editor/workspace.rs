@@ -234,7 +234,9 @@ impl Editor {
                             })
                             .on_key_down(cx.listener(
                                 move |this, event: &KeyDownEvent, window, cx| {
-                                    let index = this.left_tab as usize;
+                                    // Arrows move from the focused tab (Tab can focus one that is
+                                    // not selected), as in a WAI-ARIA tab list.
+                                    let index = tab as usize;
                                     let next = match event.keystroke.key.as_str() {
                                         "enter" | "space" => Some(tab),
                                         "right" => Some(LeftTab::ALL[(index + 1) % 5]),
