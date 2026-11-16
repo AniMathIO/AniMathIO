@@ -176,7 +176,15 @@ fn golden_vector(scene: VectorScene, name: &str) {
         clips: vec![vector_clip(scene)],
     };
     let mut ctx = RenderCtx::default();
-    let actual = render(&core_scene, &mut ctx, (640, 360)).unwrap();
+    let mut actual = render(&core_scene, &mut ctx, (640, 360)).unwrap();
+    if name == "latex-quadratic" {
+        let image = image::RgbaImage::from_raw(640, 360, actual.pixels).unwrap();
+        let crop = image::imageops::crop_imm(&image, 60, 100, 520, 160).to_image();
+        actual = animathio_render::Frame {
+            size: crop.dimensions(),
+            pixels: crop.into_raw(),
+        };
+    }
     let path = root.join(format!("{name}.png"));
     if std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1") {
         actual.save_png(&path).unwrap();
@@ -289,12 +297,12 @@ fn latex_preserves_glyph_holes_after_reveal() {
     let tmp = tempfile::tempdir().unwrap();
     let mut host = PluginHost::new(tmp.path()).unwrap();
     let latex = load_plugin(&mut host, "latex");
-    for source in ["O", "0", r"\theta"] {
+    for (source, reveal) in [("O", 1.0), ("0", 1.0), (r"\theta", 1.0), ("O", 0.6)] {
         let scene = host
             .render_clip(
                 &latex,
                 &BTreeMap::new(),
-                &json!({ "source": source, "mode": "latex", "size": 128.0, "reveal": 1.0 }),
+                &json!({ "source": source, "mode": "latex", "size": 128.0, "reveal": reveal }),
                 0,
                 (640, 360),
             )
@@ -622,4 +630,21 @@ fn graph_clipping_asymptotes_golden() {
         }
         golden_vector(scene, name);
     }
+}
+
+#[test]
+fn latex_quadratic_golden() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let latex = load_plugin(&mut host, "latex");
+    let scene = host
+        .render_clip(
+            &latex,
+            &BTreeMap::new(),
+            &json!({ "source": r"x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}", "size": 48.0, "reveal": 1.0 }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    golden_vector(scene, "latex-quadratic");
 }
