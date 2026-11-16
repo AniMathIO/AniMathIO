@@ -3,3 +3,7 @@
 .DS_Store
 .idea/
 .vscode/
+/bench/
+
+__pycache__/
+/bench-build.log

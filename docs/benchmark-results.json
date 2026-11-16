@@ -1,0 +1,1149 @@
+{
+  "machine": {
+    "cpu": "AMD Ryzen 7 5800X 8-Core Processor",
+    "cores": 16,
+    "memory_gib": 31.2,
+    "kernel": "7.3.4-1-cachyos",
+    "os": "Linux",
+    "distro": "CachyOS",
+    "display": "Xvfb 1920x1080x24; no compositor; Vulkan may use the GPU",
+    "audio": "none (sound servers pointed at nonexistent sockets)"
+  },
+  "versions": {
+    "v1": {
+      "version": "1.8.3",
+      "electron": "44.9.1",
+      "commit": "147f522d4"
+    },
+    "v2": {
+      "version": "2.0.0",
+      "commit": "b10489a4f",
+      "binary_path": "./target/release"
+    }
+  },
+  "sizes": {
+    "v2_on_disk": {
+      "animathio_editor_bytes": 183165864,
+      "animathio_cli_bytes": 123337584,
+      "plugins_bytes": 721366,
+      "on_disk_total_bytes": 307224814,
+      "payload_tar_gz_bytes": 94817463
+    },
+    "v1_artifacts": {
+      "deb": {
+        "path": "animathio_1.8.3_amd64.deb",
+        "bytes": 173546844
+      },
+      "appimage": {
+        "path": "AniMathIO-1.8.3.AppImage",
+        "bytes": 231744360
+      },
+      "unpacked_dir": {
+        "path": "linux-unpacked",
+        "bytes": 690174129
+      }
+    },
+    "v1_release_downloads": {
+      "assets": [
+        {
+          "name": "AniMathIO-1.8.3.AppImage",
+          "size": 231628415
+        },
+        {
+          "name": "AniMathIO-1.8.3.flatpak",
+          "size": 144617168
+        },
+        {
+          "name": "AniMathIO.Setup.1.8.3.exe",
+          "size": 189526281
+        },
+        {
+          "name": "AniMathIO.Setup.1.8.3.exe.blockmap",
+          "size": 197433
+        },
+        {
+          "name": "animathio_1.8.3_amd64.deb",
+          "size": 170705208
+        },
+        {
+          "name": "animathio_1.8.3_amd64.snap",
+          "size": 197423104
+        },
+        {
+          "name": "linux-unpacked.tar.gz",
+          "size": 227837379
+        },
+        {
+          "name": "win-unpacked.zip",
+          "size": 275385876
+        }
+      ],
+      "tag": "animathio-v1.8.3"
+    }
+  },
+  "authoring": {
+    "scene10": {
+      "project": "scene-10.animathio",
+      "authored_from_elements": 0,
+      "steps": 8
+    },
+    "scene60": {
+      "project": "scene-60.animathio",
+      "authored_from_elements": 0,
+      "steps": 8
+    },
+    "medium": {
+      "project": "medium.animathio",
+      "authored_from_elements": 0,
+      "steps": 182
+    }
+  },
+  "artifact_sha256": {
+    "target/release/animathio": "b7d7f42f87c836b36c90b7e3ba77aec3b548cc3c99f9468b2a60d03cc6ebf29c",
+    "target/release/animathio-cli": "f6ba49025da2981cc06cc42ed603349a79acdf4738ebb2779448c0115a7a807a",
+    "target/plugins/shapes.amplugin": "8b3713df526fa38bef5ada31ab5cba49e51aa8ac43c5d1a70faf3a2d28e11d67",
+    "target/plugins/text.amplugin": "5766a45a5c430c3b1adf632ccbbf22569cfb34d238b1639fcfffd1aa480dbb5f",
+    "target/plugins/latex.amplugin": "c026680230ae08a10abb706b4132317c933830320896e325b10eac8a2c1f599a",
+    "target/plugins/graph.amplugin": "cedd53552f2cb59e60eb59d08439ded95fa74cb44ee803f3872dac2f08bc4f04",
+    "target/plugins/effects-basic.amplugin": "94f27f2b0f5c316d0c268538ce28778c8e29202b4c074a54e0565b1d9167d8e7",
+    "target/plugins/audio-basic.amplugin": "e1ca9f92c0390f0615a6459c2bace1b11117db540e144be5e7e85a4d904915ae",
+    "target/plugins/animations.amplugin": "1bb4753503a088ede3ec3da71604a81e45d6f4cb1040602d7f7984f73a00c198",
+    "target/plugins/import-manim.amplugin": "109c0cd7c4173c89602d0fe8cec53c88abc8196bb3cd714e54cd9a489213edcb",
+    "<v1-checkout>/dist/linux-unpacked/resources/app.asar": "7ca965f57974aa3fc93a77fbbc644c530ce17d317ab973e32211488a11bdd5af"
+  },
+  "scenarios": {
+    "cold_start": {
+      "metrics": {
+        "usable_seconds": {
+          "label": "cold start to usable window",
+          "unit": "s",
+          "cell": {
+            "v1": "0.81 (0.74\u20131.08)",
+            "v2": "0.20 (0.20\u20135.20)"
+          },
+          "stats": {
+            "v1": {
+              "median": 0.811,
+              "min": 0.743,
+              "max": 1.077,
+              "runs": 3
+            },
+            "v2": {
+              "median": 0.203,
+              "min": 0.203,
+              "max": 5.197,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "memory": {},
+      "rows": [
+        {
+          "scenario": "cold_start",
+          "app": "v1",
+          "run": 1,
+          "load1": 2.87,
+          "ts": 1794799920.6633677,
+          "gate_wait_s": 1170.0,
+          "usable_seconds": 1.077,
+          "automation_ready_seconds": 1.071
+        },
+        {
+          "scenario": "cold_start",
+          "app": "v2",
+          "run": 1,
+          "load1": 2.72,
+          "ts": 1794799927.2681274,
+          "gate_wait_s": 0.0,
+          "usable_seconds": 5.197,
+          "automation_ready_seconds": 0.075
+        },
+        {
+          "scenario": "cold_start",
+          "app": "v1",
+          "run": 2,
+          "load1": 1.91,
+          "ts": 1794799969.7117312,
+          "gate_wait_s": 0.0,
+          "usable_seconds": 0.743,
+          "automation_ready_seconds": 0.736
+        },
+        {
+          "scenario": "cold_start",
+          "app": "v2",
+          "run": 2,
+          "load1": 1.91,
+          "ts": 1794799971.2216213,
+          "gate_wait_s": 0.0,
+          "usable_seconds": 0.203,
+          "automation_ready_seconds": 0.033
+        },
+        {
+          "scenario": "cold_start",
+          "app": "v1",
+          "run": 3,
+          "load1": 1.3,
+          "ts": 1794800013.7448723,
+          "gate_wait_s": 0.0,
+          "usable_seconds": 0.811,
+          "automation_ready_seconds": 0.806
+        },
+        {
+          "scenario": "cold_start",
+          "app": "v2",
+          "run": 3,
+          "load1": 1.27,
+          "ts": 1794800015.1548142,
+          "gate_wait_s": 0.0,
+          "usable_seconds": 0.203,
+          "automation_ready_seconds": 0.031
+        }
+      ]
+    },
+    "load_project_10": {
+      "metrics": {
+        "load_seconds": {
+          "label": "project load, 10 s scene open",
+          "unit": "s",
+          "cell": {
+            "v1": "1.08 (1.07\u20131.13)",
+            "v2": "0.21 (0.20\u20130.23)"
+          },
+          "stats": {
+            "v1": {
+              "median": 1.081,
+              "min": 1.074,
+              "max": 1.127,
+              "runs": 3
+            },
+            "v2": {
+              "median": 0.207,
+              "min": 0.201,
+              "max": 0.228,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "memory": {
+        "idle_rss_median_kb": {
+          "label": "idle memory, 10 s scene open (RSS sum median)",
+          "cell_kib": {
+            "v1": "945502 (940998\u2013947876)",
+            "v2": "498416 (496932\u2013538972)"
+          },
+          "stats": {
+            "v1": {
+              "median": 945502.0,
+              "min": 940998.0,
+              "max": 947876.0,
+              "runs": 3
+            },
+            "v2": {
+              "median": 498416.0,
+              "min": 496932.0,
+              "max": 538972.0,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "scenario": "load_project_10",
+          "app": "v1",
+          "run": 1,
+          "load1": 2.3,
+          "ts": 1794799937.4595945,
+          "gate_wait_s": 0.0,
+          "load_seconds": 1.081,
+          "elements": 3,
+          "idle_pss_median_kb": 524120,
+          "idle_rss_median_kb": 947876,
+          "idle_pss_max_kb": 525716,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_10",
+          "app": "v2",
+          "run": 1,
+          "load1": 2.17,
+          "ts": 1794799947.9769,
+          "gate_wait_s": 0.0,
+          "load_seconds": 0.207,
+          "elements": 5,
+          "idle_pss_median_kb": 527458,
+          "idle_rss_median_kb": 538972,
+          "idle_pss_max_kb": 527458,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_10",
+          "app": "v1",
+          "run": 2,
+          "load1": 1.76,
+          "ts": 1794799981.4603627,
+          "gate_wait_s": 0.0,
+          "load_seconds": 1.127,
+          "elements": 3,
+          "idle_pss_median_kb": 521979,
+          "idle_rss_median_kb": 945502,
+          "idle_pss_max_kb": 524042,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_10",
+          "app": "v2",
+          "run": 2,
+          "load1": 1.71,
+          "ts": 1794799992.0982978,
+          "gate_wait_s": 0.0,
+          "load_seconds": 0.228,
+          "elements": 5,
+          "idle_pss_median_kb": 485449,
+          "idle_rss_median_kb": 496932,
+          "idle_pss_max_kb": 485454,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_10",
+          "app": "v1",
+          "run": 3,
+          "load1": 1.16,
+          "ts": 1794800025.339128,
+          "gate_wait_s": 0.0,
+          "load_seconds": 1.074,
+          "elements": 3,
+          "idle_pss_median_kb": 512485,
+          "idle_rss_median_kb": 940998,
+          "idle_pss_max_kb": 514535,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_10",
+          "app": "v2",
+          "run": 3,
+          "load1": 1.2,
+          "ts": 1794800035.84954,
+          "gate_wait_s": 0.0,
+          "load_seconds": 0.201,
+          "elements": 5,
+          "idle_pss_median_kb": 486750,
+          "idle_rss_median_kb": 498416,
+          "idle_pss_max_kb": 486750,
+          "mem_mode": "pss"
+        }
+      ]
+    },
+    "load_project_medium": {
+      "metrics": {
+        "load_seconds": {
+          "label": "project load, 60-element project",
+          "unit": "s",
+          "cell": {
+            "v1": "1.11 (1.07\u20131.21)",
+            "v2": "0.20 (0.20\u20130.22)"
+          },
+          "stats": {
+            "v1": {
+              "median": 1.109,
+              "min": 1.072,
+              "max": 1.21,
+              "runs": 3
+            },
+            "v2": {
+              "median": 0.203,
+              "min": 0.203,
+              "max": 0.223,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "memory": {
+        "idle_rss_median_kb": {
+          "label": "idle memory, 60-element project (RSS sum median)",
+          "cell_kib": {
+            "v1": "953356 (952708\u2013955780)",
+            "v2": "506476 (506268\u2013507116)"
+          },
+          "stats": {
+            "v1": {
+              "median": 953356.0,
+              "min": 952708.0,
+              "max": 955780.0,
+              "runs": 3
+            },
+            "v2": {
+              "median": 506476.0,
+              "min": 506268.0,
+              "max": 507116.0,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "scenario": "load_project_medium",
+          "app": "v1",
+          "run": 1,
+          "load1": 2.06,
+          "ts": 1794799958.2979524,
+          "gate_wait_s": 0.0,
+          "load_seconds": 1.21,
+          "elements": 60,
+          "idle_pss_median_kb": 532744,
+          "idle_rss_median_kb": 955780,
+          "idle_pss_max_kb": 534669,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_medium",
+          "app": "v2",
+          "run": 1,
+          "load1": 1.81,
+          "ts": 1794799968.8308845,
+          "gate_wait_s": 0.0,
+          "load_seconds": 0.223,
+          "elements": 60,
+          "idle_pss_median_kb": 494950,
+          "idle_rss_median_kb": 506476,
+          "idle_pss_max_kb": 494954,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_medium",
+          "app": "v1",
+          "run": 2,
+          "load1": 1.45,
+          "ts": 1794800002.2821102,
+          "gate_wait_s": 0.0,
+          "load_seconds": 1.072,
+          "elements": 60,
+          "idle_pss_median_kb": 529336,
+          "idle_rss_median_kb": 953356,
+          "idle_pss_max_kb": 531363,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_medium",
+          "app": "v2",
+          "run": 2,
+          "load1": 1.3,
+          "ts": 1794800012.7955556,
+          "gate_wait_s": 0.0,
+          "load_seconds": 0.203,
+          "elements": 60,
+          "idle_pss_median_kb": 494679,
+          "idle_rss_median_kb": 506268,
+          "idle_pss_max_kb": 494761,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_medium",
+          "app": "v1",
+          "run": 3,
+          "load1": 1.24,
+          "ts": 1794800046.068696,
+          "gate_wait_s": 0.0,
+          "load_seconds": 1.109,
+          "elements": 60,
+          "idle_pss_median_kb": 522968,
+          "idle_rss_median_kb": 952708,
+          "idle_pss_max_kb": 525209,
+          "mem_mode": "pss"
+        },
+        {
+          "scenario": "load_project_medium",
+          "app": "v2",
+          "run": 3,
+          "load1": 1.05,
+          "ts": 1794800056.6809561,
+          "gate_wait_s": 0.0,
+          "load_seconds": 0.203,
+          "elements": 60,
+          "idle_pss_median_kb": 495350,
+          "idle_rss_median_kb": 507116,
+          "idle_pss_max_kb": 495350,
+          "mem_mode": "pss"
+        }
+      ]
+    },
+    "export_10": {
+      "metrics": {
+        "export_seconds": {
+          "label": "export, 10 s 1080p30 MP4",
+          "unit": "s",
+          "cell": {
+            "v1": "20.43 (20.38\u201320.52)",
+            "v2": "6.47 (6.42\u20136.47)"
+          },
+          "stats": {
+            "v1": {
+              "median": 20.426,
+              "min": 20.378,
+              "max": 20.521,
+              "runs": 3
+            },
+            "v2": {
+              "median": 6.474,
+              "min": 6.424,
+              "max": 6.474,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "memory": {
+        "peak_rss_kb": {
+          "label": "peak memory during 10 s export (RSS sum max)",
+          "cell_kib": {
+            "v1": "1281976 (1280488\u20131316436)",
+            "v2": "130900 (130360\u2013131996)"
+          },
+          "stats": {
+            "v1": {
+              "median": 1281976.0,
+              "min": 1280488.0,
+              "max": 1316436.0,
+              "runs": 3
+            },
+            "v2": {
+              "median": 130900.0,
+              "min": 130360.0,
+              "max": 131996.0,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "scenario": "export_10",
+          "app": "v1",
+          "run": 1,
+          "load1": 1.97,
+          "ts": 1794800113.7967684,
+          "export_seconds": 20.378,
+          "output_bytes": 489774,
+          "duration_ms": 10000,
+          "peak_pss_kb": 851150,
+          "peak_rss_kb": 1280488,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "300"
+              }
+            ],
+            "format": {
+              "duration": "10.000000"
+            }
+          }
+        },
+        {
+          "scenario": "export_10",
+          "app": "v2",
+          "run": 1,
+          "load1": 2.3,
+          "ts": 1794800121.804487,
+          "export_seconds": 6.474,
+          "output_bytes": 351371,
+          "peak_pss_kb": 128139,
+          "peak_rss_kb": 130900,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "300"
+              },
+              {
+                "codec_name": "aac",
+                "r_frame_rate": "0/0",
+                "nb_frames": "470"
+              }
+            ],
+            "format": {
+              "duration": "10.005000"
+            }
+          }
+        },
+        {
+          "scenario": "export_10",
+          "app": "v1",
+          "run": 2,
+          "load1": 2.93,
+          "ts": 1794800324.3117204,
+          "export_seconds": 20.521,
+          "output_bytes": 515405,
+          "duration_ms": 10000,
+          "peak_pss_kb": 871080,
+          "peak_rss_kb": 1316436,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "301"
+              }
+            ],
+            "format": {
+              "duration": "10.033333"
+            }
+          }
+        },
+        {
+          "scenario": "export_10",
+          "app": "v2",
+          "run": 2,
+          "load1": 3.16,
+          "ts": 1794800332.5188115,
+          "export_seconds": 6.474,
+          "output_bytes": 351371,
+          "peak_pss_kb": 127628,
+          "peak_rss_kb": 130360,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "300"
+              },
+              {
+                "codec_name": "aac",
+                "r_frame_rate": "0/0",
+                "nb_frames": "470"
+              }
+            ],
+            "format": {
+              "duration": "10.005000"
+            }
+          }
+        },
+        {
+          "scenario": "export_10",
+          "app": "v1",
+          "run": 3,
+          "load1": 3.62,
+          "ts": 1794800533.9091277,
+          "export_seconds": 20.426,
+          "output_bytes": 546678,
+          "duration_ms": 10000,
+          "peak_pss_kb": 849967,
+          "peak_rss_kb": 1281976,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "300"
+              }
+            ],
+            "format": {
+              "duration": "10.000000"
+            }
+          }
+        },
+        {
+          "scenario": "export_10",
+          "app": "v2",
+          "run": 3,
+          "load1": 3.61,
+          "ts": 1794800541.9162745,
+          "export_seconds": 6.424,
+          "output_bytes": 351371,
+          "peak_pss_kb": 129222,
+          "peak_rss_kb": 131996,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "300"
+              },
+              {
+                "codec_name": "aac",
+                "r_frame_rate": "0/0",
+                "nb_frames": "470"
+              }
+            ],
+            "format": {
+              "duration": "10.005000"
+            }
+          }
+        }
+      ],
+      "output_bytes": {
+        "cell": {
+          "v1": "503 (478\u2013534)",
+          "v2": "343"
+        },
+        "stats": {
+          "v1": {
+            "median": 515405.0,
+            "min": 489774.0,
+            "max": 546678.0,
+            "runs": 3
+          },
+          "v2": {
+            "median": 351371.0,
+            "min": 351371.0,
+            "max": 351371.0,
+            "runs": 3
+          }
+        }
+      }
+    },
+    "export_60": {
+      "metrics": {
+        "export_seconds": {
+          "label": "export, 60 s 1080p30 MP4",
+          "unit": "s",
+          "cell": {
+            "v1": "116.75 (116.09\u2013116.75)",
+            "v2": "37.42 (37.42\u201337.67)"
+          },
+          "stats": {
+            "v1": {
+              "median": 116.747,
+              "min": 116.093,
+              "max": 116.752,
+              "runs": 3
+            },
+            "v2": {
+              "median": 37.425,
+              "min": 37.424,
+              "max": 37.674,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "memory": {
+        "peak_rss_kb": {
+          "label": "peak memory during 60 s export (RSS sum max)",
+          "cell_kib": {
+            "v1": "1352904 (1318908\u20131366932)",
+            "v2": "132144 (132080\u2013132420)"
+          },
+          "stats": {
+            "v1": {
+              "median": 1352904.0,
+              "min": 1318908.0,
+              "max": 1366932.0,
+              "runs": 3
+            },
+            "v2": {
+              "median": 132144.0,
+              "min": 132080.0,
+              "max": 132420.0,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "rows": [
+        {
+          "scenario": "export_60",
+          "app": "v1",
+          "run": 1,
+          "load1": 1.78,
+          "ts": 1794800239.7864697,
+          "export_seconds": 116.752,
+          "output_bytes": 1567246,
+          "duration_ms": 60000,
+          "peak_pss_kb": 892213,
+          "peak_rss_kb": 1318908,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "1800"
+              }
+            ],
+            "format": {
+              "duration": "60.000000"
+            }
+          },
+          "valid": true
+        },
+        {
+          "scenario": "export_60",
+          "app": "v2",
+          "run": 1,
+          "load1": 3.03,
+          "ts": 1794800279.2652175,
+          "export_seconds": 37.674,
+          "output_bytes": 1804757,
+          "peak_pss_kb": 129697,
+          "peak_rss_kb": 132420,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "1800"
+              },
+              {
+                "codec_name": "aac",
+                "r_frame_rate": "0/0",
+                "nb_frames": "2814"
+              }
+            ],
+            "format": {
+              "duration": "60.010000"
+            }
+          },
+          "valid": true
+        },
+        {
+          "scenario": "export_60",
+          "app": "v1",
+          "run": 2,
+          "load1": 2.54,
+          "ts": 1794800450.4836357,
+          "export_seconds": 116.747,
+          "output_bytes": 1569446,
+          "duration_ms": 60000,
+          "peak_pss_kb": 908219,
+          "peak_rss_kb": 1352904,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "1801"
+              }
+            ],
+            "format": {
+              "duration": "60.033333"
+            }
+          },
+          "valid": true
+        },
+        {
+          "scenario": "export_60",
+          "app": "v2",
+          "run": 2,
+          "load1": 2.63,
+          "ts": 1794800489.4118626,
+          "export_seconds": 37.424,
+          "output_bytes": 1804757,
+          "peak_pss_kb": 129366,
+          "peak_rss_kb": 132144,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "1800"
+              },
+              {
+                "codec_name": "aac",
+                "r_frame_rate": "0/0",
+                "nb_frames": "2814"
+              }
+            ],
+            "format": {
+              "duration": "60.010000"
+            }
+          },
+          "valid": true
+        },
+        {
+          "scenario": "export_60",
+          "app": "v1",
+          "run": 3,
+          "load1": 2.14,
+          "ts": 1794800707.890114,
+          "export_seconds": 164.636,
+          "output_bytes": 1939680,
+          "duration_ms": 60000,
+          "peak_pss_kb": 900846,
+          "peak_rss_kb": 1334312,
+          "mem_mode": "pss",
+          "valid": false,
+          "exclusion_reason": "unexpected export: {'programs': [], 'stream_groups': [], 'streams': [{'codec_name': 'h264', 'width': 1920, 'height': 1080, 'r_frame_rate': '60/1', 'nb_frames': '3600'}], 'format': {'duration': '60.000000'}}"
+        },
+        {
+          "scenario": "export_60",
+          "app": "v2",
+          "run": 3,
+          "load1": 3.03,
+          "ts": 1794800746.9184148,
+          "export_seconds": 37.425,
+          "output_bytes": 1804757,
+          "peak_pss_kb": 129299,
+          "peak_rss_kb": 132080,
+          "mem_mode": "pss",
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "1800"
+              },
+              {
+                "codec_name": "aac",
+                "r_frame_rate": "0/0",
+                "nb_frames": "2814"
+              }
+            ],
+            "format": {
+              "duration": "60.010000"
+            }
+          },
+          "valid": true
+        },
+        {
+          "scenario": "export_60",
+          "app": "v1",
+          "run": 4,
+          "load1": 1.36,
+          "ts": 1794800929.6006575,
+          "export_seconds": 116.093,
+          "output_bytes": 1589520,
+          "probe": {
+            "programs": [],
+            "stream_groups": [],
+            "streams": [
+              {
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "r_frame_rate": "30/1",
+                "nb_frames": "1801"
+              }
+            ],
+            "format": {
+              "duration": "60.033333"
+            }
+          },
+          "duration_ms": 60000,
+          "peak_pss_kb": 905762,
+          "peak_rss_kb": 1366932,
+          "mem_mode": "pss"
+        }
+      ],
+      "output_bytes": {
+        "cell": {
+          "v1": "1533 (1531\u20131552)",
+          "v2": "1762"
+        },
+        "stats": {
+          "v1": {
+            "median": 1569446.0,
+            "min": 1567246.0,
+            "max": 1589520.0,
+            "runs": 3
+          },
+          "v2": {
+            "median": 1804757.0,
+            "min": 1804757.0,
+            "max": 1804757.0,
+            "runs": 3
+          }
+        }
+      }
+    },
+    "seek_latency": {
+      "metrics": {
+        "p50_ms": {
+          "label": "seek round-trip p50",
+          "unit": "ms",
+          "cell": {
+            "v1": "2.3 (2.3\u20132.3)",
+            "v2": "24.1 (23.8\u201324.1)"
+          },
+          "stats": {
+            "v1": {
+              "median": 2.3349339999999756,
+              "min": 2.289346999999907,
+              "max": 2.344372000000021,
+              "runs": 3
+            },
+            "v2": {
+              "median": 24.123,
+              "min": 23.845,
+              "max": 24.142,
+              "runs": 3
+            }
+          }
+        },
+        "p95_ms": {
+          "label": "seek round-trip p95",
+          "unit": "ms",
+          "cell": {
+            "v1": "6.1 (5.5\u20136.2)",
+            "v2": "36.8 (36.7\u201337.7)"
+          },
+          "stats": {
+            "v1": {
+              "median": 6.13526899999988,
+              "min": 5.536482000000433,
+              "max": 6.171677999999929,
+              "runs": 3
+            },
+            "v2": {
+              "median": 36.806,
+              "min": 36.743,
+              "max": 37.659,
+              "runs": 3
+            }
+          }
+        }
+      },
+      "memory": {},
+      "rows": [
+        {
+          "scenario": "seek_latency",
+          "app": "v1",
+          "run": 1,
+          "load1": 2.87,
+          "ts": 1794800290.3722541,
+          "samples": 619,
+          "p50_ms": 2.289346999999907,
+          "p95_ms": 6.171677999999929,
+          "max_ms": 13.558381999999966,
+          "hz": 60,
+          "seconds": 10
+        },
+        {
+          "scenario": "seek_latency",
+          "app": "v2",
+          "run": 1,
+          "load1": 2.75,
+          "ts": 1794800302.355821,
+          "samples": 395,
+          "p50_ms": 23.845,
+          "p95_ms": 37.659,
+          "max_ms": 99.934,
+          "hz": 60,
+          "seconds": 10
+        },
+        {
+          "scenario": "seek_latency",
+          "app": "v1",
+          "run": 2,
+          "load1": 2.54,
+          "ts": 1794800500.4218078,
+          "samples": 620,
+          "p50_ms": 2.344372000000021,
+          "p95_ms": 5.536482000000433,
+          "max_ms": 11.81697699999998,
+          "hz": 60,
+          "seconds": 10
+        },
+        {
+          "scenario": "seek_latency",
+          "app": "v2",
+          "run": 2,
+          "load1": 3.43,
+          "ts": 1794800512.194127,
+          "samples": 398,
+          "p50_ms": 24.123,
+          "p95_ms": 36.806,
+          "max_ms": 96.291,
+          "hz": 60,
+          "seconds": 10
+        },
+        {
+          "scenario": "seek_latency",
+          "app": "v1",
+          "run": 3,
+          "load1": 2.88,
+          "ts": 1794800758.0149112,
+          "samples": 619,
+          "p50_ms": 2.3349339999999756,
+          "p95_ms": 6.13526899999988,
+          "max_ms": 11.639070000000004,
+          "hz": 60,
+          "seconds": 10
+        },
+        {
+          "scenario": "seek_latency",
+          "app": "v2",
+          "run": 3,
+          "load1": 5.31,
+          "ts": 1794800769.683982,
+          "samples": 399,
+          "p50_ms": 24.142,
+          "p95_ms": 36.743,
+          "max_ms": 95.901,
+          "hz": 60,
+          "seconds": 10
+        }
+      ]
+    }
+  },
+  "measurement_notes": {
+    "date": "2026-11-16",
+    "load_gate": 4,
+    "recorded_completion_load_range": [
+      1.05,
+      5.31
+    ],
+    "v1_60fps_run_excluded": "export_60 v1 run 3; replacement run 4 passed 30 fps validation",
+    "checks": "fmt, clippy workspace all targets -D warnings, test workspace, check-docs --require-binary passed",
+    "optional_scenarios": "medium and seek ran despite requested skip flags due a fixed environment propagation bug"
+  }
+}
