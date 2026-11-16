@@ -818,6 +818,43 @@ mod tests {
     }
 
     #[test]
+    fn json_save_partial_asset_failure_preserves_old_manifest() {
+        let mut handler = json_project_with_asset(b"original");
+        let dir = tempfile::tempdir().unwrap();
+        let json = dir.path().join("project.json");
+        handler
+            .handle(Call::ProjectSave {
+                path: Some(json.clone()),
+            })
+            .unwrap();
+        let previous = fs::read(&json).unwrap();
+        let mut ids = Vec::new();
+        for bytes in [b"first".as_slice(), b"second".as_slice()] {
+            let id = AssetId::of(bytes);
+            handler.assets.insert(id.clone(), bytes.to_vec());
+            handler
+                .handle(Call::CommandApply {
+                    command: Command::AddAsset {
+                        id: id.clone(),
+                        asset: Asset {
+                            name: "new".into(),
+                            media_type: "image/png".into(),
+                        },
+                    },
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        ids.sort();
+        fs::create_dir(dir.path().join("assets").join(ids[1].as_str())).unwrap();
+        assert!(handler.handle(Call::ProjectSave { path: None }).is_err());
+        assert!(dir.path().join("assets").join(ids[0].as_str()).is_file());
+        assert_eq!(fs::read(&json).unwrap(), previous);
+        let (project, _) = load_project(&json).unwrap();
+        assert_eq!(project.assets().len(), 1);
+    }
+
+    #[test]
     fn json_save_rejects_missing_bytes_before_publishing_manifest() {
         let mut handler = json_project_with_asset(b"asset");
         let dir = tempfile::tempdir().unwrap();
