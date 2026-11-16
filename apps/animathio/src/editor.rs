@@ -852,9 +852,9 @@ impl Editor {
         // Remember the window geometry continuously (see `window_state::BoundsTracker`)
         // and save it when the geometry settles: platform quit paths (Cmd+Q, WM session
         // end, `--bench-viewport`) never run the window should-close handler.
-        this.window_tracker.observe_window(window);
+        this.window_tracker.observe_window(window, cx);
         cx.observe_window_bounds(window, |this, window, cx| {
-            this.window_tracker.observe_window(window);
+            this.window_tracker.observe_window(window, cx);
             this.schedule_window_state_save(cx);
         })
         .detach();
@@ -872,7 +872,7 @@ impl Editor {
         window.on_window_should_close(cx, move |window, cx| {
             close_view
                 .update(cx, |this, cx| {
-                    this.window_tracker.observe_window(window);
+                    this.window_tracker.observe_window(window, cx);
                     this.window_tracker.persist();
                     if this.dirty {
                         this.replace_project(ReplaceProject::CloseWindow, window, cx);
@@ -1084,5 +1084,15 @@ impl Render for Editor {
             root = root.child(ghost);
         }
         actions::attach(root, cx)
+    }
+}
+
+impl Editor {
+    pub(crate) fn seed_window_tracker(
+        &mut self,
+        bounds: gpui::WindowBounds,
+        uuid: Option<[u8; 16]>,
+    ) {
+        self.window_tracker = crate::window_state::BoundsTracker::seeded(bounds, uuid);
     }
 }

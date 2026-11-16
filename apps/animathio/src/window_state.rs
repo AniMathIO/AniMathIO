@@ -3,7 +3,7 @@
 //! Stored as `window-state.json` through [`crate::editor_env::config_file`], so tests get a
 //! private file via [`crate::editor_env::EditorEnv::headless`]. The first run has no stored
 //! state and opens maximized (with a 90%-of-display restore size, clamped to the display);
-//! later runs restore the saved geometry on the display it overlaps, clamped to that
+//! later runs restore display-local geometry on the saved display UUID, clamped to that
 //! display's usable area, so the window never opens off-screen after a monitor change.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,6 +36,7 @@ pub(crate) struct WindowState {
     pub(crate) x: f32,
     pub(crate) y: f32,
     pub(crate) maximized: bool,
+    pub(crate) display_uuid: Option<[u8; 16]>,
 }
 
 impl Default for WindowState {
@@ -46,6 +47,7 @@ impl Default for WindowState {
             x: 0.,
             y: 0.,
             maximized: false,
+            display_uuid: None,
         }
     }
 }
@@ -117,15 +119,28 @@ pub(crate) struct BoundsTracker {
     /// Bounds of the latest observation, whatever the window state.
     last_observed: Option<Bounds<Pixels>>,
     maximized: bool,
+    display_uuid: Option<[u8; 16]>,
 }
 
 impl BoundsTracker {
-    /// Record the current geometry of `window`.
-    pub(crate) fn observe_window(&mut self, window: &gpui::Window) {
-        self.observe(
-            window_is_maximized(window),
-            window.window_bounds().get_bounds(),
-        );
+    pub(crate) fn seeded(bounds: gpui::WindowBounds, display_uuid: Option<[u8; 16]>) -> Self {
+        Self {
+            last_windowed: Some(bounds.get_bounds()),
+            last_observed: Some(bounds.get_bounds()),
+            maximized: matches!(bounds, gpui::WindowBounds::Maximized(_)),
+            display_uuid,
+        }
+    }
+
+    /// Record window geometry in display-local coordinates.
+    pub(crate) fn observe_window(&mut self, window: &gpui::Window, cx: &gpui::App) {
+        let maximized = window_is_maximized(window);
+        let mut bounds = window.window_bounds().get_bounds();
+        if let Some(display) = window.display(cx) {
+            self.display_uuid = display.uuid().ok().map(|uuid| *uuid.as_bytes());
+            bounds.origin -= native_display_bounds(display.as_ref()).origin;
+        }
+        self.observe(maximized, bounds);
     }
 
     /// Record one geometry observation (pure, so tests can replay backend quirks).
@@ -154,6 +169,7 @@ impl BoundsTracker {
             x: f32::from(bounds.origin.x),
             y: f32::from(bounds.origin.y),
             maximized: self.maximized,
+            display_uuid: self.display_uuid,
         }
     }
 
@@ -181,29 +197,26 @@ pub(crate) fn min_size_for_display(min: Size<Pixels>, display: Bounds<Pixels>) -
     )
 }
 
-/// The index of the display holding the largest part of `bounds` (`None` when the bounds
-/// are on no connected display). Touching an edge is not an overlap.
-pub(crate) fn largest_overlap(
-    bounds: Bounds<Pixels>,
-    displays: &[Bounds<Pixels>],
-) -> Option<usize> {
-    let right = bounds.origin.x + bounds.size.width;
-    let bottom = bounds.origin.y + bounds.size.height;
-    let mut best: Option<(usize, f64)> = None;
-    for (index, display) in displays.iter().enumerate() {
-        let width = right.min(display.origin.x + display.size.width)
-            - bounds.origin.x.max(display.origin.x);
-        let height = bottom.min(display.origin.y + display.size.height)
-            - bounds.origin.y.max(display.origin.y);
-        if width <= px(0.) || height <= px(0.) {
-            continue;
-        }
-        let area = f64::from(f32::from(width)) * f64::from(f32::from(height));
-        if best.is_none_or(|(_, best_area)| area > best_area) {
-            best = Some((index, area));
-        }
+/// Bounds in the coordinate system accepted by this platform's window backend.
+/// macOS uses display-local coordinates; Windows and Linux use desktop coordinates.
+pub(crate) fn native_display_bounds(display: &dyn gpui::PlatformDisplay) -> Bounds<Pixels> {
+    let mut bounds = display.visible_bounds();
+    if cfg!(target_os = "macos") {
+        bounds.origin -= display.bounds().origin;
     }
-    best.map(|(index, _)| index)
+    bounds
+}
+
+/// Select a stable display identity, falling back to the primary after disconnection.
+pub(crate) fn restore_display(
+    saved: Option<WindowState>,
+    ids: &[Option<[u8; 16]>],
+    primary: usize,
+) -> usize {
+    saved
+        .and_then(|state| state.display_uuid)
+        .and_then(|id| ids.iter().position(|candidate| *candidate == Some(id)))
+        .unwrap_or(primary)
 }
 
 /// Clamp `bounds` so the window fits on `display`: never smaller than `min` (itself
@@ -233,8 +246,7 @@ pub(crate) fn clamp_bounds(
 /// The `WindowBounds` the main window opens with.
 ///
 /// No stored state (first run) opens maximized with a 90%-of-display restore size. A stored
-/// state restores its geometry, clamped to the given display (the one its saved bounds
-/// overlap, else the primary), keeping the maximized flag. Both paths are clamped, so a
+/// state restores its local geometry, clamped to the selected display, keeping the maximized flag. Both paths are clamped, so a
 /// small display never receives oversized, off-screen geometry.
 pub(crate) fn initial_window_bounds(
     state: Option<WindowState>,
@@ -243,7 +255,14 @@ pub(crate) fn initial_window_bounds(
 ) -> gpui::WindowBounds {
     let maximized = state.is_none_or(|state| state.maximized);
     let restore = if let Some(state) = state {
-        clamp_bounds(state.bounds(), display, min)
+        clamp_bounds(
+            Bounds {
+                origin: state.bounds().origin + display.origin,
+                size: state.bounds().size,
+            },
+            display,
+            min,
+        )
     } else {
         let requested = size(display.size.width * 0.9, display.size.height * 0.9);
         let centered = Bounds {
@@ -375,28 +394,16 @@ mod tests {
     }
 
     #[test]
-    fn picks_the_display_the_bounds_overlap() {
-        let primary = bounds(0., 0., 2560., 1440.);
-        let secondary = bounds(2560., 0., 1920., 1080.);
-        let displays = [primary, secondary];
+    fn restores_identity_after_reordering_and_falls_back_after_disconnect() {
+        let state = WindowState {
+            display_uuid: Some([2; 16]),
+            ..WindowState::default()
+        };
         assert_eq!(
-            largest_overlap(bounds(3000., 100., 1400., 900.), &displays),
-            Some(1)
+            restore_display(Some(state), &[Some([2; 16]), Some([1; 16])], 1),
+            0
         );
-        assert_eq!(
-            largest_overlap(bounds(100., 100., 1400., 900.), &displays),
-            Some(0)
-        );
-        // A window straddling both restores on the one holding most of it.
-        assert_eq!(
-            largest_overlap(bounds(2400., 100., 1400., 900.), &displays),
-            Some(1)
-        );
-        // Fully off every display: no match (the caller falls back to the primary).
-        assert_eq!(
-            largest_overlap(bounds(9000., 9000., 1400., 900.), &displays),
-            None
-        );
+        assert_eq!(restore_display(Some(state), &[Some([1; 16])], 0), 0);
     }
 
     #[test]
@@ -407,9 +414,10 @@ mod tests {
         let state = WindowState {
             width: 1400.,
             height: 900.,
-            x: 3000.,
+            x: 440.,
             y: 100.,
             maximized: false,
+            ..WindowState::default()
         };
         let gpui::WindowBounds::Windowed(restore) =
             initial_window_bounds(Some(state), secondary, MIN)
@@ -417,6 +425,38 @@ mod tests {
             panic!("windowed state should restore windowed");
         };
         assert_eq!(restore, bounds(3000., 100., 1400., 900.));
+    }
+
+    #[test]
+    fn local_coordinates_survive_layout_changes_and_missing_display() {
+        let state = WindowState {
+            width: 1400.,
+            height: 900.,
+            x: 100.,
+            y: 50.,
+            display_uuid: Some([2; 16]),
+            ..WindowState::default()
+        };
+        for display in [
+            bounds(-1920., 200., 1920., 1080.),
+            bounds(0., 0., 1920., 1080.),
+        ] {
+            let restored = initial_window_bounds(Some(state), display, MIN).get_bounds();
+            assert_eq!(
+                restored,
+                bounds(
+                    f32::from(display.origin.x) + 100.,
+                    f32::from(display.origin.y) + 50.,
+                    1400.,
+                    900.
+                )
+            );
+        }
+        let tiny = bounds(0., 0., 800., 600.);
+        assert_eq!(
+            initial_window_bounds(Some(state), tiny, MIN).get_bounds(),
+            tiny
+        );
     }
 
     #[test]
@@ -428,6 +468,7 @@ mod tests {
             x: 5000.,
             y: 20.,
             maximized: false,
+            ..WindowState::default()
         };
         let gpui::WindowBounds::Windowed(restore) =
             initial_window_bounds(Some(state), display, MIN)
@@ -447,6 +488,7 @@ mod tests {
             x: 100.,
             y: 100.,
             maximized: true,
+            ..WindowState::default()
         };
         assert!(matches!(
             initial_window_bounds(Some(state), display, MIN),
@@ -475,18 +517,34 @@ mod tests {
     }
 
     #[test]
-    fn first_observation_of_a_maximized_window_still_saves() {
-        // Started maximized with no prior normal bounds: fall back to the observed
-        // bounds (restored clamped, and the maximized flag re-maximizes anyway).
-        let mut tracker = BoundsTracker::default();
+    fn maximized_session_keeps_seeded_restore_bounds() {
+        // A session that never leaves maximized must retain its seeded restore size.
+        let mut tracker = BoundsTracker::seeded(
+            gpui::WindowBounds::Maximized(bounds(100., 80., 1400., 900.)),
+            Some([1; 16]),
+        );
         tracker.observe(true, bounds(0., 0., 2560., 1440.));
         let state = tracker.state();
         assert!(state.maximized);
-        assert_eq!((state.width, state.height), (2560., 1440.));
+        assert_eq!((state.width, state.height), (1400., 900.));
+        assert_eq!((state.x, state.y), (100., 80.));
+        assert_eq!(state.display_uuid, Some([1; 16]));
+    }
+
+    #[test]
+    fn first_run_maximized_session_keeps_default_restore_size() {
+        let display = bounds(0., 0., 2560., 1440.);
+        let initial = initial_window_bounds(None, display, MIN);
+        let mut tracker = BoundsTracker::seeded(initial, None);
+        tracker.observe(true, display);
+        assert_eq!(tracker.state().bounds(), initial.get_bounds());
+        assert!(tracker.state().maximized);
     }
 
     #[test]
     fn concurrent_writers_leave_a_valid_file() {
+        const WRITERS: usize = 8;
+        const WRITES: usize = 25;
         let dir = std::env::temp_dir().join(format!(
             "animathio-window-state-stress-{}",
             std::process::id()
@@ -494,8 +552,6 @@ mod tests {
         let path = dir.join(FILE_NAME);
         std::fs::remove_dir_all(&dir).ok();
 
-        const WRITERS: usize = 8;
-        const WRITES: usize = 25;
         let states: Vec<WindowState> = (0..WRITERS)
             .map(|writer| WindowState {
                 width: 800. + writer as f32,
@@ -503,6 +559,7 @@ mod tests {
                 x: writer as f32,
                 y: writer as f32,
                 maximized: writer % 2 == 0,
+                ..WindowState::default()
             })
             .collect();
 
@@ -511,7 +568,13 @@ mod tests {
                 let path = &path;
                 scope.spawn(move || {
                     for _ in 0..WRITES {
-                        state.write_to(path).expect("concurrent write");
+                        let result = state.write_to(path);
+                        // Windows can reject replacing a destination another writer has
+                        // open. Production saves are best effort; successful writes must
+                        // still be whole and failed writes must clean their temporary.
+                        if !cfg!(windows) {
+                            result.expect("concurrent write");
+                        }
                     }
                 });
             }
@@ -548,6 +611,7 @@ mod tests {
         let state = WindowState {
             width: 1706.6,
             height: 1012.3,
+            display_uuid: Some([3; 16]),
             x: 42.5,
             y: -7.25,
             maximized: true,

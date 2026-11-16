@@ -77,25 +77,30 @@ fn main() {
             })
             .detach();
 
-            // Restore on the display the saved geometry overlaps (a secondary monitor's
-            // position is valid); when none overlaps, or on the first run, the primary.
-            let displays: Vec<Bounds<Pixels>> = cx
-                .displays()
-                .iter()
-                .map(|display| display.visible_bounds())
-                .collect();
+            let displays = cx.displays();
             let saved = window_state::WindowState::load();
-            let display_bounds = saved
-                .as_ref()
-                .and_then(|state| {
-                    window_state::largest_overlap(state.bounds(), &displays)
-                        .map(|index| displays[index])
+            let primary = cx.primary_display();
+            let primary_index = displays
+                .iter()
+                .position(|display| {
+                    primary
+                        .as_ref()
+                        .is_some_and(|primary| primary.id() == display.id())
                 })
-                .or_else(|| cx.primary_display().map(|display| display.visible_bounds()))
-                .unwrap_or(Bounds {
+                .unwrap_or(0);
+            let ids: Vec<_> = displays
+                .iter()
+                .map(|display| display.uuid().ok().map(|uuid| *uuid.as_bytes()))
+                .collect();
+            let index = window_state::restore_display(saved, &ids, primary_index);
+            let display = displays.get(index);
+            let display_bounds = display.map_or(
+                Bounds {
                     origin: point(px(0.), px(0.)),
                     size: size(px(2560.), px(1440.)),
-                });
+                },
+                |display| window_state::native_display_bounds(display.as_ref()),
+            );
             // The native minimum never exceeds the selected display's usable area, so a
             // small display still gets a usable window (smaller than 1280x720 there).
             let min_size =
@@ -106,6 +111,7 @@ fn main() {
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(window_bounds),
+                    display_id: display.map(|display| display.id()),
                     window_min_size: Some(min_size),
                     window_decorations: Some(WindowDecorations::Client),
                     ..gpui_component::TitleBar::window_options()
@@ -115,6 +121,16 @@ fn main() {
                         editor::Editor::new(
                             cx, window, project, assets, path, recovered, control, bench,
                         )
+                    });
+                    view.update(cx, |editor, _cx| {
+                        let mut local = window_bounds.get_bounds();
+                        local.origin -= display_bounds.origin;
+                        let seed = if matches!(window_bounds, gpui::WindowBounds::Maximized(_)) {
+                            gpui::WindowBounds::Maximized(local)
+                        } else {
+                            gpui::WindowBounds::Windowed(local)
+                        };
+                        editor.seed_window_tracker(seed, ids.get(index).copied().flatten());
                     });
                     // `Root` hosts the popover layers that gpui-component widgets
                     // (select, colour picker) render into.

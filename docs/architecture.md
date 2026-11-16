@@ -142,8 +142,9 @@ a delivery preset does not change the open project. `control::ExportPreset` is t
 shared table for editor, CLI and MCP. Preferences persist under the application
 config directory (`preferences.json`, renderer selection in `preview.json`), the
 main-window geometry (`window-state.json`, written atomically from a debounced
-save, restored on the display its saved bounds overlap and clamped to that
-display's usable area) and never enter project serialization.
+save, with display UUID and display-local position; restored on that display or
+the primary if disconnected, clamped to its usable area; maximized sessions retain
+the initial restore size) and never enter project serialization.
 
 The `actions` module registers GPUI actions and a contextual keymap (`Editor`,
 `Timeline`, `Viewer`, `Inspector`, `MediaPool`). `secondary-` bindings are resolved
