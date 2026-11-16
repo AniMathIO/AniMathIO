@@ -112,6 +112,25 @@ pub(crate) fn config_file(name: &str) -> Option<PathBuf> {
     }
 }
 
+/// The community plugin store (per-user plugin folder and trust settings).
+///
+/// The settings live in the configuration directory (`community-plugins.json`), shared with
+/// `animathio-cli` and the control handler. An environment with a private configuration
+/// directory (the headless test harness) also gets a private plugin folder inside it, so tests
+/// never read or write the user's real plugins.
+pub(crate) fn community_store() -> Option<animathio_plugin_host::CommunityStore> {
+    let config = match PROCESS.get() {
+        Some((_, Some(dir))) => Some(dir.clone()),
+        _ => None,
+    };
+    let settings = animathio_plugin_host::settings_path(config.as_deref())?;
+    let dir = match &config {
+        Some(dir) => dir.join("community-plugins"),
+        None => animathio_plugin_host::user_plugin_dir()?,
+    };
+    Some(animathio_plugin_host::CommunityStore::new(dir, settings))
+}
+
 /// The compiled-plugin cache directory.
 pub(crate) fn plugin_cache_dir() -> PathBuf {
     match PROCESS.get() {

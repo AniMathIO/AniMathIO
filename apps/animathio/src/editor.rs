@@ -44,6 +44,7 @@ mod caption_styles;
 mod clip_ops;
 mod color_edit;
 mod commands;
+mod community_plugins;
 mod control_bridge;
 mod dialogs;
 mod ducking;

@@ -128,6 +128,14 @@ impl AudioRuntime {
         Ok(manifest)
     }
 
+    /// Drop a plugin's registration (hot unload). Handles already running keep their `Arc`.
+    pub(crate) fn unregister(&self, plugin_id: &str) {
+        self.plugins
+            .write()
+            .expect("audio registry lock")
+            .remove(plugin_id);
+    }
+
     pub(crate) fn descriptors(&self) -> Vec<EffectDescriptor> {
         self.plugins
             .read()

@@ -332,6 +332,10 @@ pub enum Call {
         /// Import parameters.
         params: ImportManimParams,
     },
+    /// List the loaded bundled plugins and the installed community plugins with their
+    /// enabled flags, plus the global community plugins switch. Read-only.
+    #[serde(rename = "plugins.list")]
+    PluginsList,
     /// List the presets provided by loaded animation-preset plugins.
     #[serde(rename = "animations.list")]
     AnimationsList,

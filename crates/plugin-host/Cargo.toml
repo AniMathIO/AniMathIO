@@ -25,6 +25,8 @@ thiserror = { workspace = true }
 log = "0.4"
 directories = "6"
 tempfile = "3"
+sha2 = "0.10"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 animathio-core = { workspace = true }

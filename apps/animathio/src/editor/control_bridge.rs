@@ -382,6 +382,10 @@ impl Editor {
             Call::EffectsList => {
                 serde_json::to_value(animathio_control::effect_infos(self.available_effects()))?
             }
+            Call::PluginsList => serde_json::to_value(animathio_control::plugins_listing(
+                self.plugin_host.as_ref(),
+                crate::editor_env::community_store().as_ref(),
+            ))?,
             Call::AnimationsList => serde_json::to_value(
                 animathio_control::animation_preset_infos(self.available_animation_presets()),
             )?,

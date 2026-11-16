@@ -105,6 +105,7 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
         "add_audio_effect",
         "list_animation_presets",
         "apply_animation_preset",
+        "list_plugins",
     ] {
         assert!(
             names.contains(&expected),
@@ -121,6 +122,20 @@ fn lists_tools_adds_a_clip_and_renders_a_frame() {
     );
     let response = recv(&mut stdout);
     assert_ne!(response["result"]["isError"], true, "{response}");
+
+    // list_plugins is read-only and reports the global community switch
+    send(
+        &mut stdin,
+        30,
+        "tools/call",
+        json!({"name": "list_plugins", "arguments": {}}),
+    );
+    let response = recv(&mut stdout);
+    assert_ne!(response["result"]["isError"], true, "{response}");
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let listing: Value = serde_json::from_str(text).unwrap();
+    assert!(listing["community_enabled"].is_boolean(), "{listing}");
+    assert!(listing["plugins"].is_array(), "{listing}");
 
     // render_frame returns a base64 PNG
     send(
