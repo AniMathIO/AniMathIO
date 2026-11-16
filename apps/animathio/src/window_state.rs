@@ -66,12 +66,12 @@ impl WindowState {
         self.write_to(&path)
     }
 
-    fn read_from(path: &std::path::Path) -> Option<Self> {
+    pub(crate) fn read_from(path: &std::path::Path) -> Option<Self> {
         let bytes = std::fs::read(path).ok()?;
         serde_json::from_slice(&bytes).ok()
     }
 
-    fn write_to(&self, path: &std::path::Path) -> Result<(), String> {
+    pub(crate) fn write_to(&self, path: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -115,6 +115,7 @@ impl WindowState {
 pub(crate) struct BoundsTracker {
     /// Last bounds observed while the window was neither maximized nor fullscreen: the
     /// restore geometry a maximized window should reopen with.
+    pub(crate) save_path: Option<std::path::PathBuf>,
     last_windowed: Option<Bounds<Pixels>>,
     /// Bounds of the latest observation, whatever the window state.
     last_observed: Option<Bounds<Pixels>>,
@@ -125,6 +126,7 @@ pub(crate) struct BoundsTracker {
 impl BoundsTracker {
     pub(crate) fn seeded(bounds: gpui::WindowBounds, display_uuid: Option<[u8; 16]>) -> Self {
         Self {
+            save_path: None,
             last_windowed: Some(bounds.get_bounds()),
             last_observed: Some(bounds.get_bounds()),
             maximized: matches!(bounds, gpui::WindowBounds::Maximized(_)),
@@ -175,7 +177,12 @@ impl BoundsTracker {
 
     /// Store the state for the next start. Best effort: failures are reported, not fatal.
     pub(crate) fn persist(&self) {
-        if let Err(error) = self.state().save() {
+        let state = self.state();
+        let result = self
+            .save_path
+            .as_ref()
+            .map_or_else(|| state.save(), |path| state.write_to(path));
+        if let Err(error) = result {
             eprintln!("warning: could not save window state: {error}");
         }
     }

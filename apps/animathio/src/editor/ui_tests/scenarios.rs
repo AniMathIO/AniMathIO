@@ -70,15 +70,17 @@ fn window_state_persists_through_the_config_dir(cx: &mut TestAppContext) {
         "the headless platform window is windowed"
     );
 
-    let path = crate::editor_env::config_file(crate::window_state::FILE_NAME)
-        .expect("headless environment provides a config dir");
+    let dir = super::config_dir().join("window-state-persistence");
+    std::fs::remove_dir_all(&dir).ok();
+    let path = dir.join(crate::window_state::FILE_NAME);
+    ui.update(|editor, _window, _cx| editor.window_tracker.save_path = Some(path.clone()));
     // A geometry change schedules the debounced save; the file only appears once the
     // debounce settles.
     ui.update(|editor, _window, cx| editor.schedule_window_state_save(cx));
     assert!(!path.exists(), "the debounced save has not fired yet");
     ui.advance_clock(crate::window_state::SAVE_DEBOUNCE);
-    let saved =
-        crate::window_state::WindowState::load().expect("the debounced save wrote the state");
+    let saved = crate::window_state::WindowState::read_from(&path)
+        .expect("the debounced save wrote the state");
     assert_eq!(saved, initial, "the tracked geometry is what lands on disk");
     std::fs::remove_file(&path).ok();
 }

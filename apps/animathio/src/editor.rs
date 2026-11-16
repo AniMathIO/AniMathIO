@@ -848,6 +848,11 @@ impl Editor {
             }
         })
         .detach();
+        this.window_tracker.save_path = this
+            .env
+            .config_dir
+            .as_ref()
+            .map(|dir| dir.join(crate::window_state::FILE_NAME));
         this.request_render(Time(0));
         // Remember the window geometry continuously (see `window_state::BoundsTracker`)
         // and save it when the geometry settles: platform quit paths (Cmd+Q, WM session
@@ -860,8 +865,12 @@ impl Editor {
         .detach();
         cx.on_app_quit(|this, _cx| {
             let state = this.window_tracker.state();
+            let path = this.window_tracker.save_path.clone();
             async move {
-                if let Err(error) = state.save() {
+                let result = path
+                    .as_ref()
+                    .map_or_else(|| state.save(), |path| state.write_to(path));
+                if let Err(error) = result {
                     eprintln!("warning: could not save window state on quit: {error}");
                 }
             }
@@ -1093,6 +1102,8 @@ impl Editor {
         bounds: gpui::WindowBounds,
         uuid: Option<[u8; 16]>,
     ) {
+        let path = self.window_tracker.save_path.take();
         self.window_tracker = crate::window_state::BoundsTracker::seeded(bounds, uuid);
+        self.window_tracker.save_path = path;
     }
 }
