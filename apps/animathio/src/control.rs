@@ -218,7 +218,7 @@ mod acknowledgement_tests {
         assert!(matches!(wait(), Err(ControlError::NotAccepted)));
         let mut editor = animathio_control::HeadlessHandler::new();
         assert!(rx.recv().unwrap().accept().is_none());
-        assert!(editor.project_get().unwrap().project.tracks().is_empty());
+        assert_eq!(editor.project_get().unwrap().project.tracks(), []);
 
         // Retry after UI recovery applies exactly once.
         bridge.ack_deadline = Duration::from_secs(5);
@@ -277,10 +277,10 @@ mod acknowledgement_tests {
         // Simulate a client resuming its wait 45 minutes after acceptance.
         // Advancing a clock avoids sleeping or subtracting past Instant's epoch.
         let queued_at = Instant::now();
-        let completed_at = queued_at + Duration::from_secs(45 * 60);
+        let completed_at = queued_at + Duration::from_mins(45);
         let wait = bridge.defer_at(
             Call::DetectScenes {
-                params: Default::default(),
+                params: animathio_control::SceneParams::default(),
             },
             queued_at,
             move || completed_at,
@@ -309,7 +309,7 @@ mod acknowledgement_tests {
     fn dropped_queued_or_accepted_reply_fails_immediately() {
         for accepted in [false, true] {
             let (mut bridge, rx) = ControlBridge::new();
-            bridge.ack_deadline = Duration::from_secs(60 * 60);
+            bridge.ack_deadline = Duration::from_hours(1);
             let wait = bridge.defer(edit());
             let request = rx.recv().unwrap();
             if accepted {
