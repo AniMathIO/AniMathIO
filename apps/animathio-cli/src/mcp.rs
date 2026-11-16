@@ -981,6 +981,19 @@ fn parse_clip_id(id: &str) -> Result<ClipId, McpError> {
         .map_err(|_| invalid("id must be a numeric clip id"))
 }
 
+/// One linear transform keyframe at a clip-local tick, for the animation tools.
+fn fade_key(clip_id: ClipId, property: TransformProperty, time: i64, value: f64) -> Command {
+    Command::AddKeyframe {
+        id: clip_id,
+        target: Target::Transform(property),
+        time: Time(time),
+        keyframe: Keyframe {
+            value: value.into(),
+            interpolation: Interpolation::Linear,
+        },
+    }
+}
+
 fn parse_color(value: &str) -> Option<[u8; 4]> {
     let hex = value.trim().strip_prefix('#')?;
     if !hex.is_ascii() {
@@ -1360,7 +1373,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Attach an animation to a clip. Supported kinds: fadeIn, fadeOut, slideIn, slideOut."
+        description = "Attach an animation to a clip. Supported kinds: fadeIn, fadeOut, slideIn, slideOut. fadeIn/slideIn run from the clip start; fadeOut/slideOut end at the clip end, so the element animates out over the last `duration_ms`. Durations longer than the clip are clamped to the clip."
     )]
     async fn add_animation(
         &self,
@@ -1371,56 +1384,28 @@ impl McpServer {
         let clip_id = parse_clip_id(&p.target_id)?;
         let clip =
             find_clip(&state.project, clip_id).ok_or_else(|| invalid("target clip not found"))?;
-        let duration = ms_to_ticks(p.duration_ms)?;
+        // Keyframe times are clip-local ticks. Out-animations must end at the
+        // clip end (mirroring the v1 importer's `late_start`), not at local
+        // zero, or the element would fade/leave at the start and stay gone.
+        let clip_len = clip.range.end.0 - clip.range.start.0;
+        let requested = ms_to_ticks(p.duration_ms)?.0;
+        let duration = requested.min(clip_len);
+        let start = clip_len - duration;
         let opacity = clip.transform.opacity;
         match p.kind.as_str() {
             "fadeIn" => {
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::Opacity),
-                        time: Time(0),
-                        keyframe: Keyframe {
-                            value: (0.0).into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::Opacity),
-                        time: duration,
-                        keyframe: Keyframe {
-                            value: opacity.into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
+                for (time, value) in [(0, 0.0), (duration, opacity)] {
+                    backend
+                        .command_apply(fade_key(clip_id, TransformProperty::Opacity, time, value))
+                        .map_err(mcp_error)?;
+                }
             }
             "fadeOut" => {
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::Opacity),
-                        time: Time(0),
-                        keyframe: Keyframe {
-                            value: opacity.into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::Opacity),
-                        time: duration,
-                        keyframe: Keyframe {
-                            value: (0.0).into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
+                for (time, value) in [(start, opacity), (clip_len, 0.0)] {
+                    backend
+                        .command_apply(fade_key(clip_id, TransformProperty::Opacity, time, value))
+                        .map_err(mcp_error)?;
+                }
             }
             "slideIn" | "slideOut" => {
                 let (x, y) = (clip.transform.x, clip.transform.y);
@@ -1437,50 +1422,26 @@ impl McpServer {
                 } else {
                     ((x, y), (x + offset.0, y + offset.1))
                 };
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::X),
-                        time: Time(0),
-                        keyframe: Keyframe {
-                            value: from.0.into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::X),
-                        time: duration,
-                        keyframe: Keyframe {
-                            value: to.0.into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::Y),
-                        time: Time(0),
-                        keyframe: Keyframe {
-                            value: from.1.into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
-                backend
-                    .command_apply(Command::AddKeyframe {
-                        id: clip_id,
-                        target: Target::Transform(TransformProperty::Y),
-                        time: duration,
-                        keyframe: Keyframe {
-                            value: to.1.into(),
-                            interpolation: Interpolation::Linear,
-                        },
-                    })
-                    .map_err(mcp_error)?;
+                let (from_time, to_time) = if p.kind == "slideIn" {
+                    (0, duration)
+                } else {
+                    (start, clip_len)
+                };
+                for (property, position) in [
+                    (TransformProperty::X, from.0),
+                    (TransformProperty::Y, from.1),
+                ] {
+                    backend
+                        .command_apply(fade_key(clip_id, property, from_time, position))
+                        .map_err(mcp_error)?;
+                }
+                for (property, position) in
+                    [(TransformProperty::X, to.0), (TransformProperty::Y, to.1)]
+                {
+                    backend
+                        .command_apply(fade_key(clip_id, property, to_time, position))
+                        .map_err(mcp_error)?;
+                }
             }
             other => {
                 return Err(unsupported(&format!(
@@ -1488,7 +1449,7 @@ impl McpServer {
                 )));
             }
         }
-        tool_text(json!({"clip_id": clip_id.0}))
+        tool_text(json!({"clip_id": clip_id.0, "clamped_to_clip": requested > clip_len}))
     }
 
     #[tool(
@@ -3026,5 +2987,115 @@ mod retime_tests {
             server.backend.lock().await.project_get().unwrap().project,
             before
         );
+    }
+}
+
+#[cfg(test)]
+mod animation_tests {
+    use super::*;
+    use animathio_core::evaluate;
+
+    fn clip_with_server() -> (McpServer, i64) {
+        let mut backend = HeadlessHandler::new();
+        backend
+            .command_apply(Command::Batch {
+                commands: vec![
+                    Command::AddTrack {
+                        track: Track::new(TrackId(1), "media"),
+                        index: 0,
+                    },
+                    Command::AddClip {
+                        track: TrackId(1),
+                        clip: Clip::new(
+                            ClipId(1),
+                            animathio_core::ClipKind::Error("fixture".into()),
+                            TimeRange::new(Time(0), Time(5 * TICKS_PER_SECOND)).unwrap(),
+                        ),
+                    },
+                ],
+            })
+            .unwrap();
+        (McpServer::new(Box::new(backend)), 5 * TICKS_PER_SECOND)
+    }
+
+    async fn opacity_at(server: &McpServer, tick: i64) -> f64 {
+        let project = server.backend.lock().await.project_get().unwrap().project;
+        let scene = evaluate(&project, Time(tick));
+        assert_eq!(scene.clips.len(), 1);
+        scene.clips[0].transform.opacity
+    }
+
+    async fn x_at(server: &McpServer, tick: i64) -> f64 {
+        let project = server.backend.lock().await.project_get().unwrap().project;
+        let scene = evaluate(&project, Time(tick));
+        assert_eq!(scene.clips.len(), 1);
+        scene.clips[0].transform.x
+    }
+
+    #[tokio::test]
+    async fn fade_out_ends_at_the_clip_end_not_at_its_start() {
+        let (server, clip_len) = clip_with_server();
+        server
+            .add_animation(Parameters(
+                serde_json::from_value(
+                    json!({"target_id":"1","kind":"fadeOut","duration_ms":500.0}),
+                )
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let tenth = clip_len / 10;
+        assert_eq!(opacity_at(&server, tenth).await, 1.0);
+        // Half a second window ending at the clip end: 95% of the clip sits in
+        // the middle of the fade (the old behaviour was already invisible here).
+        let fade = opacity_at(&server, clip_len * 95 / 100).await;
+        assert!(
+            (fade - 0.5).abs() < 0.05,
+            "opacity at 95%: {fade}, expected the middle of the fade"
+        );
+        // The clip never fully disappears before its end.
+        assert!(opacity_at(&server, clip_len * 9 / 10).await > 0.5);
+    }
+
+    #[tokio::test]
+    async fn slide_out_moves_only_over_the_last_window() {
+        let (server, clip_len) = clip_with_server();
+        server
+            .add_animation(Parameters(
+                serde_json::from_value(
+                    json!({"target_id":"1","kind":"slideOut","duration_ms":500.0,"direction":"right"}),
+                )
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let tenth = clip_len / 10;
+        assert!((x_at(&server, tenth).await - 0.5).abs() < 1e-9);
+        let moved = x_at(&server, clip_len * 95 / 100).await;
+        assert!(
+            (moved - 1.0).abs() < 0.05,
+            "x at 95%: {moved}, expected half of the rightward slide"
+        );
+    }
+
+    #[tokio::test]
+    async fn durations_longer_than_the_clip_are_clamped() {
+        let (server, clip_len) = clip_with_server();
+        let result = server
+            .add_animation(Parameters(
+                serde_json::from_value(
+                    json!({"target_id":"1","kind":"fadeOut","duration_ms":10000.0}),
+                )
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        let text = result.content[0].as_text().unwrap().text.clone();
+        assert!(text.contains("\"clamped_to_clip\":true"), "{text}");
+        // A whole-clip fade: linear opacity everywhere in (0, 1).
+        let tenth = opacity_at(&server, clip_len / 10).await;
+        assert!((tenth - 0.9).abs() < 0.05, "opacity at 10%: {tenth}");
+        let fade = opacity_at(&server, clip_len * 95 / 100).await;
+        assert!((fade - 0.05).abs() < 0.05, "opacity at 95%: {fade}");
     }
 }
