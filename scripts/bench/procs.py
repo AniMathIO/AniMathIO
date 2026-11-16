@@ -25,8 +25,14 @@ PAGE_KB = os.sysconf("SC_PAGE_SIZE") / 1024.0
 
 def child_pids(pid: int) -> list[int]:
     try:
-        with open(f"/proc/{pid}/task/{pid}/children") as fh:
-            return [int(c) for c in fh.read().split()]
+        from pathlib import Path
+        children = set()
+        for task in Path(f"/proc/{pid}/task").iterdir():
+            try:
+                children.update(int(c) for c in (task / "children").read_text().split())
+            except (OSError, ValueError):
+                continue
+        return sorted(children)
     except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError):
         return []
 

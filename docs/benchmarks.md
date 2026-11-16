@@ -22,11 +22,8 @@ The harness lives in `scripts/bench-v1-v2.sh` + `scripts/bench/`:
 
 All numbers in this document were measured on one machine, in one session:
 
-- **CPU:** AMD Ryzen 9 7950X3D, 16 cores (32 threads), 64 GiB RAM
-- **OS:** Linux, kernel 6.x, GNOME
-- **Display:** every GUI run inside a private Xvfb server at 1920×1080×24 —
-  software rendering, no compositor, no GPU acceleration. **These are Xvfb
-  numbers;** do not quote them as native-desktop numbers.
+- Machine facts are recorded from `/proc/cpuinfo`, `/proc/meminfo` and the OS at run time (see results below).
+- **Display:** private Xvfb 1920×1080×24, no compositor. Vulkan can use the host GPU; this is not a forced software-rendering comparison.
 - **Audio:** none (both apps' sound servers pointed at nonexistent sockets)
 - **Load gating:** every timed run waits until the 1-minute load average is
   ≤ 4 and records the exact load it ran under (`bench/results.json`).
@@ -39,7 +36,7 @@ in `bench/results.json` (`machine`, `versions`).
 ```bash
 # v2: build plugins and release binaries (the harness reuses target/release)
 scripts/build-plugins.sh
-CARGO_BUILD_JOBS=3 nice -n 19 ionice -c3 cargo build --release --locked
+CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=line-tables-only nice -n 19 ionice -c3 cargo build --release --locked
 
 # run everything (roughly 45–60 minutes: builds v1 from origin/main in a
 # throwaway git worktree under /home/hunor/tmp/animathio-bench, authors the
@@ -64,8 +61,8 @@ artifacts (`bench/` is gitignored).
 Both apps get the **same logical content**: a 1920×1080, 30 fps, dark
 (`#10131a`) scene with
 
-- a fading-in title "Fourier series" (76 px / 7 % of the short edge),
-- a fading-in LaTeX formula `\sum_{n=1}^{\infty}\frac{1}{n^2}=\frac{\pi^2}{6}`,
+- a title "Fourier series" (76 px / 7 % of the short edge),
+- a LaTeX formula `\sum_{n=1}^{\infty}\frac{1}{n^2}=\frac{\pi^2}{6}`,
 - a graph area with axes, grid, labels, `sin(x)`, a circle (r = 2 units) and a
   triangle, at the same canvas position (45 % of canvas height),
 
@@ -96,8 +93,8 @@ visible seconds each on a 5 s stagger, 60 s total.
 | --- | --- |
 | Cold start to usable window | Launch to the app's automation interface answering: v1 = MCP `get_project_state` replies (renderer mounted, dashboard live); v2 = control socket replies to `project.get` (the render loop is serving). Includes process start; v2 opens its built-in sample project (its default start state), v1 opens its dashboard. This is a proxy for "usable window" — neither app exposes a pixel-ready signal headlessly. |
 | Project load | Launch with the saved scene file passed on the command line, until all of its elements are visible (`get_project_state`/`project.get`). Same proxy caveat as cold start. |
-| Idle RSS | Process-tree PSS sum, sampled at 4 Hz for 8 s (1 s settle) with the 10 s / medium project open. |
-| Export 10 s / 60 s 1080p30 MP4 | Wall time of a full-project H.264+AAC MP4 export, measured at each app's shipped export path: v1 `export_video` (real-time canvas capture + in-renderer ffmpeg.wasm convert), v2 `animathio-cli export` (offline renderer + FilmCraft encoders). Peak export PSS is sampled concurrently at 8 Hz. |
+| Idle RSS | Process-tree RSS sum, sampled at 4 Hz for 8 s (1 s settle) with the 10 s / medium project open. |
+| Export 10 s / 60 s 1080p30 MP4 | Wall time of a full-project H.264 MP4 export, measured at each app's shipped export path: v1 `export_video` (real-time canvas capture + in-renderer ffmpeg.wasm convert), v2 `animathio-cli export` (offline renderer + FilmCraft encoders). Peak export RSS is sampled concurrently at 8 Hz. |
 | Seek round-trip | Playhead moves through each app's automation interface (v1 MCP `seek`, v2 control `playback.seek`): 60 pseudo-random seeks/second for 10 s, p50/p95 reported. It includes IPC + state update, not paint time. |
 | Sizes | v1: published release download sizes plus locally built `.deb`/AppImage/`linux-unpacked` from the same commit. v2: on-disk size of the from-source install (editor binary + CLI + 8 first-party `.amplugin` bundles). |
 
@@ -118,9 +115,8 @@ _Benchmark results will be filled in after the measured run completes._
 Read before quoting any number above.
 
 1. **Xvfb, not a desktop.** Every GUI number (cold start, load, seek, v1
-   exports, idle RSS) was measured under a software-rendered Xvfb display.
-   Relative comparisons are meaningful; absolute seconds will differ on a real
-   desktop.
+   exports, idle RSS) was measured under a Xvfb display.
+   These results do not establish native desktop performance.
 2. **The export comparison compares shipped paths, not the same algorithm.**
    v1 exports by capturing the canvas in real time (a 60 s project needs ≥ 60 s
    by construction) and converts WebM→MP4 with ffmpeg.wasm (`libx264 -preset
@@ -135,9 +131,8 @@ Read before quoting any number above.
 4. **"Usable window" is a proxy** (see the scenario table). Both proxies
    require each app's renderer/UI loop to be live, but neither measures
    pixel-presented time.
-5. **RSS is process-tree PSS** (smaps_rollup, shared pages charged once,
-   sampled ≥ 8× per second during exports). PSS is a better honest number than
-   RSS-sum for Electron's many processes, but it is still a sampling estimate,
+5. **RSS is the process-tree RSS sum** (shared pages can be counted repeatedly,
+   sampled ≥ 8× per second during exports). PSS is retained in raw data as a supplementary metric. RSS is a sampling estimate,
    not a peak tracker; the export peak may be slightly under-sampled.
 6. **v2's cold start includes the sample project** (its default start state)
    and plugin loading; v1's includes its dashboard. Neither number includes

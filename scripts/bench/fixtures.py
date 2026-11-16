@@ -139,7 +139,7 @@ def build_v2_scene(cli: Path, env: dict, out: Path, seconds: int, work: Path) ->
     _write_amio(cur, _empty_v2(seconds))
     steps = [
         ("text", {"source": TITLE, "size": "7"}),
-        ("latex", {"source": FORMULA, "size": "10"}),
+        ("latex", {"source": FORMULA, "size": "4"}),
         ("plot", {"expression": "sin(x)"}),
         ("circle", {"radius": "2", "x": "0", "y": "0"}),
         ("polygon", {"vertices": "-2,-1; 2,-1; 0,2"}),
@@ -258,7 +258,7 @@ def v1_scene_steps(graph_png: Path, seconds: int) -> list[dict]:
     ms = seconds * 1000
     steps = [
         {"tool": "set_canvas", "args": {"width": WIDTH, "height": HEIGHT, "backgroundColor": BACKGROUND_HEX, "maxTimeMs": ms}},
-        {"tool": "add_text", "args": {"text": TITLE, "fontSize": 76, "fontWeight": 700, "x": 120, "y": 80, "color": "#ffffff"}},
+        {"tool": "add_text", "args": {"text": TITLE, "fontSize": 76, "fontWeight": 700, "x": TITLE_CENTER[0] * WIDTH, "y": TITLE_CENTER[1] * HEIGHT, "color": "#ffffff"}},
         {"tool": "add_math", "args": {"latex": FORMULA, "x": 120, "y": 400, "color": "#ffffff"}},
         {"tool": "add_media", "args": {"path": str(graph_png)}},
     ]

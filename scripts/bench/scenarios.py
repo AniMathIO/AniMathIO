@@ -70,7 +70,6 @@ class Bench:
         self.v1_port = self.free_port()
         self.v1_token = secrets.token_hex(24)
         self.v1_flags: list[str] = []
-        self.deadline = time.monotonic() + args.max_wait_min * 60
         self.proc: subprocess.Popen | None = None
 
     @staticmethod
@@ -194,12 +193,12 @@ class Bench:
 
     def wait_for_load(self) -> float:
         waited = 0.0
+        deadline = time.monotonic() + self.args.max_wait_min * 60
         while True:
             if load1() <= self.args.max_load:
                 return waited
-            if time.monotonic() > self.deadline:
-                print(f"[bench] load {load1()} still above {self.args.max_load} after deadline; recording anyway", flush=True)
-                return waited
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"load {load1()} exceeds {self.args.max_load}; refusing measurement")
             if waited == 0.0:
                 print(f"[bench] load average {load1()} > {self.args.max_load}; waiting for an idle machine", flush=True)
             time.sleep(30)
@@ -321,6 +320,7 @@ def run_timed_export_v1(bench: Bench, project: Path, out_mp4: Path, idx: int, sc
         bench.record(scenario, "v1", idx, {
             "export_seconds": round((finished - started) / 1000, 3),
             "output_bytes": size,
+            "probe": validate_mp4(out_mp4),
             "duration_ms": duration_ms,
             "peak_pss_kb": mem.get("pss_max_kb"),
             "peak_rss_kb": mem.get("rss_max_kb"),
@@ -368,11 +368,25 @@ def run_timed_export_v2(bench: Bench, project: Path, out_mp4: Path, idx: int, sc
     mem = samples[-1] if samples else {}
     bench.record(scenario, "v2", idx, {
         "export_seconds": round((finished - started) / 1000, 3),
-        "output_bytes": out_mp4.stat().st_size if out_mp4.exists() else 0,
+        "output_bytes": out_mp4.stat().st_size,
+        "probe": validate_mp4(out_mp4),
         "peak_pss_kb": mem.get("pss_max_kb"),
         "peak_rss_kb": mem.get("rss_max_kb"),
         "mem_mode": mem.get("mode"),
     })
+
+
+def validate_mp4(path: Path) -> dict:
+    result = subprocess.run([
+        "ffprobe", "-v", "error", "-show_entries",
+        "stream=codec_name,width,height,r_frame_rate,nb_frames:format=duration",
+        "-of", "json", str(path),
+    ], check=True, capture_output=True, text=True)
+    probe = json.loads(result.stdout)
+    video = next(s for s in probe["streams"] if s.get("width"))
+    if (video["codec_name"], video["width"], video["height"], video["r_frame_rate"]) != ("h264", 1920, 1080, "30/1"):
+        raise RuntimeError(f"unexpected export: {probe}")
+    return probe
 
 
 def cold_start(bench: Bench, app: str, idx: int) -> None:
@@ -488,6 +502,20 @@ def main() -> None:
         if not (projects / name).exists():
             raise SystemExit(f"v1 did not save {name} (see raw/v1-app.log)")
 
+    # ---- startup and load scenarios -----------------------------------------------------
+    for idx in range(1, args.runs + 1):
+        print(f"[bench] === run {idx}/{args.runs} ===", flush=True)
+        cold_start(bench, "v1", idx)
+        cold_start(bench, "v2", idx)
+
+        load_and_idle(bench, "v1", "load_project_10", scene10, 3, idx)
+        load_and_idle(bench, "v2", "load_project_10", scene10_amio, 5, idx)
+
+        if not skip_medium:
+            load_and_idle(bench, "v1", "load_project_medium", medium, 60, idx)
+            load_and_idle(bench, "v2", "load_project_medium", medium_amio, 60, idx)
+
+
     print("[bench] warm-up: v1 ffmpeg.wasm core (fetched from unpkg on first MP4 export)", flush=True)
     warm = bench.launch_v1(scene10)
     try:
@@ -514,19 +542,7 @@ def main() -> None:
     if warm_cli.returncode != 0:
         raise SystemExit("v2 warm-up export failed (see raw/v2-cli.log)")
 
-    # ---- timed scenarios -----------------------------------------------------
     for idx in range(1, args.runs + 1):
-        print(f"[bench] === run {idx}/{args.runs} ===", flush=True)
-        cold_start(bench, "v1", idx)
-        cold_start(bench, "v2", idx)
-
-        load_and_idle(bench, "v1", "load_project_10", scene10, 3, idx)
-        load_and_idle(bench, "v2", "load_project_10", scene10_amio, 5, idx)
-
-        if not skip_medium:
-            load_and_idle(bench, "v1", "load_project_medium", medium, 60, idx)
-            load_and_idle(bench, "v2", "load_project_medium", medium_amio, 60, idx)
-
         run_timed_export_v1(bench, scene10, bench.exports / f"v1-10-run{idx}.mp4", idx, "export_10")
         run_timed_export_v2(bench, scene10_amio, bench.exports / f"v2-10-run{idx}.mp4", idx, "export_10")
 

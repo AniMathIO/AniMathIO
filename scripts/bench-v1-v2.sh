@@ -80,6 +80,7 @@ if [[ "$INSIDE_XVFB" != 1 ]]; then
 
   [[ -x "$V2_BIN/animathio" && -x "$V2_BIN/animathio-cli" ]] || die "v2 binaries missing at $V2_BIN — run scripts/build-plugins.sh and cargo build --release"
   [[ -d "$PLUGINS" ]] || die "v2 plugins missing at $PLUGINS — run scripts/build-plugins.sh"
+  command -v ffprobe >/dev/null || die "ffprobe is required to validate exports"
   command -v node >/dev/null || die "node is required"
   command -v Xvfb >/dev/null || die "Xvfb is required"
   command -v python3 >/dev/null || die "python3 is required"
@@ -92,7 +93,7 @@ if [[ "$INSIDE_XVFB" != 1 ]]; then
       die "v1 executable not found at $V1_DIST/AniMathIO and --no-build given"
     fi
     log "building v1 from origin/main into $V1_SRC (throwaway git worktree, ~15 min)"
-    if [[ ! -d "$V1_SRC/.git" ]]; then
+    if [[ ! -e "$V1_SRC/.git" ]]; then
       git -C "$REPO_ROOT" worktree add --detach "$V1_SRC" origin/main
     fi
     (
@@ -129,7 +130,7 @@ info = {
     "kernel": platform.release(),
     "os": "Linux",
     "distro": distro,
-    "display": "Xvfb 1920x1080x24, software rendering, no compositor, no GPU acceleration",
+    "display": "Xvfb 1920x1080x24; no compositor; Vulkan may use the GPU",
     "audio": "none (sound servers pointed at nonexistent sockets)",
 }
 with open(sys.argv[1], "w") as fh:
@@ -140,7 +141,7 @@ PY
   # (--v2-bin), so record that checkout's commit, not this repo's HEAD.
   V1_VERSION="$(node -p "require('$V1_SRC/package.json').version")"
   V1_ELECTRON="$(node -p "require('$V1_SRC/package.json').devDependencies.electron || require('$V1_SRC/package.json').dependencies.electron || 'unknown'")"
-  V2_VERSION="$("$V2_BIN/animathio" --version | awk '{print $2}')"
+  V2_VERSION="$(ANIMATHIO_AUDIO=none "$V2_BIN/animathio" --version | awk '{print $2}')"
   V2_BIN_COMMIT="$(git -C "$(dirname "$V2_BIN")" rev-parse --short HEAD 2>/dev/null || echo unknown)"
   V1_COMMIT="$(git -C "$V1_SRC" rev-parse --short HEAD)"
   python3 - "$RAW/versions.json" <<PY
@@ -197,13 +198,15 @@ log "running timed scenarios (runs=$RUNS, out=$OUT)"
 ANIMATHIO_BENCH_SKIP_SEEK="$SKIP_SEEK" \
 ANIMATHIO_BENCH_SKIP_MEDIUM="$SKIP_MEDIUM" \
 ANIMATHIO_BENCH_KEEP_GOING="$KEEP_GOING" \
-python3 "$REPO_ROOT/scripts/bench/scenarios.py" \
+status=0
+nice -n 19 ionice -c3 python3 "$REPO_ROOT/scripts/bench/scenarios.py" \
   --out "$OUT" --runs "$RUNS" \
   --v1-bin "$V1_DIST/AniMathIO" --v1-src "$V1_SRC" \
   --v2-bin "$V2_BIN/animathio" --v2-cli "$V2_BIN/animathio-cli" \
   --plugins "$PLUGINS" \
-  --max-load "$MAX_LOAD" --max-wait-min "$MAX_WAIT_MIN"
+  --max-load "$MAX_LOAD" --max-wait-min "$MAX_WAIT_MIN" || status=$?
 
 log "aggregating results"
 python3 "$REPO_ROOT/scripts/bench/report.py" --out "$OUT"
-log "done: $OUT/results.json and $OUT/results.md"
+log "done: $OUT/results.json and $OUT/results.md (scenario exit=$status)"
+exit "$status"

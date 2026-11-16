@@ -33,10 +33,10 @@ SCENARIOS: dict[str, list[tuple[str, str, str, int]]] = {
 }
 MEM_ROWS: dict[str, list[tuple[str, str]]] = {
     # scenario -> [(json metric, table label)]
-    "load_project_10": [("idle_pss_median_kb", "idle memory, 10 s scene open (PSS median)")],
-    "load_project_medium": [("idle_pss_median_kb", "idle memory, 60-element project (PSS median)")],
-    "export_10": [("peak_pss_kb", "peak memory during 10 s export (PSS max)")],
-    "export_60": [("peak_pss_kb", "peak memory during 60 s export (PSS max)")],
+    "load_project_10": [("idle_rss_median_kb", "idle memory, 10 s scene open (RSS sum median)")],
+    "load_project_medium": [("idle_rss_median_kb", "idle memory, 60-element project (RSS sum median)")],
+    "export_10": [("peak_rss_kb", "peak memory during 10 s export (RSS sum max)")],
+    "export_60": [("peak_rss_kb", "peak memory during 60 s export (RSS sum max)")],
 }
 
 
