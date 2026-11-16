@@ -376,7 +376,8 @@ impl CommunityStore {
             HostError::ReservedId(id) => CommunityError::Reserved(id),
             other => CommunityError::InvalidId(other.to_string()),
         })?;
-        if manifest.id.starts_with('.') {
+        if manifest.id.starts_with('.') || is_windows_device_name(&manifest.id) {
+            // The id becomes a file name; keep it valid on every platform.
             return Err(CommunityError::InvalidId(manifest.id.clone()));
         }
 
@@ -450,6 +451,17 @@ pub(crate) fn read_package_file(path: &Path) -> Result<PluginPackage, CommunityE
         return Err(CommunityError::TooLarge);
     }
     Ok(PluginPackage::from_bytes(&bytes)?)
+}
+
+/// Whether the file name `<id>.amplugin` would name a Windows device (`CON`, `NUL`, `COM1`, ...),
+/// which Windows resolves by the part before the first dot.
+fn is_windows_device_name(id: &str) -> bool {
+    let stem = id.split('.').next().unwrap_or(id).to_ascii_lowercase();
+    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || ((stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0')
 }
 
 fn is_https(url: &str) -> bool {
@@ -607,11 +619,17 @@ mod tests {
             store.install_bytes(&reserved, Some(&sha(&reserved)), false),
             Err(CommunityError::Reserved(_))
         ));
-        let dotted = package("..");
-        assert!(matches!(
-            store.install_bytes(&dotted, None, false),
-            Err(CommunityError::InvalidId(_))
-        ));
+        for bad in ["..", "nul", "COM1.example", "con.plugin"] {
+            let bytes = package(bad);
+            assert!(
+                matches!(
+                    store.install_bytes(&bytes, None, false),
+                    Err(CommunityError::InvalidId(_))
+                ),
+                "{bad}"
+            );
+        }
+        assert!(!is_windows_device_name("com.example.hello"));
         assert!(store.list().0.is_empty());
     }
 

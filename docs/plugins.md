@@ -86,7 +86,8 @@ registers newly enabled plugins and drops disabled ones (clip sources, effects, 
 effects, animation presets and importers), the inspector's plugin list refreshes and the
 preview re-renders. Clips of an unloaded or missing plugin render as the usual
 missing-plugin placeholder (and fail an export) until the plugin is enabled again.
-A running audio mixer keeps the effects it was built with until the next playback restart.
+Audio effects of an unloaded plugin are skipped with a warning during playback and fail an
+export.
 `plugins.list` / `list_plugins` (see `docs/mcp.md`) report what is installed and loaded;
 installing and enabling are deliberately not part of the control protocol.
 
