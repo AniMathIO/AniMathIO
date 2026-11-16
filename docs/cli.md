@@ -277,6 +277,30 @@ The import runs inside the sandboxed `org.animathio.import-manim` importer plugi
 it with `scripts/build-plugins.sh`); `ImageMobject` files are read only from the script's
 folder.
 
+## `plugins`
+
+Manage community plugins: third-party `.amplugin` bundles in the per-user plugin folder.
+They are off by default: the global switch (`plugins community on`) and a per-plugin flag
+(`plugins enable <id>`) must both be on for a plugin to load, and an installed plugin starts
+disabled. `install` takes a local file or an `https://` URL; a URL needs `--sha256`, which is
+verified before anything is written, and the package must pass manifest and ABI validation.
+Reserved `org.animathio.*` ids are refused and an id that is already installed needs
+`--force` (an update). `list --json` prints the folder, the global switch and every installed
+plugin. See [Installing community plugins](plugins.md#installing-community-plugins) for the
+trust model and folders.
+
+<!-- help:plugins -->
+```text
+```
+<!-- /help:plugins -->
+
+```bash
+animathio-cli plugins install ./my-plugin.amplugin
+animathio-cli plugins community on
+animathio-cli plugins enable com.example.my-plugin
+animathio-cli plugins list --json
+```
+
 ## `animations`
 
 List or apply animation presets from the loaded animation-preset plugins

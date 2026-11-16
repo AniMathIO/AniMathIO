@@ -16,6 +16,74 @@ validates and replays. A plugin never
 touches files, sockets, the GPU or a font engine directly. Everything it needs is
 provided by **host imports**.
 
+## Installing community plugins
+
+Besides the first-party plugins that ship with AniMathIO, you can install third-party
+**community plugins** (`.amplugin` files). They are sandboxed exactly like first-party
+plugins (no network or file access, memory and time limits), but they are third-party code
+that AniMathIO does not audit, so they are **off by default** and every plugin has to be
+enabled explicitly.
+
+### Trust model
+
+1. **Global switch.** "Community plugins" (Preferences in the editor, or
+   `animathio-cli plugins community on|off`) is off by default. While it is off the per-user
+   plugin folder is not read at all and only bundled plugins load.
+2. **Per-plugin flag.** An installed plugin starts **disabled**. It loads only when the
+   switch is on *and* the plugin is enabled (`animathio-cli plugins enable <id>`).
+3. **No impersonation.** Community plugins cannot use the reserved `org.animathio.*` ids, so
+   they can never replace a first-party plugin, and they cannot reuse the id of another
+   installed community plugin (installing the same id again requires `--force`, an update).
+4. **Verified installs.** Installing from a URL needs `https://` and the package's expected
+   SHA-256; the hash is checked before anything is written. The package must then pass the
+   normal package reader, manifest validation and ABI check. The file is written atomically.
+   `ANIMATHIO_NO_UPDATE_CHECK=1` does not block an explicit install: it is a user action.
+
+The trust settings are one small JSON file, `community-plugins.json` (`enabled` switch and
+the enabled plugin ids), in the editor's configuration directory. The editor, the CLI and
+the control handler all read the same file. `ANIMATHIO_PLUGIN_SETTINGS` overrides its path.
+
+### Folders
+
+| OS | Community plugin folder | Settings file |
+| --- | --- | --- |
+| Linux | `~/.local/share/animathio/plugins` | `~/.config/animathio/community-plugins.json` |
+| macOS | `~/Library/Application Support/animathio/plugins` | `~/Library/Application Support/org.AniMathIO.AniMathIO/community-plugins.json` |
+| Windows | `%APPDATA%\animathio\plugins` | `%APPDATA%\AniMathIO\AniMathIO\config\community-plugins.json` |
+
+`ANIMATHIO_USER_PLUGIN_DIR` overrides the plugin folder (useful for tests and portable
+setups). `ANIMATHIO_PLUGIN_DIR` is unrelated: it is the developer override for *bundled*
+plugins and may use reserved ids.
+
+### From the command line
+
+```bash
+animathio-cli plugins install ./my-plugin.amplugin
+animathio-cli plugins install https://example.org/my-plugin.amplugin --sha256 <64 hex characters>
+animathio-cli plugins community on
+animathio-cli plugins enable com.example.my-plugin
+animathio-cli plugins list --json
+animathio-cli plugins disable com.example.my-plugin
+animathio-cli plugins remove com.example.my-plugin
+```
+
+`plugins list` shows each installed plugin and whether it is enabled; `plugins remove`
+deletes the file and the enabled flag. Renders and exports from the CLI (and the control
+handler) load the enabled community plugins like any other plugin.
+
+### In the editor: no restart
+
+The editor applies the switch live. Turning "Community plugins" on or off in Preferences
+(saving the dialog also re-reads the settings, so changes made with the CLI while the editor
+runs are picked up) loads or unloads plugins in place: `PluginHost::sync_community_plugins`
+registers newly enabled plugins and drops disabled ones (clip sources, effects, audio
+effects, animation presets and importers), the inspector's plugin list refreshes and the
+preview re-renders. Clips of an unloaded or missing plugin render as the usual
+missing-plugin placeholder (and fail an export) until the plugin is enabled again.
+A running audio mixer keeps the effects it was built with until the next playback restart.
+`plugins.list` / `list_plugins` (see `docs/mcp.md`) report what is installed and loaded;
+installing and enabling are deliberately not part of the control protocol.
+
 ## The WIT world
 
 The contract is `crates/plugin-api/wit/plugin.wit`:

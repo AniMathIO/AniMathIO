@@ -112,7 +112,8 @@ fn discovery_rejects_user_packages_with_reserved_ids_but_loads_trusted_bundles()
     assert!(
         host.load_plugin_directory(&PluginDirectory {
             path: user.path().to_owned(),
-            allow_reserved_ids: false
+            allow_reserved_ids: false,
+            community: false,
         })
         .unwrap()
         .is_empty()
@@ -129,7 +130,8 @@ fn discovery_rejects_user_packages_with_reserved_ids_but_loads_trusted_bundles()
     assert_eq!(
         host.load_plugin_directory(&PluginDirectory {
             path: bundled.path().to_owned(),
-            allow_reserved_ids: true
+            allow_reserved_ids: true,
+            community: false,
         })
         .unwrap(),
         vec!["org.animathio.latex"]
@@ -145,7 +147,8 @@ fn discovery_rejects_user_packages_with_reserved_ids_but_loads_trusted_bundles()
     assert_eq!(
         host.load_plugin_directory(&PluginDirectory {
             path: user.path().to_owned(),
-            allow_reserved_ids: false
+            allow_reserved_ids: false,
+            community: false,
         })
         .unwrap(),
         vec!["com.example.math"]

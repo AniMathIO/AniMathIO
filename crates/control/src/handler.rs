@@ -122,6 +122,11 @@ pub trait ControlHandler {
         from_value(self.handle(Call::TitlesAdd { params })?)
     }
 
+    /// List the loaded bundled plugins and the installed community plugins.
+    fn plugins_list(&mut self) -> Result<crate::PluginsListing, ControlError> {
+        from_value(self.handle(Call::PluginsList)?)
+    }
+
     /// List the presets provided by loaded animation-preset plugins.
     fn animations_list(&mut self) -> Result<Vec<crate::AnimationPresetInfo>, ControlError> {
         from_value(self.handle(Call::AnimationsList)?)

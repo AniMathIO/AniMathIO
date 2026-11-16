@@ -10,6 +10,10 @@ pub struct PluginDirectory {
     /// Only explicit overrides and executable-relative bundles may claim
     /// first-party `org.animathio.*` ids.
     pub allow_reserved_ids: bool,
+    /// The per-user community plugin folder. It is never loaded wholesale: only the plugins
+    /// the user enabled, and only while the global community switch is on (see
+    /// [`crate::CommunityStore`] and [`crate::PluginHost::sync_community_plugins`]).
+    pub community: bool,
 }
 
 /// Discover plugins without consulting the current working directory.
@@ -19,9 +23,7 @@ pub fn plugin_search_dirs() -> Vec<PluginDirectory> {
     search_dirs(
         std::env::var_os("ANIMATHIO_PLUGIN_DIR").map(PathBuf::from),
         std::env::current_exe().ok().as_deref(),
-        directories::BaseDirs::new()
-            .as_ref()
-            .map(directories::BaseDirs::data_dir),
+        crate::community::user_plugin_dir(),
     )
 }
 
@@ -35,19 +37,21 @@ pub(crate) fn invalid_override_dir() -> Option<PathBuf> {
 fn search_dirs(
     override_dir: Option<PathBuf>,
     exe: Option<&Path>,
-    data: Option<&Path>,
+    user: Option<PathBuf>,
 ) -> Vec<PluginDirectory> {
     let mut dirs = Vec::new();
     if let Some(path) = override_dir {
         dirs.push(PluginDirectory {
             path,
             allow_reserved_ids: true,
+            community: false,
         });
     }
     if let Some(bin) = exe.and_then(Path::parent) {
         dirs.push(PluginDirectory {
             path: bin.join("plugins"),
             allow_reserved_ids: true,
+            community: false,
         });
         // Installed packages keep their bundled resources next to, not inside,
         // the binary directory: `usr/lib/<bin>/plugins` in deb and AppImage
@@ -56,15 +60,18 @@ fn search_dirs(
             dirs.push(PluginDirectory {
                 path: bin.join("..").join("lib").join(name).join("plugins"),
                 allow_reserved_ids: true,
+                community: false,
             });
         }
         dirs.push(PluginDirectory {
             path: bin.join("..").join("lib/animathio/plugins"),
             allow_reserved_ids: true,
+            community: false,
         });
         dirs.push(PluginDirectory {
             path: bin.join("..").join("Resources").join("plugins"),
             allow_reserved_ids: true,
+            community: false,
         });
         // Development bundles are built into target/plugins. Never search
         // upward from the CWD, even in development builds.
@@ -73,13 +80,15 @@ fn search_dirs(
             dirs.push(PluginDirectory {
                 path: target.join("plugins"),
                 allow_reserved_ids: true,
+                community: false,
             });
         }
     }
-    if let Some(data) = data {
+    if let Some(path) = user {
         dirs.push(PluginDirectory {
-            path: data.join("animathio/plugins"),
+            path,
             allow_reserved_ids: false,
+            community: true,
         });
     }
     // An explicit development override often points at the same directory as
@@ -100,7 +109,7 @@ mod tests {
         let dirs = search_dirs(
             Some(PathBuf::from("/override")),
             Some(Path::new("/install/bin/animathio")),
-            Some(Path::new("/user/data")),
+            Some(PathBuf::from("/user/data/animathio/plugins")),
         );
         assert_eq!(dirs[0].path, Path::new("/override"));
         assert_eq!(dirs[1].path, Path::new("/install/bin/plugins"));
@@ -113,7 +122,8 @@ mod tests {
             dirs.last().unwrap(),
             &PluginDirectory {
                 path: PathBuf::from("/user/data/animathio/plugins"),
-                allow_reserved_ids: false
+                allow_reserved_ids: false,
+                community: true,
             }
         );
         assert_eq!(dirs.len(), if cfg!(debug_assertions) { 6 } else { 5 });
@@ -173,7 +183,7 @@ mod tests {
         let dirs = search_dirs(
             Some(root.join("plugins/../plugins")),
             Some(&root.join("animathio")),
-            Some(&root),
+            Some(root.join("animathio/plugins")),
         );
         assert_eq!(
             dirs.iter()

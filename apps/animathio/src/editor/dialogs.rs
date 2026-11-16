@@ -721,6 +721,7 @@ impl Editor {
             cx,
         );
         let check_updates = std::rc::Rc::new(std::cell::Cell::new(self.preferences.check_updates));
+        let community = std::rc::Rc::new(std::cell::Cell::new(self.community_plugins_enabled()));
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let scale_submit = scale.clone();
@@ -730,6 +731,7 @@ impl Editor {
             let gpu_submit = gpu.clone();
             let density_submit = density.clone();
             let check_submit = check_updates.clone();
+            let community_submit = community.clone();
             let editor = editor.clone();
             let submit = std::rc::Rc::new(move |cx: &mut App| {
                 let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
@@ -745,6 +747,7 @@ impl Editor {
                 let compact = selected(&density_submit, cx) == "Compact";
                 let reduce_motion = selected(&motion_submit, cx) == "Reduce motion";
                 let check_updates = check_submit.get();
+                let community = community_submit.get();
                 editor.update(cx, |this, cx| {
                     let preferences = crate::preferences::Preferences {
                         autosave_seconds: seconds,
@@ -763,6 +766,11 @@ impl Editor {
                         return false;
                     }
                     this.preferences = preferences;
+                    // Saving also re-reads the plugin settings, so changes made with
+                    // `animathio-cli plugins` while the editor runs are picked up.
+                    if let Err(error) = this.set_community_plugins_enabled(community, cx) {
+                        this.error = Some(error);
+                    }
                     if gpu != this.preview.gpu {
                         this.toggle_gpu_preview(cx);
                     }
@@ -816,6 +824,21 @@ impl Editor {
                                         window.refresh();
                                     }
                                 }),
+                        ))
+                        .child(field(
+                            "Community plugins (third-party, sandboxed, not audited)",
+                            gpui_component::checkbox::Checkbox::new(
+                                "preferences-community-plugins",
+                            )
+                            .checked(community.get())
+                            .accessibility_label("Community plugins")
+                            .on_change({
+                                let community = community.clone();
+                                move |checked, window, _| {
+                                    community.set(*checked);
+                                    window.refresh();
+                                }
+                            }),
                         )),
                 );
             form_dialog(dialog, "Save", cx, submit)
