@@ -359,6 +359,44 @@ impl HostState {
         parse_svg_to_paths(&svg_xml, MAX_SVG_VERBS)
     }
 
+    fn typeset_math_result(
+        &mut self,
+        source: String,
+        mode: wit_types::MathMode,
+        font_size: f32,
+    ) -> Result<TypesetResult, wit_types::Diagnostic> {
+        if !font_size.is_finite() || font_size <= 0.0 {
+            return Err(diagnostic(
+                "invalid-input",
+                "font size must be finite and positive",
+            ));
+        }
+        if source.trim().is_empty() {
+            return Err(diagnostic("invalid-input", "math source is empty"));
+        }
+        if source.len() > animathio_typeset::MAX_SOURCE_BYTES {
+            return Err(diagnostic(
+                "limit-exceeded",
+                "math exceeds source byte limit",
+            ));
+        }
+        if font_size > animathio_typeset::MAX_FONT_SIZE {
+            return Err(diagnostic("limit-exceeded", "math exceeds font size limit"));
+        }
+        let mode = match mode {
+            wit_types::MathMode::Latex => MathMode::Latex,
+            wit_types::MathMode::Typst => MathMode::Typst,
+        };
+        let result = self
+            .typeset
+            .typeset(&source, mode, font_size)
+            .map_err(|e| diagnostic("service-failed", e.to_string()))?;
+        if result.paths.iter().map(Vec::len).sum::<usize>() > MAX_TYPESET_VERBS {
+            return Err(diagnostic("limit-exceeded", "math exceeds path verb limit"));
+        }
+        Ok(result)
+    }
+
     fn legacy_typeset_math(
         &mut self,
         source: String,
@@ -1816,6 +1854,34 @@ fn check_plugin_id(id: &str, allow_reserved: bool) -> Result<(), HostError> {
     Ok(())
 }
 
+impl colored_world::animathio::plugin::math_colors::Host for HostState {
+    fn typeset_math_colored(
+        &mut self,
+        source: String,
+        mode: wit_types::MathMode,
+        font_size: f32,
+    ) -> Result<
+        colored_world::animathio::plugin::math_colors::ColoredTypesetResult,
+        wit_types::Diagnostic,
+    > {
+        use colored_world::animathio::plugin::math_colors::{ColoredPath, ColoredTypesetResult};
+        let result = self.typeset_math_result(source, mode, font_size)?;
+        let plain = typeset_to_wit(&result, MAX_TYPESET_VERBS);
+        Ok(ColoredTypesetResult {
+            bbox: plain.bbox,
+            paths: plain
+                .paths
+                .into_iter()
+                .zip(result.colors)
+                .map(|(outline, color)| ColoredPath {
+                    outline,
+                    color: color.map(|[r, g, b, a]| wit_types::Color { r, g, b, a }),
+                })
+                .collect(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2529,73 +2595,5 @@ mod abi_tests {
                 .unwrap()
                 .is_empty()
         );
-    }
-}
-
-impl HostState {
-    fn typeset_math_result(
-        &mut self,
-        source: String,
-        mode: wit_types::MathMode,
-        font_size: f32,
-    ) -> Result<TypesetResult, wit_types::Diagnostic> {
-        if !font_size.is_finite() || font_size <= 0.0 {
-            return Err(diagnostic(
-                "invalid-input",
-                "font size must be finite and positive",
-            ));
-        }
-        if source.trim().is_empty() {
-            return Err(diagnostic("invalid-input", "math source is empty"));
-        }
-        if source.len() > animathio_typeset::MAX_SOURCE_BYTES {
-            return Err(diagnostic(
-                "limit-exceeded",
-                "math exceeds source byte limit",
-            ));
-        }
-        if font_size > animathio_typeset::MAX_FONT_SIZE {
-            return Err(diagnostic("limit-exceeded", "math exceeds font size limit"));
-        }
-        let mode = match mode {
-            wit_types::MathMode::Latex => MathMode::Latex,
-            wit_types::MathMode::Typst => MathMode::Typst,
-        };
-        let result = self
-            .typeset
-            .typeset(&source, mode, font_size)
-            .map_err(|e| diagnostic("service-failed", e.to_string()))?;
-        if result.paths.iter().map(Vec::len).sum::<usize>() > MAX_TYPESET_VERBS {
-            return Err(diagnostic("limit-exceeded", "math exceeds path verb limit"));
-        }
-        Ok(result)
-    }
-}
-
-impl colored_world::animathio::plugin::math_colors::Host for HostState {
-    fn typeset_math_colored(
-        &mut self,
-        source: String,
-        mode: wit_types::MathMode,
-        font_size: f32,
-    ) -> Result<
-        colored_world::animathio::plugin::math_colors::ColoredTypesetResult,
-        wit_types::Diagnostic,
-    > {
-        use colored_world::animathio::plugin::math_colors::{ColoredPath, ColoredTypesetResult};
-        let result = self.typeset_math_result(source, mode, font_size)?;
-        let plain = typeset_to_wit(&result, MAX_TYPESET_VERBS);
-        Ok(ColoredTypesetResult {
-            bbox: plain.bbox,
-            paths: plain
-                .paths
-                .into_iter()
-                .zip(result.colors)
-                .map(|(outline, color)| ColoredPath {
-                    outline,
-                    color: color.map(|[r, g, b, a]| wit_types::Color { r, g, b, a }),
-                })
-                .collect(),
-        })
     }
 }

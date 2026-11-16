@@ -692,7 +692,20 @@ fn latex_inline_colors_golden() {
             "{expected:?}"
         );
     }
-    golden_vector(scene, "latex-inline-colors");
+    golden_vector(scene.clone(), "latex-inline-colors");
+    let mut clip = vector_clip(scene);
+    clip.transform.opacity = 0.5;
+    let frame = render(
+        &CoreScene {
+            canvas: (0, 0),
+            background: [0; 4],
+            clips: vec![clip],
+        },
+        &mut RenderCtx::default(),
+        (640, 360),
+    )
+    .unwrap();
+    assert_eq!(frame.pixels.chunks_exact(4).map(|p| p[3]).max(), Some(128));
 }
 
 #[test]

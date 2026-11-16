@@ -44,7 +44,7 @@ fn packages() -> &'static (tempfile::TempDir, Vec<PluginPackage>) {
                 .arg(root.join("plugins").join(name).join("Cargo.toml"))
                 .env("CARGO_TARGET_DIR", &target)
                 .env("CARGO_BUILD_JOBS", "3")
-                .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
+                .env("CARGO_PROFILE_DEV_DEBUG", "0")
                 .status()
                 .expect("build first-party test components");
             assert!(

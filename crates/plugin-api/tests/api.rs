@@ -241,6 +241,7 @@ fn abi_negotiation_is_strict_and_rejects_future_requirements() {
         "1",
         "1.0.1",
         "1.1.1",
+        "1.2.1",
         "1.3.0",
         "2.0.0",
         "1.0.0-rc.1",

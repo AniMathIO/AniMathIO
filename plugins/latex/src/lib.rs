@@ -275,7 +275,17 @@ impl Guest for LatexPlugin {
                     },
                 )));
             } else {
-                elements.push(DrawCommand::FillPath((offset, path_color)));
+                // Coalesce adjacent glyphs with the same paint, preserving the original
+                // winding/overlap behavior of plain formulas and their clip alpha.
+                match elements.last_mut() {
+                    Some(DrawCommand::FillPath((filled, previous)))
+                        if (previous.r, previous.g, previous.b, previous.a)
+                            == (path_color.r, path_color.g, path_color.b, path_color.a) =>
+                    {
+                        filled.extend(offset);
+                    }
+                    _ => elements.push(DrawCommand::FillPath((offset, path_color))),
+                }
             }
         }
 

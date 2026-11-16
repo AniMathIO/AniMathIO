@@ -77,6 +77,15 @@ world importer-plugin {
 }
 ```
 
+ABI 1.2 adds an opt-in source world:
+
+```wit
+world colored-source-plugin {
+    include source-plugin;
+    import math-colors;
+}
+```
+
 A clip-source component implements the two exports of `world source-plugin`.
 Effects implement their separate worlds; no unused stubs are required in 1.0.
 The legacy adapter retains the old source world's reserved vector-effect and
@@ -88,7 +97,7 @@ The current contract is `animathio:plugin@1.2.0`. ABI 1.2 adds the separate
 `math-colors` interface and opt-in `colored-source-plugin` world; all 1.0/1.1
 records, functions and existing worlds retain their layouts and behavior.
 ABI 1.1 added two
-new worlds (`animation-preset-plugin`, `importer-plugin`) and one new interface that only
+worlds (`animation-preset-plugin`, `importer-plugin`) and one new interface that only
 the importer world imports (`import-files`). 1.1 changes no existing record, enum,
 variant, function or world, so every 1.0 component loads and runs unchanged (the
 checked-in frozen `hello-1.0.0` fixture and the 0.2.x fixtures are tested against this
@@ -157,7 +166,7 @@ generators need a separate future world; the source world returns vector scenes 
 ### Upgrading a 0.2 component
 
 Existing binaries can keep their original manifests and run through the adapter.
-To build a new 1.0 component:
+To rebuild a legacy component against the current ABI:
 
 1. Generate against the current WIT. Source plugins select `world: "source-plugin"`
    and remove the unused vector-effect/curve trait methods. Effect/audio world

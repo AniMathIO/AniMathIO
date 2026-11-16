@@ -877,11 +877,11 @@ mod tests {
         for (source, expected) in [
             ("frac(a,b)", None),
             (
-                "text(fill: rgb(255, 0, 0), $frac(a,b)$)",
+                "text(fill: rgb(255, 0, 0), frac(a,b))",
                 Some([255, 0, 0, 255]),
             ),
-            ("text(fill: gradient.linear(red, blue), $frac(a,b)$)", None),
-            ("text(fill: rgb(0, 0, 0, 0), $a$)", Some([0, 0, 0, 0])),
+            ("text(fill: gradient.linear(red, blue), frac(a,b))", None),
+            ("text(fill: rgb(0, 0, 0, 0), a)", Some([0, 0, 0, 0])),
         ] {
             let result = engine.typeset(source, MathMode::Typst, 48.0).unwrap();
             assert_eq!(result.colors.len(), result.paths.len());
