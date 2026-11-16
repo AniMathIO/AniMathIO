@@ -264,6 +264,13 @@ impl Editor {
                         "an export is already running".into(),
                     )));
                 } else {
+                    // Exporting over the open project file would destroy it;
+                    // any other destination exports normally.
+                    if let Err(error) = self.control_export_allowed(&params.output) {
+                        let _ = reply.send(Err(error));
+                        cx.notify();
+                        continue;
+                    }
                     // Control exports show up in the queue like any other job.
                     let spec = crate::export_queue::JobSpec {
                         project: self.project.clone(),
@@ -290,6 +297,15 @@ impl Editor {
             }
             let result = self.handle_control_call(call, cx);
             let _ = reply.send(result);
+        }
+    }
+
+    /// The control surface must never write an export over the open project
+    /// file; every other destination is fine, project open or not.
+    pub(super) fn control_export_allowed(&self, output: &Path) -> Result<(), ControlError> {
+        match &self.path {
+            Some(project) => animathio_control::ensure_distinct_from_project(output, project),
+            None => Ok(()),
         }
     }
 

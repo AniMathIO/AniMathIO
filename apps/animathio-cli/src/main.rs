@@ -429,7 +429,13 @@ fn run(cli: Cli) -> Result<()> {
             bench,
         } => {
             let mut bundle = load(&project)?;
+            // Refuse to overwrite the project file itself with the export (or
+            // the chapters sidecar): that would destroy the project.
+            animathio_control::ensure_distinct_from_project(&output, &project)
+                .map_err(|error| error.to_string())?;
             if let Some(path) = &chapters {
+                animathio_control::ensure_distinct_from_project(path, &project)
+                    .map_err(|error| error.to_string())?;
                 if animathio_control::validate_output_file(path)?
                     == animathio_control::validate_output_file(&output)?
                 {

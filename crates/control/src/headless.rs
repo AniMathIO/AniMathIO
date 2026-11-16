@@ -22,7 +22,9 @@ use crate::{
         AssetInfo, ProjectState, RenderFrameParams, RenderFrameResult, Timeline, media_type_of,
         timeline_of,
     },
-    path::{read_bounded, validate_existing_file, validate_output_file},
+    path::{
+        ensure_distinct_from_project, read_bounded, validate_existing_file, validate_output_file,
+    },
 };
 
 /// A headless [`ControlHandler`] over an in-memory project.
@@ -326,6 +328,11 @@ impl ControlHandler for HeadlessHandler {
         Ok(match call {
             Call::Export { params } => {
                 let output = validate_output_file(&params.output)?;
+                // Exporting over the open project file would destroy it; any
+                // other destination exports normally.
+                if let Some(project) = &self.path {
+                    ensure_distinct_from_project(&output, project)?;
+                }
                 let range = animathio_core::TimeRange::new(
                     params.from,
                     params
@@ -930,5 +937,44 @@ mod tests {
             })
             .unwrap();
         assert!(output.is_file());
+    }
+
+    #[test]
+    fn export_refuses_the_open_project_file_and_leaves_it_untouched() {
+        let mut handler = text_project();
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        handler.path = Some(project.clone());
+        let error = handler
+            .handle(Call::Export {
+                params: export_params(project.clone(), true),
+            })
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("the output path is the open project file"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(&project).unwrap(), b"x", "project untouched");
+    }
+
+    #[test]
+    fn export_to_another_file_still_works_while_a_project_is_open() {
+        // Regression: the guard must refuse only the project file itself,
+        // never every export that runs while a project is open.
+        let mut handler = text_project();
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project.amio");
+        std::fs::write(&project, b"x").unwrap();
+        handler.path = Some(project.clone());
+        let output = dir.path().join("out.mp4");
+        handler
+            .handle(Call::Export {
+                params: export_params(output.clone(), false),
+            })
+            .unwrap();
+        assert!(output.is_file());
+        assert_eq!(std::fs::read(&project).unwrap(), b"x", "project untouched");
     }
 }

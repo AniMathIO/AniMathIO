@@ -458,6 +458,43 @@ fn export_creates_missing_parents_and_never_overwrites_silently() {
 }
 
 #[test]
+fn export_refuses_to_overwrite_the_project_file() {
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    let original = fs::read(&archive).unwrap();
+    // Even with --overwrite, the video must never replace the .amio itself.
+    let rejected = cli(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.1",
+        "-o",
+        path(&archive),
+        "--overwrite",
+    ]);
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(
+        stderr.contains("the output path is the open project file"),
+        "{stderr}"
+    );
+    assert_eq!(fs::read(&archive).unwrap(), original, "project untouched");
+    // A sibling output still exports while the project is the input.
+    let sibling = dir.path().join("sibling.mp4");
+    ok(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.1",
+        "-o",
+        path(&sibling),
+    ]);
+    assert!(sibling.is_file());
+    assert_eq!(fs::read(&archive).unwrap(), original, "project untouched");
+}
+
+#[test]
 fn import_media_preserves_companion_audio_and_video_only_sources() {
     use animathio_core::{ClipKind, FrameRate};
     use animathio_media::{EncoderConfig, Mp4Encoder, VideoConfig};
