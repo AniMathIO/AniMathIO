@@ -204,10 +204,14 @@ impl Editor {
         self.community_job(
             move |store| {
                 let installed = entry.install(&store, &download, update)?;
-                Ok(format!(
-                    "Installed {} {}. Enable it in Installed.",
-                    installed.name, installed.version
-                ))
+                Ok(if installed.replaced.is_some() {
+                    format!("Updated {} {}.", installed.name, installed.version)
+                } else {
+                    format!(
+                        "Installed {} {}. Choose Enable when ready.",
+                        installed.name, installed.version
+                    )
+                })
             },
             cx,
         );
@@ -711,6 +715,20 @@ impl Editor {
                         this.install_community_entry(action.clone(), cx);
                     })),
             );
+            if installed.is_some_and(|p| !p.enabled && p.version == entry.version) {
+                let id = entry.id.clone();
+                let selector = format!("catalog-enable-{id}");
+                row = row.child(
+                    Button::new(SharedString::from(selector.clone()))
+                        .debug_selector(move || selector.clone())
+                        .small()
+                        .label("Enable")
+                        .disabled(self.community.busy || compatibility.is_err())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_community_plugin(id.clone(), true, cx);
+                        })),
+                );
+            }
             body = body.child(row);
         }
         if count == 0 {

@@ -91,6 +91,12 @@ fn install_verify_enable_render_and_remove_live(cx: &mut TestAppContext) {
     assert!(store.settings().enabled);
     assert_eq!(store.list().0.len(), 1);
     assert!(
+        ui.cx
+            .debug_bounds("catalog-enable-com.example.hello")
+            .is_some(),
+        "Browse offers Enable after installation"
+    );
+    assert!(
         !store.list().0[0].enabled,
         "new installs need an explicit Enable"
     );
@@ -99,19 +105,34 @@ fn install_verify_enable_render_and_remove_live(cx: &mut TestAppContext) {
     assert!(ui.read(|e| e.plugins.iter().any(|p| p.id == ID)));
     ui.update(|e, _, cx| {
         e.add_plugin_clip_by_id(ID, cx);
+        let hello_clip = e.selected.expect("new hello clip selected");
         let scene = evaluate(&e.project, Time(0));
         let resolved = e.plugin_host.as_mut().unwrap().resolve(&scene, (320, 180));
         assert!(
             resolved
                 .clips
                 .iter()
-                .any(|c| matches!(c.kind, ClipKind::Vector(_))),
+                .any(|c| c.id == hello_clip && matches!(c.kind, ClipKind::Vector(_))),
             "enabled plugin renders its clip"
         );
     });
     ui.update(|e, _, cx| e.remove_community_plugin(ID.into(), cx));
     assert_eq!(store.list().0, []);
     assert!(ui.read(|e| e.plugin_host.as_ref().unwrap().get_plugin(ID).is_none()));
+    ui.update(|e, _, _| {
+        let hello_clip = e.selected.expect("hello clip retained");
+        let scene = evaluate(&e.project, Time(0));
+        let resolved = e.plugin_host.as_mut().unwrap().resolve(&scene, (320, 180));
+        let clip = resolved
+            .clips
+            .iter()
+            .find(|c| c.id == hello_clip)
+            .expect("missing clip retained");
+        assert!(
+            !matches!(clip.kind, ClipKind::Vector(_)),
+            "unloading invalidates rendered plugin output"
+        );
+    });
     assert!(
         ui.read(|e| e.missing_plugin_ids().contains(ID)),
         "project retains its missing plugin reference"

@@ -49,7 +49,7 @@ a matching fetched registry entry also offers **Install**.
 community index in the background. Search matches names, authors, ids and descriptions.
 Cards show version, licence, minimum ABI, compatibility and a source link. **Install**
 downloads the indexed release and checks its size, SHA-256 and package metadata before
-saving it. A fresh installation starts disabled: return to Installed and choose Enable.
+saving it. A fresh installation starts disabled: choose Enable on its Browse card or in Installed.
 An incompatible plugin stays visible with a reason and its Install control disabled.
 Network failures show a Retry action and keep installed plugins usable.
 

@@ -31,8 +31,8 @@ enabled explicitly.
 ### Trust model
 
 1. **Global switch.** "Community plugins" (Preferences in the editor, or
-   `animathio-cli plugins community on|off`) is off by default. While it is off the per-user
-   plugin folder is not read at all and only bundled plugins load.
+   `animathio-cli plugins community on|off`) is off by default. While it is off no community
+   component is loaded or executed; Installed can still display bundle metadata.
 2. **Per-plugin flag.** An installed plugin starts **disabled**. It loads only when the
    switch is on *and* the plugin is enabled (`animathio-cli plugins enable <id>`).
 3. **No impersonation.** Community plugins cannot use the reserved `org.animathio.*` ids, so
@@ -54,7 +54,7 @@ sandbox/trust explanation. Installed community plugins have an Enabled toggle an
 first-party plugins remain on and cannot be removed here. Browse appears only while the
 switch is on. Search by name, author, description or id; inspect the licence, version,
 minimum ABI, incompatibility reason and source link before installing. Installs start
-disabled, then Enable loads them live. Updates are offered when the fetched version is
+disabled, then Enable on the Browse card or in Installed loads them live. Updates are offered when the fetched version is
 newer, never installed automatically. Delisted installed plugins retain their files and
 show the registry's reason. Missing project plugins are named above the workspace, with
 Install when a compatible entry is in the fetched index.
