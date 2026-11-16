@@ -11,6 +11,8 @@ finish-args:
   - --share=ipc
   - --device=dri
   - --socket=pulseaudio
+  # Community plugin browsing/downloads are explicit user actions.
+  - --share=network
   - --env=ANIMATHIO_NO_UPDATE_CHECK=1
 modules:
   - name: wasi-standard-library

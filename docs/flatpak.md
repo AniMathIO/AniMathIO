@@ -48,9 +48,17 @@ imports may require granting the containing directory explicitly. Test project
 save/reopen, media import, export and Manim sibling reads on the target desktop
 before submission. No GUI or sound is needed to build the package.
 
-There is no network permission. `ANIMATHIO_NO_UPDATE_CHECK=1` disables the GitHub
-update check because store updates should manage this package. Network-dependent
-features are unavailable in this sandbox.
+Network access is allowed for user-initiated community plugin Browse and downloads.
+`ANIMATHIO_NO_UPDATE_CHECK=1` disables the GitHub update check because Flatpak
+updates manage this package. Network permission applies to the whole application;
+Flatpak does not restrict it to individual actions.
+
+Community plugins use `$XDG_DATA_HOME/animathio/plugins` inside the sandbox,
+which maps to `~/.var/app/com.animathio.AniMathIO/data/animathio/plugins` on the
+host. This writable application directory needs no home filesystem permission.
+
+AppStream lists the tagged 2.0.0 and 2.1.0 releases. Add a 2.2.0 entry at release
+time once its release tag exists.
 
 The maintainer must submit the manifest to Flathub, demonstrate control of
 animathio.com for the `com.animathio.AniMathIO` ID, replace the local directory
