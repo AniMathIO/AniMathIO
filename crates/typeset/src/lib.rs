@@ -854,6 +854,21 @@ mod rule_regressions {
             assert!(
                 result.paths.iter().any(|path| {
                     let bbox = path_bbox(std::slice::from_ref(path));
+                    let vertices: Vec<_> = path
+                        .iter()
+                        .filter_map(|v| match v {
+                            TypesetVerb::MoveTo(p) | TypesetVerb::LineTo(p) => Some(*p),
+                            _ => None,
+                        })
+                        .collect();
+                    let area = vertices
+                        .iter()
+                        .zip(vertices.iter().cycle().skip(1))
+                        .take(vertices.len())
+                        .map(|(a, b)| a.x * b.y - b.x * a.y)
+                        .sum::<f64>()
+                        .abs()
+                        / 2.0;
                     // A horizontal rule, rather than a glyph or an open zero-area line.
                     path.iter().all(|v| {
                         matches!(

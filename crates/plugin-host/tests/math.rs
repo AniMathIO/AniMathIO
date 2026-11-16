@@ -641,7 +641,7 @@ fn latex_quadratic_golden() {
         .render_clip(
             &latex,
             &BTreeMap::new(),
-            &json!({ "source": r"x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}", "size": 64.0, "reveal": 1.0 }),
+            &json!({ "source": r"x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}", "size": 48.0, "reveal": 1.0 }),
             0,
             (640, 360),
         )
