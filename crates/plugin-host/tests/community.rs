@@ -173,3 +173,22 @@ fn unloading_drops_effect_and_audio_effect_registrations() {
         assert_eq!(remaining, after, "{id} filters are gone");
     }
 }
+
+#[test]
+fn manifest_only_updates_are_reloaded() {
+    let mut fx = fixture();
+    fx.store.install_bytes(HELLO, None, false).unwrap();
+    fx.store.set_plugin_enabled(ID, true).unwrap();
+    fx.store.set_enabled(true).unwrap();
+    assert_eq!(fx.host.sync_community_plugins(&fx.store).loaded, [ID]);
+    let mut package = animathio_plugin_api::PluginPackage::from_bytes(HELLO).unwrap();
+    package.manifest.description = "Updated description".into();
+    fx.store
+        .install_bytes(&package.create_bytes().unwrap(), None, true)
+        .unwrap();
+    assert_eq!(fx.host.sync_community_plugins(&fx.store).loaded, [ID]);
+    assert_eq!(
+        fx.host.get_plugin(ID).unwrap().manifest.description,
+        "Updated description"
+    );
+}

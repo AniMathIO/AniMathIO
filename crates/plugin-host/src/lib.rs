@@ -937,12 +937,13 @@ impl PluginHost {
         }
         for plugin in desired {
             let result = (|| {
-                let package = community::read_package_file(&plugin.path)
+                let package = community::read_selected_package(&plugin.path, &plugin.id)
                     .map_err(|error| HostError::InvalidOutput(error.to_string()))?;
                 check_plugin_id(&package.manifest.id, false)?;
                 let id = package.manifest.id.clone();
                 if let Some(loaded) = self.plugins.get(&id) {
-                    let same = *blake3::hash(&package.wasm_bytes).as_bytes() == loaded.wasm_hash;
+                    let same = *blake3::hash(&package.wasm_bytes).as_bytes() == loaded.wasm_hash
+                        && package.manifest == loaded.manifest;
                     if !self.community_ids.contains(&id) || same {
                         // Already loaded from another directory, or unchanged.
                         return if same {

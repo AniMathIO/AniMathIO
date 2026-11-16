@@ -123,8 +123,12 @@ fn install(
     sha256: Option<&str>,
     force: bool,
 ) -> std::result::Result<InstallOutcome, CommunityError> {
-    if source.len() >= 7 && source[..7].eq_ignore_ascii_case("http://")
-        || source.len() >= 8 && source[..8].eq_ignore_ascii_case("https://")
+    if source
+        .get(..7)
+        .is_some_and(|s| s.eq_ignore_ascii_case("http://"))
+        || source
+            .get(..8)
+            .is_some_and(|s| s.eq_ignore_ascii_case("https://"))
     {
         let hash = sha256.ok_or(CommunityError::HashRequired)?;
         store.install_url(source, hash, force)
@@ -195,5 +199,20 @@ fn list(store: &CommunityStore, json: bool) {
     }
     for problem in problems {
         eprintln!("warning: {problem}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unicode_file_names_do_not_panic() {
+        let root = tempfile::tempdir().unwrap();
+        let store = CommunityStore::new(root.path().join("plugins"), root.path().join("settings"));
+        assert!(matches!(
+            install(&store, "数学插件.amplugin", None, false),
+            Err(CommunityError::Io(_))
+        ));
     }
 }
