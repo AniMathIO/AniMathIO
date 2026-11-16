@@ -2004,6 +2004,15 @@ fn library_tabs_have_distinct_contents_and_scoped_search(cx: &mut TestAppContext
             .is_some()
     );
     assert!(ui.cx.debug_bounds("library-write-on").is_none());
+    assert!(ui.cx.debug_bounds("effects-empty").is_none());
+    // A search that hides everything says so instead of claiming no plugins are loaded.
+    search_library(&mut ui, LeftTab::Effects, "no such effect");
+    assert!(ui.cx.debug_bounds("effects-empty").is_some());
+    assert!(ui.cx.debug_bounds("library-transition-video").is_none());
+    search_library(&mut ui, LeftTab::Effects, "write on");
+    assert!(ui.cx.debug_bounds("library-write-on").is_some());
+    assert!(ui.cx.debug_bounds("effects-empty").is_none());
+    search_library(&mut ui, LeftTab::Effects, "invert");
     search_library(&mut ui, LeftTab::Plugins, "import-manim");
     assert!(
         ui.cx
@@ -2184,6 +2193,13 @@ fn library_tab_arrows_move_selection_and_focus(cx: &mut TestAppContext) {
     assert!(ui.read(|e| e.left_tab == LeftTab::Plugins));
     ui.press("home");
     assert!(ui.read(|e| e.left_tab == LeftTab::Media));
+    // Tab can focus a tab header without selecting it; arrows start from the focused one.
+    ui.update(|e, window, cx| window.focus(&e.media_view.tab_focus[LeftTab::Effects as usize], cx));
+    ui.press("right");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Plugins));
+    ui.update(|e, window, cx| window.focus(&e.media_view.tab_focus[LeftTab::Titles as usize], cx));
+    ui.press("left");
+    assert!(ui.read(|e| e.left_tab == LeftTab::Elements));
 }
 
 /// Community plugins start off. Switching them on and enabling one loads it into the running
