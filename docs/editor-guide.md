@@ -296,6 +296,23 @@ full deliveries using checksum-pinned public-domain recordings.
 
 Scene detection: **Clip → Split at scene changes…** reviews sampled hard cuts with thumbnails and toggles, then splits linked video/audio or adds markers in one undo step. CLI `scenes` and headless MCP expose the same analysis.
 
+## Update notices
+
+Once per day, at startup, the editor asks the GitHub releases API
+(`https://api.github.com/repos/AniMathIO/AniMathIO/releases/latest`) whether a newer
+2.x release exists. When one does, a toast announces "AniMathIO <version> is
+available" with an **Open release page** action that opens the release in your
+browser; closing the toast dismisses the notice. Only the release version and page
+URL are read: no telemetry is sent, nothing is downloaded automatically, and 1.x
+tags and pre-releases never announce. Every network failure is silent (debug-level
+log only); failed attempts also count toward the 24-hour limit.
+
+The check never runs in the headless test harness, in benchmark runs and in
+CI environments. To turn it off for yourself untick **Check for updates** in
+**File → Preferences**, or set the environment variable `ANIMATHIO_NO_UPDATE_CHECK=1`
+(any other value keeps it on). The last check time is remembered in the application
+config directory (`update-check.json`), so at most one request is made per 24 hours.
+
 ## Installer verification
 
 Verify with `animathio --version` and `animathio-cli --version`. The `Package` workflow also

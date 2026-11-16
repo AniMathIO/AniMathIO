@@ -69,6 +69,7 @@ mod titles;
 mod transport;
 #[cfg(test)]
 mod ui_tests;
+mod update_check;
 mod video_effects;
 mod viewer;
 mod workspace;
@@ -857,6 +858,10 @@ impl Editor {
             this.k_held = false;
         })
         .detach();
+        if !bench {
+            // Never in viewport benches: deterministic and offline.
+            update_check::schedule(this.env.updates, this.preferences.check_updates, cx);
+        }
         cx.observe_window_activation(window, |this, window, _| {
             if !window.is_window_active() {
                 this.k_held = false;

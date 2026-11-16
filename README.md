@@ -24,6 +24,9 @@ right-click → Open. Verify installation with `animathio --version` and
 - Typeset LaTeX and animate graphs and geometric shapes with bundled plugins.
 - Add titles and captions, review automatic cuts, and reframe video for social formats.
 - Render and export through the same engine used by the editor.
+- Once a day the editor checks GitHub for a newer release and shows a notice with a link
+  to it; opt out in Preferences or with `ANIMATHIO_NO_UPDATE_CHECK=1` (no telemetry, no
+  automatic download).
 
 ![Math library](docs/screenshots/editor-math-panel.png)
 

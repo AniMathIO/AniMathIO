@@ -93,7 +93,10 @@ under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `animations` (the inspector
 Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `media_pool`, `math` (Math tab, typed object dialog and inspector), `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
-`control_bridge`, `playback_glue`, `timeline_thumbnails` and `actions`. Shared drawing/resource helpers live in
+`control_bridge`, `playback_glue`, `timeline_thumbnails`, `actions` and `update_check`
+(at most one GitHub releases lookup per 24 h, a dismissable newer-release notice,
+opt-out in Preferences or with `ANIMATHIO_NO_UPDATE_CHECK=1`, silent on failure).
+Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
 number scrubbing and the viewer's transform gizmo all preview through it, so one
 gesture is one history entry). The gizmo maths in `viewer` shares the renderer's

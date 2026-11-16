@@ -47,6 +47,9 @@ pub(crate) struct EditorEnv {
     pub(crate) plugins: PluginSource,
     /// Directory for settings, recent files and caches; `None` uses the XDG directories.
     pub(crate) config_dir: Option<PathBuf>,
+    /// Whether this environment may check for a newer release at startup
+    /// (`update_check`); the headless test harness never touches the network.
+    pub(crate) updates: bool,
 }
 
 /// Process-wide part of the environment. Plugin loading and settings files are reached from
@@ -61,6 +64,7 @@ impl EditorEnv {
             backend: None,
             plugins: PluginSource::Discover,
             config_dir: None,
+            updates: true,
         }
     }
 
@@ -73,6 +77,7 @@ impl EditorEnv {
             backend: Some(BackendKind::Cpu),
             plugins,
             config_dir: Some(config_dir),
+            updates: false,
         }
     }
 

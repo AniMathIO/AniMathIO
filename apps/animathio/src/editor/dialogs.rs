@@ -720,6 +720,7 @@ impl Editor {
             window,
             cx,
         );
+        let check_updates = std::rc::Rc::new(std::cell::Cell::new(self.preferences.check_updates));
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let scale_submit = scale.clone();
@@ -728,6 +729,7 @@ impl Editor {
             let folder_submit = folder.clone();
             let gpu_submit = gpu.clone();
             let density_submit = density.clone();
+            let check_submit = check_updates.clone();
             let editor = editor.clone();
             let submit = std::rc::Rc::new(move |cx: &mut App| {
                 let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
@@ -742,6 +744,7 @@ impl Editor {
                 let gpu = selected(&gpu_submit, cx) == "GPU";
                 let compact = selected(&density_submit, cx) == "Compact";
                 let reduce_motion = selected(&motion_submit, cx) == "Reduce motion";
+                let check_updates = check_submit.get();
                 editor.update(cx, |this, cx| {
                     let preferences = crate::preferences::Preferences {
                         autosave_seconds: seconds,
@@ -752,6 +755,7 @@ impl Editor {
                             .parse()
                             .ok(),
                         reduce_motion,
+                        check_updates,
                     };
                     if let Err(error) = preferences.save() {
                         this.error = Some(error);
@@ -799,7 +803,20 @@ impl Editor {
                         .child(field("Default export folder", Input::new(&folder)))
                         .child(field("Interface: UI scale", Select::new(&scale)))
                         .child(field("Theme density", Select::new(&density)))
-                        .child(field("Motion", Select::new(&motion))),
+                        .child(field("Motion", Select::new(&motion)))
+                        .child(field(
+                            "Check for updates",
+                            gpui_component::checkbox::Checkbox::new("preferences-check-updates")
+                                .checked(check_updates.get())
+                                .accessibility_label("Check for updates")
+                                .on_change({
+                                    let check_updates = check_updates.clone();
+                                    move |checked, window, _| {
+                                        check_updates.set(*checked);
+                                        window.refresh();
+                                    }
+                                }),
+                        )),
                 );
             form_dialog(dialog, "Save", cx, submit)
         });
