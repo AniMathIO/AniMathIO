@@ -66,7 +66,7 @@ pub enum TypesetVerb {
     Close,
 }
 
-/// A single contour (glyph outline or rule/line) as a sequence of verbs.
+/// A complete glyph or shape (including all counter contours) as a sequence of verbs.
 pub type TypesetPath = Vec<TypesetVerb>;
 
 /// A tight bounding box in canvas pixel coordinates.
@@ -85,7 +85,7 @@ pub struct TypesetBBox {
 /// Result of one typesetting call.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypesetResult {
-    /// Ordered glyph and rule contours.
+    /// Ordered complete glyph and rule paths; counters stay with their glyph.
     pub paths: Vec<TypesetPath>,
     /// Bounding box of all paths.
     pub bbox: TypesetBBox,
@@ -539,7 +539,7 @@ fn walk_frame(frame: &Frame, state: Affine, out: &mut Vec<TypesetPath>) {
                 walk_frame(&group.frame, state, out);
             }
             FrameItem::Text(text) => walk_text(text, state, out),
-            FrameItem::Shape(shape, _) => walk_shape(&shape.geometry, state, out),
+            FrameItem::Shape(shape, _) => walk_shape(shape, state, out),
             FrameItem::Image(_, _, _) | FrameItem::Link(_, _) | FrameItem::Tag(_) => {}
         }
     }
@@ -568,9 +568,8 @@ fn walk_text(text: &typst::text::TextItem, state: Affine, out: &mut Vec<TypesetP
             .outline_glyph(ttf_parser::GlyphId(glyph.id), &mut collector)
             .is_some();
         if outlined {
-            for path in collector.finish() {
-                out.push(transform_path(&path, glyph_state, scale));
-            }
+            let path: TypesetPath = collector.finish().into_iter().flatten().collect();
+            out.push(transform_path(&path, glyph_state, scale));
         }
 
         cursor_x += glyph.x_advance.at(text.size).to_pt();
@@ -604,9 +603,9 @@ fn apply(state: Affine, point: TypesetPoint, scale: f64) -> TypesetPoint {
     }
 }
 
-fn walk_shape(geometry: &Geometry, state: Affine, out: &mut Vec<TypesetPath>) {
+fn walk_shape(shape: &typst::visualize::Shape, state: Affine, out: &mut Vec<TypesetPath>) {
     let mut path = Vec::new();
-    match geometry {
+    match &shape.geometry {
         Geometry::Line(end) => {
             path.push(TypesetVerb::MoveTo(TypesetPoint::default()));
             path.push(TypesetVerb::LineTo(TypesetPoint {
@@ -667,9 +666,57 @@ fn walk_shape(geometry: &Geometry, state: Affine, out: &mut Vec<TypesetPath>) {
         }
     }
 
+    if (matches!(shape.geometry, Geometry::Line(_)) || shape.fill.is_none())
+        && let Some(stroke) = &shape.stroke
+    {
+        path = stroke_outline(&path, stroke);
+    }
     if !path.is_empty() {
         out.push(transform_path(&path, state, 1.0));
     }
+}
+
+fn stroke_outline(path: &[TypesetVerb], stroke: &typst::visualize::FixedStroke) -> TypesetPath {
+    let mut center = kurbo::BezPath::new();
+    for verb in path {
+        match *verb {
+            TypesetVerb::MoveTo(p) => center.move_to((p.x, p.y)),
+            TypesetVerb::LineTo(p) => center.line_to((p.x, p.y)),
+            TypesetVerb::CubicTo(a, b, p) => {
+                center.curve_to((a.x, a.y), (b.x, b.y), (p.x, p.y));
+            }
+            TypesetVerb::QuadTo(a, p) => center.quad_to((a.x, a.y), (p.x, p.y)),
+            TypesetVerb::Close => center.close_path(),
+        }
+    }
+    let cap = match stroke.cap {
+        typst::visualize::LineCap::Butt => kurbo::Cap::Butt,
+        typst::visualize::LineCap::Round => kurbo::Cap::Round,
+        typst::visualize::LineCap::Square => kurbo::Cap::Square,
+    };
+    let join = match stroke.join {
+        typst::visualize::LineJoin::Miter => kurbo::Join::Miter,
+        typst::visualize::LineJoin::Round => kurbo::Join::Round,
+        typst::visualize::LineJoin::Bevel => kurbo::Join::Bevel,
+    };
+    let style = kurbo::Stroke::new(stroke.thickness.to_pt())
+        .with_caps(cap)
+        .with_join(join)
+        .with_miter_limit(stroke.miter_limit.get());
+    // Typst math rules use butt caps; expand before transforming so thickness
+    // follows the frame's affine transform along with the geometry.
+    let outline = kurbo::stroke(center.iter(), &style, &kurbo::StrokeOpts::default(), 0.01);
+    let point = |p: kurbo::Point| TypesetPoint { x: p.x, y: p.y };
+    outline
+        .iter()
+        .map(|el| match el {
+            kurbo::PathEl::MoveTo(p) => TypesetVerb::MoveTo(point(p)),
+            kurbo::PathEl::LineTo(p) => TypesetVerb::LineTo(point(p)),
+            kurbo::PathEl::QuadTo(a, p) => TypesetVerb::QuadTo(point(a), point(p)),
+            kurbo::PathEl::CurveTo(a, b, p) => TypesetVerb::CubicTo(point(a), point(b), point(p)),
+            kurbo::PathEl::ClosePath => TypesetVerb::Close,
+        })
+        .collect()
 }
 
 /// Bounding box over every verb's control and end points.
@@ -787,5 +834,79 @@ mod tests {
             .unwrap();
         assert_eq!(first, second);
         assert_eq!(engine.cache_len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod rule_regressions {
+    use super::*;
+
+    #[test]
+    fn math_rules_are_closed_filled_outlines() {
+        let engine = TypesetEngine::new().unwrap();
+        for source in [
+            r"\frac{a}{b}",
+            r"\sqrt{x}",
+            r"\overline{x}",
+            r"\underline{x}",
+        ] {
+            let result = engine.typeset(source, MathMode::Latex, 48.0).unwrap();
+            assert!(
+                result.paths.iter().any(|path| {
+                    let bbox = path_bbox(std::slice::from_ref(path));
+                    // A horizontal rule, rather than a glyph or an open zero-area line.
+                    path.iter().all(|v| {
+                        matches!(
+                            v,
+                            TypesetVerb::MoveTo(_) | TypesetVerb::LineTo(_) | TypesetVerb::Close
+                        )
+                    }) && path.contains(&TypesetVerb::Close)
+                        && area > 1.0
+                        && bbox.max_x - bbox.min_x > 12.0
+                        && bbox.max_y - bbox.min_y > 0.1
+                        && bbox.max_y - bbox.min_y < 4.0
+                }),
+                "missing filled rule: {source}"
+            );
+        }
+        for source in [r"\cancel{x}", r"\begin{pmatrix}a&b\\c&d\end{pmatrix}"] {
+            assert!(
+                !engine
+                    .typeset(source, MathMode::Latex, 48.0)
+                    .unwrap()
+                    .paths
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn reveal_units_keep_glyph_counters_together() {
+        let result = TypesetEngine::new()
+            .unwrap()
+            .typeset("ab4", MathMode::Latex, 48.0)
+            .unwrap();
+        assert_eq!(result.paths.len(), 3, "one reveal unit per glyph");
+        for path in &result.paths {
+            assert!(
+                path.iter()
+                    .filter(|v| matches!(v, TypesetVerb::MoveTo(_)))
+                    .count()
+                    >= 2,
+                "outer contour and counter must be revealed atomically"
+            );
+        }
+        // At every reveal fraction the plugin fills only complete path units.
+        for step in 0..100 {
+            let full = (step as f32 / 100.0 * result.paths.len() as f32).floor() as usize;
+            for path in &result.paths[..full] {
+                assert!(
+                    path.iter()
+                        .filter(|v| matches!(v, TypesetVerb::Close))
+                        .count()
+                        >= 2
+                );
+            }
+        }
     }
 }
