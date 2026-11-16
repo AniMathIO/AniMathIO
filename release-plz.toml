@@ -63,6 +63,9 @@ name = "animathio-cli"
 git_only = true
 # One changelog at the repository root (default would be apps/animathio-cli/CHANGELOG.md).
 changelog_path = "CHANGELOG.md"
+# The CLI is the one tagged package, but the release covers the whole workspace:
+# include commits that touch any workspace crate in its changelog.
+changelog_include = ["animathio", "animathio-audio", "animathio-control", "animathio-core", "animathio-export", "animathio-format", "animathio-import-manim", "animathio-import-v1", "animathio-media", "animathio-plugin-api", "animathio-plugin-host", "animathio-render", "animathio-transcribe", "animathio-typeset"]
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
 # Releases are disabled until the 2.0 swap. Flip both to `true` to enable.

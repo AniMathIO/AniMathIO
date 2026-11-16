@@ -98,6 +98,17 @@ jobs:
       - name: Check docs (docs-only fast path)
         if: steps.changes.outputs.docs_only == 'true' && runner.os == 'Linux'
         run: scripts/check-docs.sh
+      # The nested workspaces that path-depend on workspace crates (fuzz/,
+      # plugins/import-manim/) keep their own Cargo.lock files; a hand-made
+      # version bump leaves them stale and breaks their --locked builds. Fail
+      # fast with the fix command (release-plz.yml syncs release PRs
+      # automatically; this guards everything else). Release-plz branches are
+      # exempt: their lockfiles are stale by construction until the sync
+      # commit lands a minute later, and a failing check there would only add
+      # noise to the PR's first CI run.
+      - name: Sub-workspace lockfiles
+        if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-plz-'))
+        run: scripts/sync-sub-lockfiles.sh --check
       - name: Install Linux development headers
         if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         run: |
