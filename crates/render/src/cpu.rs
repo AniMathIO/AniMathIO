@@ -35,7 +35,6 @@ impl Default for CpuBackend {
         collection.register_fonts(Blob::new(Arc::new(FONT)), None);
         Self {
             canvas: (0, 0),
-            background: [0; 4],
             fonts: FontContext {
                 collection,
                 source_cache: SourceCache::default(),

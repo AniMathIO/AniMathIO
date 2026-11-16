@@ -875,7 +875,7 @@ mod tests {
 
     #[test]
     fn nested_roots_fit_worker_stack() {
-        let source = format!("{}x{}", r"\sqrt{".repeat(12), "}".repeat(12));
+        let source = format!("{}x{}", r"\sqrt{".repeat(64), "}".repeat(64));
         assert!(!typeset_latex(&source).unwrap().paths.is_empty());
     }
 
