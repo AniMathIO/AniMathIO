@@ -397,6 +397,14 @@ impl CommunityStore {
             });
         }
 
+        if existing.is_empty() {
+            // Clear stale trust before publishing a fresh package, so a concurrent sync
+            // cannot run it between the package rename and the settings update.
+            let mut settings = self.settings();
+            if settings.plugins.remove(&manifest.id) {
+                self.save_settings(&settings)?;
+            }
+        }
         let target = self.dir.join(format!("{}.amplugin", manifest.id));
         let mut file = tempfile::NamedTempFile::new_in(&self.dir)?;
         file.write_all(bytes)?;
@@ -406,13 +414,6 @@ impl CommunityStore {
         for old in &existing {
             if old.path != target {
                 let _ = fs::remove_file(&old.path);
-            }
-        }
-        if existing.is_empty() {
-            // A fresh install starts disabled, whatever an earlier install left behind.
-            let mut settings = self.settings();
-            if settings.plugins.remove(&manifest.id) {
-                self.save_settings(&settings)?;
             }
         }
         Ok(InstallOutcome {
@@ -716,6 +717,18 @@ mod tests {
             store.settings().plugins.contains("com.example.hello"),
             "an update keeps its enabled flag"
         );
+    }
+
+    #[test]
+    fn fresh_install_revokes_stale_trust_before_attempting_publish() {
+        let (_root, store) = store();
+        let mut settings = store.settings();
+        settings.plugins.insert("com.example.hello".into());
+        store.save_settings(&settings).unwrap();
+        // A directory at the destination makes the atomic rename fail on every OS.
+        fs::create_dir_all(store.dir().join("com.example.hello.amplugin")).unwrap();
+        assert!(store.install_bytes(HELLO, None, false).is_err());
+        assert!(!store.settings().plugins.contains("com.example.hello"));
     }
 
     #[test]
