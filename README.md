@@ -4,7 +4,7 @@
 
 The full plan, architecture and roadmap live in **[issue #156](https://github.com/AniMathIO/AniMathIO/issues/156)**. Read it before proposing structure.
 
-**Looking for the current app?** AniMathIO 1.x lives on [`main`](https://github.com/AniMathIO/AniMathIO/tree/main). The [releases page](https://github.com/AniMathIO/AniMathIO/releases) still carries the 1.x Electron installers; no 2.0 release exists yet, so 2.0 is built from source (see [Building](#building)) or from the installer artifacts of the `Package` workflow.
+**Download:** installers for Linux (AppImage, deb), Windows and macOS are on the [v2.0.0 release](https://github.com/AniMathIO/AniMathIO/releases/tag/v2.0.0); they are unsigned, see [docs.animathio.com](https://docs.animathio.com/docs/install) for the warnings you will see. The 1.x installers stay on the [releases page](https://github.com/AniMathIO/AniMathIO/releases?q=animathio-v1). To build from source, see [Building](#building).
 
 ## What 2.0 is
 

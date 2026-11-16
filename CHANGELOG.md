@@ -16,6 +16,7 @@ sidecars. Projects use the new `.amio` format; open a 1.x project with
 ### Security
 
 - Harden plugin disk cache and control socket permissions ([#174](https://github.com/AniMathIO/AniMathIO/pull/174))
+- Update zip to 9.0.5 (GHSA-m665-v7pm-7grj and related zip advisories) ([#266](https://github.com/AniMathIO/AniMathIO/pull/266))
 
 ### Added
 

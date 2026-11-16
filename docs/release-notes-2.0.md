@@ -21,7 +21,7 @@ Measured on one Linux machine under Xvfb, medians of three runs (details and cav
 | Open a project | 1.08 s | 0.21 s |
 | Start to a usable window | 0.81 s | 0.20 s |
 | Memory, idle with a project open | 923 MiB | 487 MiB |
-| Installed size | 658 MiB | 293 MiB |
+| Size on disk (unpacked 1.x build vs. 2.0 install) | 658 MiB | 293 MiB |
 
 ## What's new since v1
 
