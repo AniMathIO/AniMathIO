@@ -31,6 +31,7 @@ Commands:
   import-v1       Convert a v1 `.animathio` project to a `.amio` archive
   import-manim    Convert a Manim Community scene script to a `.amio` archive
   animations      List or apply animation presets from the loaded animation-preset plugins
+  plugins         Install, enable, disable and remove community plugins, and switch them on or off
   transcribe      Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
   autocut         Propose or apply silence and optional filler cuts as one ripple edit
   learn-noise     Learn a denoise profile from a noise-only timeline interval
@@ -291,6 +292,21 @@ trust model and folders.
 
 <!-- help:plugins -->
 ```text
+Install, enable, disable and remove community plugins, and switch them on or off
+
+Usage: animathio-cli plugins <COMMAND>
+
+Commands:
+  list       List the installed community plugins and whether each is enabled
+  install    Install a community plugin from a local `.amplugin` file or an https URL. Installed plugins start disabled; run `plugins enable <id>` afterwards
+  enable     Enable an installed community plugin
+  disable    Disable a community plugin without removing it
+  remove     Uninstall a community plugin: delete its file and its enabled flag
+  community  Turn the global community plugins switch on or off; without an argument, show it
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
 ```
 <!-- /help:plugins -->
 

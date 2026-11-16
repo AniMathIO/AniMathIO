@@ -95,7 +95,10 @@ Animations section and the Effects-tab preset library), `video_effects` (inspect
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails`, `actions` and `update_check`
 (at most one GitHub releases lookup per 24 h, a dismissable newer-release notice,
-opt-out in Preferences or with `ANIMATHIO_NO_UPDATE_CHECK=1`, silent on failure).
+opt-out in Preferences or with `ANIMATHIO_NO_UPDATE_CHECK=1`, silent on failure) and
+`community_plugins` (the Preferences "Community plugins" switch: re-reads the trust
+settings and calls `PluginHost::sync_community_plugins`, then refreshes the plugin list and
+re-renders, so plugins load and unload without a restart).
 Shared drawing/resource helpers live in
 `support`; `color_edit` owns the live-preview transaction (colour pickers, sliders,
 number scrubbing and the viewer's transform gizmo all preview through it, so one

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PluginSource {
-    /// Shipped with AniMathIO or supplied through `ANIMATHIO_PLUGIN_DIR`; always enabled.
+    /// Shipped with `AniMathIO` or supplied through `ANIMATHIO_PLUGIN_DIR`; always enabled.
     Bundled,
     /// Installed in the per-user folder; runs only when the user enabled it.
     Community,
