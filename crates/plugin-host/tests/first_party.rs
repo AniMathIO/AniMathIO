@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 fn clip(kind: ClipKind) -> Scene {
     Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![SceneClip {
             id: ClipId(1),
             track: TrackId(1),

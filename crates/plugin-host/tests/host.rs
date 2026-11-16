@@ -144,6 +144,7 @@ fn loads_both_plugins_and_resolves_scene() {
 
     let scene = CoreScene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![
             plugin_clip(
                 "org.animathio.shapes",
@@ -211,6 +212,7 @@ fn trap_fixture_is_contained() {
 
     let scene = CoreScene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![plugin_clip(&trap, json!({}))],
     };
     let resolved = host.resolve(&scene, (640, 360));

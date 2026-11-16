@@ -35,6 +35,7 @@ impl Default for CpuBackend {
         collection.register_fonts(Blob::new(Arc::new(FONT)), None);
         Self {
             canvas: (0, 0),
+            background: [0; 4],
             fonts: FontContext {
                 collection,
                 source_cache: SourceCache::default(),
@@ -63,6 +64,8 @@ impl Backend for CpuBackend {
                 num_threads: 0,
             },
         );
+        ctx.set_paint(color(scene.background));
+        ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(width), f64::from(height)));
         let mut resources = Resources::new();
         let mut paired = vec![false; scene.clips.len()];
         for (index, clip) in scene.clips.iter().enumerate() {

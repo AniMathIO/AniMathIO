@@ -506,3 +506,39 @@ fn pipelined_export_is_byte_identical_to_serial_encoding() {
         export_with_plugins(&project, &assets, range, Settings::default(), |_| true).unwrap();
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn light_project_background_survives_mp4_export() {
+    let mut project = Project::default();
+    Command::SetSettings {
+        width: 160,
+        height: 90,
+        frame_rate: FrameRate::new(30, 1).unwrap(),
+        background: [240, 240, 240, 255],
+        duration: Time(TICKS_PER_SECOND / 30),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let assets = BTreeMap::new();
+    let bytes = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 30)).unwrap(),
+            Settings::default(),
+            |_| true,
+            |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
+        )
+        .unwrap();
+    let decoder = FilmCraftBackend::new()
+        .open_video_bytes("background.mp4", bytes.into())
+        .unwrap();
+    let frame = decoder.frame_at(Time(0)).unwrap();
+    assert!(
+        frame.pixels[..3]
+            .iter()
+            .all(|channel| channel.abs_diff(240) <= 5),
+        "{:?}",
+        &frame.pixels[..4]
+    );
+}

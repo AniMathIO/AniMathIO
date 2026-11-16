@@ -153,6 +153,13 @@ impl GpuBackend {
         self.cpu.canvas = crate::cpu::fit_canvas(scene.canvas, size);
         self.scene.reset();
         let canvas = Rect::new(0.0, 0.0, f64::from(size.0), f64::from(size.1));
+        self.scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            color(scene.background),
+            None,
+            &canvas,
+        );
         for clip in &scene.clips {
             if matches!(clip.kind, ClipKind::Audio(_)) || clip.transform.opacity == 0.0 {
                 continue;

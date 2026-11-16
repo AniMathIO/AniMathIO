@@ -202,6 +202,7 @@ fn scene_clip_has_ink(
     single.transform.opacity = 1.;
     let mut scene = Scene {
         canvas: project_size,
+        background: [0; 4],
         clips: vec![single],
     };
     if let Some(host) = host {

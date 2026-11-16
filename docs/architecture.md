@@ -865,3 +865,9 @@ scale and bounds its scrolling form to leave the preview and action buttons visi
 ## Scene cuts
 
 `scene_detector` shares the sampled luminance detector with reframe, preserving its default thresholds. `scenes` decodes source frames through the media backend at 4 Hz, maps cuts to the project frame grid and stores a snapshot-bound review draft. The editor `scenes` module runs analysis on a cancellable worker. Application validates the snapshot, simulates linked splits on a scratch project and returns one nested batch. No format change.
+
+Evaluated scenes carry the project’s straight-alpha sRGB background. Both render
+backends paint it before clips; preview, PNG rendering and video export share this
+policy. New default projects remain transparent; templates retain their configured
+backgrounds. Math input nesting is limited to 64 levels and native typesetting
+workers use an explicit 64 MiB stack.

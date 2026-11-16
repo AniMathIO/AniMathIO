@@ -23,6 +23,7 @@ pub fn scene(kind: &str) -> Scene {
     }
     Scene {
         canvas: (0, 0),
+        background: [0; 4],
         clips: vec![SceneClip {
             track: TrackId(0),
             id: ClipId(0),
