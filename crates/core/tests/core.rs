@@ -1232,3 +1232,99 @@ fn track_rename_and_move_are_reversible_and_validate_their_targets() {
     .unwrap();
     assert_eq!(project.tracks()[2].name(), "Locked");
 }
+
+#[test]
+fn history_cap_pushes_beyond_the_cap_and_redo_replays_the_kept_window() {
+    // Push cap + 5 commands, undo everything available: the reachable past is
+    // exactly the state after the first (kept) commands, not the start.
+    let cap = 8usize;
+    let total = cap + 5;
+    let newest = i64::try_from(total * 10).unwrap();
+    let mut project = base();
+    let mut history = History::with_limit(cap);
+    assert_eq!(history.limit(), cap);
+    let start = |time: i64| Command::MoveClip {
+        id: ClipId(0),
+        track: TrackId(0),
+        start: Time(time),
+    };
+    // Snapshot the state after the first 5 commands (the oldest ones the cap
+    // will keep, since cap + 5 - cap = 5 entries survive).
+    let mut after_first_five = base();
+    for time in 0..i64::try_from(total).unwrap() {
+        let command = start(time * 10 + 10);
+        if time < 5 {
+            history.execute(&mut after_first_five, &command).unwrap();
+        }
+        history.execute(&mut project, &command).unwrap();
+    }
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(0)].range.start,
+        Time(newest)
+    );
+    let mut undos = 0;
+    while history.undo(&mut project).unwrap() {
+        undos += 1;
+    }
+    assert_eq!(undos, cap, "exactly `cap` entries stay reachable");
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(0)].range.start,
+        after_first_five.tracks()[0].clips()[&ClipId(0)].range.start,
+        "undoing everything lands on the state after the first kept commands"
+    );
+    // Redo stays correct: replaying forward returns to the newest state.
+    for _ in 0..undos {
+        assert!(history.redo(&mut project).unwrap());
+    }
+    assert!(!history.redo(&mut project).unwrap());
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(0)].range.start,
+        Time(newest)
+    );
+}
+
+#[test]
+fn history_cap_can_be_changed_and_zero_disables_undo() {
+    let mut project = base();
+    let mut history = History::with_limit(10);
+    let start = |time: i64| Command::MoveClip {
+        id: ClipId(0),
+        track: TrackId(0),
+        start: Time(time),
+    };
+    for time in [10, 20, 30, 40] {
+        history.execute(&mut project, &start(time)).unwrap();
+    }
+    history.set_limit(2);
+    assert_eq!(history.limit(), 2);
+    assert!(history.undo(&mut project).unwrap());
+    assert!(history.undo(&mut project).unwrap());
+    assert!(!history.undo(&mut project).unwrap());
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(0)].range.start,
+        Time(20)
+    );
+
+    let mut frozen = History::default();
+    frozen.set_limit(0);
+    frozen.execute(&mut project, &start(50)).unwrap();
+    assert!(
+        !frozen.undo(&mut project).unwrap(),
+        "limit 0 keeps no entries"
+    );
+    assert_eq!(
+        project.tracks()[0].clips()[&ClipId(0)].range.start,
+        Time(50)
+    );
+}
+
+#[test]
+fn history_default_limit_is_bounded() {
+    let history = History::default();
+    assert_eq!(history.limit(), DEFAULT_HISTORY_LIMIT);
+    let floor = 100;
+    assert!(
+        DEFAULT_HISTORY_LIMIT >= floor,
+        "a sensible default, not a token cap"
+    );
+}

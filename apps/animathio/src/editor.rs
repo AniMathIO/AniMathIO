@@ -708,7 +708,15 @@ impl Editor {
         let audio_ids = audio_asset_ids(&project);
         let initial_next_id = next_id(&project);
         let clock = env.make_clock(&project, &pool);
-        let worker = RenderWorker::spawn();
+        let worker = match RenderWorker::spawn() {
+            Ok(worker) => worker,
+            Err(spawn_error) => {
+                if error.is_none() {
+                    error = Some(format!("preview renderer could not start: {spawn_error}"));
+                }
+                RenderWorker::disabled()
+            }
+        };
         let mut preview = crate::preview_settings::PreviewSettings::load();
         if let Some(kind) = env.backend {
             preview.gpu = kind == animathio_render::BackendKind::Gpu;
