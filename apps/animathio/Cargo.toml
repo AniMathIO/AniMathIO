@@ -25,6 +25,9 @@ animathio-plugin-api = { path = "../../crates/plugin-api" }
 animathio-plugin-host = { path = "../../crates/plugin-host" }
 base64 = "0.22"
 directories = "6"
+log = "0.4"
+semver = "1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-kit-assets.workspace = true

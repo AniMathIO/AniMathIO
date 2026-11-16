@@ -243,10 +243,13 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "image",
+ "log",
  "rfd",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",
+ "ureq",
 ]
 
 [[package]]

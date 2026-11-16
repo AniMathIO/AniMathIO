@@ -10,6 +10,9 @@ pub(crate) struct Preferences {
     pub(crate) compact: bool,
     pub(crate) ui_scale: Option<u16>,
     pub(crate) reduce_motion: bool,
+    /// The startup check for a newer release (`update_check`); off means the
+    /// editor never contacts GitHub. `ANIMATHIO_NO_UPDATE_CHECK=1` also opts out.
+    pub(crate) check_updates: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -19,6 +22,7 @@ impl Default for Preferences {
             compact: true,
             ui_scale: None,
             reduce_motion: false,
+            check_updates: true,
         }
     }
 }
@@ -203,10 +207,19 @@ mod tests {
         let prefs: Preferences = serde_json::from_str("{}").unwrap();
         assert_eq!(prefs.autosave_seconds, 60);
         assert!(!prefs.reduce_motion);
+        assert!(prefs.check_updates, "the update check is opt-out, not opt-in");
         let text = serde_json::to_string(&prefs).unwrap();
         assert_eq!(
             serde_json::from_str::<Preferences>(&text).unwrap().compact,
             prefs.compact
         );
+    }
+
+    #[test]
+    fn a_stored_opt_out_survives_loading() {
+        let saved: Preferences =
+            serde_json::from_str(r#"{"autosave_seconds":30,"check_updates":false}"#).unwrap();
+        assert!(!saved.check_updates);
+        assert_eq!(saved.autosave_seconds, 30);
     }
 }

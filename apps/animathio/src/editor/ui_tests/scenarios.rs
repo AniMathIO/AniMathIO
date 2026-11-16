@@ -1917,3 +1917,23 @@ fn math_dialog_enter_submits_from_the_multiline_source_and_escape_cancels(cx: &m
     }));
     assert_eq!(ui.read(|e| e.project.clone()), before);
 }
+
+/// The headless test environment never checks for updates: the check is gated on the
+/// environment (not on a preference), so no notice appears and no attempt timestamp
+/// is written to the harness config directory.
+#[gpui::test]
+fn headless_environment_never_checks_for_updates(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.settle();
+    ui.read(|editor| {
+        assert!(!editor.env.updates, "the headless environment skips the check");
+        assert!(
+            editor.preferences.check_updates,
+            "the gate is the environment, not the preference"
+        );
+        assert!(editor.notices.is_empty(), "no update notice in tests");
+    });
+    let state = super::config_dir().join(super::update_check::STATE_FILE);
+    assert!(!state.exists(), "the harness never contacts the network");
+}
