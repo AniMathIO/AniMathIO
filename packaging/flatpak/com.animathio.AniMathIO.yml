@@ -1,0 +1,58 @@
+app-id: com.animathio.AniMathIO
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: animathio
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --socket=pulseaudio
+  - --env=ANIMATHIO_NO_UPDATE_CHECK=1
+modules:
+  - name: wasi-standard-library
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+    build-commands:
+      # The SDK is read-only. Overlay its sysroot with writable WASI libraries.
+      - test "$(rustc --version | cut -d' ' -f2)" = 1.98.0
+      - mkdir -p /app/rust/lib/rustlib
+      - ln -s /usr/lib/sdk/rust-stable/lib/rustlib/$(rustc -vV | sed -n 's/^host. //p') /app/rust/lib/rustlib/
+      - ./install.sh --prefix=/app/rust --disable-ldconfig
+    sources:
+      - type: archive
+        url: https://static.rust-lang.org/dist/2026-08-20/rust-std-1.98.0-wasm32-wasip2.tar.xz
+        sha256: c54e91aa066465963064ea69edc0bebb243eea357e36d4488bcfa2686f8cc538
+    cleanup: ['*']
+  - name: animathio
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/animathio/cargo
+        CARGO_NET_OFFLINE: 'true'
+        CARGO_BUILD_JOBS: '3'
+        CARGO_PROFILE_DEV_DEBUG: '0'
+        CARGO_INCREMENTAL: '0'
+        RUSTFLAGS: --sysroot=/app/rust
+        ANIMATHIO_SKIP_RUSTUP: '1'
+    build-commands:
+      - bash scripts/build-plugins.sh
+      - nice -n 19 ionice -c3 cargo build --offline --release --locked -p animathio -p animathio-cli
+      - install -Dm755 target/release/animathio /app/bin/animathio
+      - install -Dm755 target/release/animathio-cli /app/bin/animathio-cli
+      - install -d /app/lib/animathio/plugins
+      - install -m644 target/plugins/*.amplugin /app/lib/animathio/plugins/
+      - test "$(find /app/lib/animathio/plugins -name '*.amplugin' | wc -l)" = 8
+      - install -Dm644 packaging/flatpak/com.animathio.AniMathIO.desktop /app/share/applications/com.animathio.AniMathIO.desktop
+      - install -Dm644 packaging/flatpak/com.animathio.AniMathIO.metainfo.xml /app/share/metainfo/com.animathio.AniMathIO.metainfo.xml
+      - for size in 32 64 128 256 512; do install -Dm644 apps/animathio/assets/icons/${size}x${size}.png /app/share/icons/hicolor/${size}x${size}/apps/com.animathio.AniMathIO.png; done
+    sources:
+      - type: dir
+        path: ../..
+        skip: [.git, target, .flatpak-builder, build-dir]
+      - cargo-sources.json

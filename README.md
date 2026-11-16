@@ -75,3 +75,5 @@ Report vulnerabilities privately following [SECURITY.md](SECURITY.md).
 ## License
 
 [MIT](LICENSE)
+
+Linux Flatpak build and installation instructions: [Flatpak](docs/flatpak.md) (Flathub submission pending).

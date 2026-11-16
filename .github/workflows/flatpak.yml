@@ -1,0 +1,25 @@
+name: Flatpak
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - packaging/flatpak/**
+      - .github/workflows/flatpak.yml
+      - scripts/build-plugins.sh
+permissions:
+  contents: read
+jobs:
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@0fadf5d65cdfbdb9c94c7a2f3637c41206cc1a70 # v6
+        with:
+          bundle: AniMathIO.flatpak
+          manifest-path: packaging/flatpak/com.animathio.AniMathIO.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+          build-bundle: true

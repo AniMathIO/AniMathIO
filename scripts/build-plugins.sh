@@ -5,7 +5,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-rustup target add wasm32-wasip2
+# Flatpak supplies the matching target as a checksum-pinned, offline source.
+if [[ "${ANIMATHIO_SKIP_RUSTUP:-0}" != 1 ]] &&
+    ! rustc --print target-libdir --target wasm32-wasip2 | xargs test -d; then
+    rustup target add wasm32-wasip2
+fi
 
 mkdir -p target/plugins
 

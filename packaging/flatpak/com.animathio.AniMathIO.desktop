@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AniMathIO
+Comment=Edit and export math animation videos
+Exec=animathio
+Icon=com.animathio.AniMathIO
+Terminal=false
+Categories=AudioVideo;Video;
+StartupNotify=true
