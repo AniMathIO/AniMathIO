@@ -75,9 +75,9 @@ impl PluginPackage {
         }
         for index in 0..archive.len() {
             let entry = archive.by_index(index)?;
-            let name = entry.name();
-            if is_unsafe_entry_name(name) {
-                return Err(PackageError::UnsafeEntry(name.to_owned()));
+            let name = entry.name()?;
+            if is_unsafe_entry_name(&name) {
+                return Err(PackageError::UnsafeEntry(name.into_owned()));
             }
         }
 
