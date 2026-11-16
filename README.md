@@ -75,3 +75,5 @@ Report vulnerabilities privately following [SECURITY.md](SECURITY.md).
 ## License
 
 [MIT](LICENSE)
+
+Build your own with the [plugin template, examples and community index](https://github.com/AniMathIO/plugins).
