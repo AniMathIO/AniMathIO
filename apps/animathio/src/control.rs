@@ -2,38 +2,100 @@
 //! and the UI thread drains it during the render loop, keeping all project
 //! mutation on the same thread that owns the editor.
 
-use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+        mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, channel, sync_channel},
+    },
+    time::{Duration, Instant},
+};
 
-use animathio_control::{Call, ControlError, ControlHandler, ControlServer, RunningServer};
+use animathio_control::{Call, ControlError, ControlHandler, ControlReply, ControlServer, RunningServer};
 use serde_json::Value;
 
-/// One routed call and the channel for its serialized reply.
-pub(crate) enum ControlMsg {
-    Invoke(Call, SyncSender<Result<Value, ControlError>>),
+const ACK_DEADLINE: Duration = Duration::from_secs(10);
+const PENDING: u8 = 0;
+const ACCEPTED: u8 = 1;
+const EXPIRED: u8 = 2;
+
+/// A queued call that must be accepted before touching editor state.
+pub(crate) struct ControlMsg {
+    call: Call,
+    reply: SyncSender<Result<Value, ControlError>>,
+    ack: SyncSender<()>,
+    state: Arc<AtomicU8>,
+    deadline: Instant,
 }
 
-/// The server-side half of the bridge; it implements [`ControlHandler`] by
-/// forwarding every call to the UI thread and waiting for the reply.
+impl ControlMsg {
+    /// Atomically accept or discard an expired request, before any side effects.
+    pub(crate) fn accept(self) -> Option<(Call, SyncSender<Result<Value, ControlError>>)> {
+        self.accept_at(Instant::now())
+    }
+
+    fn accept_at(self, now: Instant) -> Option<(Call, SyncSender<Result<Value, ControlError>>)> {
+        if now >= self.deadline {
+            let _ = self.state.compare_exchange(PENDING, EXPIRED, Ordering::SeqCst, Ordering::SeqCst);
+            return None;
+        }
+        self.state
+            .compare_exchange(PENDING, ACCEPTED, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
+        self.ack.send(()).ok()?;
+        Some((self.call, self.reply))
+    }
+}
+
+/// The server-side half; enqueue under the handler lock, then wait outside it.
 pub(crate) struct ControlBridge {
     tx: Sender<ControlMsg>,
+    ack_deadline: Duration,
 }
 
 impl ControlBridge {
     pub(crate) fn new() -> (Self, Receiver<ControlMsg>) {
         let (tx, rx) = channel();
-        (Self { tx }, rx)
+        (Self { tx, ack_deadline: ACK_DEADLINE }, rx)
     }
 }
 
 impl ControlHandler for ControlBridge {
     fn handle(&mut self, call: Call) -> Result<Value, ControlError> {
+        self.defer(call)()
+    }
+
+    fn defer(&mut self, call: Call) -> ControlReply {
         let (reply_tx, reply_rx) = sync_channel(1);
-        self.tx
-            .send(ControlMsg::Invoke(call, reply_tx))
-            .map_err(|_| ControlError::Other("editor shut down".to_owned()))?;
-        reply_rx
-            .recv()
-            .map_err(|_| ControlError::Other("editor did not respond".to_owned()))?
+        let (ack_tx, ack_rx) = sync_channel(1);
+        let state = Arc::new(AtomicU8::new(PENDING));
+        let deadline = Instant::now() + self.ack_deadline;
+        let sent = self.tx.send(ControlMsg {
+            call, reply: reply_tx, ack: ack_tx, state: state.clone(), deadline,
+        });
+        Box::new(move || {
+            sent.map_err(|_| ControlError::EditorClosed)?;
+            match ack_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(()) => {},
+                Err(RecvTimeoutError::Timeout) => {
+                    // Only the winner may expire or execute. If acceptance won,
+                    // wait for completion even if the ack arrived at the deadline.
+                    if state.compare_exchange(PENDING, EXPIRED, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+                        || state.load(Ordering::SeqCst) == EXPIRED {
+                        return Err(ControlError::NotAccepted);
+                    }
+                },
+                Err(RecvTimeoutError::Disconnected) => {
+                    if state.load(Ordering::SeqCst) == EXPIRED {
+                        return Err(ControlError::NotAccepted);
+                    }
+                    return Err(ControlError::EditorClosed);
+                },
+            }
+            // Accepted jobs have no completion deadline (exports and analysis
+            // can take hours). A dropped sender wakes recv immediately.
+            reply_rx.recv().map_err(|_| ControlError::EditorClosed)?
+        })
     }
 }
 

@@ -64,6 +64,8 @@ impl ControlClient {
                 Some(-32_001) => ControlError::Unauthorized,
                 Some(-32_601) => ControlError::MethodNotFound(message.to_owned()),
                 Some(-32_602) => ControlError::InvalidParams(message.to_owned()),
+                Some(-32_003) => ControlError::NotAccepted,
+                Some(-32_004) => ControlError::EditorClosed,
                 Some(-32_002) => ControlError::Unsupported(message.to_owned()),
                 _ => ControlError::Protocol(message.to_owned()),
             });

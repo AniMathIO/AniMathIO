@@ -11,6 +11,9 @@ use crate::{
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+/// A completion wait that owns its state and runs outside the server's handler lock.
+pub type ControlReply = Box<dyn FnOnce() -> Result<Value, ControlError> + Send>;
+
 /// Handles one parsed control call, returning its JSON result.
 ///
 /// The editor implements this by routing the call onto the UI thread and
@@ -19,6 +22,13 @@ use serde_json::Value;
 pub trait ControlHandler {
     /// Execute one call and return its result as JSON.
     fn handle(&mut self, call: Call) -> Result<Value, ControlError>;
+
+    /// Start a call, returning its completion wait. The default executes inline;
+    /// editor bridges override this to release the shared lock before waiting.
+    fn defer(&mut self, call: Call) -> ControlReply {
+        let result = self.handle(call);
+        Box::new(move || result)
+    }
 
     /// Read the project and session state.
     fn project_get(&mut self) -> Result<ProjectState, ControlError> {
