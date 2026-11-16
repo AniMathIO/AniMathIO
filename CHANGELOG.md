@@ -7,11 +7,18 @@ git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMa
 ## [2.0.1](https://github.com/AniMathIO/AniMathIO/compare/v2.0.0...v2.0.1) - 2026-11-16
 
 
+### Security
+
+- Clear open dependency advisories ([#268](https://github.com/AniMathIO/AniMathIO/pull/268))
+
 ### Fixed
 
+- Cap undo history and report worker spawn failures ([#263](https://github.com/AniMathIO/AniMathIO/pull/263))
+- `\tfrac` text-style size and launcher status bar placeholder ([#271](https://github.com/AniMathIO/AniMathIO/pull/271))
 - Refuse exports that would overwrite the open project file ([#272](https://github.com/AniMathIO/AniMathIO/pull/272))
-- 2.0.1 control, MCP and v1 import fixes ([#275](https://github.com/AniMathIO/AniMathIO/pull/275))
-
+- Write JSON project assets atomically ([#264](https://github.com/AniMathIO/AniMathIO/pull/264))
+- *(control)* Never hang on a wedged editor without breaking long jobs ([#274](https://github.com/AniMathIO/AniMathIO/pull/274))
+- Control socket pipelining, MCP fade-out/slide-out timing, one-step `add_text`, bounded v1 `breathe` import ([#275](https://github.com/AniMathIO/AniMathIO/pull/275))
 
 ## 2.0.0 - 2026-11-16
 
