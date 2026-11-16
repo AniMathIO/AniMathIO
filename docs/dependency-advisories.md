@@ -10,7 +10,7 @@ RustSec does not currently contain the grid GHSA.
 
 | Dependency | Open alerts before | Result on this branch |
 | --- | ---: | --- |
-| zip | 12 (four GHSA IDs across three locks) | Fixed by inherited PR #266, zip 9.0.5 |
+| zip | 12 (four GHSA IDs across three locks) | Fixed by inherited PR #266, minimum 9.0.5; all three locks resolve 9.6.0 |
 | grid | 1 | Unshipped viewport spike only; unreachable-function exception below |
 | npm / other ecosystems | 0 | No legacy changes |
 
