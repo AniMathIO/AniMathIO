@@ -59,6 +59,14 @@ still processes calls sequentially. A computation that stalls after acceptance m
 finish or be cancelled through its existing job controls; the acceptance deadline
 is not a job watchdog. Headless project-file MCP execution has no UI acceptance step.
 
+Closing a connection does not cancel work. A request already queued may still be
+accepted and applied if the editor reaches it before its deadline, and an accepted job
+keeps running to completion; its connection thread stays occupied (one of the eight
+client slots) until the job finishes and its reply is discarded. Cancel long jobs
+through their own controls, not by disconnecting. One `animathio-cli mcp` process uses a
+single connection and serialises its tool calls behind a running job. When the queue is
+full the error comes back at once, so clients retrying -32003 should back off.
+
 A closed editor bridge or dropped reply channel returns **-32004** immediately when
 detected. Its outcome may be unknown: an accepted edit might already have happened.
 Do not automatically retry mutations after this error or a transport disconnect.

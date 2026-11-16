@@ -305,6 +305,32 @@ mod acknowledgement_tests {
         wait().unwrap();
     }
 
+    /// Expiry and acceptance race on the same atomic: whichever wins, the
+    /// client's verdict must agree with whether the editor applied the call.
+    #[test]
+    fn expiry_and_acceptance_never_both_win() {
+        for round in 0..400_u64 {
+            let (mut bridge, rx) = ControlBridge::new();
+            bridge.ack_deadline = Duration::from_micros(round % 40 * 25);
+            let wait = bridge.defer(edit());
+            let waiter = std::thread::spawn(wait);
+            let request = rx.recv().unwrap();
+            for _ in 0..round % 7 * 50 {
+                std::thread::yield_now();
+            }
+            let applied = request.accept().map(|(_, reply)| {
+                reply.send(Ok(Value::Null)).unwrap();
+            });
+            match waiter.join().unwrap() {
+                Ok(_) => assert!(applied.is_some(), "round {round}: applied but not reported"),
+                Err(ControlError::NotAccepted) => {
+                    assert!(applied.is_none(), "round {round}: expired yet applied");
+                }
+                Err(other) => panic!("round {round}: unexpected {other}"),
+            }
+        }
+    }
+
     #[test]
     fn dropped_queued_or_accepted_reply_fails_immediately() {
         for accepted in [false, true] {
