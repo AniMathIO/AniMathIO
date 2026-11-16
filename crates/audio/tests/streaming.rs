@@ -766,3 +766,15 @@ fn fuzz_adts_overflow_is_a_clean_error() {
         std::panic::catch_unwind(|| animathio_audio::SymphoniaSource::from_bytes(bytes.to_vec()));
     assert!(result.expect("must not panic").is_err());
 }
+
+/// Second cargo-fuzz reproducer: a different subtraction overflow in symphonia-codec-aac's
+/// ADTS `approximate_frame_count`. Same contract: clean error, not a panic.
+#[test]
+fn fuzz_adts_frame_count_overflow_is_a_clean_error() {
+    let bytes = include_bytes!(
+        "../../../fuzz/regressions/media_probe/adts-approximate-frame-count-overflow"
+    );
+    let result =
+        std::panic::catch_unwind(|| animathio_audio::SymphoniaSource::from_bytes(bytes.to_vec()));
+    assert!(result.expect("must not panic").is_err());
+}
