@@ -111,3 +111,39 @@ pub fn plugins_listing(
         plugins,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HELLO: &[u8] = include_bytes!("../../plugin-host/tests/fixtures/hello-1.0.0.amplugin");
+
+    #[test]
+    fn listing_reports_installed_community_plugins_and_the_switch() {
+        let root = tempfile::tempdir().unwrap();
+        let store = CommunityStore::new(
+            root.path().join("plugins"),
+            root.path().join("community-plugins.json"),
+        );
+        let empty = plugins_listing(None, Some(&store));
+        assert!(!empty.community_enabled && empty.plugins.is_empty());
+
+        store.install_bytes(HELLO, None, false).unwrap();
+        let listing = plugins_listing(None, Some(&store));
+        let [plugin] = listing.plugins.as_slice() else {
+            panic!("one plugin: {listing:?}");
+        };
+        assert_eq!(plugin.id, "com.example.hello");
+        assert_eq!(plugin.source, PluginSource::Community);
+        assert!(!plugin.enabled && !plugin.loaded);
+
+        store.set_plugin_enabled("com.example.hello", true).unwrap();
+        store.set_enabled(true).unwrap();
+        let mut host = PluginHost::new(root.path().join("cache")).unwrap();
+        host.sync_community_plugins(&store);
+        let listing = plugins_listing(Some(&host), Some(&store));
+        assert!(listing.community_enabled);
+        assert!(listing.plugins[0].enabled && listing.plugins[0].loaded);
+        assert_eq!(listing.plugins[0].source, PluginSource::Community);
+    }
+}

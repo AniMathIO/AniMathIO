@@ -180,6 +180,17 @@ replays the plugin's version-1 command document and grants bounded `read-sibling
 runtime cannot target `wasm32-wasip2` here) and is linked only into that plugin;
 `import-v1` stays native. Keep 1.0 components loading unchanged (`hello-1.0.0` fixture).
 
+Community plugins (`crates/plugin-host/src/community.rs`) are the third-party `.amplugin` files in the
+per-user folder (`ANIMATHIO_USER_PLUGIN_DIR` overrides it). They are off by default: nothing in that folder
+loads unless the global switch and the plugin's own flag in `community-plugins.json`
+(`ANIMATHIO_PLUGIN_SETTINGS`, in the editor config dir; one source of truth read through `CommunityStore` by
+the editor, `animathio-cli plugins` and the control handler) are both on. `PluginHost::load_plugin_directory`
+never loads a `PluginDirectory { community: true }`; `PluginHost::sync_community_plugins` reconciles the
+loaded set with the settings and `unload_plugin` drops a plugin's clip source, effects, audio effects, presets
+and importer, which is how the editor hot loads and unloads without a restart. Installs verify a SHA-256
+before writing, run the normal package/manifest/ABI validation and refuse reserved `org.animathio.*` ids; the
+control protocol only has the read-only `plugins.list`.
+
 Audio effects are `org.animathio.audio-basic` (build it with `scripts/build-plugins.sh`).
 Clips and tracks carry ordered `audio_effects` chains (`EffectInstance`, with a `bypass`
 flag) edited through `Command::{Add,Remove,Move}AudioEffect` /
