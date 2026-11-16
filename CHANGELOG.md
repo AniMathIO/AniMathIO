@@ -4,6 +4,10 @@ All notable changes to AniMathIO 2.x are documented in this file. It is generate
 from [Conventional Commits](https://www.conventionalcommits.org) by release-plz and
 git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMathIO/AniMathIO/releases?q=animathio-v1).
 
+## [2.0.1](https://github.com/AniMathIO/AniMathIO/compare/v2.0.0...v2.0.1) - 2026-11-16
+
+
+
 ## 2.0.0 - 2026-11-16
 
 AniMathIO 2.0 is a from-scratch Rust rewrite of the editor: a small video editor core
