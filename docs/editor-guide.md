@@ -305,9 +305,9 @@ available" with an **Open release page** action that opens the release in your
 browser; closing the toast dismisses the notice. Only the release version and page
 URL are read: no telemetry is sent, nothing is downloaded automatically, and 1.x
 tags and pre-releases never announce. Every network failure is silent (debug-level
-log only) and postpones nothing: the next check happens on a later start.
+log only); failed attempts also count toward the 24-hour limit.
 
-The check is off by default on the headless test harness, in benchmark runs and in
+The check never runs in the headless test harness, in benchmark runs and in
 CI environments. To turn it off for yourself untick **Check for updates** in
 **File → Preferences**, or set the environment variable `ANIMATHIO_NO_UPDATE_CHECK=1`
 (any other value keeps it on). The last check time is remembered in the application

@@ -34,8 +34,8 @@ pub(super) const STATE_FILE: &str = "update-check.json";
 const THROTTLE: Duration = Duration::from_hours(24);
 /// Connection timeout: the editor must never wait on this check.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-/// Response-body timeout, applied on top of the connect timeout.
-const BODY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Overall request deadline, including reading the response.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Cap on the releases JSON response.
 const MAX_BODY: u64 = 2 * 1024 * 1024;
 
@@ -51,19 +51,16 @@ pub(super) struct Release {
 /// The persisted "last attempt" timestamp, kept across restarts so the throttle holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CheckState {
-    /// Unix seconds of the last completed attempt (successful or failed).
+    /// Unix seconds of the last reserved attempt (successful or failed).
     last_check: u64,
 }
 
 /// `v2.1.0` -> `2.1.0`. Older-major tags (`animathio-v1.8.3`, `v1.2.3`), pre-releases
 /// (`v2.1.0-rc.1`) and anything unparseable yield `None`: the check never announces them.
 fn parse_tag(tag: &str) -> Option<Version> {
-    let rest = tag.trim().strip_prefix('v')?;
-    if !rest.starts_with(|c: char| c.is_ascii_digit()) {
-        return None;
-    }
+    let rest = tag.strip_prefix('v')?;
     let version = Version::parse(rest).ok()?;
-    if version.major < 2 || !version.pre.is_empty() {
+    if version.major != 2 || !version.pre.is_empty() {
         return None;
     }
     Some(version)
@@ -74,15 +71,25 @@ fn parse_release(body: &str) -> Option<Release> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let tag = value.get("tag_name")?.as_str()?;
     let url = value.get("html_url")?.as_str()?;
+    if value.get("prerelease").and_then(serde_json::Value::as_bool) == Some(true)
+        || value.get("draft").and_then(serde_json::Value::as_bool) == Some(true)
+    {
+        return None;
+    }
+    let version = parse_tag(tag)?;
+    let expected = format!("https://github.com/AniMathIO/AniMathIO/releases/tag/{tag}");
+    if url != expected {
+        return None;
+    }
     Some(Release {
-        version: parse_tag(tag)?,
-        url: url.trim().to_owned(),
+        version,
+        url: expected,
     })
 }
 
 /// Whether `latest` should be announced over the running version.
 fn is_newer(latest: &Version, current: &Version) -> bool {
-    latest > current
+    latest.cmp_precedence(current).is_gt()
 }
 
 /// One startup check: ask `fetch` for the latest release and report it when it is
@@ -97,6 +104,10 @@ fn check(current: &Version, fetch: impl FnOnce() -> Option<Release>) -> Option<R
 fn disabled_by_environment_with(get: impl Fn(&str) -> Option<String>) -> bool {
     let set = |name: &str| get(name).is_some_and(|value| !value.is_empty());
     get(ENV_VAR).as_deref() == Some("1") || set("CI") || set("GITHUB_ACTIONS")
+}
+
+fn allowed(env_allows: bool, opted_in: bool, disabled: bool) -> bool {
+    env_allows && opted_in && !disabled
 }
 
 fn disabled_by_environment() -> bool {
@@ -114,38 +125,41 @@ fn now_unix() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-fn load_state() -> Option<CheckState> {
-    load_state_from(&crate::editor_env::config_file(STATE_FILE)?)
-}
-
-fn load_state_from(path: &Path) -> Option<CheckState> {
-    let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-fn save_state(state: CheckState) {
-    let Some(path) = crate::editor_env::config_file(STATE_FILE) else {
-        return;
-    };
-    save_state_to(&path, state);
-}
-
-fn save_state_to(path: &Path, state: CheckState) {
-    if let Some(dir) = path.parent()
-        && let Err(error) = std::fs::create_dir_all(dir)
-    {
-        log::debug!("update check: cannot create config dir: {error}");
-        return;
+/// Reserve the attempt before doing any network work. The OS lock serializes
+/// simultaneous editor launches; a crash releases it automatically.
+fn reserve_attempt(path: &Path, now: u64) -> Option<()> {
+    use std::io::{Seek as _, Write as _};
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .ok()?;
+    file.try_lock().ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    let state = serde_json::from_slice(&bytes).ok();
+    if throttled(state, now) {
+        return None;
     }
-    let Ok(bytes) = serde_json::to_vec(&state) else {
-        return;
-    };
-    let temporary = path.with_extension("json.tmp");
-    if std::fs::write(&temporary, bytes).is_ok() {
-        let _ = std::fs::rename(&temporary, path);
-    } else {
-        log::debug!("update check: cannot write {}", path.display());
-    }
+    let bytes = serde_json::to_vec(&CheckState { last_check: now }).ok()?;
+    file.rewind().ok()?;
+    file.write_all(&bytes).ok()?;
+    file.set_len(bytes.len() as u64).ok()?;
+    file.sync_all().ok()?;
+    Some(())
+}
+
+fn run_check(
+    path: &Path,
+    now: u64,
+    current: &Version,
+    fetch: impl FnOnce() -> Option<Release>,
+) -> Option<Release> {
+    reserve_attempt(path, now)?;
+    check(current, fetch)
 }
 
 /// The request agent: plain `AniMathIO/<version>` user agent (no personal data),
@@ -153,8 +167,9 @@ fn save_state_to(path: &Path, state: CheckState) {
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .user_agent(format!("AniMathIO/{}", env!("CARGO_PKG_VERSION")))
+        .timeout_global(Some(REQUEST_TIMEOUT))
         .timeout_connect(Some(CONNECT_TIMEOUT))
-        .timeout_recv_body(Some(BODY_TIMEOUT))
+        .max_redirects(0)
         .build()
         .into()
 }
@@ -197,26 +212,9 @@ fn notice(release: &Release) -> gpui_component::notification::Notification {
             let url = url.clone();
             gpui_component::button::Button::new("update-check-open-release")
                 .label("Open release page")
-                .on_click(move |_, _, _| {
-                    if let Err(error) = open_url(&url) {
-                        log::debug!("update notice: {error}");
-                    }
-                })
+                .on_click(move |_, _, cx| cx.open_url(&url))
         },
     )
-}
-
-/// Open `url` with the platform browser (no embedded web view, no download).
-fn open_url(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(url).spawn();
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("explorer").arg(url).spawn();
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let result = std::process::Command::new("xdg-open").arg(url).spawn();
-    result
-        .map(|_| ())
-        .map_err(|e| format!("cannot open browser: {e}"))
 }
 
 /// Decide whether this startup should ask GitHub about a newer release and, if so,
@@ -226,32 +224,28 @@ fn open_url(url: &str) -> Result<(), String> {
 /// in CI, when the user opted out with `ANIMATHIO_NO_UPDATE_CHECK=1`, and within
 /// 24 h of the previous attempt.
 pub(super) fn schedule(env_allows: bool, opted_in: bool, cx: &mut gpui::Context<Editor>) {
-    if !env_allows || !opted_in || disabled_by_environment() {
+    if cfg!(test) || !allowed(env_allows, opted_in, disabled_by_environment()) {
         return;
     }
-    let now = now_unix();
-    if throttled(load_state(), now) {
+    let Some(path) = crate::editor_env::config_file(STATE_FILE) else {
         return;
-    }
+    };
+    let Ok(current) = Version::parse(env!("CARGO_PKG_VERSION")) else {
+        return;
+    };
     cx.spawn(async move |this, cx| {
         let outcome = cx
-            .background_spawn(async move {
-                let release = fetch(&agent());
-                save_state(CheckState { last_check: now });
-                release
-            })
+            .background_spawn(
+                async move { run_check(&path, now_unix(), &current, || fetch(&agent())) },
+            )
             .await;
         let Some(release) = outcome else {
             return;
         };
-        let Some(current) = Version::parse(env!("CARGO_PKG_VERSION")).ok() else {
-            return;
-        };
-        let Some(release) = check(&current, || Some(release)) else {
-            return;
-        };
         if let Err(error) = this.update(cx, |editor, cx| {
-            editor.notices.push(notice(&release));
+            if editor.preferences.check_updates {
+                editor.notices.push(notice(&release));
+            }
             cx.notify();
         }) {
             log::debug!("update check: window closed before the notice: {error}");
@@ -292,6 +286,7 @@ mod tests {
         assert_eq!(parse_tag("v"), None);
         assert_eq!(parse_tag("vbanana"), None);
         assert_eq!(parse_tag("v2"), None);
+        assert_eq!(parse_tag("v3.0.0"), None);
     }
 
     #[test]
@@ -311,19 +306,36 @@ mod tests {
         assert_eq!(parse_release("not json"), None);
         assert_eq!(parse_release(r#"{"tag_name":"v2.1.0"}"#), None, "no url");
         assert_eq!(parse_release("{}"), None);
+        assert_eq!(release("v2.1.0", "file:///tmp/untrusted"), None);
+        assert_eq!(release("v2.1.0", "https://example.com"), None);
+        let body = r#"{"tag_name":"v2.1.0","html_url":"https://github.com/AniMathIO/AniMathIO/releases/tag/v2.1.0","prerelease":true}"#;
+        assert_eq!(parse_release(body), None);
     }
 
     #[test]
     fn only_a_strictly_newer_version_announces() {
-        let current = Version::parse(env!("CARGO_PKG_VERSION")).unwrap();
+        let current = Version::new(2, 1, 0);
         let newer = Version::new(current.major, current.minor + 1, current.patch);
         let fetch_of = |version: Version| {
             let tag = format!("v{version}");
-            move || release(&tag, "https://example.com")
+            move || {
+                release(
+                    &tag,
+                    &format!("https://github.com/AniMathIO/AniMathIO/releases/tag/{tag}"),
+                )
+            }
         };
         assert!(check(&current, fetch_of(newer)).is_some(), "newer");
         assert!(check(&current, fetch_of(current.clone())).is_none(), "same");
+        assert!(
+            check(&current, fetch_of(Version::new(2, 0, 9))).is_none(),
+            "older 2.x"
+        );
         assert!(check(&current, fetch_of(Version::new(1, 9, 9))).is_none());
+        assert!(
+            check(&current, fetch_of(Version::parse("2.1.0+build.2").unwrap())).is_none(),
+            "build metadata does not change precedence"
+        );
         assert!(check(&current, || None).is_none(), "network failure");
     }
 
@@ -368,19 +380,56 @@ mod tests {
     }
 
     #[test]
-    fn state_round_trips_through_a_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn opt_out_and_headless_gates() {
+        assert!(allowed(true, true, false));
+        assert!(!allowed(false, true, false));
+        assert!(!allowed(true, false, false));
+        assert!(!allowed(true, true, true));
+    }
+
+    #[test]
+    fn simultaneous_launches_only_reserve_one_attempt() {
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("update-check.json");
-        assert_eq!(load_state_from(&path), None, "nothing written yet");
-        save_state_to(
-            &path,
-            CheckState {
-                last_check: 1_700_000_000,
-            },
-        );
-        assert_eq!(
-            load_state_from(&path).map(|state| state.last_check),
-            Some(1_700_000_000)
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        reserve_attempt(&path, 100).is_some()
+                    })
+                })
+                .collect();
+            assert_eq!(
+                handles
+                    .into_iter()
+                    .map(|h| usize::from(h.join().unwrap()))
+                    .sum::<usize>(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn attempts_are_persisted_before_fetch_even_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update-check.json");
+        let current = Version::new(2, 1, 0);
+        assert!(run_check(&path, 100, &current, || None).is_none());
+        assert!(run_check(&path, 101, &current, || panic!("throttled")).is_none());
+        let older = || {
+            release(
+                "v2.0.0",
+                "https://github.com/AniMathIO/AniMathIO/releases/tag/v2.0.0",
+            )
+        };
+        assert!(run_check(&path, 100 + THROTTLE.as_secs(), &current, older).is_none());
+        assert!(
+            run_check(&path, 101 + THROTTLE.as_secs(), &current, || panic!(
+                "throttled"
+            ))
+            .is_none()
         );
     }
 }
