@@ -1253,6 +1253,7 @@ pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Opti
             let dir = PluginDirectory {
                 path,
                 allow_reserved_ids: true,
+                community: false,
             };
             let mut problems = Vec::new();
             if let Err(error) = host.load_plugin_directory(&dir) {
@@ -1261,7 +1262,7 @@ pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Opti
             problems.extend(host.load_failures().iter().cloned());
             problems
         }
-        _ => host.load_discovered_plugins(),
+        _ => host.load_discovered_plugins_with(crate::editor_env::community_store().as_ref()),
     };
     for problem in &problems {
         eprintln!("plugin load problem: {problem}");
@@ -1271,6 +1272,12 @@ pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Opti
     let error = problems
         .first()
         .map(|first| format!("plugin load failed: {first} (text and shapes may not render)"));
+    let descriptors = plugin_descriptors(&host);
+    (Some(host), descriptors, error)
+}
+
+/// The clip-source plugins of `host` as plain UI descriptors, sorted by name.
+pub(crate) fn plugin_descriptors(host: &PluginHost) -> Vec<PluginDescriptor> {
     let mut descriptors = Vec::new();
     for id in host.loaded_plugin_ids() {
         let Some(plugin) = host.get_plugin(&id) else {
@@ -1285,7 +1292,7 @@ pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Opti
         }
     }
     descriptors.sort_by(|left, right| left.name.cmp(&right.name));
-    (Some(host), descriptors, error)
+    descriptors
 }
 
 pub(super) fn load_audio(

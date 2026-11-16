@@ -404,6 +404,14 @@ impl ControlHandler for HeadlessHandler {
                 serde_json::to_value(self.audio_effects_add(&params)?)?
             }
             Call::EffectsAdd { params } => serde_json::to_value(self.effects_add(&params)?)?,
+            Call::PluginsList => {
+                self.ensure_effect_plugins();
+                let store = animathio_plugin_host::CommunityStore::at_default_location(None).ok();
+                serde_json::to_value(crate::plugins_listing(
+                    self.plugins.as_ref(),
+                    store.as_ref(),
+                ))?
+            }
             Call::AnimationsList => {
                 self.ensure_effect_plugins();
                 serde_json::to_value(crate::animation_preset_infos(
@@ -650,17 +658,25 @@ fn plugin_cache_dir() -> PathBuf {
 
 /// Load bundles from explicit, executable-relative and per-user locations.
 fn load_plugins() -> Option<PluginHost> {
+    let community = animathio_plugin_host::CommunityStore::at_default_location(None).ok();
+    let community_on = community
+        .as_ref()
+        .is_some_and(|store| store.settings().enabled);
     let dirs = animathio_plugin_host::plugin_search_dirs();
-    let has_plugins = dirs.iter().any(|dir| {
-        fs::read_dir(&dir.path).is_ok_and(|entries| {
-            entries.filter_map(Result::ok).any(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext == "amplugin")
+    // The per-user folder only counts while the community switch is on.
+    let has_plugins = dirs
+        .iter()
+        .filter(|dir| !dir.community || community_on)
+        .any(|dir| {
+            fs::read_dir(&dir.path).is_ok_and(|entries| {
+                entries.filter_map(Result::ok).any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext == "amplugin")
+                })
             })
-        })
-    });
+        });
     if !has_plugins {
         eprintln!(
             "no plugin bundles found; plugin clips render as placeholders and fail to export \

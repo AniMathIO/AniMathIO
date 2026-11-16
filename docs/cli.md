@@ -31,6 +31,7 @@ Commands:
   import-v1       Convert a v1 `.animathio` project to a `.amio` archive
   import-manim    Convert a Manim Community scene script to a `.amio` archive
   animations      List or apply animation presets from the loaded animation-preset plugins
+  plugins         Install, enable, disable and remove community plugins, and switch them on or off
   transcribe      Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips
   autocut         Propose or apply silence and optional filler cuts as one ripple edit
   learn-noise     Learn a denoise profile from a noise-only timeline interval
@@ -276,6 +277,45 @@ animathio-cli import-manim scene.py --scene MyScene -o imported.amio
 The import runs inside the sandboxed `org.animathio.import-manim` importer plugin (build
 it with `scripts/build-plugins.sh`); `ImageMobject` files are read only from the script's
 folder.
+
+## `plugins`
+
+Manage community plugins: third-party `.amplugin` bundles in the per-user plugin folder.
+They are off by default: the global switch (`plugins community on`) and a per-plugin flag
+(`plugins enable <id>`) must both be on for a plugin to load, and an installed plugin starts
+disabled. `install` takes a local file or an `https://` URL; a URL needs `--sha256`, which is
+verified before anything is written, and the package must pass manifest and ABI validation.
+Reserved `org.animathio.*` ids are refused and an id that is already installed needs
+`--force` (an update). `list --json` prints the folder, the global switch and every installed
+plugin. See [Installing community plugins](plugins.md#installing-community-plugins) for the
+trust model and folders.
+
+<!-- help:plugins -->
+```text
+Install, enable, disable and remove community plugins, and switch them on or off
+
+Usage: animathio-cli plugins <COMMAND>
+
+Commands:
+  list       List the installed community plugins and whether each is enabled
+  install    Install a community plugin from a local `.amplugin` file or an https URL. Installed plugins start disabled; run `plugins enable <id>` afterwards
+  enable     Enable an installed community plugin
+  disable    Disable a community plugin without removing it
+  remove     Uninstall a community plugin: delete its file and its enabled flag
+  community  Turn the global community plugins switch on or off; without an argument, show it
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+<!-- /help:plugins -->
+
+```bash
+animathio-cli plugins install ./my-plugin.amplugin
+animathio-cli plugins community on
+animathio-cli plugins enable com.example.my-plugin
+animathio-cli plugins list --json
+```
 
 ## `animations`
 
