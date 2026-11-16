@@ -116,7 +116,9 @@ impl ControlServer {
                     clients.push(thread::spawn(move || {
                         let mut stream = InterruptibleStream { stream, shutdown };
                         let result = (|| -> io::Result<()> {
-                            while let Some(message) = read_message(&mut stream, MAX_REQUEST_BYTES)?
+                            let mut buffer = Vec::new();
+                            while let Some(message) =
+                                read_message(&mut stream, &mut buffer, MAX_REQUEST_BYTES)?
                             {
                                 let response = respond_with(&token, &message, |call| {
                                     let reply = handler
@@ -192,8 +194,9 @@ impl ControlServer {
         handler: &mut H,
     ) -> io::Result<()> {
         let mut stream = stream;
+        let mut buffer = Vec::new();
         loop {
-            let Some(message) = read_message(&mut stream, MAX_REQUEST_BYTES)? else {
+            let Some(message) = read_message(&mut stream, &mut buffer, MAX_REQUEST_BYTES)? else {
                 return Ok(());
             };
             let response = respond(handler, &self.token, &message);
@@ -369,14 +372,33 @@ fn error_response(id: &Value, code: i64, message: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-/// Read one newline-delimited message without buffering more than `limit` bytes.
-pub(crate) fn read_message(reader: &mut impl Read, limit: usize) -> io::Result<Option<Vec<u8>>> {
-    let mut message = Vec::new();
+/// Read one newline-delimited message, without buffering more than `limit`
+/// bytes per message. Bytes after the first newline stay in `buffer` for the
+/// next call, so a client may pipeline several requests in one write.
+pub(crate) fn read_message(
+    reader: &mut impl Read,
+    buffer: &mut Vec<u8>,
+    limit: usize,
+) -> io::Result<Option<Vec<u8>>> {
     let mut chunk = [0_u8; 8192];
     loop {
+        if let Some(position) = buffer.iter().position(|&byte| byte == b'\n') {
+            if position > limit {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "control message exceeds size limit",
+                ));
+            }
+            let mut message: Vec<u8> = buffer.drain(..=position).collect();
+            message.truncate(message.len() - 1); // the newline
+            if message.last() == Some(&b'\r') {
+                message.pop();
+            }
+            return Ok(Some(message));
+        }
         let read = reader.read(&mut chunk)?;
         if read == 0 {
-            if message.is_empty() {
+            if buffer.is_empty() {
                 return Ok(None);
             }
             return Err(io::Error::new(
@@ -384,19 +406,15 @@ pub(crate) fn read_message(reader: &mut impl Read, limit: usize) -> io::Result<O
                 "truncated control message",
             ));
         }
-        message.extend_from_slice(&chunk[..read]);
-        if message.len() > limit {
+        buffer.extend_from_slice(&chunk[..read]);
+        // The cap applies to the message being assembled; bytes after a
+        // newline belong to later messages and are checked when they reach
+        // the front of the buffer.
+        if !buffer.contains(&b'\n') && buffer.len() > limit {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "control message exceeds size limit",
             ));
-        }
-        if let Some(position) = message.iter().position(|&byte| byte == b'\n') {
-            message.truncate(position);
-            if message.last() == Some(&b'\r') {
-                message.pop();
-            }
-            return Ok(Some(message));
         }
     }
 }
@@ -546,6 +564,7 @@ fn ensure_runtime_dir(dir: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::HeadlessHandler;
+    use std::io::Cursor;
 
     fn call(params: &str) -> Value {
         let mut handler = HeadlessHandler::new();
@@ -568,5 +587,72 @@ mod tests {
         }
         let response = call(r#","params":{"unexpected":1}"#);
         assert_eq!(response["error"]["code"], -32_602, "{response}");
+    }
+
+    #[test]
+    fn read_message_splits_two_messages_delivered_in_one_read() {
+        let mut reader = Cursor::new(b"{\"a\":1}\n{\"b\":2}\n".to_vec());
+        let mut buffer = Vec::new();
+        assert_eq!(
+            read_message(&mut reader, &mut buffer, 1024)
+                .unwrap()
+                .unwrap(),
+            b"{\"a\":1}".to_vec()
+        );
+        // The second reply comes from the bytes held over, not from the reader.
+        assert_eq!(
+            read_message(&mut reader, &mut buffer, 1024)
+                .unwrap()
+                .unwrap(),
+            b"{\"b\":2}".to_vec()
+        );
+        assert_eq!(read_message(&mut reader, &mut buffer, 1024).unwrap(), None);
+    }
+
+    #[test]
+    fn read_message_strips_crlf_and_holds_an_unterminated_tail() {
+        let wire: &[u8] = b"first\r\nsecond";
+        let mut reader = wire;
+        let mut buffer = Vec::new();
+        assert_eq!(
+            read_message(&mut reader, &mut buffer, 1024)
+                .unwrap()
+                .unwrap(),
+            b"first".to_vec()
+        );
+        // A tail without a newline is a truncated message at EOF, not silence.
+        assert!(matches!(
+            read_message(&mut reader, &mut buffer, 1024),
+            Err(ref error) if error.kind() == io::ErrorKind::UnexpectedEof
+        ));
+    }
+
+    #[test]
+    fn read_message_keeps_the_per_message_size_cap() {
+        let wire: &[u8] = &b"x".repeat(64);
+        let mut reader = wire;
+        let mut buffer = Vec::new();
+        assert!(matches!(
+            read_message(&mut reader, &mut buffer, 32),
+            Err(ref error) if error.kind() == io::ErrorKind::InvalidData
+        ));
+        // An oversized message pipelined behind a small one is rejected when
+        // it reaches the front of the buffer.
+        let wire: Vec<u8> = b"ok\n"
+            .iter()
+            .copied()
+            .chain(std::iter::repeat_n(b'y', 64))
+            .chain(std::iter::once(b'\n'))
+            .collect();
+        let mut reader = wire.as_slice();
+        let mut buffer = Vec::new();
+        assert_eq!(
+            read_message(&mut reader, &mut buffer, 32).unwrap().unwrap(),
+            b"ok".to_vec()
+        );
+        assert!(matches!(
+            read_message(&mut reader, &mut buffer, 32),
+            Err(ref error) if error.kind() == io::ErrorKind::InvalidData
+        ));
     }
 }

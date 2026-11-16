@@ -37,8 +37,9 @@ Newline-delimited JSON-RPC 2.0. `method` + `params` form a tagged enum
 ```
 
 Requests are capped at 16 MiB; responses at 64 MiB (renders can be several
-megabytes). A request without the token, or with a mismatched `jsonrpc` version,
-gets a JSON-RPC error instead of a result.
+megabytes). A client may pipeline requests: several newline-delimited requests
+sent in one write are each answered in order. A request without the token, or
+with a mismatched `jsonrpc` version, gets a JSON-RPC error instead of a result.
 
 ### Editor acceptance and completion
 
@@ -165,12 +166,12 @@ clears its undo history.
 | Tool | Description | Notes |
 | --- | --- | --- |
 | `get_project_state` | Canvas, tracks, clips, playhead, active state | |
-| `add_text` | Add a plain-text clip | font size in pixels; ms times |
+| `add_text` | Add a plain-text clip | font size in pixels; ms times; the clip and its track are one undo step |
 | `add_math` | Add an `org.animathio.latex` plugin clip | `latex`; optional `mode` (`latex`/`typst`), `size` (default 48 px), `color`, `x`/`y`, `start_ms`, `duration_ms`, `reveal_duration_ms`; the clip, its new track and any reveal keyframes are one undo step |
 | `add_math_object` | Add any typed object from the Math panel, including shape objects and grids, as one free-layer batch | `kind`: `latex`, `text`, `point`, `line`, `vector`, `polygon`, `plot`, `circle`, `ellipse`, `cartesian`, `polar`; optional `fields` (string values in math units), `color`, `start_ms`, `duration_ms` (default 5000); uses panel defaults for omitted fields. LaTeX/Text: `source`, `size` (% short edge); Point/Circle: `x`, `y`, `radius`; Ellipse: `x`, `y`, `rx`, `ry`; Line/Vector: `x1`, `y1`, `x2`, `y2`; Polygon: `vertices` (`x,y; x,y; ...`); Plot: `expression`, `min`, `max`; grids: `extent`. Use `apply_animation_preset` for Write animation. |
 | `add_graph` | Add an `org.animathio.graph` plugin clip | bounds (always fully visible; the plane is scaled uniformly so circles stay round on any canvas aspect), newline-separated `items`, `show_grid`/`show_axes`/`show_labels`, `color`, `x`/`y`, `start_ms`, `duration_ms`, `draw_duration_ms` |
 | `add_media` | Import image/video/audio by absolute path, add a clip (one undo step); audio starts with animatable gain/mute defaults | |
-| `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction` |
+| `add_animation` | Attach an animation | `fadeIn`, `fadeOut`, `slideIn`, `slideOut`; optional `direction`; in animations occupy the start of the clip, out animations its end; durations longer than the clip are clamped (`clamped_to_clip` in the result) |
 | `set_clip_speed` | Set exact rational speed, reverse and linear ramps in one undo step | `clip_id`, `numerator`, `denominator`, `reverse?`, `ramps?: [{time, numerator, denominator}]`, `ripple?`; ramp times are local ticks; linked audio follows with pitch shift |
 | `freeze_frame` | Insert a frame hold segment and ripple unlocked trailing clips | `clip_id`, `at` (absolute ticks), `frames` (positive project frames); linked audio holds are silent; one undo step |
 | `update_element` | Update placement, visible time frame or image/video fit | |

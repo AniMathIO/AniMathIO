@@ -266,3 +266,49 @@ fn editor_closed_error_round_trips_without_changing_the_envelope() {
     drop(client);
     drop(running);
 }
+
+#[cfg(unix)]
+#[test]
+fn pipelined_requests_in_one_write_each_get_a_reply() {
+    use std::io::{Read as _, Write};
+
+    let dir = private_dir();
+    let spec = spec(dir.path());
+    let running = ControlServer::bind(spec.clone())
+        .unwrap()
+        .spawn(HeadlessHandler::new())
+        .unwrap();
+    let mut stream = std::os::unix::net::UnixStream::connect(&spec.path).unwrap();
+    let token = std::fs::read_to_string(&spec.token_file).unwrap();
+    // Two complete requests leave the client in a single write.
+    let request = |id: u64| {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"project.get","params":null,"token":"{}"}}"#,
+            token.trim()
+        ) + "\n"
+    };
+    let requests = request(1) + &request(2);
+    stream.write_all(requests.as_bytes()).unwrap();
+    stream.flush().unwrap();
+
+    // Both replies come back, in order, each newline-terminated.
+    let mut seen = Vec::new();
+    while seen.len() < 2 {
+        let mut line = Vec::new();
+        loop {
+            let mut byte = [0_u8; 1];
+            stream.read_exact(&mut byte).unwrap();
+            line.push(byte[0]);
+            if byte[0] == b'\n' {
+                break;
+            }
+        }
+        let reply = String::from_utf8(line).unwrap();
+        let response: serde_json::Value = serde_json::from_str(reply.trim()).unwrap();
+        assert!(response.get("result").is_some(), "{reply}");
+        assert_eq!(response["id"], serde_json::json!(seen.len() + 1));
+        seen.push(response["id"].clone());
+    }
+    drop(stream);
+    drop(running);
+}

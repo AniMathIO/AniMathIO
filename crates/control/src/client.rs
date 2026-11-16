@@ -14,6 +14,9 @@ use crate::{
 /// A client connected to a running control server.
 pub struct ControlClient {
     stream: interprocess::local_socket::Stream,
+    /// Bytes of the next reply that arrived past its newline, kept for the
+    /// next `call` (the server may pipeline replies ahead of reads).
+    buffer: Vec<u8>,
     token: String,
     next_id: u64,
 }
@@ -26,6 +29,7 @@ impl ControlClient {
         let token = token::read_file(&spec.token_file)?;
         Ok(Self {
             stream,
+            buffer: Vec::new(),
             token,
             next_id: 1,
         })
@@ -51,9 +55,10 @@ impl ControlClient {
         bytes.push(b'\n');
         self.stream.write_all(&bytes)?;
         self.stream.flush()?;
-        let response = read_message(&mut self.stream, MAX_RESPONSE_BYTES)?.ok_or_else(|| {
-            ControlError::Protocol("control server closed the connection".to_owned())
-        })?;
+        let response = read_message(&mut self.stream, &mut self.buffer, MAX_RESPONSE_BYTES)?
+            .ok_or_else(|| {
+                ControlError::Protocol("control server closed the connection".to_owned())
+            })?;
         let response: Value = serde_json::from_slice(&response)?;
         if let Some(error) = response.get("error") {
             let message = error
