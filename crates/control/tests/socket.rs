@@ -193,3 +193,76 @@ fn truncated_request_does_not_stop_accepting() {
     client.project_get().unwrap();
     drop(running);
 }
+
+#[test]
+fn deferred_completion_does_not_block_another_client() {
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::time::Duration;
+    struct Deferred {
+        started: Sender<()>,
+        finish: Option<Receiver<()>>,
+    }
+    impl ControlHandler for Deferred {
+        fn handle(&mut self, _call: Call) -> Result<serde_json::Value, ControlError> {
+            unreachable!("server must use deferred dispatch")
+        }
+        fn defer(&mut self, _call: Call) -> animathio_control::ControlReply {
+            if let Some(finish) = self.finish.take() {
+                self.started.send(()).unwrap();
+                Box::new(move || {
+                    finish.recv().unwrap();
+                    Ok(serde_json::json!("completed"))
+                })
+            } else {
+                Box::new(|| Err(ControlError::NotAccepted))
+            }
+        }
+    }
+    let dir = private_dir();
+    let spec = spec(dir.path());
+    let (started_tx, started_rx) = channel();
+    let (finish_tx, finish_rx) = channel();
+    let running = ControlServer::bind(spec.clone())
+        .unwrap()
+        .spawn(Deferred {
+            started: started_tx,
+            finish: Some(finish_rx),
+        })
+        .unwrap();
+    let mut first = ControlClient::connect(&spec).unwrap();
+    let first = std::thread::spawn(move || first.call(Call::ProjectGet));
+    started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let mut second = ControlClient::connect(&spec).unwrap();
+    let (result_tx, result_rx) = channel();
+    let second = std::thread::spawn(move || result_tx.send(second.call(Call::ProjectGet)).unwrap());
+    let result = result_rx.recv_timeout(Duration::from_secs(5));
+    // Always release the first job, even if the lock regression returns.
+    finish_tx.send(()).unwrap();
+    assert!(matches!(result.unwrap(), Err(ControlError::NotAccepted)));
+    assert_eq!(first.join().unwrap().unwrap(), "completed");
+    second.join().unwrap();
+    drop(running);
+}
+
+#[test]
+fn editor_closed_error_round_trips_without_changing_the_envelope() {
+    struct Closed;
+    impl ControlHandler for Closed {
+        fn handle(&mut self, _call: Call) -> Result<serde_json::Value, ControlError> {
+            Err(ControlError::EditorClosed)
+        }
+    }
+    let dir = private_dir();
+    let spec = spec(dir.path());
+    let running = ControlServer::bind(spec.clone())
+        .unwrap()
+        .spawn(Closed)
+        .unwrap();
+    let mut client = ControlClient::connect(&spec).unwrap();
+    assert!(matches!(
+        client.call(Call::ProjectGet),
+        Err(ControlError::EditorClosed)
+    ));
+    drop(client);
+    drop(running);
+}

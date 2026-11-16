@@ -25,7 +25,7 @@ pub enum ControlError {
     #[error("not supported: {0}")]
     Unsupported(String),
     /// The editor did not accept this request; it cannot execute later.
-    #[error("editor did not accept request within 10 seconds; request was not applied")]
+    #[error("editor did not accept request (busy or deadline elapsed); request was not applied")]
     NotAccepted,
     /// The editor or its reply channel closed; completion may be unknown.
     #[error("editor reply channel closed; request completion is unknown")]

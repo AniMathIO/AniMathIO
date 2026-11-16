@@ -1,4 +1,4 @@
-//! The [`ControlHandler`] trait: one method the server calls, plus typed
+//! The [`ControlHandler`] trait: dispatch and deferred completion, plus typed
 //! convenience accessors built on top of it.
 
 use crate::{
@@ -316,8 +316,8 @@ pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, ControlError> 
     serde_json::from_value(value).map_err(ControlError::from)
 }
 
-/// Dispatch one call to a handler. Provided for symmetry; the server calls
-/// [`ControlHandler::handle`] directly.
+/// Dispatch one call synchronously. The socket server uses
+/// [`ControlHandler::defer`] to release its lock before waiting for completion.
 pub fn dispatch<H: ControlHandler + ?Sized>(
     handler: &mut H,
     call: Call,

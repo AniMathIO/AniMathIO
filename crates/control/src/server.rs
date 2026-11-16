@@ -119,8 +119,13 @@ impl ControlServer {
                             while let Some(message) = read_message(&mut stream, MAX_REQUEST_BYTES)?
                             {
                                 let response = respond_with(&token, &message, |call| {
-                                    let reply = handler.lock()
-                                        .map_err(|_| crate::ControlError::Other("control handler poisoned".into()))?
+                                    let reply = handler
+                                        .lock()
+                                        .map_err(|_| {
+                                            crate::ControlError::Other(
+                                                "control handler poisoned".into(),
+                                            )
+                                        })?
                                         .defer(call);
                                     reply()
                                 });
