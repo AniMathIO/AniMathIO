@@ -64,14 +64,49 @@ if (( ${#candidates[@]} == 0 )); then
     exit 0
 fi
 
+# Snapshot actual working files, including uncommitted edits. Restore on check
+# mode and on errors/signals, even if Cargo failed after writing a lockfile.
+backup=$(mktemp -d)
+restore=1
+cleanup() {
+    if ((restore)); then
+        for dir in "${candidates[@]}"; do
+            cp -- "$backup/$dir/Cargo.lock" "$dir/Cargo.lock"
+        done
+    fi
+    rm -rf -- "$backup"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 for dir in "${candidates[@]}"; do
-    echo ">> $dir: cargo update --workspace"
-    "${cargo_command[@]}" update --workspace --manifest-path "$dir/Cargo.toml"
+    mkdir -p -- "$backup/$dir"
+    cp -- "$dir/Cargo.lock" "$backup/$dir/Cargo.lock"
 done
 
-# Lockfiles the updates actually touched (tracked files, so plain `git diff`).
-lock_paths=("${candidates[@]/%//Cargo.lock}")
-stale=$(git diff --name-only --diff-filter=M -- "${lock_paths[@]}" || true)
+stale=''
+for dir in "${candidates[@]}"; do
+    echo ">> $dir: cargo update --workspace"
+    CARGO_BUILD_JOBS=3 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 \
+        "${cargo_command[@]}" update --workspace --manifest-path "$dir/Cargo.toml"
+    # Cargo -w preserves existing compatible dependencies, but can resolve new
+    # ones. Fail closed rather than silently introduce registry/git versions.
+    python3 - "$backup/$dir/Cargo.lock" "$dir/Cargo.lock" <<'PYTHON'
+import sys
+import tomllib
+
+def external(path):
+    with open(path, "rb") as stream:
+        return {(p["name"], p["version"], p["source"], p.get("checksum"))
+                for p in tomllib.load(stream)["package"] if "source" in p}
+
+if external(sys.argv[2]) - external(sys.argv[1]):
+    sys.exit("ERROR: sync would introduce external dependency versions; update dependencies explicitly first")
+PYTHON
+    if ! cmp -s -- "$backup/$dir/Cargo.lock" "$dir/Cargo.lock"; then
+        stale+="$dir/Cargo.lock"$'\n'
+    fi
+done
 
 if [[ -z "$stale" ]]; then
     echo ">> sub-workspace lockfiles are in sync"
@@ -84,13 +119,10 @@ while IFS= read -r lock; do
 done <<<"$stale"
 
 if ((check)); then
-    # Leave the tree as it was found.
-    while IFS= read -r lock; do
-        git checkout -- "$lock"
-    done <<<"$stale"
     echo "ERROR: sub-workspace Cargo.lock files are out of sync with the workspace version." >&2
     echo "ERROR: run scripts/sync-sub-lockfiles.sh and commit the updated lockfiles." >&2
     exit 1
 fi
 
+restore=0
 echo ">> updated; commit the changed lockfiles"
