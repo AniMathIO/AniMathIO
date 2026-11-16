@@ -1,7 +1,8 @@
 name: Release Plz
 
-# Opens/updates the release PR (version bump + changelog) on every push to v2.
-# Releases themselves stay disabled until the 2.0 swap: see release-plz.toml.
+# Opens/updates the release PR (version bump + changelog) on every push to
+# `main`; merging the release PR tags `v{{ version }}` and creates the GitHub
+# release (`release_always = false`, see release-plz.toml).
 on:
   push:
     branches: [main]
@@ -15,24 +16,70 @@ jobs:
     name: Open release PR
     runs-on: ubuntu-latest
     steps:
+      # RELEASE_PLZ_TOKEN (a PAT; see docs/release-checklist.md section 2) is
+      # preferred over the default GITHUB_TOKEN: PRs opened and commits pushed
+      # with GITHUB_TOKEN only start the other workflows after a maintainer
+      # approves the run ("action_required"). The `||` fallback keeps the
+      # workflow working before the secret is added.
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
           fetch-tags: true
+          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
       - name: Open or update release PR
+        id: release_pr
         uses: release-plz/action@f36720ba01927d9927fba665fcdf802e12bc264b # v0.5.147
         with:
           command: release-pr
           version: "0.4.3"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+      # The release PR bumps the workspace version in the root Cargo.toml and
+      # Cargo.lock, but the nested workspaces that path-depend on workspace
+      # crates (currently `fuzz/` and `plugins/import-manim/`) keep their own
+      # Cargo.lock files. Until those are synced, their `--locked` builds fail
+      # on the release PR (the "Build plugins" step in ci.yml) — see PR #276.
+      # `cargo update -w` only rewrites the workspace crates' entries, never a
+      # registry dependency.
+      #
+      # The commit is authored as github-actions[bot]: release-plz keeps
+      # force-updating release PRs that have no human contributors, while a
+      # human commit makes it close the PR and open a fresh one. Pushes made
+      # with GITHUB_TOKEN start CI on the release PR only after a maintainer
+      # approves the run; the RELEASE_PLZ_TOKEN secret removes that step (and
+      # re-running this workflow after an approval always re-syncs).
+      - name: Sync sub-workspace lockfiles on the release PR
+        if: steps.release_pr.outputs.prs != '' && steps.release_pr.outputs.prs != '[]'
+        env:
+          # JSON array of the opened/updated release PRs
+          # (fields: head_branch, base_branch, html_url, number, releases).
+          RELEASE_PLZ_PRS: ${{ steps.release_pr.outputs.prs }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r branch number; do
+            [[ -n "$branch" ]] || continue
+            echo ">> release PR #$number: syncing sub-workspace lockfiles on branch $branch"
+            git fetch --force origin "refs/heads/$branch:refs/remotes/origin/$branch"
+            git checkout --force -B "$branch" "refs/remotes/origin/$branch"
+            ./scripts/sync-sub-lockfiles.sh
+            changed=$(git diff --name-only --diff-filter=M | grep -E '(^|/)Cargo\.lock$' || true)
+            if [[ -z "$changed" ]]; then
+              echo ">> $branch: sub-workspace lockfiles already in sync"
+              continue
+            fi
+            while IFS= read -r lock; do
+              git add -- "$lock"
+            done <<<"$changed"
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit -m 'chore: sync sub-workspace Cargo.lock files with the release version'
+            git push origin "HEAD:refs/heads/$branch"
+            echo ">> pushed lockfile sync commit to $branch"
+          done <<<"$(jq -r '.[] | "\(.head_branch)\t\(.number)"' <<<"$RELEASE_PLZ_PRS")"
 
-  # Releases are disabled until the 2.0 swap (see release-plz.toml).
-  # To enable, uncomment this job after flipping git_tag_enable/git_release_enable:
-  #
   release:
     name: Release
     runs-on: ubuntu-latest
@@ -50,4 +97,4 @@ jobs:
           command: release
           version: "0.4.3"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
