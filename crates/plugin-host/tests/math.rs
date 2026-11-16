@@ -662,7 +662,7 @@ fn latex_inline_colors_golden() {
             &BTreeMap::new(),
             &json!({
                 "source": r"\textcolor{red}{a}b + {\color{blue} \frac{x}{y}} + \color{green}{z}",
-                "color": [255, 255, 255, 255], "size": 72.0,
+                "color": [64, 64, 64, 255], "size": 72.0,
             }),
             0,
             (640, 360),
@@ -680,7 +680,7 @@ fn latex_inline_colors_golden() {
         [255, 0, 0, 255],
         [0, 0, 255, 255],
         [0, 255, 0, 255],
-        [255; 4],
+        [64, 64, 64, 255],
     ] {
         assert!(
             colors.contains(&animathio_core::Color::rgba(

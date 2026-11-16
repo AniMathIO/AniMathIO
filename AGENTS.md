@@ -178,7 +178,10 @@ the inspector) and `importer-plugin` (`org.animathio.import-manim`; `PluginHost:
 replays the plugin's version-1 command document and grants bounded `read-sibling` reads).
 `crates/import-manim` parses Python with its own pure-Rust `pyparse` (tree-sitter's C
 runtime cannot target `wasm32-wasip2` here) and is linked only into that plugin;
-`import-v1` stays native. Keep 1.0 components loading unchanged (`hello-1.0.0` fixture).
+`import-v1` stays native. Plugin ABI 1.2.0 adds the opt-in `colored-source-plugin` world (`math-colors`:
+`typeset-math-colored`, per-path optional solid paint from `TypesetResult::colors`) used by
+`org.animathio.latex` for inline `\color`/`\textcolor`. Keep 1.0 and 1.1 components loading
+unchanged (`hello-1.0.0` fixture); never edit frozen WIT records, add a new world/interface instead.
 
 Audio effects are `org.animathio.audio-basic` (build it with `scripts/build-plugins.sh`).
 Clips and tracks carry ordered `audio_effects` chains (`EffectInstance`, with a `bypass`
