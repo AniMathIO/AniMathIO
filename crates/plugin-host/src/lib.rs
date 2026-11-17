@@ -437,6 +437,8 @@ impl HostState {
 pub struct LoadedPlugin {
     /// Package manifest.
     pub manifest: PluginManifestToml,
+    /// Bundle path when loaded from disk; absent for in-memory packages.
+    pub source_path: Option<PathBuf>,
     /// Component compiled for wasmtime.
     pub component: Component,
     /// BLAKE3 content hash of the wasm binary.
@@ -865,9 +867,15 @@ impl PluginHost {
 
     /// Load an `.amplugin` file from disk.
     pub fn load_plugin_file(&mut self, path: impl AsRef<Path>) -> Result<String, HostError> {
+        let path = path.as_ref();
         let bytes = fs::read(path)?;
         let package = PluginPackage::from_bytes(&bytes)?;
-        self.load_plugin_package(package)
+        let id = self.load_plugin_package(package)?;
+        self.plugins
+            .get_mut(&id)
+            .expect("loaded plugin")
+            .source_path = Some(path.to_path_buf());
+        Ok(id)
     }
 
     /// Load all `.amplugin` files from a trusted directory.
@@ -940,7 +948,13 @@ impl PluginHost {
                 self.load_plugin_package(package)
             })();
             match result {
-                Ok(id) => ids.push(id),
+                Ok(id) => {
+                    self.plugins
+                        .get_mut(&id)
+                        .expect("loaded plugin")
+                        .source_path = Some(path);
+                    ids.push(id);
+                }
                 Err(error) => {
                     log::warn!("plugin {} was not loaded: {error}", path.display());
                     self.load_failures
@@ -1025,6 +1039,7 @@ impl PluginHost {
             id.clone(),
             LoadedPlugin {
                 manifest: package.manifest,
+                source_path: None,
                 component,
                 wasm_hash,
                 inspector_schema,

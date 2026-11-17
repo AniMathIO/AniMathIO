@@ -3,6 +3,52 @@
 Desktop workflows, controls and examples for AniMathIO 2. See also the
 [keyboard shortcuts](keyboard-shortcuts.md) and [architecture](architecture.md).
 
+## Library
+
+The left dock has five distinct tabs. **View → Media / Elements / Titles / Effects /
+Plugins** opens the corresponding tab even when the Library is hidden. The existing
+Library and Effects focus shortcuts still open Media and Effects respectively.
+Arrow keys, Home and End move focus and selection between tabs; Tab continues to
+search, cards and buttons. Every tab retains its own search when switching away.
+
+| Tab | Contents and actions |
+| --- | --- |
+| **Media** | Imported assets only. Search names, filter All/Video/Images/Audio, switch grid/list, import using the Library + button, click to place or drag to the timeline. |
+| **Elements** | Text & formulas (LaTeX, Text), Shapes & geometry (points, lines, vectors, polygons, circles, ellipses), Graphs & grids (plots, Cartesian and polar grids). Click a card or press Enter/Space to configure; + adds defaults; drag its preview to the timeline. More shapes retains the generic Shapes source for rectangles, stars and arrows. Third-party clip sources appear under Plugins in this tab. |
+| **Titles** | Title compositions and caption presets. Double-click or Enter/Space adds at the playhead; drag to place on the timeline. Linked text fields remain editable in the inspector. |
+| **Effects** | Video effects, audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
+| **Plugins** | Every successfully loaded plugin, including effects, audio effects, animations and importers, with id, version, kind, First-party/Third-party origin, Enabled status and bundle file name (hover for the full path). Browse AniMathIO/plugins opens the catalog. Install bundles in a discovery directory and restart; enable/disable toggling is not implemented. Load failures are listed here too. |
+
+Media filters and view controls appear only on Media. Generated clips have one
+creation home in Elements; Plugins lists their installation metadata. See the
+[1.x feature map](migrating-from-v1.md#where-1x-features-live) for older workflows
+and the separately tracked gaps.
+
+| Media | Elements |
+| --- | --- |
+| ![Media](../docs/screenshots/editor-media.png) | ![Elements](../docs/screenshots/editor-math-panel.png) |
+
+| Titles | Effects |
+| --- | --- |
+| ![Titles](../docs/screenshots/editor-titles.png) | ![Effects](../docs/screenshots/editor-library-effects.png) |
+
+![Installed plugin inventory](../docs/screenshots/editor-library-plugins.png)
+
+Before and after the reorganization (2.1.0 on the left of each pair, same sample
+project, release builds with the first-party plugins on a private Xvfb display):
+
+| 2.1.0 Assets | Media | 2.1.0 Math | Elements |
+| --- | --- | --- | --- |
+| ![](../docs/screenshots/library-before-assets.png) | ![](../docs/screenshots/library-after-media.png) | ![](../docs/screenshots/library-before-math.png) | ![](../docs/screenshots/library-after-elements.png) |
+
+| 2.1.0 Plugins | Plugins | 2.1.0 Effects | Effects |
+| --- | --- | --- | --- |
+| ![](../docs/screenshots/library-before-plugins.png) | ![](../docs/screenshots/library-after-plugins.png) | ![](../docs/screenshots/library-before-effects.png) | ![](../docs/screenshots/library-after-effects.png) |
+
+| 2.1.0 Titles | Titles | Elements, scrolled | Effects, scrolled to transitions |
+| --- | --- | --- | --- |
+| ![](../docs/screenshots/library-before-titles.png) | ![](../docs/screenshots/library-after-titles.png) | ![](../docs/screenshots/library-after-elements-more.png) | ![](../docs/screenshots/library-after-effects-more.png) |
+
 ## Clip speed and frame holds
 
 Select a clip and open **Clip → Speed/Duration…** (Ctrl+R in the timeline), or the
@@ -55,8 +101,10 @@ stores it in the user data directory. The opt-in integration test runs the real 
 
 ## Editor gallery
 
-The editor shell (dark theme, media pool, viewer
-with transport controls, resizable inspector and vertically scrolling timeline):
+The editor shell (dark theme, Media library, viewer
+with transport controls, resizable inspector and vertically scrolling timeline;
+some gallery images below predate the Library reorganization and still show the
+2.1.0 tab names):
 
 ![AniMathIO 2 editor](../docs/screenshots/editor-main.png)
 
@@ -68,11 +116,11 @@ with transport controls, resizable inspector and vertically scrolling timeline):
 | --- | --- |
 | ![Viewer and inspector](../docs/screenshots/editor-viewer.png) | ![Timeline](../docs/screenshots/editor-timeline.png) |
 
-| Multi-selection (rubber band, inspector summary) | Media pool (thumbnail grid) |
+| Multi-selection (rubber band, inspector summary) | Media library (thumbnail grid) |
 | --- | --- |
-| ![Multi-selection](../docs/screenshots/editor-multiselect.png) | ![Media pool](../docs/screenshots/editor-media.png) |
+| ![Multi-selection](../docs/screenshots/editor-multiselect.png) | ![Media library](../docs/screenshots/editor-media.png) |
 
-| Titles library alongside a math composition | Export queue (status-bar popover) |
+| Titles library | Export queue (status-bar popover) |
 | --- | --- |
 | ![Titles](../docs/screenshots/editor-titles.png) | ![Export queue](../docs/screenshots/editor-export-queue.png) |
 
@@ -130,7 +178,7 @@ move the playhead past existing media. Track and clip are one undo step. MCP `ad
 `add_graph` do the same. A new formula starts at 14 % of the shorter frame edge, centred, so it reads
 the same on 16:9 and 9:16.
 
-**Viewer, inspector and media pool.** The selected visual clip shows an on-canvas
+**Viewer, inspector and Media library.** The selected visual clip shows an on-canvas
 transform gizmo: drag inside to move (snapping to the canvas centre and edges, with
 accent guide lines), drag a corner or edge handle to scale (Shift keeps the aspect
 ratio), drag the handle above the box to rotate (Shift snaps to 15 degrees). A small
@@ -142,7 +190,7 @@ the duration and a monitor-only volume (it never changes export). Inspector sect
 collapsible cards with a reset button each. Drag a field label (Shift = fine, Ctrl =
 coarse) or the grip beside a value to scrub it as one undo step; 0 to 1 parameters also get a slider;
 every animatable property has a keyframe diamond with previous/next-key arrows. The
-media pool offers a grid or list, a search field, kind filter chips, per-card type
+Media tab of the Library offers a grid or list, a search field, kind filter chips, per-card type
 badges, duration and resolution, audio waveforms, and hover-scrubbing of video posters.
 
 **Tracks.** Double-click a track name to rename it inline (Enter commits, Esc cancels).
@@ -280,7 +328,7 @@ the violet-to-cyan accent. See [the design guide](design.md).
 
 [Keyboard shortcuts](keyboard-shortcuts.md) — Premiere Pro defaults.
 
-The library's **Math** tab provides preview cards for LaTeX, text, points, lines,
+The library's **Elements** tab provides grouped preview cards for LaTeX, text, points, lines,
 vectors, polygons, plots, circles, ellipses and Cartesian/polar grids. Click a
 card for typed fields and a live preview, use its plus button for defaults, or
 drag it onto the timeline. Double-click an existing object to edit it. LaTeX has
@@ -288,7 +336,7 @@ snippets, formula templates and a Write on preset. See the
 [math workflow](architecture.md#mathematical-object-workflow) and the
 [CLI guide](cli.md) for automation equivalents.
 
-![Math library](../docs/screenshots/editor-math-panel.png)
+![Elements library](../docs/screenshots/editor-math-panel.png)
 ![Math object editor](../docs/screenshots/editor-math-dialog.png)
 
 ## Reproducible math showcases

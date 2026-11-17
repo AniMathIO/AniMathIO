@@ -94,6 +94,9 @@ actions!(
         ToggleTimeline,
         ToggleGpuPreview,
         ShowEffects,
+        ShowElements,
+        ShowTitles,
+        ShowPlugins,
         FitViewer,
         ToggleSafeAreas,
         KeyboardShortcuts,
@@ -482,7 +485,7 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &FocusLibrary, window, cx| {
         this.dock.left_open = true;
-        this.select_left_tab(LeftTab::Assets, cx);
+        this.select_left_tab(LeftTab::Media, cx);
         window.focus(&this.panel_focus[3], cx);
     }))
     .on_action(cx.listener(|this, _: &FocusEffects, window, cx| {
@@ -516,7 +519,23 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         this.toggle_gpu_preview(cx);
     }))
     .on_action(cx.listener(|this, _: &ShowEffects, _window, cx| {
+        this.dock.left_open = true;
         this.select_left_tab(LeftTab::Effects, cx);
+    }))
+    .on_action(cx.listener(|this, _: &ShowElements, window, cx| {
+        this.dock.left_open = true;
+        this.select_left_tab(LeftTab::Elements, cx);
+        window.focus(&this.panel_focus[3], cx);
+    }))
+    .on_action(cx.listener(|this, _: &ShowTitles, window, cx| {
+        this.dock.left_open = true;
+        this.select_left_tab(LeftTab::Titles, cx);
+        window.focus(&this.panel_focus[3], cx);
+    }))
+    .on_action(cx.listener(|this, _: &ShowPlugins, window, cx| {
+        this.dock.left_open = true;
+        this.select_left_tab(LeftTab::Plugins, cx);
+        window.focus(&this.panel_focus[3], cx);
     }))
     .on_action(cx.listener(|this, _: &FitViewer, window, cx| {
         if this.fields.any_focused(window, cx) {

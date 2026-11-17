@@ -120,6 +120,16 @@ fn preview(
     Ok(Arc::new(RenderImage::new([image::Frame::new(rgba)])))
 }
 
+pub(super) fn element_group(kind: MathObjectKind) -> &'static str {
+    match kind {
+        MathObjectKind::Latex | MathObjectKind::Text => "Text & formulas",
+        MathObjectKind::Plot | MathObjectKind::Cartesian | MathObjectKind::Polar => {
+            "Graphs & grids"
+        }
+        _ => "Shapes & geometry",
+    }
+}
+
 impl Editor {
     pub(super) fn add_math_default(
         &mut self,
@@ -246,7 +256,21 @@ impl Editor {
                     "Choose an object to configure. + adds defaults; drag a preview to the timeline.",
                 ),
         );
-        for (i, kind) in MathObjectKind::ALL.into_iter().enumerate() {
+        let mut previous_group = "";
+        for (i, kind) in self.element_kinds() {
+            let group = element_group(kind);
+            if group != previous_group {
+                cards = cards.child(
+                    div()
+                        .w_full()
+                        .pt_2()
+                        .text_size(style::type_size::XS)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(hex(color::TEXT_SECONDARY))
+                        .child(group),
+                );
+                previous_group = group;
+            }
             let mut thumbnail = div()
                 .h(px(76.))
                 .w_full()
@@ -266,6 +290,7 @@ impl Editor {
             cards = cards.child(
                 div()
                     .id(("math-card", i))
+                    .debug_selector(move || format!("element-card-{i}"))
                     .w(relative(if self.dock.left_width >= 240. {
                         0.48
                     } else {
@@ -279,6 +304,8 @@ impl Editor {
                     .cursor_pointer()
                     .focusable()
                     .tab_index(0)
+                    .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
+                    .focus_visible(|s| s.border_color(hex(color::ACCENT)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.pool_drag = None;
                         this.open_math(kind, None, window, cx);
@@ -315,6 +342,7 @@ impl Editor {
                             )
                             .child(
                                 Button::new(("math-default", i))
+                                    .debug_selector(move || format!("element-default-{i}"))
                                     .ghost()
                                     .compact()
                                     .icon(icons::icon(IconName::Plus))

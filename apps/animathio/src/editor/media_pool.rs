@@ -4,13 +4,17 @@ use super::*;
 use crate::style::{color, hex};
 use gpui_component::input::{Input, InputEvent, InputState};
 
+/// Search text for the Effects tab's built-in Write on button.
+const WRITE_ON_SEARCH: &str = "Animations Write on LaTeX";
+
 #[derive(Default)]
 pub(super) struct MediaView {
     list: bool,
-    query: String,
+    pub(super) tab_focus: Vec<FocusHandle>,
+    pub(super) queries: [String; 5],
     kind: &'static str,
-    search: Option<Entity<InputState>>,
-    subscription: Option<Subscription>,
+    pub(super) searches: [Option<Entity<InputState>>; 5],
+    subscriptions: Vec<Subscription>,
     thumbnails: BTreeMap<AssetId, Option<MediaThumbnail>>,
     hovered: Option<(AssetId, usize)>,
 }
@@ -421,16 +425,27 @@ impl Editor {
         self.media_view
             .thumbnails
             .retain(|id, _| self.project.assets().contains_key(id));
-        if self.media_view.search.is_none() {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search media…"));
-            self.media_view.subscription =
-                Some(cx.subscribe(&input, |this, input, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        this.media_view.query = input.read(cx).value().to_string();
-                        cx.notify();
-                    }
-                }));
-            self.media_view.search = Some(input);
+        if self.media_view.tab_focus.is_empty() {
+            self.media_view.tab_focus = LeftTab::ALL
+                .into_iter()
+                .map(|_| cx.focus_handle())
+                .collect();
+        }
+        let tab = self.left_tab;
+        let index = tab as usize;
+        if self.media_view.searches[index].is_none() {
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(format!("Search {}…", tab.label().to_lowercase()))
+            });
+            let subscription = cx.subscribe(&input, move |this, input, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.media_view.queries[index] = input.read(cx).value().to_string();
+                    cx.notify();
+                }
+            });
+            self.media_view.subscriptions.push(subscription);
+            self.media_view.searches[index] = Some(input);
         }
         // One worker processes missing cards in order, bounded to 128 cached assets.
         let missing: Vec<_> = self
@@ -482,16 +497,19 @@ impl Editor {
             .flex_1()
             .w_full()
             .p_1()
-            .id("media-body")
+            .id(("media-body", self.left_tab as usize))
+            .debug_selector(|| "library-body".into())
             .overflow_y_scroll();
         match self.left_tab {
-            LeftTab::Math => {
-                body = body.child(self.math_cards(cx));
+            LeftTab::Elements => {
+                body = body
+                    .child(self.math_cards(cx))
+                    .child(self.plugin_element_cards(cx));
             }
             LeftTab::Titles => {
                 body = body.child(self.title_cards(cx));
             }
-            LeftTab::Assets => {
+            LeftTab::Media => {
                 let assets: Vec<_> = self
                     .project
                     .assets()
@@ -500,7 +518,7 @@ impl Editor {
                         media_matches(
                             &asset.name,
                             &asset.media_type,
-                            &self.media_view.query,
+                            &self.media_view.queries[LeftTab::Media as usize],
                             self.media_view.kind,
                         )
                     })
@@ -725,91 +743,50 @@ impl Editor {
                 body = body.child(cards);
             }
             LeftTab::Plugins => {
-                body = body.child(
-                    Button::new("write-on-preset")
-                        .icon(icons::icon(IconName::PenLine))
-                        .label("Write on…")
-                        .tooltip("Animate the selected LaTeX clip")
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.open_write_on(window, cx)),
-                        ),
-                );
-                if self.plugins.is_empty() {
-                    body = body.child(empty_state("No clip plugins loaded", cx));
-                }
-                let mut cards = div().flex().flex_wrap().gap_2().w_full().pt_1();
-                for descriptor in &self.plugins {
-                    let id = descriptor.id.clone();
-                    let drop_id = id.clone();
-                    let name = descriptor.name.clone();
-                    // Match the plugin's own name, not the reverse-domain prefix (which
-                    // contains "math" for every first-party plugin).
-                    let short = id.rsplit('.').next().unwrap_or(&id);
-                    let icon = if short.contains("latex") || short.contains("math") {
-                        IconName::Sigma
-                    } else if short.contains("graph") {
-                        IconName::ChartNoAxesColumn
-                    } else if short.contains("shape") {
-                        IconName::Shapes
-                    } else if short.contains("text") {
-                        IconName::Type
-                    } else {
-                        IconName::Puzzle
-                    };
-                    cards = cards.child(
-                        div()
-                            .id(SharedString::from(format!("plugin-{id}")))
-                            .flex_1()
-                            .min_w(gpui::rems(6.933))
-                            .max_w(px(176.))
-                            .rounded(px(6.))
-                            .overflow_hidden()
-                            .border_1()
-                            .border_color(hex(color::BORDER))
-                            .bg(hex(color::RAISED))
-                            .cursor_pointer()
-                            .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
-                            .child(
-                                div()
-                                    .h(gpui::rems(4.267))
-                                    .bg(hex(color::BG))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(
-                                        icons::icon(icon)
-                                            .size(gpui::rems(1.733))
-                                            .text_color(hex(color::CLIP_PLUGIN)),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .p_2()
-                                    .text_size(crate::style::type_size::XS)
-                                    .truncate()
-                                    .text_color(hex(color::TEXT))
-                                    .child(name),
-                            )
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                this.pool_drag = None;
-                                this.add_plugin_clip_by_id(&id, cx);
-                            }))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                                    this.arm_pool_drag(PoolDrag::Plugin(drop_id.clone()), cx);
-                                }),
-                            ),
-                    );
-                }
-                body = body.child(cards);
+                body = body.child(self.plugin_inventory(cx));
             }
             LeftTab::Effects => {
-                let effects = self.available_effects();
-                let audio_effects = self.available_audio_effects();
+                let effects: Vec<_> = self
+                    .available_effects()
+                    .into_iter()
+                    .filter(|e| {
+                        self.library_matches(LeftTab::Effects, &format!("Video effects {}", e.name))
+                    })
+                    .collect();
+                let audio_effects: Vec<_> = self
+                    .available_audio_effects()
+                    .into_iter()
+                    .filter(|e| {
+                        self.library_matches(LeftTab::Effects, &format!("Audio effects {}", e.name))
+                    })
+                    .collect();
                 let animations = self.animation_library_rows(cx);
-                if effects.is_empty() && audio_effects.is_empty() && animations.is_empty() {
-                    body = body.child(empty_state("No effect plugins loaded", cx));
+                let has_transitions = ["Video fades", "Audio fades", "Video + audio fades"]
+                    .iter()
+                    .any(|label| {
+                        self.library_matches(LeftTab::Effects, &format!("Transitions {label}"))
+                    });
+                let searching = !self.media_view.queries[LeftTab::Effects as usize]
+                    .trim()
+                    .is_empty();
+                let no_plugin_rows =
+                    effects.is_empty() && audio_effects.is_empty() && animations.is_empty();
+                // Transitions and Write on are built in, so they never count as loaded plugins.
+                if searching {
+                    if no_plugin_rows
+                        && !has_transitions
+                        && !self.library_matches(LeftTab::Effects, WRITE_ON_SEARCH)
+                    {
+                        body = body.child(
+                            empty_state("No matching effects", cx)
+                                .debug_selector(|| "effects-empty".into()),
+                        );
+                    }
+                } else if no_plugin_rows {
+                    body = body.child(
+                        empty_state("No effect plugins loaded", cx)
+                            .debug_selector(|| "effects-empty".into()),
+                    );
                 }
                 let group = |label: &'static str| {
                     div()
@@ -839,6 +816,7 @@ impl Editor {
                     let (click_plugin, click_effect) = (plugin.clone(), effect.clone());
                     body = body.child(
                         div()
+                            .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
                             .px_2()
                             .py_1()
                             .cursor_pointer()
@@ -849,7 +827,23 @@ impl Editor {
                             .gap_2()
                             .child(icons::icon(icon).small())
                             .child(descriptor.name)
-                            .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
+                            .debug_selector({
+                                let key = format!("effect-item-{plugin}-{effect}");
+                                move || key.clone()
+                            })
+                            .focusable()
+                            .tab_index(0)
+                            .focus_visible(|s| s.bg(cx.theme().muted))
+                            .on_key_down({
+                                let plugin = plugin.clone();
+                                let effect = effect.clone();
+                                cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        this.add_effect_to_selected(&plugin, &effect, cx);
+                                        cx.stop_propagation();
+                                    }
+                                })
+                            })
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.add_effect_to_selected(&click_plugin, &click_effect, cx);
                             }))
@@ -867,7 +861,83 @@ impl Editor {
                             ),
                     );
                 }
+                let transitions: Vec<_> = [
+                    (
+                        "video",
+                        "Video fades",
+                        IconName::Film,
+                        fades::TransitionKind::Video,
+                    ),
+                    (
+                        "audio",
+                        "Audio fades",
+                        IconName::AudioWaveform,
+                        fades::TransitionKind::Audio,
+                    ),
+                    (
+                        "both",
+                        "Video + audio fades",
+                        IconName::Layers,
+                        fades::TransitionKind::Both,
+                    ),
+                ]
+                .into_iter()
+                .filter(|(_, label, _, _)| {
+                    self.library_matches(LeftTab::Effects, &format!("Transitions {label}"))
+                })
+                .collect();
+                if !transitions.is_empty() {
+                    body = body.child(group("Transitions"));
+                }
+                for (key, label, icon, kind) in transitions {
+                    let key_down = cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.apply_default_transition(None, kind, cx);
+                            cx.stop_propagation();
+                        }
+                    });
+                    body = body.child(
+                        div()
+                            .id(SharedString::from(format!("library-transition-{key}")))
+                            .debug_selector(move || format!("library-transition-{key}"))
+                            .px_2()
+                            .py_1()
+                            .cursor_pointer()
+                            .hover(|this| this.bg(cx.theme().muted))
+                            .focus_visible(|s| s.bg(cx.theme().muted))
+                            .focusable()
+                            .tab_index(0)
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(icons::icon(icon).small())
+                            .child(label)
+                            .tooltip(|window, cx| {
+                                gpui_component::tooltip::Tooltip::new(
+                                    "Apply one-second fades to the selected clips",
+                                )
+                                .build(window, cx)
+                            })
+                            .on_key_down(key_down)
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.apply_default_transition(None, kind, cx);
+                            })),
+                    );
+                }
                 body = body.children(animations);
+                if self.library_matches(LeftTab::Effects, WRITE_ON_SEARCH) {
+                    body = body.child(
+                        Button::new("write-on-preset")
+                            .debug_selector(|| "library-write-on".into())
+                            .icon(icons::icon(IconName::PenLine))
+                            .label("Write on…")
+                            .tooltip("Animate the selected LaTeX clip")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_write_on(window, cx)),
+                            ),
+                    );
+                }
             }
         }
         div()
@@ -887,51 +957,59 @@ impl Editor {
             }))
             .bg(hex(color::PANEL))
             .child(tab_row)
-            .when(
-                !matches!(self.left_tab, LeftTab::Titles | LeftTab::Math),
-                |pane| {
-                    pane.child(
-                        div()
-                            .px_2()
-                            .py_2()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Input::new(
-                                        self.media_view.search.as_ref().expect("search state"),
-                                    )
-                                    .small(),
-                                ),
-                            )
-                            .child(
-                                icon_button(
-                                    "pool-grid",
-                                    icons::icon(IconName::LayoutGrid),
-                                    "Thumbnail grid",
-                                    cx.listener(|this, _, _, cx| {
-                                        this.media_view.list = false;
-                                        cx.notify();
-                                    }),
-                                )
-                                .selected(!self.media_view.list),
-                            )
-                            .child(
-                                icon_button(
-                                    "pool-list",
-                                    icons::icon(IconName::List),
-                                    "List view",
-                                    cx.listener(|this, _, _, cx| {
-                                        this.media_view.list = true;
-                                        cx.notify();
-                                    }),
-                                )
-                                .selected(self.media_view.list),
-                            ),
-                    )
+            .child(
+                div()
+                    .px_2()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .gap_1()
                     .child(
-                        div().px_2().pb_2().flex().gap_1().children(
+                        div().flex_1().min_w_0().child(
+                            Input::new(
+                                self.media_view.searches[index]
+                                    .as_ref()
+                                    .expect("search state"),
+                            )
+                            .small(),
+                        ),
+                    )
+                    .when(self.left_tab == LeftTab::Media, |row| {
+                        row.child(
+                            icon_button(
+                                "pool-grid",
+                                icons::icon(IconName::LayoutGrid),
+                                "Thumbnail grid",
+                                cx.listener(|this, _, _, cx| {
+                                    this.media_view.list = false;
+                                    cx.notify();
+                                }),
+                            )
+                            .selected(!self.media_view.list),
+                        )
+                        .child(
+                            icon_button(
+                                "pool-list",
+                                icons::icon(IconName::List),
+                                "List view",
+                                cx.listener(|this, _, _, cx| {
+                                    this.media_view.list = true;
+                                    cx.notify();
+                                }),
+                            )
+                            .selected(self.media_view.list),
+                        )
+                    }),
+            )
+            .when(self.left_tab == LeftTab::Media, |pane| {
+                pane.child(
+                    div()
+                        .debug_selector(|| "media-kind-filters".into())
+                        .px_2()
+                        .pb_2()
+                        .flex()
+                        .gap_1()
+                        .children(
                             [
                                 ("", "All"),
                                 ("video/", "Video"),
@@ -951,10 +1029,282 @@ impl Editor {
                                     }))
                             }),
                         ),
-                    )
-                },
-            )
+                )
+            })
             .child(body)
+    }
+
+    pub(super) fn library_matches(&self, tab: LeftTab, text: &str) -> bool {
+        text.to_lowercase().contains(
+            self.media_view.queries[tab as usize]
+                .trim()
+                .to_lowercase()
+                .as_str(),
+        )
+    }
+
+    pub(super) fn element_kinds(&self) -> Vec<(usize, animathio_control::MathObjectKind)> {
+        use animathio_control::MathObjectKind;
+        let mut kinds: Vec<_> = MathObjectKind::ALL
+            .into_iter()
+            .enumerate()
+            .filter(|(_, kind)| {
+                self.library_matches(
+                    LeftTab::Elements,
+                    &format!("{} {}", math::element_group(*kind), kind.label()),
+                )
+            })
+            .collect();
+        kinds.sort_by_key(|(_, kind)| match math::element_group(*kind) {
+            "Text & formulas" => 0,
+            "Shapes & geometry" => 1,
+            _ => 2,
+        });
+        kinds
+    }
+
+    /// First-party sources with a dedicated object card never appear a second time.
+    /// Shapes retains its generic card for rectangle, star and arrow authoring.
+    pub(super) fn element_plugin_sources(&self) -> Vec<&PluginDescriptor> {
+        self.plugins
+            .iter()
+            .filter(|p| {
+                !matches!(
+                    p.id.as_str(),
+                    "org.animathio.text" | "org.animathio.latex" | "org.animathio.graph"
+                )
+            })
+            .filter(|p| {
+                self.library_matches(
+                    LeftTab::Elements,
+                    &format!(
+                        "{} {}",
+                        p.name,
+                        if p.id == "org.animathio.shapes" {
+                            "Shapes & geometry"
+                        } else {
+                            "Plugins"
+                        }
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    fn plugin_element_cards(&self, cx: &mut Context<Self>) -> Div {
+        let mut cards = div().flex().flex_col().gap_2().p_2();
+        for (first_party, label) in [(true, "More shapes"), (false, "Plugins")] {
+            let sources: Vec<_> = self
+                .element_plugin_sources()
+                .into_iter()
+                .filter(|p| (p.id == "org.animathio.shapes") == first_party)
+                .collect();
+            if sources.is_empty() {
+                continue;
+            }
+            cards = cards.child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(hex(color::TEXT_SECONDARY))
+                    .child(label),
+            );
+            for descriptor in sources {
+                let id = descriptor.id.clone();
+                let drag = id.clone();
+                let keyboard = id.clone();
+                let add = id.clone();
+                let add_id = id.clone();
+                let selector = format!("element-plugin-{id}");
+                cards = cards.child(
+                    div()
+                        .id(SharedString::from(selector.clone()))
+                        .debug_selector(move || selector.clone())
+                        .p_2()
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(hex(color::BORDER))
+                        .bg(hex(color::RAISED))
+                        .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
+                        .focusable()
+                        .tab_index(0)
+                        .cursor_pointer()
+                        .focus_visible(|s| s.border_color(hex(color::ACCENT)))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.add_plugin_clip_by_id(&keyboard, cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.pool_drag = None;
+                            this.add_plugin_clip_by_id(&id, cx);
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.arm_pool_drag(PoolDrag::Plugin(drag.clone()), cx);
+                            }),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    icons::icon(if first_party {
+                                        IconName::Shapes
+                                    } else {
+                                        IconName::Puzzle
+                                    })
+                                    .small(),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(crate::style::type_size::XS)
+                                        .child(descriptor.name.clone()),
+                                )
+                                .child(
+                                    Button::new(SharedString::from(format!("add-element-{add}")))
+                                        .debug_selector(move || format!("add-element-{add}"))
+                                        .ghost()
+                                        .compact()
+                                        .icon(icons::icon(IconName::Plus))
+                                        .tooltip("Add with defaults at playhead")
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.pool_drag = None;
+                                            this.add_plugin_clip_by_id(&add_id, cx);
+                                            cx.stop_propagation();
+                                        })),
+                                ),
+                        ),
+                );
+            }
+        }
+        cards
+    }
+
+    fn plugin_inventory(&self, cx: &mut Context<Self>) -> Div {
+        let mut body = div().flex().flex_col().gap_2().p_2()
+            .debug_selector(|| "plugin-inventory".into())
+            .child(div().text_size(crate::style::type_size::XS).text_color(hex(color::TEXT_SECONDARY))
+                .child("Loaded plugins are enabled. Install .amplugin bundles in a plugin directory, then restart."))
+            .child(Button::new("plugin-catalog").small().ghost()
+                .icon(icons::icon(IconName::ExternalLink)).label("Browse AniMathIO/plugins")
+                .on_click(|_, _, cx| cx.open_url("https://github.com/AniMathIO/plugins")));
+        let Some(host) = &self.plugin_host else {
+            return body.child(empty_state("No plugins loaded", cx));
+        };
+        for id in host.loaded_plugin_ids() {
+            let Some(plugin) = host.get_plugin(&id) else {
+                continue;
+            };
+            let kinds = plugin
+                .manifest
+                .kinds
+                .iter()
+                .map(|kind| match kind {
+                    PluginKind::ClipSource => "Clip source",
+                    PluginKind::Effect => "Video effects",
+                    PluginKind::AudioEffect => "Audio effects",
+                    PluginKind::AnimationPreset => "Animation presets",
+                    PluginKind::Importer => "Importer",
+                    _ => "Animation",
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let source_full = plugin
+                .source_path
+                .as_ref()
+                .map_or_else(|| "In-memory package".into(), |p| p.display().to_string());
+            // The bundle file name is what identifies the package; the full path is the tooltip.
+            let source = plugin
+                .source_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map_or_else(|| source_full.clone(), |n| n.to_string_lossy().into_owned());
+            let origin = if id.starts_with("org.animathio.") {
+                "First-party"
+            } else {
+                "Third-party"
+            };
+            if !self.library_matches(
+                LeftTab::Plugins,
+                &format!(
+                    "{} {} {} {} {} {}",
+                    id, plugin.manifest.name, plugin.manifest.version, kinds, source_full, origin
+                ),
+            ) {
+                continue;
+            }
+            let selector = format!("installed-{id}");
+            let source_tooltip = source_full.clone();
+            let id_tooltip = id.clone();
+            body = body.child(
+                div()
+                    .id(SharedString::from(selector.clone()))
+                    .debug_selector(move || selector.clone())
+                    .p_2()
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(hex(color::BORDER))
+                    .bg(hex(color::RAISED))
+                    .text_size(crate::style::type_size::XS)
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .items_center()
+                            .child(icons::icon(IconName::Puzzle).small())
+                            .child(div().flex_1().min_w_0().child(plugin.manifest.name.clone()))
+                            .child(
+                                div()
+                                    .text_color(hex(color::TEXT_SECONDARY))
+                                    .child(format!("v{} · Enabled", plugin.manifest.version)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("plugin-id-{id}")))
+                            .truncate()
+                            .child(id)
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(id_tooltip.clone())
+                                    .build(window, cx)
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_color(hex(color::TEXT_SECONDARY))
+                            .child(format!("{kinds} · {origin}")),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "plugin-source-{}",
+                                plugin.manifest.id
+                            )))
+                            .truncate()
+                            .text_color(hex(color::TEXT_MUTED))
+                            .child(source)
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(source_tooltip.clone())
+                                    .build(window, cx)
+                            }),
+                    ),
+            );
+        }
+        for failure in host.load_failures() {
+            body = body.child(
+                div()
+                    .text_size(crate::style::type_size::XS)
+                    .text_color(hex(color::DANGER))
+                    .child(failure.clone()),
+            );
+        }
+        body
     }
 
     pub(super) fn pool_drag_ghost(&self, cx: &mut Context<Self>) -> Option<Div> {
