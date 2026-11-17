@@ -1,6 +1,6 @@
 //! WebAssembly Component Model plugin host runtime and registry for AniMathIO 2.0.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::num::NonZeroUsize;
@@ -85,6 +85,7 @@ mod colored_world {
 }
 
 mod audio;
+mod community;
 mod compat;
 mod discovery;
 mod effect_params;
@@ -92,6 +93,10 @@ mod effects;
 mod importers;
 mod presets;
 pub use audio::AudioEffectHandle;
+pub use community::{
+    CommunityError, CommunitySettings, CommunityStore, InstallOutcome, InstalledPlugin,
+    MAX_PACKAGE_BYTES, SETTINGS_ENV, SETTINGS_FILE, USER_DIR_ENV, settings_path, user_plugin_dir,
+};
 pub use discovery::{PluginDirectory, plugin_search_dirs};
 pub use effect_params::{mentions_effect_params, validate_effect_command};
 pub use effects::{EffectDescriptor, EffectHandle, EffectParam};
@@ -769,6 +774,28 @@ pub struct PluginHost {
     _epoch_ticker: Arc<EpochTicker>,
     /// One message per plugin package that was found but could not be loaded.
     load_failures: Vec<String>,
+    /// Ids of loaded plugins that came from the community folder (the only ones
+    /// [`Self::sync_community_plugins`] may unload).
+    community_ids: BTreeSet<String>,
+}
+
+/// What [`PluginHost::sync_community_plugins`] changed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommunitySync {
+    /// Community plugins that were loaded (new, or reloaded because the package changed).
+    pub loaded: Vec<String>,
+    /// Community plugins that were unloaded (disabled, switch off, removed or replaced).
+    pub unloaded: Vec<String>,
+    /// One message per enabled plugin or file that could not be loaded.
+    pub problems: Vec<String>,
+}
+
+impl CommunitySync {
+    /// Whether the set of loaded plugins changed (clips and inspector schemas may differ).
+    #[must_use]
+    pub fn changed(&self) -> bool {
+        !self.loaded.is_empty() || !self.unloaded.is_empty()
+    }
 }
 
 impl PluginHost {
@@ -842,6 +869,7 @@ impl PluginHost {
             cache_misses: AtomicUsize::new(0),
             _epoch_ticker: epoch_ticker,
             load_failures: Vec::new(),
+            community_ids: BTreeSet::new(),
         })
     }
 
@@ -898,7 +926,20 @@ impl PluginHost {
     /// directory, an unreadable directory, or a package that failed to load. Optional
     /// directories that simply do not exist are not problems. An empty list does not
     /// mean any plugin was found; clips of a missing plugin fail at export.
+    ///
+    /// The per-user community folder is gated by the trust settings at their default
+    /// location; see [`Self::load_discovered_plugins_with`].
     pub fn load_discovered_plugins(&mut self) -> Vec<String> {
+        let store = CommunityStore::at_default_location(None).ok();
+        self.load_discovered_plugins_with(store.as_ref())
+    }
+
+    /// [`Self::load_discovered_plugins`] with an explicit community store (the editor passes
+    /// its own configuration directory). `None` loads no community plugins.
+    pub fn load_discovered_plugins_with(
+        &mut self,
+        community: Option<&CommunityStore>,
+    ) -> Vec<String> {
         let mut problems = Vec::new();
         if let Some(path) = discovery::invalid_override_dir() {
             problems.push(format!(
@@ -907,21 +948,122 @@ impl PluginHost {
             ));
         }
         for dir in plugin_search_dirs() {
+            if dir.community {
+                continue;
+            }
             let before = self.load_failures.len();
             if let Err(error) = self.load_plugin_directory(&dir) {
                 problems.push(format!("plugins in {}: {error}", dir.path.display()));
             }
             problems.extend(self.load_failures[before..].iter().cloned());
         }
+        if let Some(store) = community {
+            problems.extend(self.sync_community_plugins(store).problems);
+        }
         problems
+    }
+
+    /// Reconcile the loaded community plugins with the trust settings, without a restart.
+    ///
+    /// With the global switch off every community plugin is unloaded and the folder is not
+    /// read. With it on, each installed plugin the user enabled is loaded (or reloaded when its
+    /// package changed) and every other community plugin is unloaded. First-party and
+    /// override-directory plugins are never touched. Unloading drops the plugin's clip source,
+    /// effects, presets and importer registrations, so clips that use it render as the missing
+    /// plugin placeholder until it is enabled again; the caller re-renders.
+    pub fn sync_community_plugins(&mut self, store: &CommunityStore) -> CommunitySync {
+        let settings = store.settings();
+        let mut report = CommunitySync::default();
+        let mut desired = Vec::new();
+        if settings.enabled {
+            let (installed, problems) = store.list();
+            report.problems.extend(problems);
+            desired = installed
+                .into_iter()
+                .filter(|plugin| settings.plugins.contains(&plugin.id))
+                .collect::<Vec<_>>();
+        }
+        for id in self.community_ids.clone() {
+            if !desired.iter().any(|plugin| plugin.id == id) {
+                self.unload_plugin(&id);
+                report.unloaded.push(id);
+            }
+        }
+        for plugin in desired {
+            let result = (|| {
+                let package = community::read_selected_package(&plugin.path, &plugin.id)
+                    .map_err(|error| HostError::InvalidOutput(error.to_string()))?;
+                check_plugin_id(&package.manifest.id, false)?;
+                let id = package.manifest.id.clone();
+                if let Some(loaded) = self.plugins.get(&id) {
+                    let same = *blake3::hash(&package.wasm_bytes).as_bytes() == loaded.wasm_hash
+                        && package.manifest == loaded.manifest;
+                    if !self.community_ids.contains(&id) || same {
+                        // Already loaded from another directory, or unchanged.
+                        return if same {
+                            Ok(None)
+                        } else {
+                            Err(HostError::DuplicateId(id))
+                        };
+                    }
+                    self.unload_plugin(&id);
+                    report.unloaded.push(id.clone());
+                }
+                self.load_plugin_package(package)?;
+                self.community_ids.insert(id.clone());
+                Ok(Some(id))
+            })();
+            match result {
+                Ok(Some(id)) => report.loaded.push(id),
+                Ok(None) => {}
+                Err(error) => {
+                    let message = format!(
+                        "community plugin {} was not loaded: {error}",
+                        plugin.path.display()
+                    );
+                    log::warn!("{message}");
+                    self.load_failures.push(message.clone());
+                    report.problems.push(message);
+                }
+            }
+        }
+        if report.changed() {
+            self.output_cache.clear();
+        }
+        report
+    }
+
+    /// Remove a loaded plugin: its clip source, effects, audio effects, animation presets and
+    /// importer. Returns whether a plugin with that id was loaded. Renderers and mixers that
+    /// already hold an effect handle see the removal immediately (the registries are shared).
+    pub fn unload_plugin(&mut self, plugin_id: &str) -> bool {
+        let existed = self.plugins.remove(plugin_id).is_some();
+        self.effects.unregister(plugin_id);
+        self.audio_effects.unregister(plugin_id);
+        self.presets.remove(plugin_id);
+        self.importers.remove(plugin_id);
+        self.community_ids.remove(plugin_id);
+        existed
+    }
+
+    /// Whether `plugin_id` is loaded from the community folder.
+    #[must_use]
+    pub fn is_community_plugin(&self, plugin_id: &str) -> bool {
+        self.community_ids.contains(plugin_id)
     }
 
     /// Load a discovered directory, enforcing its reserved-id policy before
     /// compiling or instantiating any component.
+    ///
+    /// The community folder ([`PluginDirectory::community`]) is never loaded wholesale: this
+    /// returns no ids for it. Use [`Self::sync_community_plugins`].
     pub fn load_plugin_directory(
         &mut self,
         dir: &PluginDirectory,
     ) -> Result<Vec<String>, HostError> {
+        if dir.community {
+            return Ok(Vec::new());
+        }
         self.load_directory(&dir.path, dir.allow_reserved_ids)
     }
 
@@ -1862,7 +2004,7 @@ fn typeset_verb_to_wit(verb: &TypesetVerb) -> wit_types::PathVerb {
     }
 }
 
-fn check_plugin_id(id: &str, allow_reserved: bool) -> Result<(), HostError> {
+pub(crate) fn check_plugin_id(id: &str, allow_reserved: bool) -> Result<(), HostError> {
     if !allow_reserved && id.starts_with("org.animathio.") {
         return Err(HostError::ReservedId(id.to_owned()));
     }

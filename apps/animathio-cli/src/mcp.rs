@@ -1704,6 +1704,15 @@ impl McpServer {
     }
 
     #[tool(
+        description = "List the loaded bundled plugins and the installed community plugins: id, name, version, description, kinds, source (bundled or community), enabled, loaded; plus community_enabled, the global community plugins switch. Read-only: installing and enabling plugins is done by the user in the editor or with animathio-cli plugins."
+    )]
+    async fn list_plugins(&self) -> Result<CallToolResult, McpError> {
+        let mut backend = self.backend.lock().await;
+        let listing = backend.plugins_list().map_err(mcp_error)?;
+        tool_text(json!(listing))
+    }
+
+    #[tool(
         description = "List the audio effects provided by loaded audio-effect plugins: plugin id, effect id, name, description and numeric parameters (id, min, max, default). Pass the plugin and effect ids to add_audio_effect."
     )]
     async fn list_audio_effects(&self) -> Result<CallToolResult, McpError> {

@@ -5,6 +5,7 @@ mod markers;
 mod math_objects;
 mod mcp;
 mod noise;
+mod plugins;
 mod reframe;
 mod retime;
 mod scenes;
@@ -169,6 +170,11 @@ enum Action {
         #[command(subcommand)]
         action: AnimationAction,
     },
+    /// Install, enable, disable and remove community plugins, and switch them on or off.
+    Plugins {
+        #[command(subcommand)]
+        action: plugins::PluginsAction,
+    },
     /// Transcribe speech locally (no cloud) and write SRT/WebVTT or add subtitle clips.
     Transcribe {
         #[command(flatten)]
@@ -312,6 +318,7 @@ fn main() -> ExitCode {
 #[allow(clippy::too_many_lines)]
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Action::Plugins { action } => plugins::run(action)?,
         Action::SetClipSpeed { args } => retime::speed(&args)?,
         Action::FreezeFrame { args } => retime::hold(&args)?,
         Action::Templates {
