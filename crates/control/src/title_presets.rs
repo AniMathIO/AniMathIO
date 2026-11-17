@@ -69,12 +69,19 @@ pub struct TitleLayer {
     /// Font height relative to the shorter canvas dimension.
     #[serde(default)]
     pub size: f64,
+    /// CSS numeric font weight (400 when omitted).
+    #[serde(default = "regular_weight")]
+    pub weight: f64,
     /// Decorative bar or text-box height.
     #[serde(default)]
     pub height: f64,
     /// Decorative fill.
     #[serde(default)]
     pub color: [u8; 4],
+}
+
+fn regular_weight() -> f64 {
+    400.0
 }
 
 /// Parameters for `titles.add`; times are integer ticks.
@@ -168,6 +175,7 @@ pub fn title_preset_command(
                 let mut kind = animathio_plugin_api::sources::text(content.clone(), font, [255; 4]);
                 if let ClipKind::Plugin { params, .. } = &mut kind {
                     params["align"] = json!("center");
+                    params["font_weight"] = json!(layer.weight);
                     params["fit_width"] = json!(width);
                     params["fit_height"] = json!(layer.height);
                 }

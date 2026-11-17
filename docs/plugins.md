@@ -1073,7 +1073,7 @@ Notes for real plugins:
 
 ## First-party text and shapes
 
-`org.animathio.text` accepts `text`, `font_size`, `color`, `align` (`left`, `center`,
+`org.animathio.text` accepts `text`, `font_size`, `font_weight`, `color`, `align` (`left`, `center`,
 `right`), `units` (`pixels` or `normalized`) and `reveal` (0–1, default 1: the fraction
 of characters shown, keyframed by the typewriter presets; the visible prefix is laid
 out on its own, so left alignment keeps characters in place while they appear). Pixel mode retains centered outline
@@ -1194,3 +1194,5 @@ schema: `noise_profile` enables a learned profile (default 0 keeps adaptive trac
 band extends to Nyquist. Profiles come from a noise-only selection via the shared control
 analysis. They are project parameters, survive bounded mixer warm-up and save/reload,
 and apply at any output sample rate. Existing projects keep adaptive behaviour.
+
+Text plugin 1.3.0 adds numeric `font_weight` (100–900, default 400). Regular text retains DejaVu Sans; other weights use the bundled Inter variable font (SIL OFL), including genuine semibold, bold and extra bold outlines. Weighted normalized text uses a fitted outline box; explicit newlines are supported and long lines shrink to fit. Caption styles also honor weight. The plugin still uses ABI 1.2; no frozen WIT records or host imports changed.

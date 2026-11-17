@@ -343,5 +343,205 @@
         ]
       }
     ]
+  },
+  {
+    "id": "typography-title",
+    "name": "Title",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Title",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.07777777777777778,
+        "weight": 600,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-subtitle",
+    "name": "Subtitle",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Subtitle",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.044444444444444446,
+        "weight": 600,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-body",
+    "name": "Body",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Body",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03888888888888889,
+        "weight": 400,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-caption",
+    "name": "Caption",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Caption",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03333333333333333,
+        "weight": 400,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-heading-1",
+    "name": "Heading 1",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 1",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.06666666666666667,
+        "weight": 800,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-heading-2",
+    "name": "Heading 2",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 2",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.05555555555555555,
+        "weight": 800,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-heading-3",
+    "name": "Heading 3",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 3",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.05,
+        "weight": 800,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-heading-4",
+    "name": "Heading 4",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 4",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.044444444444444446,
+        "weight": 800,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-heading-5",
+    "name": "Heading 5",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 5",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03888888888888889,
+        "weight": 800,
+        "height": 0.2
+      }
+    ]
+  },
+  {
+    "id": "typography-heading-6",
+    "name": "Heading 6",
+    "animation": "fade",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 6",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03333333333333333,
+        "weight": 800,
+        "height": 0.2
+      }
+    ]
   }
 ]

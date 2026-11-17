@@ -714,22 +714,27 @@ fn built_text(
         }
         None => contrast_color(background),
     };
-    if let Some(weight) = element.properties.font_weight
-        && (weight - 400.0).abs() > 1e-9
-    {
-        report.warn(format!(
-            "element {}: fontWeight {weight} has no v2 text plugin equivalent; dropped",
-            element.id
-        ));
-    }
     if placement.rotation != 0.0 {
         report.warn(format!(
             "element {}: rotation is approximated as center-based",
             element.id
         ));
     }
+    let mut kind = animathio_plugin_api::sources::text(text, fraction, color);
+    if let Some(weight) = element.properties.font_weight {
+        if weight.is_finite() && (100.0..=900.0).contains(&weight) {
+            if let ClipKind::Plugin { params, .. } = &mut kind {
+                params["font_weight"] = serde_json::json!(weight);
+            }
+        } else {
+            report.warn(format!(
+                "element {}: invalid fontWeight; using 400",
+                element.id
+            ));
+        }
+    }
     Some((
-        animathio_plugin_api::sources::text(text, fraction, color),
+        kind,
         text_transform(placement, canvas_width, canvas_height),
         BTreeMap::new(),
         Vec::new(),

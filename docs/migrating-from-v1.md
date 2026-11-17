@@ -26,7 +26,7 @@ This describes authoring in 2.x; importing saved 1.x projects has the limitation
 | Video / image / audio resources, upload | Library → Media; Import media; kind filters, grid/list and drag to timeline | Moved |
 | Microphone audio recorder | Import recorded audio files in Media; no in-app recording ([#299](https://github.com/AniMathIO/AniMathIO/issues/299)) | Missing |
 | Plain text / Mafs text | Library → Elements → Text & formulas → Text; source and size in dialog/inspector | Moved |
-| Title, Subtitle, Body, Caption, Heading 1–6 typography | Titles has composition presets; Text has editable size; original styles and font weights await [#300](https://github.com/AniMathIO/AniMathIO/issues/300) | Missing |
+| Title, Subtitle, Body, Caption, Heading 1–6 typography | Titles includes all ten typography presets with normalized sizes and numeric font weights | Supported |
 | LaTeX, matrix source, formula colour | Elements → Text & formulas → LaTeX; source, snippets, templates and colour in dialog/inspector | Moved |
 | Natural-language → LaTeX (Gemini) | No equivalent; optional integration tracked in [#302](https://github.com/AniMathIO/AniMathIO/issues/302) | Missing |
 | Mafs point, line segment, vector, polygon, circle, ellipse | Elements → Shapes & geometry; each has a configurable dialog and inspector | Moved |
@@ -80,8 +80,7 @@ where they matter.
   `amount = 2`; the plugin must be installed to render them).
 - **Rotation is approximated as center-based.** v1 rotated around the Konva
   top-left corner; the importer warns and uses the element center.
-- **`fontWeight` is dropped** — the v2 text component has no weight
-  equivalent.
+- **`fontWeight` is preserved** as the text plugin’s `font_weight` (100–900). Invalid weights warn and use regular (400).
 - **Per-character text animation is flattened.** A character-level slide is
   imported as a whole-element slide (warning).
 - **`mafsReveal` is a fallback.** It becomes an opacity fade, not a path reveal.
