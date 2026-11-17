@@ -210,3 +210,104 @@ fn index_contract_checks_schema_size_metadata_and_numeric_versions() {
     );
     assert_eq!(store.list().0, []);
 }
+#[test]
+fn malformed_index_json_is_an_error_not_a_panic() {
+    for bytes in [
+        &b""[..],
+        b"{",
+        b"null",
+        b"[]",
+        br#"{"schema_version":"1"}"#,
+        br#"{"schema_version":1}"#,
+        br#"{"schema_version":1,"plugins":[{"id":1}],"delisted":[]}"#,
+        br#"{"schema_version":1,"plugins":[],"delisted":[{"id":"x"}]}"#,
+    ] {
+        assert!(registry::parse(bytes).is_err(), "{bytes:?}");
+    }
+    // Unknown extra fields are ignored (registry contract, schema 1).
+    let index = registry::parse(
+        br#"{"schema_version":1,"plugins":[],"delisted":[],"$schema":"x","generated":"y"}"#,
+    )
+    .unwrap();
+    assert!(index.plugins.is_empty());
+}
+#[test]
+fn a_download_with_the_wrong_hash_is_rejected_before_it_is_parsed() {
+    let entry = index().plugins.remove(0);
+    let root = tempfile::tempdir().unwrap();
+    let store = CommunityStore::new(root.path().join("plugins"), root.path().join("settings"));
+    // Right size, wrong bytes: not even a zip, so a parse-first install would report an
+    // archive error instead of the checksum.
+    let size = usize::try_from(entry.size).unwrap();
+    let download: Downloader = Arc::new(move |_, _| Ok(vec![0xAB; size]));
+    let error = entry.install(&store, &download, false).unwrap_err();
+    assert!(error.contains("sha-256 mismatch"), "{error}");
+    assert_eq!(store.list().0, []);
+}
+/// Live check against the real registry: Browse, install with SHA-256 verification, Enable and
+/// render a frame of the plugin's clip. Needs network access, so it only runs on request:
+/// `cargo test -p animathio --locked live_registry -- --ignored`
+/// (`ANIMATHIO_LIVE_FRAME=<path.png>` also saves the frame).
+#[gpui::test]
+#[ignore = "network: fetches the live community index and downloads a plugin"]
+fn live_registry_install_enable_and_render(cx: &mut TestAppContext) {
+    const LIVE: &str = "io.github.animathio.code-snippets";
+    let (mut ui, _root, store, _) = setup(cx);
+    ui.update(|e, _, cx| {
+        e.community.fetch = registry::fetcher();
+        e.community.download = registry::downloader();
+        e.set_community_plugins_enabled(true, cx).unwrap();
+        e.browse_community(cx);
+    });
+    ui.settle();
+    let entry = ui.read(|e| {
+        assert_eq!(e.community.error, None);
+        e.community
+            .index
+            .as_ref()
+            .expect("live index")
+            .plugins
+            .iter()
+            .find(|p| p.id == LIVE)
+            .cloned()
+            .expect("code-snippets listed")
+    });
+    assert!(entry.compatible().is_ok(), "{:?}", entry.compatible());
+    ui.update(|e, _, cx| e.install_community_entry(entry.clone(), cx));
+    ui.settle();
+    assert_eq!(ui.read(|e| e.community.error.clone()), None);
+    let installed = store.list().0;
+    assert_eq!(installed.len(), 1);
+    assert_eq!(installed[0].version, entry.version);
+    ui.update(|e, _, cx| e.toggle_community_plugin(LIVE.into(), true, cx));
+    ui.settle();
+    assert!(ui.read(|e| e.plugins.iter().any(|p| p.id == LIVE)));
+    ui.update(|e, _, cx| {
+        e.add_plugin_clip_by_id(LIVE, cx);
+        let clip = e.selected.expect("new clip selected");
+        let time = e.current_render_time();
+        let size = (640, 360);
+        let mut scene = e
+            .plugin_host
+            .as_mut()
+            .unwrap()
+            .resolve(&evaluate(&e.project, time), size);
+        scene.clips.retain(|c| c.id == clip);
+        assert_eq!(scene.clips.len(), 1);
+        assert!(
+            !matches!(scene.clips[0].kind, ClipKind::Plugin { .. }),
+            "enabled community plugin resolves its clip: {:?}",
+            scene.clips[0].kind
+        );
+        scene.background = [0, 0, 0, 0];
+        let mut ctx =
+            animathio_render::RenderCtx::from_assets(std::collections::BTreeMap::default())
+                .unwrap();
+        let frame = animathio_render::render(&scene, &mut ctx, size).unwrap();
+        let drawn = frame.pixels.chunks(4).filter(|p| p[3] != 0).count();
+        assert!(drawn > 100, "plugin clip drew {drawn} pixels");
+        if let Some(path) = std::env::var_os("ANIMATHIO_LIVE_FRAME") {
+            frame.save_png(path).unwrap();
+        }
+    });
+}

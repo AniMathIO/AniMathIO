@@ -580,33 +580,37 @@ impl Editor {
                     if on && enabled { "Enabled" } else { "Disabled" }
                 ))
                 .child(
+                    // Same layout as the "Community plugins" row: label left, switch right.
                     div()
                         .flex()
-                        .flex_wrap()
+                        .items_center()
                         .gap_2()
+                        .child(div().flex_1().child("Enabled"))
                         .child(
                             gpui_component::switch::Switch::new(SharedString::from(format!(
                                 "enable-{id}"
                             )))
-                            .label(if on { "Enabled" } else { "Enable" })
                             .checked(on)
                             .disabled(busy || !enabled)
-                            .on_change(cx.listener(
+                            .accessibility_label(format!("Enable {}", plugin.name))
+                            .on_click(cx.listener(
                                 move |this, checked: &bool, _, cx| {
                                     this.toggle_community_plugin(id.clone(), *checked, cx);
                                 },
                             )),
-                        )
-                        .child(
-                            Button::new(SharedString::from(format!("remove-{remove}")))
-                                .small()
-                                .ghost()
-                                .label("Remove")
-                                .disabled(busy)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.remove_community_plugin(remove.clone(), cx);
-                                })),
                         ),
+                )
+                .child(
+                    div().flex().child(
+                        Button::new(SharedString::from(format!("remove-{remove}")))
+                            .small()
+                            .ghost()
+                            .label("Remove")
+                            .disabled(busy)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_community_plugin(remove.clone(), cx);
+                            })),
+                    ),
                 );
             if let Some(index) = &self.community.index {
                 if let Some(entry) = index

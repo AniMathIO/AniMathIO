@@ -27,6 +27,7 @@ base64 = "0.22"
 directories = "6"
 log = "0.4"
 semver = "1"
+sha2 = "0.10"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 gpui.workspace = true
 gpui-component.workspace = true

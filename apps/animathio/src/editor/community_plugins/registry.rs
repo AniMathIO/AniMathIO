@@ -6,6 +6,7 @@ use std::time::Duration;
 use animathio_plugin_api::{PluginKind, PluginManifestToml, PluginPackage};
 use animathio_plugin_host::{CommunityError, CommunityStore, InstallOutcome, MAX_PACKAGE_BYTES};
 use serde::Deserialize;
+use sha2::Digest as _;
 
 pub(in crate::editor) const INDEX_URL: &str =
     "https://raw.githubusercontent.com/AniMathIO/plugins/main/community-index.json";
@@ -86,6 +87,15 @@ impl Entry {
                 if bytes.len() as u64 != self.size {
                     return Err(CommunityError::Download("Registry size mismatch".into()));
                 }
+                // Verify the index hash before parsing the untrusted archive at all;
+                // `install_bytes` checks it again before writing.
+                let actual = hex_lower(&sha2::Sha256::digest(&bytes));
+                if !self.sha256.eq_ignore_ascii_case(&actual) {
+                    return Err(CommunityError::HashMismatch {
+                        expected: self.sha256.to_ascii_lowercase(),
+                        actual,
+                    });
+                }
                 let package = PluginPackage::from_bytes(&bytes)?;
                 let m = &package.manifest;
                 if m.id != self.id
@@ -101,6 +111,13 @@ impl Entry {
             })
             .map_err(|e| e.to_string())
     }
+}
+fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 fn agent(redirects: u32) -> ureq::Agent {
     ureq::Agent::config_builder()

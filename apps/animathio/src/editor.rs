@@ -698,7 +698,18 @@ impl Editor {
                 }
                 self.open_autocut(cx);
             }
-            _ => eprintln!("unknown screenshot panel {panel:?}; expected markers or autocut"),
+            // The Library's Plugins tab (Installed), optionally with Browse opened. Browse
+            // fetches the index only when the Community plugins switch is already on.
+            "plugins" | "plugins-browse" => {
+                self.dock.left_open = true;
+                self.select_left_tab(LeftTab::Plugins, cx);
+                if panel == "plugins-browse" {
+                    self.browse_community(cx);
+                }
+            }
+            _ => eprintln!(
+                "unknown screenshot panel {panel:?}; expected markers, autocut, plugins or plugins-browse"
+            ),
         }
     }
 

@@ -39,7 +39,7 @@ Preferences. The first time you turn it on, an explanation states that third-par
 plugins run sandboxed with memory and time limits and are not audited by AniMathIO.
 
 **Installed** lists bundled plugins (always enabled) and installed community plugins.
-Use **Enable** to load an installed plugin, or switch it off to unload it. **Remove**
+Turn the **Enabled** switch on to load an installed plugin, or off to unload it. **Remove**
 deletes the community bundle. These actions update the preview without restarting;
 project clips retain their plugin reference and show a placeholder while it is missing.
 A missing-plugin notice above the workspace names the ids and opens plugin management;
@@ -59,7 +59,7 @@ delisted installed plugin shows the registry's reason and is never removed silen
 **Install from file...** uses the native file picker for a local `.amplugin` bundle;
 local files are validated but have no registry checksum to compare.
 
-| Installed (local example bundle) | Browse (offline registry fixture) |
+| Installed (Code Snippets, disabled) | Browse (live community index) |
 | --- | --- |
 | ![Installed community plugins](../docs/screenshots/editor-community-installed.png) | ![Browse community plugins](../docs/screenshots/editor-community-browse.png) |
 
