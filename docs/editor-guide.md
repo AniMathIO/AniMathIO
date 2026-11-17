@@ -298,6 +298,8 @@ text fields. All layers move together and insertion undoes in one step.
 Thumbnails render on the CPU in the background and are cached per canvas size.
 Text/shapes plugins are required; math titles also need the LaTeX plugin.
 
+Titles includes Title, Subtitle, Body, Caption and Heading 1–6 typography presets from 1.x. Sizes are normalized against a 360-high reference canvas (28, 16, 14, 12 and 24/20/18/16/14/12 respectively), adapting to the shorter canvas edge. Title and Subtitle use weight 600; headings use 800; Body and Caption use 400. Adding a preset is one undo step. Text clips expose Font weight in the inspector (100–900, default 400).
+
 New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
 launcher. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
 another tile starts that format. The launcher, project settings and export dialog
@@ -409,4 +411,3 @@ sha256sum -c SHA256SUMS
 
 Provenance of CI-built installers is attested with `actions/attest-build-provenance`
 (`gh attestation verify <file> --repo AniMathIO/AniMathIO`).
-

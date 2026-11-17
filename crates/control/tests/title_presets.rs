@@ -22,7 +22,7 @@ fn params(preset: &str) -> TitleAddParams {
 
 #[test]
 fn all_aspects_apply_as_one_linked_undo_step() {
-    assert_eq!(title_presets().len(), 8);
+    assert_eq!(title_presets().len(), 18);
     let mut ids = BTreeSet::new();
     for preset in title_presets() {
         assert!(ids.insert(&preset.id));
@@ -51,6 +51,12 @@ fn all_aspects_apply_as_one_linked_undo_step() {
             assert!(clips.iter().any(|c| c.id == added.clip_id));
             for (clip, layer) in clips.iter().zip(&preset.layers) {
                 assert!(matches!(clip.kind, ClipKind::Plugin { .. }));
+                if layer.kind == "text" {
+                    let ClipKind::Plugin { params, .. } = &clip.kind else {
+                        unreachable!()
+                    };
+                    assert_eq!(params["font_weight"], serde_json::json!(layer.weight));
+                }
                 assert_eq!(clip.range, params(&preset.id).range);
                 assert_eq!(clip.animations.len(), preset.curves.len());
                 if layer.kind == "text" {
@@ -74,7 +80,7 @@ fn all_aspects_apply_as_one_linked_undo_step() {
 fn controls_validate_fields_and_keep_fresh_link_groups() {
     let mut handler = HeadlessHandler::new();
     let list = handler.handle(Call::TitlesList).unwrap();
-    assert_eq!(list.as_array().unwrap().len(), 8);
+    assert_eq!(list.as_array().unwrap().len(), 18);
     let before = handler.project_get().unwrap().project;
     let mut p = params("lower_third");
     p.fields.insert("name".into(), "Jane Doe".into());
@@ -159,6 +165,7 @@ fn linked_title_moves_together_and_rejects_invalid_requests() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // One loop checks every preset, format and reference frame.
 fn title_cpu_goldens_and_safe_areas() {
     let mut host = animathio_plugin_host::test_support::host();
     let mut ctx = animathio_render::RenderCtx::default();
@@ -205,7 +212,15 @@ fn title_cpu_goldens_and_safe_areas() {
             }
             assert!(visible > 20 || id == "chapter_card", "empty preset {id}");
             if format == ExportPreset::Youtube1080p
-                && ["centered_title", "lower_third", "caption"].contains(&id)
+                && [
+                    "centered_title",
+                    "lower_third",
+                    "caption",
+                    "typography-title",
+                    "typography-heading-1",
+                    "typography-body",
+                ]
+                .contains(&id)
             {
                 let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
                 let path = root.join("golden").join(format!("title-{id}.png"));
