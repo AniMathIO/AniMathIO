@@ -40,7 +40,7 @@ fn speed_and_frame_hold_use_public_commands_and_refuse_overwrite() {
         "set-clip-speed",
         &input,
         &speed,
-        &["--speed", "2", "--reverse"],
+        &["--speed", "2", "--reverse", "--maintain-pitch", "false"],
     );
     assert!(
         result.status.success(),
@@ -58,6 +58,7 @@ fn speed_and_frame_hold_use_public_commands_and_refuse_overwrite() {
     let edited = load(&speed);
     let clip = &edited.tracks()[0].clips()[&ClipId(1)];
     assert!(clip.time_map.reverse);
+    assert!(!clip.maintain_pitch);
     assert_eq!(clip.range.end, Time(TICKS_PER_SECOND / 2));
     assert!(
         !run("set-clip-speed", &input, &speed, &["--speed", "1"])

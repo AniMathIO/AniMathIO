@@ -16,12 +16,14 @@ const CACHE_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) fn active(clip: &Clip) -> bool {
     clip.maintain_pitch
         && !clip.time_map.hold
-        && (clip.time_map.speed != ClipSpeed::default()
-            || clip
-                .time_map
+        && if clip.time_map.ramps.is_empty() {
+            clip.time_map.speed != ClipSpeed::default()
+        } else {
+            clip.time_map
                 .ramps
                 .iter()
-                .any(|p| p.speed != ClipSpeed::default()))
+                .any(|p| p.speed != ClipSpeed::default())
+        }
 }
 
 #[derive(Default)]
@@ -45,6 +47,22 @@ impl Cache {
                 self.bytes -= old.len() * 4;
             }
         }
+    }
+}
+
+/// Retain the two adjacent segments for a mix loop, even when one segment is
+/// larger than the shared cache budget at extreme rates/channel counts.
+#[derive(Default)]
+pub(crate) struct Segments([Option<(usize, Arc<Vec<f32>>)>; 2]);
+impl Segments {
+    pub(crate) fn get(&self, index: usize) -> Option<Arc<Vec<f32>>> {
+        self.0[index % 2]
+            .as_ref()
+            .filter(|(n, _)| *n == index)
+            .map(|(_, v)| Arc::clone(v))
+    }
+    pub(crate) fn insert(&mut self, index: usize, entry: Arc<Vec<f32>>) {
+        self.0[index % 2] = Some((index, entry));
     }
 }
 
@@ -73,13 +91,14 @@ pub(crate) fn render(
         let local = frame * i128::from(TICKS_PER_SECOND)
             - i128::from(clip.range.start.0) * i128::from(rate);
         let time = Time(
-            i64::try_from(local / i128::from(rate)).map_err(|e| Error::Invalid(e.to_string()))?,
+            i64::try_from(local.div_euclid(i128::from(rate)))
+                .map_err(|e| Error::Invalid(e.to_string()))?,
         );
-        let mut anchor =
-            i128::from(clip.source_time(time).0) * i128::from(rate) / i128::from(TICKS_PER_SECOND);
+        let mut position = i128::from(clip.source_time(time).0) * i128::from(rate);
         if clip.time_map.reverse {
-            anchor -= 1;
+            position -= i128::from(TICKS_PER_SECOND) - i128::from(rate);
         }
+        let anchor = position.div_euclid(i128::from(TICKS_PER_SECOND));
         let direction = if clip.time_map.reverse { -1 } else { 1 };
         let first =
             i128::from(clip.source_offset.0) * i128::from(rate) / i128::from(TICKS_PER_SECOND);
@@ -156,11 +175,35 @@ fn best_overlap(
             0.0
         };
         if score > best_score
-            || (score == best_score && offset.abs_diff(search) < best.abs_diff(search))
+            || (score.total_cmp(&best_score).is_eq()
+                && offset.abs_diff(search) < best.abs_diff(search))
         {
             best = offset;
             best_score = score;
         }
     }
     best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eviction_and_oversized_segments_remain_bounded() {
+        let mut cache = Cache::default();
+        let entry = Arc::new(vec![0.0; CACHE_BYTES / 8]);
+        cache.insert(1, 0, Arc::clone(&entry));
+        cache.insert(1, 1, Arc::clone(&entry));
+        cache.insert(1, 2, Arc::clone(&entry));
+        assert!(cache.bytes <= CACHE_BYTES);
+        assert!(cache.get(1, 0).is_none());
+        assert!(cache.get(1, 2).is_some());
+        let large = Arc::new(vec![0.0; CACHE_BYTES / 4 + 1]);
+        cache.insert(1, 3, Arc::clone(&large));
+        assert!(cache.get(1, 3).is_none());
+        let mut local = Segments::default();
+        local.insert(3, Arc::clone(&large));
+        assert!(Arc::ptr_eq(&local.get(3).unwrap(), &large));
+    }
 }

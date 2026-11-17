@@ -1344,6 +1344,7 @@ fn build_project(
         }
         .apply(&mut project)?;
         let clip = Clip {
+            maintain_pitch: true,
             link_group: None,
             id: clip_id,
             kind,

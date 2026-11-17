@@ -780,3 +780,43 @@ fn maintained_pitch_ramp_is_seek_independent_and_bypasses_identity() {
     assert_eq!(pieces, output);
     assert!(output.iter().all(|s| s.is_finite()));
 }
+
+#[test]
+fn stretching_keeps_split_phase_and_long_timeline_offsets() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let start = 10_000_000 * TICKS_PER_SECOND + 17 * tick;
+    let (mut p, pool) = project(&sine(rate), start, start + TICKS_PER_SECOND);
+    Command::SetClipSpeed {
+        id: ClipId(0),
+        speed: ClipSpeed::new(1, 2).unwrap(),
+        reverse: true,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let end = p.tracks()[0].clips()[&ClipId(0)].range.end.0;
+    let mixer = pool.prepare(rate, 1).unwrap();
+    let whole = mixer.mix(&p, range(start, end)).unwrap();
+    let at = Time(start + 12347 * tick + 17);
+    Command::SplitClip {
+        id: ClipId(0),
+        right_id: ClipId(1),
+        at,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(pool.mix(&p, range(start, end), rate, 1).unwrap(), whole);
+    // Gain/pitch edits invalidate the shared cache rather than reusing old output.
+    Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(
+        mixer.mix(&p, range(at.0, end)).unwrap(),
+        pool.mix(&p, range(at.0, end), rate, 1).unwrap()
+    );
+}

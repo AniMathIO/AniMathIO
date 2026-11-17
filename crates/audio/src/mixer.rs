@@ -374,6 +374,7 @@ impl Mixer {
             return Ok(());
         }
         let stretch_key = clip_key(self, clip, play);
+        let mut stretched = crate::stretch::Segments::default();
         let mut samples = Vec::with_capacity(channels);
         for frame in from..to {
             let timeline = frame as i128 * i128::from(TICKS_PER_SECOND);
@@ -397,7 +398,14 @@ impl Mixer {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
             if crate::stretch::active(clip) {
-                self.stretched_samples(clip, frame, stretch_key, &mut cursor, &mut samples)?;
+                self.stretched_samples(
+                    clip,
+                    frame,
+                    stretch_key,
+                    &mut cursor,
+                    &mut stretched,
+                    &mut samples,
+                )?;
             } else {
                 source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
             }
@@ -425,6 +433,7 @@ impl Mixer {
         let (clip_start, clip_end) = sample_bounds(play, self.rate)?;
         let ticks = i128::from(TICKS_PER_SECOND);
         let stretch_key = clip_key(self, clip, play);
+        let mut stretched = crate::stretch::Segments::default();
         let mut samples = Vec::with_capacity(channels);
         for frame in base.max(clip_start)..(base + EFFECT_BLOCK_FRAMES).min(clip_end) {
             let local =
@@ -441,7 +450,14 @@ impl Mixer {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
             if crate::stretch::active(clip) {
-                self.stretched_samples(clip, frame, stretch_key, &mut cursor, &mut samples)?;
+                self.stretched_samples(
+                    clip,
+                    frame,
+                    stretch_key,
+                    &mut cursor,
+                    &mut stretched,
+                    &mut samples,
+                )?;
             } else {
                 source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
             }
@@ -453,25 +469,31 @@ impl Mixer {
     }
 
     /// Read canonical WSOLA segments, blending independent histories at resets.
+    #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
     fn stretched_samples(
         &self,
         clip: &Clip,
         frame: usize,
         key: u64,
         cursor: &mut Cursor<'_>,
+        held: &mut crate::stretch::Segments,
         samples: &mut Vec<f32>,
     ) -> Result<(), Error> {
         let channels = usize::from(self.channels);
         let span = crate::stretch::segment_frames(self.rate);
         let segment = frame / span;
         let offset = frame % span;
-        let get = |index, cursor: &mut Cursor<'_>| -> Result<Arc<Vec<f32>>, Error> {
+        let mut get = |index, cursor: &mut Cursor<'_>| -> Result<Arc<Vec<f32>>, Error> {
+            if let Some(entry) = held.get(index) {
+                return Ok(entry);
+            }
             if let Some(entry) = self
                 .stretch_cache
                 .lock()
                 .expect("stretch cache lock")
                 .get(key, index)
             {
+                held.insert(index, Arc::clone(&entry));
                 return Ok(entry);
             }
             let entry = Arc::new(crate::stretch::render(
@@ -481,6 +503,7 @@ impl Mixer {
                 .lock()
                 .expect("stretch cache lock")
                 .insert(key, index, Arc::clone(&entry));
+            held.insert(index, Arc::clone(&entry));
             Ok(entry)
         };
         let current = get(segment, cursor)?;

@@ -2956,13 +2956,14 @@ mod retime_tests {
         server
             .set_clip_speed(Parameters(
                 serde_json::from_value(
-                    json!({"clip_id":1,"numerator":2,"denominator":1,"reverse":true}),
+                    json!({"clip_id":1,"numerator":2,"denominator":1,"reverse":true,"maintain_pitch":false}),
                 )
                 .unwrap(),
             ))
             .await
             .unwrap();
         let retimed = server.backend.lock().await.project_get().unwrap().project;
+        assert!(!retimed.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
         assert_eq!(
             retimed.tracks()[0].clips()[&ClipId(1)].range.end,
             Time(TICKS_PER_SECOND / 2)

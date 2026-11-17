@@ -375,7 +375,10 @@ flowchart LR
   layouts (ITU-R BS.775 fold-down to stereo, mono duplication, stereo mean). `Player` consumes the ring buffer and updates the latency-corrected
   master clock. The device callback only consumes the ring; `Player::now()` is
   quantized to callbacks and freezes on underflow. Clip and track audio-effect
-  chains run inside `Mixer::mix` (see [Audio effects](#audio-effects)).
+  chains run inside `Mixer::mix` (see [Audio effects](#audio-effects)). Before
+  clip effects, retimed clips with `Clip::maintain_pitch` enabled use bounded,
+  deterministic WSOLA segments; identity playback and disabled pitch preservation
+  retain their previous sampling paths (see [Clip retiming](#clip-retiming)).
 - **Export.** Export steps the render path frame by frame —
   `render(evaluate(project, t))` per frame plus the audio mixer's snapshot for
   each inter-frame block — and encodes with `media::Mp4Encoder`. It is never a

@@ -804,7 +804,9 @@ Options:
 
 Retimes a clip and linked companions while keeping their source ranges. Speed is
 an exact decimal or rational multiplier, 1/16–16x at millionth precision. Optional
-linear ramp keys use local timeline ticks. Audio uses pitch-shifting varispeed.
+linear ramp keys use local timeline ticks. Audio follows the clip pitch setting
+(on for new clips, off for migrated projects). Pass `--maintain-pitch true` or
+`--maintain-pitch false` to change it with the speed edit in one undo step.
 Without ripple, overlapping results fail; ripple shifts unlocked trailing clips.
 
 ```sh

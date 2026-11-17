@@ -515,7 +515,7 @@ fn schema_five_template_fit_is_promoted_without_changing_placement() {
 }
 
 #[test]
-fn schema_six_migrates_to_identity_speed_and_seven_roundtrips() {
+fn schema_six_migrates_to_identity_speed_and_current_schema_roundtrips() {
     use animathio_core::{ClipSpeed, ClipTimeMap, SpeedPoint};
     let mut project = Project::default();
     Command::AddTrack {
@@ -570,7 +570,7 @@ fn schema_six_migrates_to_identity_speed_and_seven_roundtrips() {
     write_json(&mut bytes, &project).unwrap();
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["schemaVersion"],
-        7
+        SCHEMA_VERSION
     );
     assert_eq!(read_json(bytes.as_slice()).unwrap(), project);
 }
