@@ -656,7 +656,7 @@ options after the colon):
 
 | Role | Presets |
 | --- | --- |
-| In / Out | fade (fade-in, fade-out: easing); slide (slide-in, slide-out: direction, distance, fade, easing); zoom (zoom-in, zoom-out: scale, fade, easing); pop (pop-in, pop-out: intensity overshoot); spin (spin-in, spin-out: turns, rotation, easing); bounce (bounce-in, bounce-out: from); wipe (wipe-in, wipe-out: direction, easing; an edge-anchored stretch reveal, not a mask); typewriter (typewriter-in, typewriter-out: text clips only, keyframes the text plugin's `reveal`) |
+| In / Out | clipped-slide (clipped-slide-in, clipped-slide-out: text only, direction, clip, easing); character-slide (character-slide-in, character-slide-out: staggered text, direction, clip, easing); fade (fade-in, fade-out: easing); slide (slide-in, slide-out: direction, distance, fade, easing); zoom (zoom-in, zoom-out: scale, fade, easing); pop (pop-in, pop-out: intensity overshoot); spin (spin-in, spin-out: turns, rotation, easing); bounce (bounce-in, bounce-out: from); wipe (wipe-in, wipe-out: direction, easing; an edge-anchored stretch reveal, not a mask); typewriter (typewriter-in, typewriter-out: text clips only, keyframes the text plugin's `reveal`) |
 | Emphasis | breathe (v1's breathe: intensity, period), shake, spin, hop and flash (intensity, period; spin: turns, rotation, easing) |
 
 Exits mirror their entrance in time. Easing choices are linear, ease-in, ease-out,

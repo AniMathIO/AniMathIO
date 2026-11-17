@@ -782,12 +782,6 @@ fn import_animation(
         report.warn("animation with no targetId skipped");
         return Ok(());
     }
-    if animation.properties.text_type.as_deref() == Some("character") {
-        report.warn(format!(
-            "animation {}: per-character text slide imported as a whole-element slide",
-            animation.id
-        ));
-    }
     let Some(meta) = elements.get(&animation.target_id) else {
         report.warn(format!(
             "animation {}: target element {} missing; skipped",
@@ -811,6 +805,67 @@ fn import_animation(
         .copied()
         .unwrap_or_default();
     let clip_id = meta.clip_id;
+
+    let character = animation.properties.text_type.as_deref() == Some("character");
+    let masked = animation.properties._use_clip_path.unwrap_or(false);
+    if matches!(animation.kind.as_str(), "slideIn" | "slideOut") && (character || masked) {
+        let is_text = matches!(&project.tracks().iter().find_map(|track| track.clips().get(&clip_id)).expect("imported clip").kind, ClipKind::Plugin { plugin_id, .. } if plugin_id == "org.animathio.text");
+        if is_text {
+            let exit = animation.kind == "slideOut";
+            let start = if exit {
+                late_start(meta.duration_ticks, duration_ticks, &animation.id, report)
+            } else {
+                0
+            };
+            let end = if exit {
+                meta.duration_ticks
+            } else {
+                duration_ticks
+            };
+            let direction = match animation.properties.direction.as_deref() {
+                Some("right") => 2.0,
+                Some("top") => 3.0,
+                Some("bottom") => 4.0,
+                _ => 1.0,
+            };
+            for (name, from, to) in [
+                (
+                    "slide_progress",
+                    if exit { 1.0 } else { 0.0 },
+                    if exit { 0.0 } else { 1.0 },
+                ),
+                ("slide_direction", direction, direction),
+                (
+                    "slide_characters",
+                    if character { 1.0 } else { 0.0 },
+                    if character { 1.0 } else { 0.0 },
+                ),
+                (
+                    "slide_clip",
+                    if masked { 1.0 } else { 0.0 },
+                    if masked { 1.0 } else { 0.0 },
+                ),
+            ] {
+                for (time, value) in [(start, from), (end, to)] {
+                    Command::AddKeyframe {
+                        id: clip_id,
+                        target: Target::Param(name.into()),
+                        time: Time(time),
+                        keyframe: Keyframe {
+                            value: value.into(),
+                            interpolation: Interpolation::Linear,
+                        },
+                    }
+                    .apply(project)?;
+                }
+            }
+            return Ok(());
+        }
+        report.warn(format!(
+            "animation {}: clipped/character slide on non-text imported as whole-element movement",
+            animation.id
+        ));
+    }
 
     match animation.kind.as_str() {
         "fadeIn" => {

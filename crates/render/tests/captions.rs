@@ -160,3 +160,43 @@ fn words_per_line_pages_follow_the_active_word() {
     let late = render_scene(&scene("pop", &json!({ "max_words": 1 }), 1900));
     assert_ne!(early.pixels, late.pixels);
 }
+
+#[test]
+fn text_slide_directions_and_stagger() {
+    for direction in 1..=4 {
+        for characters in [0, 1] {
+            golden(
+                "off",
+                &json!({"slide_direction":direction,"slide_progress":0.6,"slide_characters":characters}),
+                0,
+                &format!("text-slide-{direction}-{characters}"),
+            );
+        }
+    }
+}
+
+#[test]
+fn text_slide_endpoints_are_hidden_and_direction_independent() {
+    let mut resting = None;
+    for direction in 1..=4 {
+        for characters in [0, 1] {
+            let hidden = render_scene(&scene(
+                "off",
+                &json!({"slide_direction":direction,"slide_progress":0.0,"slide_characters":characters}),
+                0,
+            ));
+            assert!(hidden.pixels.chunks_exact(4).all(|p| p[3] == 0));
+            let shown = render_scene(&scene(
+                "off",
+                &json!({"slide_direction":direction,"slide_progress":1.0,"slide_characters":characters}),
+                0,
+            ));
+            assert!(shown.pixels.chunks_exact(4).any(|p| p[3] > 0));
+            if let Some(expected) = &resting {
+                assert_eq!(&shown.pixels, expected);
+            } else {
+                resting = Some(shown.pixels);
+            }
+        }
+    }
+}

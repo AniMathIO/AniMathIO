@@ -105,9 +105,7 @@ where they matter.
   editor's **Import Manim scene…** dialog or the MCP `import_manim_scene` tool.
 - **v1's Animations panel** (fade, slide, breathe, Mafs reveal) maps to the
   `org.animathio.animations` presets in the inspector's Animations section: `fade-in`,
-  `fade-out`, `slide-in`, `slide-out`, `breathe` and `zoom-in`/`zoom-out` (reveal). v1's
-  clip-path slide and per-character slide have no preset; `typewriter-in` reveals text
-  one character at a time instead.
+  `fade-out`, `slide-in`, `slide-out`, `breathe` and `zoom-in`/`zoom-out` (reveal). Text now offers clipped-slide and character-slide presets in both directions. The importer translates these options on text. Non-text masks remain unsupported and warn before falling back to whole-element movement.
 - **Round-tripping.** Import is one-way; there is no v2 → v1 export.
 
 ## Verifying an import

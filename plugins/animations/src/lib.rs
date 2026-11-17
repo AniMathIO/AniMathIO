@@ -138,6 +138,23 @@ fn catalog() -> Vec<PresetDescriptor> {
     let mut presets = Vec::new();
     for (role, verb, suffix) in [(Entrance, "in", "In"), (Exit, "out", "Out")] {
         let into = if role == Entrance { "into" } else { "out of" };
+        for (id, name) in [
+            ("clipped-slide", "Clipped text slide"),
+            ("character-slide", "Character slide"),
+        ] {
+            presets.push(preset(
+                &format!("{id}-{verb}"),
+                &format!("{name} {suffix}"),
+                "Slide text within its bounds, optionally staggering characters",
+                role,
+                &[TEXT],
+                vec![
+                    direction("left"),
+                    toggle("clip", "Clip to text bounds", true),
+                    easing("linear"),
+                ],
+            ));
+        }
         presets.extend([
             preset(
                 &format!("fade-{verb}"),
@@ -655,6 +672,36 @@ fn generate(
                 w.tween(scale_target, 0.0, size, easing, 0.0, full),
                 w.tween(pos_target, anchor, pos, easing, 0.0, full),
             ]
+        }
+        "clipped-slide" | "character-slide" => {
+            let direction = match o.choice("direction", "left") {
+                "right" => 2.0,
+                "top" => 3.0,
+                "bottom" => 4.0,
+                _ => 1.0,
+            };
+            let mut curves = vec![w.tween(
+                "param:slide_progress",
+                0.0,
+                1.0,
+                o.choice("easing", "linear"),
+                0.0,
+                full,
+            )];
+            for (target, value) in [
+                ("param:slide_direction", direction),
+                (
+                    "param:slide_characters",
+                    if base == "character-slide" { 1.0 } else { 0.0 },
+                ),
+                (
+                    "param:slide_clip",
+                    if o.flag("clip", true) { 1.0 } else { 0.0 },
+                ),
+            ] {
+                curves.push(w.tween(target, value, value, "linear", 0.0, full));
+            }
+            curves
         }
         "typewriter" => {
             let reveal = rest.get("param:reveal", 1.0);

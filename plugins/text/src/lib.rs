@@ -857,6 +857,47 @@ impl Guest for TextPlugin {
                         step: 1.0,
                     }),
                 },
+                // Numeric controls stay keyframeable through the existing source ABI.
+                ParamSpec {
+                    id: "slide_progress".into(),
+                    label: "Slide progress".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 1.0,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
+                    id: "slide_direction".into(),
+                    label: "Slide direction (1 left, 2 right, 3 top, 4 bottom)".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 4.0,
+                        default: 0.0,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
+                    id: "slide_characters".into(),
+                    label: "Stagger characters".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 0.0,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
+                    id: "slide_clip".into(),
+                    label: "Clip slide to bounds".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 1.0,
+                        step: 0.01,
+                    }),
+                },
                 ParamSpec {
                     id: "reveal".to_string(),
                     label: "Reveal".to_string(),
@@ -892,6 +933,9 @@ impl Guest for TextPlugin {
             &get_string(&params, "text", "AniMathIO"),
             get_number(&params, "reveal", 1.0),
         );
+        if get_number(&params, "slide_direction", 0.0) > 0.0 {
+            return slide_text(&params, &text, size);
+        }
         let font_size = get_number(&params, "font_size", 48.0) as f32;
         let color = get_color(
             &params,
@@ -982,3 +1026,115 @@ fn revealed(text: &str, reveal: f64) -> String {
 }
 
 export!(TextPlugin);
+
+/// Stateless slide layout: every frame retains the complete resting layout.
+fn slide_text(params: &[ParamEntry], text: &str, size: Size) -> Result<Scene, Diagnostic> {
+    let normalized = get_string(params, "units", "pixels") == "normalized";
+    let width = if normalized {
+        get_number(params, "fit_width", 1.0).max(0.0) as f32 * size.width as f32
+    } else {
+        size.width as f32
+    };
+    let height = if normalized {
+        get_number(params, "fit_height", 1.0).max(0.0) as f32 * size.height as f32
+    } else {
+        size.height as f32
+    };
+    let width = if width > 0.0 {
+        width
+    } else {
+        size.width as f32
+    };
+    let height = if height > 0.0 {
+        height
+    } else {
+        size.height as f32
+    };
+    let font = get_number(params, "font_size", 48.0) as f32
+        * if normalized { size.height as f32 } else { 1.0 };
+    let color = get_color(
+        params,
+        "color",
+        Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+        },
+    );
+    let progress = get_number(params, "slide_progress", 1.0).clamp(0.0, 1.0) as f32;
+    let stagger = get_number(params, "slide_characters", 0.0) > 0.5;
+    let direction = get_number(params, "slide_direction", 1.0) as u32;
+    let mut glyphs = Vec::new();
+    let mut cursor = 0.0;
+    for ch in text.chars() {
+        let paths = host::shape_text(&ch.to_string(), font)?;
+        let max = paths.iter().flatten().map(verb_x).fold(0.0_f32, f32::max);
+        glyphs.push((cursor, paths));
+        cursor += max.max(font * 0.3) + font * 0.05;
+    }
+    let scale = (width / cursor.max(1.0))
+        .min(height / (font * 1.5))
+        .min(1.0);
+    let count = glyphs.len().max(1) as f32;
+    let mut contours = Vec::new();
+    for (i, (x, paths)) in glyphs.into_iter().enumerate() {
+        let p = if stagger {
+            (progress * 2.0 - i as f32 / count).clamp(0.0, 1.0)
+        } else {
+            progress
+        };
+        let distance = 1.0 - p;
+        let (dx, dy) = match direction {
+            2 => (width * distance, 0.0),
+            3 => (0.0, -height * distance),
+            4 => (0.0, height * distance),
+            _ => (-width * distance, 0.0),
+        };
+        for path in paths {
+            let mut points: Vec<_> = flatten(&path)
+                .into_iter()
+                .map(|(px, py)| {
+                    (
+                        (px + x) * scale + (width - cursor * scale) / 2.0 + dx,
+                        py * scale + height / 2.0 + font * scale / 3.0 + dy,
+                    )
+                })
+                .collect();
+            if get_number(params, "slide_clip", 1.0) > 0.5 {
+                // Rotate the same half-plane clip to cover all four box edges.
+                for cut in [width, height, 0.0, 0.0] {
+                    points = clip_left(&points, cut);
+                    points = points.into_iter().map(|(x, y)| (y, -x)).collect();
+                }
+            }
+            if points.len() >= 3 {
+                let mut path: Vec<_> = points
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (x, y))| {
+                        let p = Point {
+                            x: if normalized { x / width } else { x },
+                            y: if normalized { y / height } else { y },
+                        };
+                        if i == 0 {
+                            PathVerb::MoveTo(p)
+                        } else {
+                            PathVerb::LineTo(p)
+                        }
+                    })
+                    .collect();
+                path.push(PathVerb::Close);
+                contours.push(path);
+            }
+        }
+    }
+    Ok(Scene {
+        coordinate_space: if normalized {
+            CoordinateSpace::Normalized
+        } else {
+            CoordinateSpace::Canvas
+        },
+        elements: vec![fill_contours(contours, color)],
+    })
+}

@@ -524,3 +524,36 @@ fn per_asset_size_is_capped() {
         other => panic!("expected AssetTooLarge, got {other:?}"),
     }
 }
+
+#[test]
+fn text_slide_options_become_parameter_curves() {
+    for kind in ["slideIn", "slideOut"] {
+        let input = json!({
+            "editorElements": [element("text", "text", "Text", "", placement(0.0,0.0,200.0,100.0), 0.0,2000.0,json!({"text":"Hello","fontSize":24}))],
+            "animations": [{"id":"slide","targetId":"text","type":kind,"duration":500,"properties":{"direction":"top","textType":"character","useClipPath":true}}],
+            "maxTime":2000,"fps":30,"canvas_width":800,"canvas_height":600
+        });
+        let (project, _, report) = import_v1_with_report(&deflate(&input)).unwrap();
+        assert!(
+            !report
+                .warnings()
+                .iter()
+                .any(|w| w.contains("whole-element"))
+        );
+        let clips = tracks(&project);
+        for name in [
+            "slide_progress",
+            "slide_direction",
+            "slide_characters",
+            "slide_clip",
+        ] {
+            assert!(
+                clips[0]
+                    .1
+                    .animations
+                    .iter()
+                    .any(|a| a.target == animathio_core::Target::Param(name.into()))
+            );
+        }
+    }
+}

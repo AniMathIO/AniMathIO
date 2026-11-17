@@ -410,3 +410,5 @@ sha256sum -c SHA256SUMS
 Provenance of CI-built installers is attested with `actions/attest-build-provenance`
 (`gh attestation verify <file> --repo AniMathIO/AniMathIO`).
 
+
+Text clips also offer Clipped text slide and Character slide entrance/exit presets in Effects and the inspector. Direction selects the edge; Clip to text bounds masks moving contours. Character slides stagger letters across the duration. These presets write numeric text parameters as one undoable keyframe batch.

@@ -102,6 +102,8 @@ fn the_catalog_covers_every_role_and_v1_parity_presets() {
         "fade-in",
         "fade-out",
         "slide-in",
+        "clipped-slide-in",
+        "character-slide-out",
         "slide-out",
         "zoom-in",
         "pop-in",
@@ -430,4 +432,43 @@ fn manim_plugin_selects_scenes_and_reports_failures() {
             .iter()
             .any(|i| i.plugin_id == MANIM && i.extensions == ["py"])
     );
+}
+
+#[test]
+fn text_slides_are_one_undoable_parameter_batch() {
+    let host = test_support::host();
+    for preset in [
+        "clipped-slide-in",
+        "clipped-slide-out",
+        "character-slide-in",
+        "character-slide-out",
+    ] {
+        let mut project = text_project();
+        let before = project.clone();
+        let command = host
+            .animation_preset_command(
+                &project,
+                ClipId(1),
+                ANIMATIONS,
+                preset,
+                Some(Time(SECOND)),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+        assert!(matches!(command, Command::Batch { .. }));
+        let inverse = command.apply(&mut project).unwrap();
+        let progress = keys(&project, &Target::Param("slide_progress".into()));
+        assert_eq!(progress.len(), 2);
+        let exit = preset.ends_with("out");
+        assert_eq!(
+            progress[0].1,
+            ParamValue::Number(if exit { 1.0 } else { 0.0 })
+        );
+        assert_eq!(
+            progress[1].1,
+            ParamValue::Number(if exit { 0.0 } else { 1.0 })
+        );
+        inverse.apply(&mut project).unwrap();
+        assert_eq!(project, before);
+    }
 }
