@@ -4,6 +4,18 @@ All notable changes to AniMathIO 2.x are documented in this file. It is generate
 from [Conventional Commits](https://www.conventionalcommits.org) by release-plz and
 git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMathIO/AniMathIO/releases?q=animathio-v1).
 
+## [2.2.0](https://github.com/AniMathIO/AniMathIO/compare/v2.1.0...v2.2.0) - 2026-11-17
+
+
+### Added
+
+- *(editor)* Reorganize the Library into Media, Elements, Titles, Effects and Plugins ([#307](https://github.com/AniMathIO/AniMathIO/pull/307))
+- *(editor)* Browse and manage community plugins ([#309](https://github.com/AniMathIO/AniMathIO/pull/309))
+- *(plugins)* Community plugin trust model, verified install, hot load and CLI ([#308](https://github.com/AniMathIO/AniMathIO/pull/308))
+- *(latex)* Render inline LaTeX colours (`\color`, `\textcolor`) with an additive plugin ABI 1.2.0 ([#306](https://github.com/AniMathIO/AniMathIO/pull/306))
+- *(package)* Offline Flatpak build of the desktop app, `com.animathio.AniMathIO` ([#297](https://github.com/AniMathIO/AniMathIO/pull/297))
+
+
 ## [2.1.0](https://github.com/AniMathIO/AniMathIO/compare/v2.0.0...v2.1.0) - 2026-11-16
 
 
