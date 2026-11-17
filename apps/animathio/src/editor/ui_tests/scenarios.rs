@@ -1941,76 +1941,6 @@ fn headless_environment_never_checks_for_updates(cx: &mut TestAppContext) {
     assert!(!state.exists(), "the harness never contacts the network");
 }
 
-#[gpui::test]
-fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
-    let (project, assets) = voice_and_music();
-    let mut ui = Ui::open(cx, project, assets);
-    ui.update(|editor, _, cx| editor.open_screenshot_panel("markers", cx));
-    assert!(ui.read(|editor| editor.marker_panel.is_some()));
-    ui.update(|editor, _, cx| editor.open_screenshot_panel("autocut", cx));
-    ui.settle();
-    ui.read(|editor| {
-        assert_eq!(editor.selected, Some(VOICE_CLIP));
-        let proposal = editor
-            .autocut_review
-            .as_ref()
-            .expect("review")
-            .proposal
-            .as_ref()
-            .expect("analysis completed");
-        assert!(
-            !proposal.cuts.is_empty(),
-            "voice pause detected despite music bed"
-        );
-    });
-}
-
-/// Community plugins start off. Switching them on and enabling one loads it into the running
-/// editor (its clip source appears in the plugin list); turning the switch off unloads it
-/// again. No restart, and the headless harness uses a private plugin folder and settings.
-#[gpui::test]
-fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
-    const HELLO: &[u8] =
-        include_bytes!("../../../../../crates/plugin-host/tests/fixtures/hello-1.0.0.amplugin");
-    const ID: &str = "com.example.hello";
-    if !require_plugins("community_plugins_load_and_unload_without_restart") {
-        return;
-    }
-    let (project, assets) = sample();
-    let mut ui = Ui::open(cx, project, assets);
-    ui.settle();
-    let store = crate::editor_env::community_store().expect("private community store");
-    assert!(
-        store.dir().starts_with(super::config_dir()),
-        "tests never touch the user's plugin folder"
-    );
-    let has_hello = |ui: &Ui| ui.read(|editor| editor.plugins.iter().any(|plugin| plugin.id == ID));
-    assert!(!store.settings().enabled, "community plugins start off");
-    assert!(!has_hello(&ui));
-
-    // Installed plugins start disabled, so even a switched-on editor does not load them.
-    store.install_bytes(HELLO, None, false).unwrap();
-    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(true, cx).unwrap());
-    assert!(!has_hello(&ui), "installed but not enabled");
-
-    // Enabling the plugin (the CLI or a future Browse UI) and re-syncing loads it live.
-    store.set_plugin_enabled(ID, true).unwrap();
-    ui.update(|editor, _, cx| editor.sync_community_plugins(cx));
-    assert!(has_hello(&ui), "enabled plugin is loaded without a restart");
-
-    // Switching the global switch off unloads it, and the project is unaffected.
-    let before = ui.read(|editor| editor.project.clone());
-    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(false, cx).unwrap());
-    assert!(!has_hello(&ui), "switch off unloads community plugins");
-    assert_eq!(ui.read(|editor| editor.project.clone()), before);
-    ui.read(|editor| {
-        let host = editor.plugin_host.as_ref().expect("plugin host");
-        assert!(host.get_plugin(ID).is_none());
-    });
-
-    store.uninstall(ID).unwrap();
-}
-
 /// Exercise the real rendered Library and its scoped input subscriptions.
 #[gpui::test]
 fn library_tabs_have_distinct_contents_and_scoped_search(cx: &mut TestAppContext) {
@@ -2270,4 +2200,74 @@ fn library_tab_arrows_move_selection_and_focus(cx: &mut TestAppContext) {
     ui.update(|e, window, cx| window.focus(&e.media_view.tab_focus[LeftTab::Titles as usize], cx));
     ui.press("left");
     assert!(ui.read(|e| e.left_tab == LeftTab::Elements));
+}
+
+/// Community plugins start off. Switching them on and enabling one loads it into the running
+/// editor (its clip source appears in the plugin list); turning the switch off unloads it
+/// again. No restart, and the headless harness uses a private plugin folder and settings.
+#[gpui::test]
+fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
+    const HELLO: &[u8] =
+        include_bytes!("../../../../../crates/plugin-host/tests/fixtures/hello-1.0.0.amplugin");
+    const ID: &str = "com.example.hello";
+    if !require_plugins("community_plugins_load_and_unload_without_restart") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.settle();
+    let store = crate::editor_env::community_store().expect("private community store");
+    assert!(
+        store.dir().starts_with(super::config_dir()),
+        "tests never touch the user's plugin folder"
+    );
+    let has_hello = |ui: &Ui| ui.read(|editor| editor.plugins.iter().any(|plugin| plugin.id == ID));
+    assert!(!store.settings().enabled, "community plugins start off");
+    assert!(!has_hello(&ui));
+
+    // Installed plugins start disabled, so even a switched-on editor does not load them.
+    store.install_bytes(HELLO, None, false).unwrap();
+    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(true, cx).unwrap());
+    assert!(!has_hello(&ui), "installed but not enabled");
+
+    // Enabling the plugin (the CLI or a future Browse UI) and re-syncing loads it live.
+    store.set_plugin_enabled(ID, true).unwrap();
+    ui.update(|editor, _, cx| editor.sync_community_plugins(cx));
+    assert!(has_hello(&ui), "enabled plugin is loaded without a restart");
+
+    // Switching the global switch off unloads it, and the project is unaffected.
+    let before = ui.read(|editor| editor.project.clone());
+    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(false, cx).unwrap());
+    assert!(!has_hello(&ui), "switch off unloads community plugins");
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.read(|editor| {
+        let host = editor.plugin_host.as_ref().expect("plugin host");
+        assert!(host.get_plugin(ID).is_none());
+    });
+
+    store.uninstall(ID).unwrap();
+}
+
+#[gpui::test]
+fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| editor.open_screenshot_panel("markers", cx));
+    assert!(ui.read(|editor| editor.marker_panel.is_some()));
+    ui.update(|editor, _, cx| editor.open_screenshot_panel("autocut", cx));
+    ui.settle();
+    ui.read(|editor| {
+        assert_eq!(editor.selected, Some(VOICE_CLIP));
+        let proposal = editor
+            .autocut_review
+            .as_ref()
+            .expect("review")
+            .proposal
+            .as_ref()
+            .expect("analysis completed");
+        assert!(
+            !proposal.cuts.is_empty(),
+            "voice pause detected despite music bed"
+        );
+    });
 }

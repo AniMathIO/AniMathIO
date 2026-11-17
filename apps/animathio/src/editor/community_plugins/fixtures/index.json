@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "com.example.hello",
+      "name": "Hello Circle",
+      "author": "Community example",
+      "description": "A sandboxed vector circle for animated diagrams.",
+      "license": "MIT",
+      "repo": "AniMathIO/plugins",
+      "source_url": "https://github.com/AniMathIO/plugins",
+      "kinds": [
+        "clip-source"
+      ],
+      "min_abi": "1.0.0",
+      "version": "1.0.0",
+      "download_url": "https://github.com/AniMathIO/plugins/releases/download/example/hello.amplugin",
+      "sha256": "cd5907670c2cf242519b6b9404a45e30892fc802a5ce31678dd0e487c20f19c3",
+      "size": 40741,
+      "released_at": "2026-11-17T00:00:00Z"
+    },
+    {
+      "id": "com.example.next-generation",
+      "name": "Future Diagrams",
+      "author": "Community example",
+      "description": "Example of a plugin requiring a newer host ABI.",
+      "license": "MIT",
+      "repo": "AniMathIO/plugins",
+      "source_url": "https://github.com/AniMathIO/plugins",
+      "kinds": [
+        "clip-source"
+      ],
+      "min_abi": "9.0.0",
+      "version": "2.0.0",
+      "download_url": "https://github.com/AniMathIO/plugins/releases/download/example/hello.amplugin",
+      "sha256": "cd5907670c2cf242519b6b9404a45e30892fc802a5ce31678dd0e487c20f19c3",
+      "size": 40741,
+      "released_at": "2026-11-17T00:00:00Z"
+    }
+  ],
+  "delisted": []
+}

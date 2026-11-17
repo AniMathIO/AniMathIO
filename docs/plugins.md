@@ -19,9 +19,7 @@ provided by **host imports**.
 The editor's Library → Plugins tab lists every loaded plugin kind, version, id,
 first-party or third-party origin, enabled status and source bundle file (full path on hover). Clip-source creation cards live in
 Elements (third-party sources under Plugins); title presets live in Titles and
-effects/animations in Effects. Community plugins are installed and enabled as described in
-[Installing community plugins](#installing-community-plugins). The inventory also shows package load failures.
-
+effects/animations in Effects. Community plugins can be installed and enabled live. The inventory also shows package load failures.
 ## Installing community plugins
 
 Besides the first-party plugins that ship with AniMathIO, you can install third-party
@@ -33,8 +31,8 @@ enabled explicitly.
 ### Trust model
 
 1. **Global switch.** "Community plugins" (Preferences in the editor, or
-   `animathio-cli plugins community on|off`) is off by default. While it is off the per-user
-   plugin folder is not read at all and only bundled plugins load.
+   `animathio-cli plugins community on|off`) is off by default. While it is off no community
+   component is loaded or executed; Installed can still display bundle metadata.
 2. **Per-plugin flag.** An installed plugin starts **disabled**. It loads only when the
    switch is on *and* the plugin is enabled (`animathio-cli plugins enable <id>`).
 3. **No impersonation.** Community plugins cannot use the reserved `org.animathio.*` ids, so
@@ -48,6 +46,37 @@ enabled explicitly.
 The trust settings are one small JSON file, `community-plugins.json` (`enabled` switch and
 the enabled plugin ids), in the editor's configuration directory. The editor, the CLI and
 the control handler all read the same file. `ANIMATHIO_PLUGIN_SETTINGS` overrides its path.
+
+### Browse and install in the editor
+
+The Library's Plugins tab shares the global switch with Preferences and shows a one-time
+sandbox/trust explanation. Installed community plugins have an Enabled toggle and Remove;
+first-party plugins remain on and cannot be removed here. Browse appears only while the
+switch is on. Search by name, author, description or id; inspect the licence, version,
+minimum ABI, incompatibility reason and source link before installing. Installs start
+disabled, then Enable on the Browse card or in Installed loads them live. Updates are offered when the fetched version is
+newer, never installed automatically. Delisted installed plugins retain their files and
+show the registry's reason. Missing project plugins are named above the workspace, with
+Install when a compatible entry is in the fetched index.
+
+The editor fetches one [community index](https://raw.githubusercontent.com/AniMathIO/plugins/main/community-index.json)
+on an explicit Browse click. It uses a bounded ureq client with connection/overall timeouts,
+`AniMathIO/<version>` User-Agent and ETag conditional requests; no personal data is sent.
+No registry network request runs automatically, including while the switch is off.
+`ANIMATHIO_NO_UPDATE_CHECK=1` does not block an explicit Browse or Install action.
+Failures show Retry without blocking editing. Download size, SHA-256, package id, version,
+kinds and ABI must match the index before the store writes the package. Compatibility
+uses the host's manifest validator. Install from file uses the existing native dialog and
+the same store validation, without a registry hash for a local file.
+
+`ANIMATHIO_COMMUNITY_INDEX_FILE` overrides the fetched index with a local JSON file for
+offline development/screenshots. It is read only when Browse is clicked; downloads still
+use the indexed HTTPS release URLs. UI tests inject both transports and use the frozen
+hello package, so no network is needed.
+
+| Installed | Browse (local index fixture) |
+| --- | --- |
+| ![Installed plugins](../docs/screenshots/editor-community-installed.png) | ![Community registry](../docs/screenshots/editor-community-browse.png) |
 
 ### Folders
 

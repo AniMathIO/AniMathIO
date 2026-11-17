@@ -586,6 +586,7 @@ pub(crate) struct Editor {
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
     plugin_host: Option<PluginHost>,
+    community: community_plugins::Browser,
     plugins: Vec<PluginDescriptor>,
     tool: Tool,
     marks: InOut,
@@ -697,7 +698,18 @@ impl Editor {
                 }
                 self.open_autocut(cx);
             }
-            _ => eprintln!("unknown screenshot panel {panel:?}; expected markers or autocut"),
+            // The Library's Plugins tab (Installed), optionally with Browse opened. Browse
+            // fetches the index only when the Community plugins switch is already on.
+            "plugins" | "plugins-browse" => {
+                self.dock.left_open = true;
+                self.select_left_tab(LeftTab::Plugins, cx);
+                if panel == "plugins-browse" {
+                    self.browse_community(cx);
+                }
+            }
+            _ => eprintln!(
+                "unknown screenshot panel {panel:?}; expected markers, autocut, plugins or plugins-browse"
+            ),
         }
     }
 
@@ -811,6 +823,7 @@ impl Editor {
             timeline_scroll: 0.0,
             gesture: None,
             plugin_host,
+            community: community_plugins::Browser::default(),
             plugins,
             tool: Tool::default(),
             marks: InOut::default(),
@@ -891,6 +904,7 @@ impl Editor {
             waveform_paths: std::rc::Rc::default(),
             env,
         };
+        this.refresh_community_inventory(cx);
         if recovered {
             this.notices
                 .push(crate::style::Toast::info("Recovered from autosave"));

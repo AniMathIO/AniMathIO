@@ -132,8 +132,11 @@ See [Keyboard shortcuts](keyboard-shortcuts.md) for the Premiere default keymap.
 The developer launch option `--screenshot-panel=markers` opens the same panel as
 Clip > Markers and beat sync. `--screenshot-panel=autocut` selects the first audio
 clip in track order and runs the normal asynchronous analysis before showing its
-review. Pass a project path as usual; neither option applies edits. The control
-protocol can create markers and propose cuts but does not open these UI panels.
+review. `--screenshot-panel=plugins` opens the Library's Plugins tab, and
+`--screenshot-panel=plugins-browse` also opens Browse, which fetches the community index
+only when the Community plugins switch is already on. Pass a project path as usual; none
+of these options applies edits. The control protocol can create markers and propose cuts
+but does not open these UI panels.
 
 The capture fixture combines the shared visual sample with a synthetic voice
 (tone, one-second pause, tone), a separate steady music bed and three named

@@ -17,7 +17,7 @@ search, cards and buttons. Every tab retains its own search when switching away.
 | **Elements** | Text & formulas (LaTeX, Text), Shapes & geometry (points, lines, vectors, polygons, circles, ellipses), Graphs & grids (plots, Cartesian and polar grids). Click a card or press Enter/Space to configure; + adds defaults; drag its preview to the timeline. More shapes retains the generic Shapes source for rectangles, stars and arrows. Third-party clip sources appear under Plugins in this tab. |
 | **Titles** | Title compositions and caption presets. Double-click or Enter/Space adds at the playhead; drag to place on the timeline. Linked text fields remain editable in the inspector. |
 | **Effects** | Video effects, audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
-| **Plugins** | Every successfully loaded plugin, including effects, audio effects, animations and importers, with id, version, kind, First-party/Third-party origin, Enabled status and bundle file name (hover for the full path). Browse AniMathIO/plugins opens the catalog. Install bundles in a discovery directory and restart; enable/disable toggling is not implemented. Load failures are listed here too. |
+| **Plugins** | Installed first-party and community plugins, the Community plugins switch, live Enable/Remove controls, Install from file, and Browse with search, verified installs and explicit updates. First-party plugins stay enabled. Load failures are listed here too. |
 
 Media filters and view controls appear only on Media. Generated clips have one
 creation home in Elements; Plugins lists their installation metadata. See the
@@ -32,7 +32,39 @@ and the separately tracked gaps.
 | --- | --- |
 | ![Titles](../docs/screenshots/editor-titles.png) | ![Effects](../docs/screenshots/editor-library-effects.png) |
 
-![Installed plugin inventory](../docs/screenshots/editor-library-plugins.png)
+### Community plugins
+
+Open **Library → Plugins**. Community plugins start off; the same switch is in
+Preferences. The first time you turn it on, an explanation states that third-party
+plugins run sandboxed with memory and time limits and are not audited by AniMathIO.
+
+**Installed** lists bundled plugins (always enabled) and installed community plugins.
+Turn the **Enabled** switch on to load an installed plugin, or off to unload it. **Remove**
+deletes the community bundle. These actions update the preview without restarting;
+project clips retain their plugin reference and show a placeholder while it is missing.
+A missing-plugin notice above the workspace names the ids and opens plugin management;
+a matching fetched registry entry also offers **Install**.
+
+**Browse** is available only while the community switch is on. Click it to fetch the
+community index in the background. Search matches names, authors, ids and descriptions.
+Cards show version, licence, minimum ABI, compatibility and a source link. **Install**
+downloads the indexed release and checks its size, SHA-256 and package metadata before
+saving it. A fresh installation starts disabled: choose Enable on its Browse card or in Installed.
+An incompatible plugin stays visible with a reason and its Install control disabled.
+Network failures show a Retry action and keep installed plugins usable.
+
+Browse also offers **Update available** when the latest indexed version is newer than
+an installed version. Updates require a click and preserve the enabled setting. A
+delisted installed plugin shows the registry's reason and is never removed silently.
+**Install from file...** uses the native file picker for a local `.amplugin` bundle;
+local files are validated but have no registry checksum to compare.
+
+| Installed (Code Snippets, disabled) | Browse (live community index) |
+| --- | --- |
+| ![Installed community plugins](../docs/screenshots/editor-community-installed.png) | ![Browse community plugins](../docs/screenshots/editor-community-browse.png) |
+
+The [earlier loaded-plugin inventory](../docs/screenshots/editor-library-plugins.png)
+predates community installation controls.
 
 Before and after the reorganization (2.1.0 on the left of each pair, same sample
 project, release builds with the first-party plugins on a private Xvfb display):

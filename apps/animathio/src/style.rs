@@ -205,7 +205,8 @@ fn apply_palette(c: &mut gpui_component::ThemeColor) {
     c.table_head = hex(RAISED);
     c.tab_bar_segmented = hex(RAISED);
     c.skeleton = hex(RAISED);
-    c.switch = hex(RAISED);
+    // Unchecked track: BORDER, so a switch stays visible on RAISED cards as well as panels.
+    c.switch = hex(BORDER);
     c.button_hover = hex(HOVER);
     c.button_active = hex(HOVER);
     c.secondary_hover = hex(HOVER);
