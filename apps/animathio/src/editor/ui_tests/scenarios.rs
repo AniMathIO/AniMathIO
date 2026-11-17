@@ -1963,6 +1963,7 @@ fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
             "voice pause detected despite music bed"
         );
     });
+}
 
 /// Community plugins start off. Switching them on and enabling one loads it into the running
 /// editor (its clip source appears in the plugin list); turning the switch off unloads it
