@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.animathio.AniMathIO</id>
+  <name>AniMathIO</name>
+  <summary>Edit and export math animation videos</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="com.animathio"><name>AniMathIO contributors</name></developer>
+  <description>
+    <p>AniMathIO combines a multi-track video editor with sandboxed plugins for text, LaTeX, graphs and animation. Arrange media, animate transforms with keyframes, mix audio, and export videos using the same rendering engine as the preview.</p>
+    <p>The desktop application includes the command-line renderer and eight first-party plugins.</p>
+  </description>
+  <launchable type="desktop-id">com.animathio.AniMathIO.desktop</launchable>
+  <url type="homepage">https://animathio.com</url>
+  <url type="bugtracker">https://github.com/AniMathIO/AniMathIO/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Multi-track video editor</caption>
+      <image>https://raw.githubusercontent.com/AniMathIO/AniMathIO/main/docs/screenshots/editor-main.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Math object library</caption>
+      <image>https://raw.githubusercontent.com/AniMathIO/AniMathIO/main/docs/screenshots/editor-math-panel.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="2.1.0" date="2026-11-16"><description><p>Desktop editor improvements and release automation updates.</p></description></release>
+    <release version="2.0.0" date="2026-11-16"><description><p>Rust rewrite with a multi-track editor and sandboxed WebAssembly plugins.</p></description></release>
+  </releases>
+</component>
