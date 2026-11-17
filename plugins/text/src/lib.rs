@@ -1156,6 +1156,24 @@ mod weight_tests {
     use super::*;
 
     #[test]
+    fn weight_schema_keeps_regular_as_default() {
+        let manifest = TextPlugin::describe();
+        assert_eq!(manifest.version, "1.3.0");
+        let param = manifest
+            .params
+            .iter()
+            .find(|param| param.id == "font_weight")
+            .unwrap();
+        let ParamKind::Number(range) = &param.kind else {
+            panic!("numeric weight required")
+        };
+        assert_eq!(
+            (range.min, range.max, range.default, range.step),
+            (100.0, 900.0, 400.0, 100.0)
+        );
+    }
+
+    #[test]
     fn variable_font_has_distinct_regular_semibold_bold_outlines() {
         let font = include_bytes!("../../../apps/animathio/assets/fonts/InterVariable.ttf");
         let outlines: Vec<_> = [400.0, 600.0, 700.0, 800.0]
