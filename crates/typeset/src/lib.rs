@@ -24,9 +24,9 @@ use typst::diag::{FileError, FileResult};
 use typst::foundations::{Bytes, Datetime, Duration as TypstDuration};
 use typst::layout::{Frame, FrameItem, Transform};
 use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
-use typst::text::{Font, FontBook};
+use typst::text::{Font, FontBook, TextElem};
 use typst::utils::LazyHash;
-use typst::visualize::{CurveItem, Geometry};
+use typst::visualize::{Color, CurveItem, Geometry, Luma, Paint, ProcessColor};
 use typst::{LibraryExt, World};
 use typst_layout::PagedDocument;
 
@@ -87,6 +87,9 @@ pub struct TypesetBBox {
 pub struct TypesetResult {
     /// Ordered complete glyph and rule paths; counters stay with their glyph.
     pub paths: Vec<TypesetPath>,
+    /// Optional straight-alpha RGBA paint, in the same order as `paths`.
+    /// `None` means inherit the clip colour (also used for non-solid paints).
+    pub colors: Vec<Option<[u8; 4]>>,
     /// Bounding box of all paths.
     pub bbox: TypesetBBox,
 }
@@ -218,8 +221,12 @@ impl TypesetEngine {
         let mut book = FontBook::new();
         book.push(font.info().clone());
 
+        let mut library = typst::Library::default();
+        library
+            .styles
+            .set(TextElem::fill, Paint::Solid(inherited_color()));
         let shared = Arc::new(SharedData {
-            library: LazyHash::new(typst::Library::default()),
+            library: LazyHash::new(library),
             book: LazyHash::new(book),
             fonts: vec![font],
         });
@@ -387,7 +394,8 @@ fn typeset_inner(
     let page = document.pages().first().ok_or(TypesetError::Empty)?;
 
     let mut paths = Vec::new();
-    walk_frame(&page.frame, Affine::IDENTITY, &mut paths);
+    let mut colors = Vec::new();
+    walk_frame(&page.frame, Affine::IDENTITY, &mut paths, &mut colors);
     if paths.is_empty() {
         return Err(TypesetError::Empty);
     }
@@ -395,6 +403,7 @@ fn typeset_inner(
     Ok(TypesetResult {
         bbox: path_bbox(&paths),
         paths,
+        colors,
     })
 }
 
@@ -576,22 +585,49 @@ fn affine_of(transform: Transform) -> Affine {
 }
 
 /// Recursively convert a laid-out Typst frame into path contours.
-fn walk_frame(frame: &Frame, state: Affine, out: &mut Vec<TypesetPath>) {
+fn walk_frame(
+    frame: &Frame,
+    state: Affine,
+    out: &mut Vec<TypesetPath>,
+    colors: &mut Vec<Option<[u8; 4]>>,
+) {
     for (pos, item) in frame.items() {
         let state = state * Affine::translate((pos.x.to_pt(), pos.y.to_pt()));
         match item {
             FrameItem::Group(group) => {
                 let state = state * affine_of(group.transform);
-                walk_frame(&group.frame, state, out);
+                walk_frame(&group.frame, state, out, colors);
             }
-            FrameItem::Text(text) => walk_text(text, state, out),
-            FrameItem::Shape(shape, _) => walk_shape(shape, state, out),
+            FrameItem::Text(text) => walk_text(text, state, out, colors),
+            FrameItem::Shape(shape, _) => walk_shape(shape, state, out, colors),
             FrameItem::Image(_, _, _) | FrameItem::Link(_, _) | FrameItem::Tag(_) => {}
         }
     }
 }
 
-fn walk_text(text: &typst::text::TextItem, state: Affine, out: &mut Vec<TypesetPath>) {
+// An out-of-range luma is an internal inheritance marker. Typst's public colour
+// constructors reject it, so explicit black, transparent and arbitrary RGB colours
+// remain distinguishable from the default. It is never passed to a rasterizer.
+fn inherited_color() -> Color {
+    Color::Process(ProcessColor::Luma(Luma::new(-1.0, 1.0)))
+}
+
+fn path_color(paint: &Paint) -> Option<[u8; 4]> {
+    match paint {
+        Paint::Solid(color) if *color != inherited_color() => {
+            let (r, g, b, a) = color.to_rgb().into_format::<u8, u8>().into_components();
+            Some([r, g, b, a])
+        }
+        _ => None,
+    }
+}
+
+fn walk_text(
+    text: &typst::text::TextItem,
+    state: Affine,
+    out: &mut Vec<TypesetPath>,
+    colors: &mut Vec<Option<[u8; 4]>>,
+) {
     let units_per_em = f64::from(text.font.ttf().units_per_em());
     if units_per_em <= 0.0 {
         return;
@@ -616,6 +652,7 @@ fn walk_text(text: &typst::text::TextItem, state: Affine, out: &mut Vec<TypesetP
         if outlined {
             let path: TypesetPath = collector.finish().into_iter().flatten().collect();
             out.push(transform_path(&path, glyph_state, scale));
+            colors.push(path_color(&text.fill));
         }
 
         cursor_x += glyph.x_advance.at(text.size).to_pt();
@@ -649,7 +686,13 @@ fn apply(state: Affine, point: TypesetPoint, scale: f64) -> TypesetPoint {
     }
 }
 
-fn walk_shape(shape: &typst::visualize::Shape, state: Affine, out: &mut Vec<TypesetPath>) {
+fn walk_shape(
+    shape: &typst::visualize::Shape,
+    state: Affine,
+    out: &mut Vec<TypesetPath>,
+    colors: &mut Vec<Option<[u8; 4]>>,
+) {
+    let mut outline_paint = shape.fill.as_ref();
     let mut path = Vec::new();
     match &shape.geometry {
         Geometry::Line(end) => {
@@ -716,9 +759,11 @@ fn walk_shape(shape: &typst::visualize::Shape, state: Affine, out: &mut Vec<Type
         && let Some(stroke) = &shape.stroke
     {
         path = stroke_outline(&path, stroke);
+        outline_paint = Some(&stroke.paint);
     }
     if !path.is_empty() {
         out.push(transform_path(&path, state, 1.0));
+        colors.push(outline_paint.and_then(path_color));
     }
 }
 
@@ -810,6 +855,43 @@ fn path_bbox(paths: &[TypesetPath]) -> TypesetBBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn latex_paths_preserve_explicit_colors_and_inheritance() {
+        for (source, color) in [
+            (r"\textcolor{red}{a}b", [255, 0, 0, 255]),
+            (r"{\color{blue} a}b", [0, 0, 255, 255]),
+            (r"\textcolor{black}{a}b", [0, 0, 0, 255]),
+        ] {
+            let result = typeset_latex(source).unwrap();
+            assert_eq!(result.paths.len(), 2, "{source}");
+            assert_eq!(result.colors, vec![Some(color), None], "{source}");
+        }
+        let result = typeset_latex(r"\color{red}{x}").unwrap();
+        assert_eq!(result.colors, vec![Some([255, 0, 0, 255])]);
+    }
+
+    #[test]
+    fn typst_shapes_and_gradients_preserve_paint_semantics() {
+        let engine = TypesetEngine::new().unwrap();
+        for (source, expected) in [
+            ("frac(a,b)", None),
+            (
+                "#text(fill: rgb(255, 0, 0), $frac(a,b)$)",
+                Some([255, 0, 0, 255]),
+            ),
+            ("#text(fill: gradient.linear(red, blue), $frac(a,b)$)", None),
+            ("#text(fill: rgb(0, 0, 0, 0), $a$)", Some([0, 0, 0, 0])),
+        ] {
+            let result = engine.typeset(source, MathMode::Typst, 48.0).unwrap();
+            assert_eq!(result.colors.len(), result.paths.len());
+            assert!(
+                result.colors.iter().all(|color| *color == expected),
+                "{source}: {:?}",
+                result.colors
+            );
+        }
+    }
 
     fn typeset_latex(source: &str) -> Result<TypesetResult, TypesetError> {
         let engine = TypesetEngine::new()?;
