@@ -8,6 +8,7 @@ mod player;
 mod prepared;
 mod source;
 mod speed;
+mod stretch;
 mod waveform;
 
 pub use beats::*;

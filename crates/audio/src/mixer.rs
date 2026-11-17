@@ -111,6 +111,7 @@ impl AudioPool {
             lenient: false,
             warnings: EffectWarnings::default(),
             cache: Arc::default(),
+            stretch_cache: Arc::default(),
         })
     }
     /// Convenience offline entry point; reuse `prepare` for repeated calls.
@@ -184,6 +185,7 @@ pub struct Mixer {
     lenient: bool,
     warnings: EffectWarnings,
     cache: Arc<Mutex<EffectCache>>,
+    stretch_cache: Arc<Mutex<crate::stretch::Cache>>,
 }
 impl Mixer {
     /// Total processing latency a chain's active effects declare, in frames. The mixer
@@ -371,6 +373,7 @@ impl Mixer {
             }
             return Ok(());
         }
+        let stretch_key = clip_key(self, clip, play);
         let mut samples = Vec::with_capacity(channels);
         for frame in from..to {
             let timeline = frame as i128 * i128::from(TICKS_PER_SECOND);
@@ -393,7 +396,11 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            if crate::stretch::active(clip) {
+                self.stretched_samples(clip, frame, stretch_key, &mut cursor, &mut samples)?;
+            } else {
+                source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            }
             for (channel, sample) in samples.iter().enumerate() {
                 out[(frame - out_first) * channels + channel] += (f64::from(*sample) * gain) as f32;
             }
@@ -417,6 +424,7 @@ impl Mixer {
         let mut cursor: Cursor<'_> = source.cursor();
         let (clip_start, clip_end) = sample_bounds(play, self.rate)?;
         let ticks = i128::from(TICKS_PER_SECOND);
+        let stretch_key = clip_key(self, clip, play);
         let mut samples = Vec::with_capacity(channels);
         for frame in base.max(clip_start)..(base + EFFECT_BLOCK_FRAMES).min(clip_end) {
             let local =
@@ -432,12 +440,62 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            if crate::stretch::active(clip) {
+                self.stretched_samples(clip, frame, stretch_key, &mut cursor, &mut samples)?;
+            } else {
+                source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            }
             for (channel, sample) in samples.iter().enumerate() {
                 input[(frame - base) * channels + channel] = (f64::from(*sample) * gain) as f32;
             }
         }
         Ok(input)
+    }
+
+    /// Read canonical WSOLA segments, blending independent histories at resets.
+    fn stretched_samples(
+        &self,
+        clip: &Clip,
+        frame: usize,
+        key: u64,
+        cursor: &mut Cursor<'_>,
+        samples: &mut Vec<f32>,
+    ) -> Result<(), Error> {
+        let channels = usize::from(self.channels);
+        let span = crate::stretch::segment_frames(self.rate);
+        let segment = frame / span;
+        let offset = frame % span;
+        let get = |index, cursor: &mut Cursor<'_>| -> Result<Arc<Vec<f32>>, Error> {
+            if let Some(entry) = self
+                .stretch_cache
+                .lock()
+                .expect("stretch cache lock")
+                .get(key, index)
+            {
+                return Ok(entry);
+            }
+            let entry = Arc::new(crate::stretch::render(
+                clip, self.rate, channels, index, cursor,
+            )?);
+            self.stretch_cache
+                .lock()
+                .expect("stretch cache lock")
+                .insert(key, index, Arc::clone(&entry));
+            Ok(entry)
+        };
+        let current = get(segment, cursor)?;
+        samples.clear();
+        samples.extend_from_slice(&current[offset * channels..(offset + 1) * channels]);
+        let hop = crate::stretch::hop(self.rate);
+        if segment > 0 && offset < hop {
+            let previous = get(segment - 1, cursor)?;
+            let weight = offset as f32 / hop as f32;
+            for (channel, sample) in samples.iter_mut().enumerate() {
+                *sample = previous[(span + offset) * channels + channel] * (1.0 - weight)
+                    + *sample * weight;
+            }
+        }
+        Ok(())
     }
 
     /// Processed block `block` of a clip's effect chain.

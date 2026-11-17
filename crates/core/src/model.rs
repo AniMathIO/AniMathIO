@@ -309,6 +309,9 @@ pub struct Clip {
     /// Exact timeline-to-source playback mapping.
     #[serde(default)]
     pub time_map: crate::ClipTimeMap,
+    /// Preserve audio pitch while retiming. Missing fields retain legacy varispeed.
+    #[serde(default)]
+    pub maintain_pitch: bool,
     /// Base transform.
     pub transform: Transform,
     /// Placement of an image or video source inside the frame; new clips default to contain.
@@ -344,6 +347,7 @@ impl Clip {
             range,
             source_offset: Time(0),
             time_map: crate::ClipTimeMap::default(),
+            maintain_pitch: true,
             transform: Transform::default(),
             fit,
             params: BTreeMap::new(),

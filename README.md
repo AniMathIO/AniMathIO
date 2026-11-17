@@ -6,6 +6,9 @@ rebuilds the editor and rendering engine in Rust.
 
 ![AniMathIO editor](docs/screenshots/editor-main.png)
 
+Clip speed edits offer **Maintain pitch** audio time stretching in preview and
+export. New clips enable it; existing projects preserve their previous sound.
+
 ## Installing
 
 Download the installers from the [latest release](https://github.com/AniMathIO/AniMathIO/releases/latest).

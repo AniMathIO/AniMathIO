@@ -9,7 +9,7 @@ the render/audio/export data flow. The authority for these rules is
 | Crate | Owns |
 | --- | --- |
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
-| `format` | Versioned `project.json` (schema version 7) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
+| `format` | Versioned `project.json` (schema version 8) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
 | `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, and cpal/rtrb device playback. No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
@@ -830,21 +830,40 @@ frames reading that source frame, and ripples the tail and unlocked trailing
 clips. Each linked pair gets independently linked head, hold and tail segments.
 Audio holds are silent. Other clips spanning the insertion point are unchanged.
 
-The mixer samples the same source clock on its existing output block lattice,
-with linear sample interpolation for retimed audio, in either direction. This is
-**varispeed**: pitch changes with speed. Maintain-pitch stretching and antialias
-filtering for large speedups are deferred. Identity clocks keep the existing
-bit-exact mixer path. Clip effects run after retiming; track effects run after
-mixing, and all output remains independent of seek order.
+Schema 8 adds `Clip::maintain_pitch`. New clips enable it; missing fields in
+schema 1–7 projects default to false, preserving the previous sound. The
+serializable, invertible `Command::SetClipMaintainPitch` updates the clip and
+linked companions atomically; locked companions reject the edit.
+
+With pitch preservation off, the mixer retains linear-interpolated varispeed
+(pitch changes with speed). With it on, non-unit rates and ramps use pure-Rust
+WSOLA in `crates/audio/src/stretch.rs`, shared by preview and export. Native-rate
+20 ms grains overlap at 10 ms hops; normalized multichannel correlation searches
+within 5 ms of each exact source-clock anchor. All channels share the selected
+shift. Reverse reads the grains backwards; frame holds remain silent. Each
+64-hop segment reconstructs eight warm-up grains from a fixed entry point, and
+adjacent segments crossfade for one hop. A bounded 16 MiB cache only avoids
+recomputation: cold seeks, eviction and arbitrary request boundaries produce the
+same samples. Temporary memory and seek work are independent of asset length.
+This is a basic time stretcher: transients and extreme rates can produce artifacts;
+it is not a formant-preserving voice processor. Video frame antialias filtering
+and graphical ramp handles remain deferred.
+
+Identity rates retain the existing bit-exact mixer path with either setting.
+Clip effects run after retiming; track effects run after mixing. Shuttle
+varispeed is a separate playback transport and still changes pitch.
 
 The editor's `retime` module provides the Speed inspector section and exact
 percentage/frame-key parsing. The Speed/Duration dialog accepts constant speed,
 duration or ramp keys; editing duration quantizes the implied ratio to a millionth
 (and may differ by a tick/frame boundary). Existing subframe ramp keys survive an
 unchanged dialog submission. Ctrl+R opens the dialog from the timeline; the Rate
-Stretch tool and graphical ramp handles are deferred. The CLI's
+Stretch tool respects the clip pitch setting; graphical ramp handles are deferred. The CLI's
 `animathio-cli set-clip-speed` and `animathio-cli freeze-frame` and the MCP tools
-route through the shared commands and source-limit guards.
+route through the shared commands and source-limit guards. The CLI accepts
+`--maintain-pitch true` or `--maintain-pitch false`; MCP accepts optional
+`maintain_pitch`. Omitting the option preserves the clip setting. The inspector
+and Speed/Duration dialog expose a **Maintain pitch** checkbox.
 
 ## Mathematical object workflow
 

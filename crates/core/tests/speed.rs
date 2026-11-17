@@ -343,3 +343,35 @@ fn retiming_keeps_automation_at_its_original_timeline_ticks() {
     assert_eq!(clip(&p, 1).animations, original);
     assert!(clip(&p, 1).range.end < Time(800));
 }
+
+#[test]
+fn maintain_pitch_is_serializable_linked_invertible_and_lock_safe() {
+    let mut p = project(true, false);
+    assert!(clip(&p, 1).maintain_pitch);
+    let command = Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: false,
+    };
+    let command: Command = serde_json::from_slice(&serde_json::to_vec(&command).unwrap()).unwrap();
+    exact(&mut p, &command);
+    assert!(!clip(&p, 1).maintain_pitch);
+    assert!(!clip(&p, 2).maintain_pitch);
+    speed(2, 1, false, false).apply(&mut p).unwrap();
+    assert!(!clip(&p, 1).maintain_pitch);
+    Command::SetTrackLocked {
+        id: TrackId(2),
+        locked: true,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let before = p.clone();
+    assert!(
+        Command::SetClipMaintainPitch {
+            id: ClipId(1),
+            maintain_pitch: true
+        }
+        .apply(&mut p)
+        .is_err()
+    );
+    assert_eq!(p, before);
+}

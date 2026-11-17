@@ -2271,3 +2271,20 @@ fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
         );
     });
 }
+
+#[gpui::test]
+fn maintain_pitch_inspector_handler_undoes(cx: &mut TestAppContext) {
+    let (project, assets) = voice_pair();
+    let mut ui = Ui::open(cx, project, assets);
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|e, _, cx| {
+        e.select_only(PAIR_FIRST, cx);
+        let _ = e.speed_rows(PAIR_FIRST, cx);
+        e.set_maintain_pitch(PAIR_FIRST, false, cx);
+    });
+    assert!(!ui.read(|e| e.project.tracks()[0].clips()[&PAIR_FIRST].maintain_pitch));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Redo);
+    assert!(!ui.read(|e| e.project.tracks()[0].clips()[&PAIR_FIRST].maintain_pitch));
+}

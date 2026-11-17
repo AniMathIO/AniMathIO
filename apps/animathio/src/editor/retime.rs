@@ -54,6 +54,14 @@ pub(super) fn ramps(text: &str, rate: FrameRate) -> Result<Vec<SpeedPoint>, Stri
         .collect()
 }
 impl Editor {
+    pub(super) fn set_maintain_pitch(
+        &mut self,
+        id: ClipId,
+        maintain_pitch: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.try_execute(&Command::SetClipMaintainPitch { id, maintain_pitch }, cx);
+    }
     pub(super) fn speed_rows(&self, id: ClipId, cx: &mut Context<Self>) -> Div {
         let Some(clip) = self.find_clip(id) else {
             return div();
@@ -100,6 +108,14 @@ impl Editor {
                 Button::new("edit-speed").label("Speed/Duration…").on_click(
                     cx.listener(|this, _, window, cx| this.open_speed_duration(window, cx)),
                 ),
+            )
+            .child(
+                gpui_component::checkbox::Checkbox::new("maintain-pitch")
+                    .label("Maintain pitch")
+                    .checked(clip.maintain_pitch)
+                    .on_change(cx.listener(move |this, checked: &bool, _, cx| {
+                        this.set_maintain_pitch(id, *checked, cx);
+                    })),
             )
             .child(
                 Button::new("insert-hold")

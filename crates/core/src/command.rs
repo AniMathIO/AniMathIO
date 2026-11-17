@@ -187,6 +187,13 @@ pub enum Command {
         /// Shift trailing clips across unlocked tracks.
         ripple: bool,
     },
+    /// Set pitch preservation for a clip and its linked companions as one undo step.
+    SetClipMaintainPitch {
+        /// Clip identity.
+        id: ClipId,
+        /// Use time stretching instead of pitch-shifting varispeed.
+        maintain_pitch: bool,
+    },
     /// Insert a frame hold and ripple the tail as one undo step (audio holds are silent).
     InsertFrameHold {
         /// Clip identity.
@@ -506,6 +513,7 @@ impl Command {
             | Self::SetTransform { id, .. }
             | Self::SetClipFit { id, .. }
             | Self::SetClipSpeed { id, .. }
+            | Self::SetClipMaintainPitch { id, .. }
             | Self::InsertFrameHold { id, .. }
             | Self::SetParam { id, .. }
             | Self::AddEffect { id, .. }
@@ -1150,6 +1158,10 @@ impl Command {
             } => {
                 let commands =
                     crate::speed::speed_commands(project, *id, *speed, *reverse, ramps, *ripple)?;
+                apply_generated(project, &commands)?
+            }
+            Self::SetClipMaintainPitch { id, maintain_pitch } => {
+                let commands = crate::speed::pitch_commands(project, *id, *maintain_pitch)?;
                 apply_generated(project, &commands)?
             }
             Self::InsertFrameHold { id, at, frames } => {

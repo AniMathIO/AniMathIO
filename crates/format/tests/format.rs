@@ -722,3 +722,28 @@ fn effect_parameters_cannot_contain_typed_asset_references() {
     value["tracks"][1]["audio_effects"] = json!([effect]);
     assert!(serde_json::from_value::<Project>(value).is_err());
 }
+
+#[test]
+fn schema_seven_keeps_legacy_pitch_and_schema_eight_roundtrips_the_option() {
+    let (project, _) = fixture(b"pitch migration");
+    assert!(project.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
+    let mut value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    value["schemaVersion"] = json!(7);
+    for track in value["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_object_mut().unwrap().values_mut() {
+            clip.as_object_mut().unwrap().remove("maintain_pitch");
+        }
+    }
+    let mut migrated = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+    assert!(!migrated.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
+    Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: true,
+    }
+    .apply(&mut migrated)
+    .unwrap();
+    assert_eq!(
+        read_json(json_bytes(&migrated).as_slice()).unwrap(),
+        migrated
+    );
+}

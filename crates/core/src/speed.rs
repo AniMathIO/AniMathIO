@@ -533,3 +533,37 @@ pub(crate) fn speed_commands(
     }
     Ok(commands)
 }
+
+/// Snapshot linked clips so undo restores even companions with different settings.
+pub(crate) fn pitch_commands(
+    project: &Project,
+    id: ClipId,
+    maintain_pitch: bool,
+) -> Result<Vec<Command>, Error> {
+    let original = project
+        .tracks()
+        .iter()
+        .find_map(|t| t.clips().get(&id))
+        .ok_or_else(|| invalid("clip missing"))?;
+    let mut commands = Vec::new();
+    for track in project.tracks() {
+        for clip in track.clips().values() {
+            if clip.id != id
+                && (original.link_group.is_none() || clip.link_group != original.link_group)
+            {
+                continue;
+            }
+            if track.is_locked() {
+                return Err(invalid("linked track is locked"));
+            }
+            let mut updated = clip.clone();
+            updated.maintain_pitch = maintain_pitch;
+            commands.push(Command::RestoreClips {
+                track: track.id(),
+                ids: vec![clip.id],
+                clips: vec![updated],
+            });
+        }
+    }
+    Ok(commands)
+}

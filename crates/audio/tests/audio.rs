@@ -531,6 +531,12 @@ fn clip_varispeed_length_alignment_reverse_and_block_independence() {
         for (n, d) in [(1, 2), (2, 1)] {
             for reverse in [false, true] {
                 let (mut p, pool) = project(&pcm, 0, TICKS_PER_SECOND);
+                Command::SetClipMaintainPitch {
+                    id: ClipId(0),
+                    maintain_pitch: false,
+                }
+                .apply(&mut p)
+                .unwrap();
                 Command::SetClipSpeed {
                     id: ClipId(0),
                     speed: ClipSpeed::new(n, d).unwrap(),
@@ -611,6 +617,12 @@ fn retimed_audio_aligns_at_long_timeline_and_trimmed_source_offsets() {
             }
             .apply(&mut p)
             .unwrap();
+            Command::SetClipMaintainPitch {
+                id: ClipId(0),
+                maintain_pitch: false,
+            }
+            .apply(&mut p)
+            .unwrap();
             Command::SetClipSpeed {
                 id: ClipId(0),
                 speed: ClipSpeed::new(n, d).unwrap(),
@@ -640,4 +652,131 @@ fn retimed_audio_aligns_at_long_timeline_and_trimmed_source_offsets() {
             }
         }
     }
+}
+
+#[test]
+fn maintained_pitch_sine_and_seek_order_are_stable() {
+    for rate in [44_100, 48_000] {
+        let tick = TICKS_PER_SECOND / i64::from(rate);
+        let pcm = Pcm::new(
+            rate,
+            2,
+            (0..rate * 2)
+                .flat_map(|i| {
+                    let sample =
+                        (i as f32 * std::f32::consts::TAU * 440.0 / rate as f32).sin() * 0.2;
+                    [sample, -sample]
+                })
+                .collect(),
+        )
+        .unwrap();
+        for (n, d) in [(1, 2), (2, 1)] {
+            for reverse in [false, true] {
+                let (mut p, pool) = project(&pcm, 0, 2 * TICKS_PER_SECOND);
+                Command::SetClipSpeed {
+                    id: ClipId(0),
+                    speed: ClipSpeed::new(n, d).unwrap(),
+                    reverse,
+                    ramps: vec![],
+                    ripple: false,
+                }
+                .apply(&mut p)
+                .unwrap();
+                let end = p.tracks()[0].clips()[&ClipId(0)].range.end;
+                let mixer = pool.prepare(rate, 2).unwrap();
+                let output = mixer.mix(&p, range(0, end.0)).unwrap();
+                assert_eq!(output.len(), (rate * 2 * d / n) as usize * 2);
+                let mono: Vec<_> = output
+                    .chunks_exact(2)
+                    .map(|frame| {
+                        assert_eq!(frame[0], -frame[1]);
+                        frame[0]
+                    })
+                    .collect();
+                // Count positive crossings across segment resets, excluding edge transients.
+                let signal = &mono[rate as usize / 10..mono.len() - rate as usize / 10];
+                let crossings: Vec<_> = signal
+                    .windows(2)
+                    .enumerate()
+                    .filter(|(_, s)| s[0] <= 0.0 && s[1] > 0.0)
+                    .map(|(i, _)| i)
+                    .collect();
+                let frequency = (crossings.len() - 1) as f64 * f64::from(rate)
+                    / (crossings.last().unwrap() - crossings[0]) as f64;
+                assert!(
+                    (frequency - 440.0).abs() < 3.0,
+                    "{rate} {n}/{d} reverse={reverse}: {frequency} Hz"
+                );
+                // Cold, out-of-order seeks cross effect blocks and WSOLA segment/reset fades.
+                let hop = rate as usize / 100;
+                for (a, b) in [
+                    (2041, 4099),
+                    (63 * hop, 66 * hop),
+                    (rate as usize / 3, rate as usize / 3 + 911),
+                    (0, 93),
+                ] {
+                    let cold = pool.prepare(rate, 2).unwrap();
+                    let part = cold
+                        .mix(&p, range(a as i64 * tick, b as i64 * tick))
+                        .unwrap();
+                    assert_eq!(part, output[a * 2..b * 2]);
+                    assert_eq!(
+                        mixer
+                            .mix(&p, range(a as i64 * tick, b as i64 * tick))
+                            .unwrap(),
+                        part
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn maintained_pitch_ramp_is_seek_independent_and_bypasses_identity() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let (mut p, pool) = project(&sine(rate), 0, TICKS_PER_SECOND);
+    let original = pool.mix(&p, range(0, TICKS_PER_SECOND), rate, 1).unwrap();
+    Command::SetClipMaintainPitch {
+        id: ClipId(0),
+        maintain_pitch: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(
+        pool.mix(&p, range(0, TICKS_PER_SECOND), rate, 1).unwrap(),
+        original
+    );
+    Command::SetClipMaintainPitch {
+        id: ClipId(0),
+        maintain_pitch: true,
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::SetClipSpeed {
+        id: ClipId(0),
+        speed: ClipSpeed::default(),
+        reverse: false,
+        ramps: vec![
+            SpeedPoint {
+                time: Time(0),
+                speed: ClipSpeed::new(1, 2).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(TICKS_PER_SECOND / 2),
+                speed: ClipSpeed::new(2, 1).unwrap(),
+            },
+        ],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let end = p.tracks()[0].clips()[&ClipId(0)].range.end;
+    let output = pool.mix(&p, range(0, end.0), rate, 1).unwrap();
+    let cut = 2137;
+    let mut pieces = pool.mix(&p, range(0, cut * tick), rate, 1).unwrap();
+    pieces.extend(pool.mix(&p, range(cut * tick, end.0), rate, 1).unwrap());
+    assert_eq!(pieces, output);
+    assert!(output.iter().all(|s| s.is_finite()));
 }
