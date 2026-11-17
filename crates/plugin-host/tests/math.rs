@@ -53,7 +53,7 @@ fn build_plugin(name: &str) -> BuiltPlugin {
         ])
         .env("CARGO_TARGET_DIR", &target_dir)
         .env("CARGO_BUILD_JOBS", "3")
-        .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
+        .env("CARGO_PROFILE_DEV_DEBUG", "0")
         .env("CARGO_INCREMENTAL", "0")
         .status()
         .expect("failed to spawn cargo build for plugin");
@@ -659,4 +659,110 @@ fn latex_quadratic_golden() {
         )
         .unwrap();
     golden_vector(scene, "latex-quadratic");
+}
+
+#[test]
+fn latex_inline_colors_golden() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let latex = load_plugin(&mut host, "latex");
+    let scene = host
+        .render_clip(
+            &latex,
+            &BTreeMap::new(),
+            &json!({
+                "source": r"\textcolor{red}{a}b + {\color{blue} \frac{x}{y}} + \color{green}{z}",
+                "color": [64, 64, 64, 255], "size": 72.0,
+            }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    let colors: Vec<_> = scene
+        .elements
+        .iter()
+        .map(|element| match element {
+            animathio_core::VectorElement::FillPath { color, .. } => *color,
+            _ => panic!("expected filled glyphs/rules"),
+        })
+        .collect();
+    for expected in [
+        [255, 0, 0, 255],
+        [0, 0, 255, 255],
+        [0, 255, 0, 255],
+        [64, 64, 64, 255],
+    ] {
+        assert!(
+            colors.contains(&animathio_core::Color::rgba(
+                expected[0],
+                expected[1],
+                expected[2],
+                expected[3]
+            )),
+            "{expected:?}"
+        );
+    }
+    golden_vector(scene.clone(), "latex-inline-colors");
+    let mut clip = vector_clip(scene);
+    clip.transform.opacity = 0.5;
+    let frame = render(
+        &CoreScene {
+            canvas: (0, 0),
+            background: [0; 4],
+            clips: vec![clip],
+        },
+        &mut RenderCtx::default(),
+        (640, 360),
+    )
+    .unwrap();
+    assert_eq!(
+        frame.pixels.as_chunks::<4>().0.iter().map(|p| p[3]).max(),
+        Some(128)
+    );
+}
+
+#[test]
+fn latex_colored_reveal_and_evaluated_clip_color() {
+    use animathio_core::{Color, ParamValue, VectorElement};
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let latex = load_plugin(&mut host, "latex");
+    for (reveal, count, partial) in [
+        (0.0, 0, false),
+        (0.25, 1, true),
+        (0.5, 2, true),
+        (0.75, 2, true),
+        (1.0, 2, false),
+    ] {
+        // Core-evaluated values take precedence over static plugin JSON, as with keyframes.
+        let evaluated = BTreeMap::from([("color".into(), ParamValue::Color([0.0, 1.0, 0.0, 0.5]))]);
+        let scene = host
+            .render_clip(
+                &latex,
+                &evaluated,
+                &json!({
+                    "source": r"\textcolor{red}{a}b", "color": [0, 0, 255, 255],
+                    "size": 72.0, "reveal": reveal,
+                }),
+                0,
+                (640, 360),
+            )
+            .unwrap();
+        assert_eq!(scene.elements.len(), count, "{reveal}");
+        for (index, element) in scene.elements.iter().enumerate() {
+            let expected = if index == 0 {
+                Color::rgba(255, 0, 0, 128)
+            } else {
+                Color::rgba(0, 255, 0, 128)
+            };
+            match element {
+                VectorElement::FillPath { color, .. } => assert_eq!(*color, expected),
+                VectorElement::StrokePath { style, .. } => assert_eq!(style.color, expected),
+                _ => panic!("expected glyph path"),
+            }
+        }
+        if let Some(last) = scene.elements.last() {
+            assert_eq!(matches!(last, VectorElement::StrokePath { .. }), partial);
+        }
+    }
 }

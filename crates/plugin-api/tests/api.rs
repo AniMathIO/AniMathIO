@@ -228,7 +228,7 @@ fn rejects_the_incompatible_previous_component_abi() {
 #[test]
 fn abi_negotiation_is_strict_and_rejects_future_requirements() {
     let mut manifest = PluginManifestToml::parse(MINIMAL_MANIFEST).unwrap();
-    for api in ["0.2.0", "0.2.1", "0.2.2", "1.0.0", "1.1.0"] {
+    for api in ["0.2.0", "0.2.1", "0.2.2", "1.0.0", "1.1.0", "1.2.0"] {
         manifest.api_version = api.into();
         assert!(manifest.validate().is_ok(), "{api}");
     }
@@ -241,7 +241,8 @@ fn abi_negotiation_is_strict_and_rejects_future_requirements() {
         "1",
         "1.0.1",
         "1.1.1",
-        "1.2.0",
+        "1.2.1",
+        "1.3.0",
         "2.0.0",
         "1.0.0-rc.1",
         "1.0.0+local",
