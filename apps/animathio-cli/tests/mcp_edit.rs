@@ -114,7 +114,7 @@ fn describe_cut_remove_batch_and_preset() {
     }
 
     let library = session.json_tool("list_title_presets", json!({}));
-    assert_eq!(library.as_array().unwrap().len(), 8);
+    assert_eq!(library.as_array().unwrap().len(), 18);
     let before_title = session.json_tool("get_project_state", json!({}))["project"].clone();
     let composition = session.json_tool(
         "add_title",
