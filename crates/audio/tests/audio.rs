@@ -1,5 +1,12 @@
 //! Contracts shared by preview and export, independent of any audio device.
-#![allow(clippy::float_cmp, clippy::cast_precision_loss)]
+#![allow(
+    clippy::float_cmp,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::chunks_exact_to_as_chunks
+)]
 use animathio_audio::{AudioPool, AudioSource, DecodeLimits, Error, Pcm, Player, SymphoniaSource};
 use animathio_core::*;
 use proptest::prelude::*;

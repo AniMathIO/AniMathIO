@@ -217,7 +217,7 @@ mod tests {
     fn lane_maps_speed_on_a_log_scale_with_a_magnetic_100_percent() {
         let lane = lane(0.0, 100.0).unwrap();
         assert_eq!((lane.top, lane.bottom), (11.0, 89.0));
-        let middle = (lane.top + lane.bottom) / 2.0;
+        let middle = f32::midpoint(lane.top, lane.bottom);
         assert!((lane.y(speed(100)) - middle).abs() < 1e-3);
         assert!((lane.y(speed(1600)) - lane.top).abs() < 1e-3);
         assert!(lane.y(speed(25)) > lane.y(speed(50)), "slower is lower");
@@ -296,7 +296,7 @@ mod tests {
         let command = remove_key(&clip(&project, id), 0).unwrap();
         command.apply(&mut project).unwrap();
         let constant = clip(&project, id);
-        assert!(constant.time_map.ramps.is_empty());
+        assert_eq!(constant.time_map.ramps.len(), 0);
         assert_eq!(constant.time_map.speed, speed(200));
     }
 

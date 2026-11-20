@@ -35,11 +35,14 @@ pub(crate) fn active(clip: &Clip) -> bool {
         }
 }
 
+/// A cached segment and the clock tick it was last used at.
+type Entry = (u64, Arc<Vec<f32>>);
+
 /// Bounded LRU cache of rendered segments. It changes cost only: eviction, an entry
 /// larger than the budget and cold starts all reproduce the same samples.
 #[derive(Default)]
 pub(crate) struct Cache {
-    entries: HashMap<(u64, usize), (u64, Arc<Vec<f32>>)>,
+    entries: HashMap<(u64, usize), Entry>,
     clock: u64,
     bytes: usize,
 }
@@ -141,17 +144,16 @@ impl<'a> Reader<'a> {
             .lock()
             .expect("stretch cache lock")
             .get(self.key, index);
-        let entry = match cached {
-            Some(entry) => entry,
-            None => {
-                let entry = Arc::new(render(self.clip, self.rate, self.channels, index, cursor)?);
-                self.cache.lock().expect("stretch cache lock").insert(
-                    self.key,
-                    index,
-                    Arc::clone(&entry),
-                );
-                entry
-            }
+        let entry = if let Some(entry) = cached {
+            entry
+        } else {
+            let entry = Arc::new(render(self.clip, self.rate, self.channels, index, cursor)?);
+            self.cache.lock().expect("stretch cache lock").insert(
+                self.key,
+                index,
+                Arc::clone(&entry),
+            );
+            entry
         };
         self.slots[index % 2] = Some((index, entry));
         Ok(())
@@ -363,7 +365,7 @@ mod tests {
         let reference = vec![1.0_f32; hop];
         // Every candidate anti-correlated except a silent one: the silent one must lose.
         let mut region = vec![-1.0_f32; 2 * hop + 2 * search];
-        for v in &mut region[..hop + 1] {
+        for v in &mut region[..=hop] {
             *v = 0.0;
         }
         assert_ne!(best_overlap(&reference, &region, channels, hop, search), 0);

@@ -469,10 +469,11 @@ fn point_samples_remain_for_normal_slow_still_and_held_video() {
     }
     .apply(&mut p)
     .unwrap();
-    assert!(
+    assert_eq!(
         evaluate(&p, Time(TICKS_PER_SECOND + frame / 2)).clips[0]
             .source_taps
-            .is_empty()
+            .len(),
+        0
     );
     // A frame hold shows one frame; the segments around it still filter.
     let mut p = video_project(2, 1, false);
@@ -484,11 +485,7 @@ fn point_samples_remain_for_normal_slow_still_and_held_video() {
     .apply(&mut p)
     .unwrap();
     assert_eq!(evaluate(&p, Time(frame)).clips[0].source_taps.len(), 2);
-    assert!(
-        evaluate(&p, Time(5 * frame)).clips[0]
-            .source_taps
-            .is_empty()
-    );
+    assert_eq!(evaluate(&p, Time(5 * frame)).clips[0].source_taps.len(), 0);
     assert_eq!(evaluate(&p, Time(9 * frame)).clips[0].source_taps.len(), 2);
 }
 

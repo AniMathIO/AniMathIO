@@ -2364,7 +2364,7 @@ fn speed_ramp_handles_drag_add_and_remove_as_single_undo_steps(cx: &mut TestAppC
         // Nothing is committed while the pointer is still down.
         assert_eq!(ui.read(|e| e.project.clone()), before);
     }
-    assert!(ui.read(|e| e.edit_tool_feedback()).starts_with("Speed key"));
+    assert!(ui.read(Editor::edit_tool_feedback).starts_with("Speed key"));
     let end = grab + gpui::point(gpui::px(-24.), gpui::px(-16.));
     ui.cx.simulate_mouse_up(end, gpui::MouseButton::Left, none);
     ui.settle();

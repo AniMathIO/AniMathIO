@@ -206,8 +206,8 @@ pub(crate) fn video_frame(
     if clip.source_taps.len() < 2 {
         return video.frame_at(asset, clip.source_time);
     }
-    let mut sums: Vec<u32> = Vec::new();
-    let mut alpha_sums: Vec<u32> = Vec::new();
+    // Per pixel: alpha-weighted colour sums and the alpha sum.
+    let mut sums: Vec<[u32; 4]> = Vec::new();
     let (mut size, mut count) = ((0, 0), 0_u32);
     for time in &clip.source_taps {
         let Some(frame) = video.frame_at(asset, *time) else {
@@ -218,36 +218,28 @@ pub(crate) fn video_frame(
         }
         if count == 0 {
             size = frame.size;
-            sums = vec![0; frame.pixels.len()];
-            alpha_sums = vec![0; frame.pixels.len() / 4];
+            sums = vec![[0; 4]; frame.pixels.len() / 4];
         } else if frame.size != size {
             continue;
         }
-        for ((sum, alpha), pixel) in sums
-            .chunks_exact_mut(4)
-            .zip(&mut alpha_sums)
-            .zip(frame.pixels.chunks_exact(4))
-        {
-            let a = u32::from(pixel[3]);
-            for channel in 0..3 {
-                sum[channel] += u32::from(pixel[channel]) * a;
-            }
-            sum[3] += a;
-            *alpha += a;
+        for (sum, pixel) in sums.iter_mut().zip(frame.pixels.as_chunks::<4>().0) {
+            let alpha = u32::from(pixel[3]);
+            sum[0] += u32::from(pixel[0]) * alpha;
+            sum[1] += u32::from(pixel[1]) * alpha;
+            sum[2] += u32::from(pixel[2]) * alpha;
+            sum[3] += alpha;
         }
         count += 1;
     }
     if count == 0 {
         return None;
     }
-    let mut pixels = Vec::with_capacity(sums.len());
-    for (sum, alpha) in sums.chunks_exact(4).zip(&alpha_sums) {
-        for channel in 0..3 {
-            pixels.push(if *alpha == 0 {
-                0
-            } else {
-                u8::try_from((sum[channel] + alpha / 2) / alpha).unwrap_or(u8::MAX)
-            });
+    let mut pixels = Vec::with_capacity(sums.len() * 4);
+    for sum in &sums {
+        let alpha = sum[3];
+        for total in &sum[..3] {
+            let value = (total + alpha / 2).checked_div(alpha).unwrap_or(0);
+            pixels.push(u8::try_from(value).unwrap_or(u8::MAX));
         }
         pixels.push(u8::try_from((alpha + count / 2) / count).unwrap_or(u8::MAX));
     }
