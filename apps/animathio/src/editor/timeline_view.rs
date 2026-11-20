@@ -4,6 +4,13 @@ use super::*;
 
 impl Editor {
     pub(super) fn edit_tool_feedback(&self) -> String {
+        if let Some(TimelineGesture::Ramp(drag)) = &self.gesture {
+            return format!(
+                "Speed key {:.0}% at {}",
+                drag.speed.percent(),
+                timecode::format_timecode(drag.time, self.project.frame_rate())
+            );
+        }
         let Some(TimelineGesture::Trim(t)) = &self.gesture else {
             return String::new();
         };
@@ -165,6 +172,9 @@ impl Editor {
         // Explicit edge tools take priority over the selected clip's fade and
         // keyframe handles, including at its upper and lower corners.
         let edge_tool = matches!(self.tool, Tool::RateStretch | Tool::Rolling);
+        if !edge_tool && self.ramp_press(&layout, x, y, event.modifiers.alt, cx) {
+            return;
+        }
         if !edge_tool && let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
             self.select_only(clip_id, cx);
             self.selected_field = None;
@@ -561,6 +571,7 @@ impl Editor {
                 }
                 cx.notify();
             }
+            Some(TimelineGesture::Ramp(_)) => self.ramp_drag_to(&layout, x, y, cx),
             Some(TimelineGesture::Fade(fade)) => {
                 let Some(clip) = self
                     .project
@@ -715,6 +726,7 @@ impl Editor {
                 }
                 cx.notify();
             }
+            Some(TimelineGesture::Ramp(drag)) => self.ramp_release(&drag, cx),
             Some(TimelineGesture::Fade(fade)) => {
                 if let Some(command) = self
                     .find_clip(fade.clip_id)
@@ -981,6 +993,11 @@ impl Editor {
                         }
                     }
                 }
+                let ramp_keys = if single && self.selected == Some(clip.id) {
+                    self.ramp_paints(clip, start)
+                } else {
+                    Vec::new()
+                };
                 let (mut fade_in, mut fade_out) = (
                     fades::fade_len(clip, FadeEdge::In),
                     fades::fade_len(clip, FadeEdge::Out),
@@ -1069,6 +1086,7 @@ impl Editor {
                     kind: clip.kind.clone(),
                     icon: icons::kind_icon(&clip.kind),
                     keyframes,
+                    ramp_keys,
                     waveform,
                     source_offset,
                     fade_levels: [FadeEdge::In, FadeEdge::Out].map(|edge| {

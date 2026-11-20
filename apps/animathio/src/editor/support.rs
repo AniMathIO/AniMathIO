@@ -355,6 +355,7 @@ pub(super) fn paint_clip(
         );
     }
     paint_fades(clip, (x0, x1, y0, y1), window, cx);
+    paint_speed_ramp(bounds, layout, clip, (x0, x1, y0, y1), window);
     // Labels stay readable while the clip start scrolls off the left edge.
     let lx = x0.max(bounds.left());
     if !clip.preview.is_empty() && y1 - y0 > px(38.) {
@@ -784,6 +785,66 @@ pub(super) fn paint_waveform(
     }
     paths.insert(key, path.clone());
     window.paint_path(path, clip_color(&clip.kind, cx.theme()).opacity(alpha));
+}
+
+/// The speed curve and its draggable key handles, for the selected clip with speed keys.
+/// The curve is the linear ramp the retiming clock integrates: flat before the first key
+/// and after the last, with a faint 100% guide behind it.
+fn paint_speed_ramp(
+    bounds: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    clip: &ClipPaint,
+    (x0, x1, y0, y1): (Pixels, Pixels, Pixels, Pixels),
+    window: &mut Window,
+) {
+    let Some(lane) = crate::speed_ramp::lane(f32::from(y0), f32::from(y1)) else {
+        return;
+    };
+    if clip.ramp_keys.is_empty() || x1 - x0 < px(24.) {
+        return;
+    }
+    let guide_y = px(lane.y(animathio_core::ClipSpeed::default()));
+    window.paint_quad(fill(
+        Bounds::from_corners(
+            point(x0 + px(4.), guide_y),
+            point(x1 - px(4.), guide_y + px(1.)),
+        ),
+        style::hexa(colors::TEXT, 0.18),
+    ));
+    let key_x =
+        |time: Time| (bounds.origin.x + px(timeline::time_to_x(layout, time))).clamp(x0, x1);
+    let mut curve = gpui::PathBuilder::stroke(px(1.5));
+    let first = &clip.ramp_keys[0];
+    curve.move_to(point(x0, px(lane.y(first.speed))));
+    for key in &clip.ramp_keys {
+        curve.line_to(point(key_x(key.time), px(lane.y(key.speed))));
+    }
+    if let Some(last) = clip.ramp_keys.last() {
+        curve.line_to(point(x1, px(lane.y(last.speed))));
+    }
+    if let Ok(path) = curve.build() {
+        window.paint_path(path, style::hexa(colors::TEXT, 0.85));
+    }
+    for key in &clip.ramp_keys {
+        let kx = bounds.origin.x + px(timeline::time_to_x(layout, key.time));
+        if kx < x0 || kx > x1 {
+            continue;
+        }
+        let ky = px(lane.y(key.speed));
+        let (outer, inner) = (px(5.5), px(4.0));
+        window.paint_quad(fill(
+            Bounds::from_corners(point(kx - outer, ky - outer), point(kx + outer, ky + outer)),
+            style::hexa(colors::BG, 0.85),
+        ));
+        window.paint_quad(fill(
+            Bounds::from_corners(point(kx - inner, ky - inner), point(kx + inner, ky + inner)),
+            if key.active {
+                style::hex(colors::ACCENT)
+            } else {
+                style::hex(colors::TEXT)
+            },
+        ));
+    }
 }
 
 /// Polyline samples per fade curve.

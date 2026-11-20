@@ -98,6 +98,10 @@ and `animathio-cli freeze-frame`; MCP: `set_clip_speed` and `freeze_frame`.
 CLI speed edits accept `--maintain-pitch true` or `--maintain-pitch false`; MCP
 accepts `maintain_pitch`. Omission keeps the clip setting. Shuttle playback still
 changes pitch with transport speed.
+Select a clip with ramp keys to see its speed curve on the timeline: drag a square
+handle to change a key's time and speed (one undo step per drag), Alt-click a handle to
+remove it, Alt-click the clip to add a key. Video above 1x speed is filtered over time
+(frames averaged across each output frame) instead of dropping frames.
 See [retiming rules and limits](architecture.md#clip-retiming).
 
 ## Auto-reframe

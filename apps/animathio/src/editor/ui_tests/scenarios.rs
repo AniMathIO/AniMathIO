@@ -2288,3 +2288,121 @@ fn maintain_pitch_inspector_handler_undoes(cx: &mut TestAppContext) {
     ui.dispatch(Redo);
     assert!(!ui.read(|e| e.project.tracks()[0].clips()[&PAIR_FIRST].maintain_pitch));
 }
+
+/// Window position of speed key `index` of `clip`, or of its clip-local `time` on the
+/// 100% line of the lane when `index` is `None`.
+fn ramp_point(
+    ui: &Ui,
+    clip: ClipId,
+    index: Option<usize>,
+    time: Time,
+) -> gpui::Point<gpui::Pixels> {
+    ui.read(|e| {
+        let layout = e.current_layout();
+        let (row, c) = e.ramp_target().expect("selected clip");
+        assert_eq!(c.id, clip);
+        let lane = Editor::ramp_lane(&layout, row).expect("lane");
+        let (local, speed) = index.map_or((time, ClipSpeed::default()), |i| {
+            (c.time_map.ramps[i].time, c.time_map.ramps[i].speed)
+        });
+        gpui::point(
+            e.timeline_bounds.origin.x
+                + gpui::px(timeline::time_to_x(
+                    &layout,
+                    Time(c.range.start.0 + local.0),
+                )),
+            e.timeline_bounds.origin.y + gpui::px(lane.y(speed)),
+        )
+    })
+}
+
+#[gpui::test]
+fn speed_ramp_handles_drag_add_and_remove_as_single_undo_steps(cx: &mut TestAppContext) {
+    use animathio_core::SpeedPoint;
+    let (project, assets) = voice_pair();
+    let mut ui = Ui::open(cx, project, assets);
+    // A two-key ramp from 100% to 200% on the first clip.
+    ui.update(|e, _, cx| {
+        e.select_only(PAIR_FIRST, cx);
+        e.try_execute(
+            &Command::SetClipSpeed {
+                id: PAIR_FIRST,
+                speed: ClipSpeed::default(),
+                reverse: false,
+                ramps: vec![
+                    SpeedPoint {
+                        time: Time(0),
+                        speed: ClipSpeed::default(),
+                    },
+                    SpeedPoint {
+                        time: Time(500 * MS),
+                        speed: ClipSpeed::new(2, 1).unwrap(),
+                    },
+                ],
+                ripple: false,
+            },
+            cx,
+        );
+    });
+    ui.settle();
+    let ramps = |ui: &Ui| ui.read(|e| e.find_clip(PAIR_FIRST).unwrap().time_map.ramps.clone());
+    let original = ramps(&ui);
+    assert_eq!(original.len(), 2);
+    let before = ui.read(|e| e.project.clone());
+    let none = gpui::Modifiers::default();
+
+    // Dragging the second key up and left is one gesture and one undo step.
+    let grab = ramp_point(&ui, PAIR_FIRST, Some(1), Time(0));
+    ui.cx
+        .simulate_mouse_down(grab, gpui::MouseButton::Left, none);
+    ui.settle();
+    assert!(ui.read(|e| matches!(e.gesture, Some(TimelineGesture::Ramp(_)))));
+    for step in 1..=4 {
+        let moved = grab + gpui::point(gpui::px(-6. * step as f32), gpui::px(-4. * step as f32));
+        ui.cx
+            .simulate_mouse_move(moved, gpui::MouseButton::Left, none);
+        // Nothing is committed while the pointer is still down.
+        assert_eq!(ui.read(|e| e.project.clone()), before);
+    }
+    assert!(ui.read(|e| e.edit_tool_feedback()).starts_with("Speed key"));
+    let end = grab + gpui::point(gpui::px(-24.), gpui::px(-16.));
+    ui.cx.simulate_mouse_up(end, gpui::MouseButton::Left, none);
+    ui.settle();
+    let dragged = ramps(&ui);
+    assert_eq!(dragged.len(), 2);
+    assert!(dragged[1].time < original[1].time, "moved earlier");
+    assert!(dragged[1].speed.percent() > 200., "moved faster");
+    assert_eq!(dragged[0], original[0]);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(ramps(&ui), dragged);
+    ui.dispatch(Undo);
+
+    // A click that does not move the key changes nothing.
+    let grab = ramp_point(&ui, PAIR_FIRST, Some(0), Time(0));
+    ui.cx
+        .simulate_mouse_down(grab, gpui::MouseButton::Left, none);
+    ui.cx.simulate_mouse_up(grab, gpui::MouseButton::Left, none);
+    ui.settle();
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+
+    // Alt-click adds a key on the curve without changing it; Alt-click a key removes it.
+    let alt = gpui::Modifiers {
+        alt: true,
+        ..Default::default()
+    };
+    let at = ramp_point(&ui, PAIR_FIRST, None, Time(250 * MS));
+    ui.click(at, alt);
+    assert_eq!(ramps(&ui).len(), 3);
+    // On the 100% -> 200% curve around the 250 ms the pointer landed on (pixel precision).
+    assert!((140.0..160.0).contains(&ramps(&ui)[1].speed.percent()));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Redo);
+    let added = ramp_point(&ui, PAIR_FIRST, Some(1), Time(0));
+    ui.click(added, alt);
+    assert_eq!(ramps(&ui), original);
+    ui.dispatch(Undo);
+    assert_eq!(ramps(&ui).len(), 3);
+}

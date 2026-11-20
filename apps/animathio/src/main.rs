@@ -34,6 +34,7 @@ mod preview_settings;
 mod render_worker;
 mod ripple;
 mod selection;
+mod speed_ramp;
 mod style;
 mod subtitle_job;
 mod timecode;

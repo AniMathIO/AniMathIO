@@ -8,6 +8,8 @@ rebuilds the editor and rendering engine in Rust.
 
 Clip speed edits offer **Maintain pitch** audio time stretching in preview and
 export. New clips enable it; existing projects preserve their previous sound.
+Video above 1x speed is box filtered over time, and speed ramps have draggable
+handles on the timeline.
 
 ## Installing
 

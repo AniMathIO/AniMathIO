@@ -849,8 +849,24 @@ adjacent segments crossfade for one hop. A bounded 16 MiB cache only avoids
 recomputation: cold seeks, eviction and arbitrary request boundaries produce the
 same samples. Temporary memory and seek work are independent of asset length.
 This is a basic time stretcher: transients and extreme rates can produce artifacts;
-it is not a formant-preserving voice processor. Video frame antialias filtering
-and graphical ramp handles remain deferred.
+it is not a formant-preserving voice processor. A constant 1x clip (reversed or
+not) never uses the stretcher: it already preserves pitch and reads samples one for
+one. Segments that lie wholly before the clip's first (dissolve-extended) frame are
+not blended in, so the clip start is not faded. The overlap
+search treats silence as no information (a silent candidate never beats a real match;
+a silent reference keeps the nominal anchor), source bounds round outwards like the
+varispeed path, and the shared cache evicts least recently used segments (a segment
+larger than the budget is never cached and never flushes the rest).
+
+Video above 1x is filtered rather than decimated. `evaluate` gives each video
+`SceneClip` a `source_taps` list when the clip's source clock covers about two or
+more source frames per output frame: `round(speed)` source times (at most 16) spaced
+evenly across the output frame's interval, read through the exact retiming clock, so
+ramps and reverse work. The renderer (CPU and GPU preview alike) averages the frames
+due at those times with equal weight, alpha-weighted per pixel with integer rounding,
+a box filter over time that turns dropped-frame aliasing into motion blur. At or near
+1x, slow motion, holds and stills there are no taps and the path is the exact point
+sample. Output stays a pure function of the scene and the frame source.
 
 Identity rates retain the existing bit-exact mixer path with either setting.
 Clip effects run after retiming; track effects run after mixing. Shuttle
@@ -861,12 +877,24 @@ percentage/frame-key parsing. The Speed/Duration dialog accepts constant speed,
 duration or ramp keys; editing duration quantizes the implied ratio to a millionth
 (and may differ by a tick/frame boundary). Existing subframe ramp keys survive an
 unchanged dialog submission. Ctrl+R opens the dialog from the timeline; the Rate
-Stretch tool respects the clip pitch setting; graphical ramp handles are deferred. The CLI's
+Stretch tool respects the clip pitch setting. Speed ramps have graphical handles on the
+timeline (see below). The CLI's
 `animathio-cli set-clip-speed` and `animathio-cli freeze-frame` and the MCP tools
 route through the shared commands and source-limit guards. The CLI accepts
 `--maintain-pitch true` or `--maintain-pitch false`; MCP accepts optional
 `maintain_pitch`. Omitting the option preserves the clip setting. The inspector
 and Speed/Duration dialog expose a **Maintain pitch** checkbox.
+
+**Speed-ramp handles.** For the selected clip with ramp keys the timeline draws the
+speed curve (log scale, 6.25% to 1600%, a 100% guide in the middle) and a square handle
+per key (`apps/animathio/src/speed_ramp.rs` holds the geometry and commands). Dragging a
+handle moves the key in time (between its neighbours, at least one frame from each) and in
+speed (whole percent, magnetic at 100%); Alt-click a handle removes the key; Alt-click the
+selected clip adds a key at the pointer on the current curve, so nothing changes until it
+is dragged. Every gesture ends in exactly one `Command::SetClipSpeed` with the new key
+list, so it is one undo step, follows linked companions and passes the same source-limit
+and overlap checks as the dialog (no ripple). The clip's length changes with its curve;
+keys keep their clip-local times.
 
 ## Mathematical object workflow
 

@@ -233,9 +233,10 @@ pub(crate) fn render(
             position -= ticks - i128::from(rate);
         }
         let anchor = position.div_euclid(ticks);
-        // Fetch the candidate region in ascending source order (a reverse clip then never
-        // steps backwards through prepared blocks) and store it in playback order, so the
-        // same overlap/search code also handles reverse clips.
+        // Fetch the candidate region in ascending source order (within one grain a reverse
+        // clip then never walks backwards through prepared blocks, which would force the
+        // sequential resampler fallback to restart when a block has been evicted) and store
+        // it in playback order, so the same overlap/search code also handles reverse clips.
         let lowest = if reverse {
             anchor - (width - 1 - search) as i128
         } else {
