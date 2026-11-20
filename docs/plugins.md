@@ -1073,7 +1073,7 @@ Notes for real plugins:
 
 ## First-party text and shapes
 
-`org.animathio.text` accepts `text`, `font_size`, `font_weight`, `color`, `align` (`left`, `center`,
+`org.animathio.text` accepts `text`, `font_size`, `font_weight`, `font`, `color`, `align` (`left`, `center`,
 `right`), `units` (`pixels` or `normalized`) and `reveal` (0–1, default 1: the fraction
 of characters shown, keyframed by the typewriter presets; the visible prefix is laid
 out on its own, so left alignment keeps characters in place while they appear). Pixel mode retains centered outline
@@ -1090,12 +1090,24 @@ edited fields and transform handles inside safe areas.
 Text plugin 1.2.0 fills shaped glyph contours together with their original winding,
 preserving counters in canvas text, fitted titles and Classic captions. Normalized
 text runs use the renderer’s shared embedded-font shaping on CPU and GPU.
-Text plugin 1.3.0 adds numeric `font_weight` (100–900, default 400, clamped). Regular
-(400, or an absent parameter) keeps the host's DejaVu Sans `TextRun`, so projects saved
-before 1.3.0 render unchanged. Every other weight is outlined inside the plugin from the
-bundled Inter variable font (SIL OFL; `LICENSE-Inter.txt` ships in the bundle), at any
-value between 100 and 900, including genuine semibold, bold and extra-bold shapes. Weighted
-text keeps the regular layout contract: normalized text wraps at the canvas width, honours
+Text plugin 1.3.0 adds numeric `font_weight` (100–900, default 400, clamped) and the enum
+`font` (`dejavu` or `inter`, default `dejavu` when absent). With `font = dejavu`, weight
+400 keeps the host's DejaVu Sans `TextRun`, so projects saved before 1.3.0 render
+unchanged, and every other weight is outlined inside the plugin from the bundled Inter
+variable font (SIL OFL; `LICENSE-Inter.txt` ships in the bundle), so keyframing the weight
+of such a clip switches typeface at 400. With `font = inter` every weight, 400 included, is
+outlined from Inter (genuine semibold, bold and extra-bold shapes at any value between 100
+and 900) and the typeface never changes; the typography title presets and the v1 importer
+(for elements with a `fontWeight`) set it. Characters Inter lacks (maths operators such as
+`∀ ∈ ℝ`, Hebrew and so on) are drawn per character from the bundled DejaVu Sans, always at
+its regular weight (no synthetic emboldening). Outlined text follows the host limits: a
+non-finite, non-positive or over-large font size is an error, at most 10,000 characters and
+200,000 path verbs, and the paths are split so none nears the core's per-path verb cap.
+Layout matches the host's: blanks keep their width (a tab advances 0.6 em, as the host's
+does), blanks that end a soft-wrapped line hang past the edge while those at the end of the
+text or before a newline count towards alignment, a trailing newline adds an empty line, and
+an over-long word overflows.
+Weighted text keeps the regular layout contract: normalized text wraps at the canvas width, honours
 `align` and explicit newlines and is centred in the clip box; fitted title boxes
 (`fit_width`/`fit_height`) and animated caption styles also honour the weight. The shaper
 advances glyph by glyph (no kerning or ligatures) and needs no host import. The plugin

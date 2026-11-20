@@ -2315,6 +2315,11 @@ fn typography_presets_add_with_their_weight_in_one_undo_step(cx: &mut TestAppCon
             };
             assert_eq!(plugin_id, "org.animathio.text");
             assert_eq!(params["font_weight"], serde_json::json!(weight), "{id}");
+            assert_eq!(
+                params["font"],
+                serde_json::json!("inter"),
+                "{id}: typography is Inter at every weight"
+            );
             let size = params["font_size"].as_f64().unwrap();
             let (width, height) = project_size(&e.project);
             // Normalized against 360 px of the shorter canvas edge (16:9 here).
@@ -2354,6 +2359,14 @@ fn text_font_weight_edit_is_a_command_with_undo(cx: &mut TestAppContext) {
                 crate::inspector::ParamModel::Number { min, max, .. } if (min - 100.0).abs() < 1e-9 && (max - 900.0).abs() < 1e-9
             ))),
         "the inspector builds a 100-900 Font weight field from the schema"
+    );
+    assert!(
+        ui.read(|e| e.plugin_model(id, "font").is_some_and(|model| matches!(
+            model,
+            crate::inspector::ParamModel::Enum { options, default, .. }
+                if options == ["dejavu", "inter"] && default == "dejavu"
+        ))),
+        "the inspector builds a Font dropdown (dejavu | inter) from the schema"
     );
     let before = ui.read(|e| e.project.clone());
     // The inspector's number field commits through this command; out-of-range input clamps.

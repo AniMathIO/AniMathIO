@@ -301,10 +301,14 @@ Text/shapes plugins are required; math titles also need the LaTeX plugin.
 Below the compositions, a **Typography** section restores the 1.x text styles as ten
 single-layer presets: Title, Subtitle, Body, Caption and Heading 1–6. Their sizes are the
 1.x pixel sizes (28, 16, 14, 12 and 24/20/18/16/14/12) normalized against a 360-high
-canvas, so they scale with the shorter canvas edge. Title and Subtitle use weight 600,
-the headings 800, Body and Caption 400. Adding one is a single undo step and selects the
+canvas, so they scale with the shorter canvas edge. They are set in the bundled Inter
+(the text plugin's `font = inter`). Title and Subtitle use weight 600, the headings 800,
+Body and Caption 400. Adding one is a single undo step and selects the
 text clip; edit its text in the inspector. Select any text clip to change **Font weight**
-(100–900, default 400) in the inspector; every change is an undoable command.
+(100–900, default 400) and **Font** (`dejavu` or `inter`) in the inspector; every change is
+an undoable command. With **Font** on `dejavu` (the default), weight 400 is DejaVu Sans and
+any other weight switches to Inter, so keyframing the weight of such a clip changes typeface;
+choose `inter` for a weight that varies smoothly.
 
 New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
 launcher. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing

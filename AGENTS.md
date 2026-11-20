@@ -172,6 +172,13 @@ effects migrate in `format` to plugin clips/effects on load. Video frames come f
 the fallback when no frame source is attached. Do not add runtime
 resources to `Project` or store evaluated animation state in the renderer.
 
+`plugins/text` is its own Cargo workspace, so `cargo test --workspace` skips its native unit tests: run
+`cargo test --manifest-path plugins/text/Cargo.toml --locked --target-dir target/plugin-tests` (CI has a
+`Text plugin unit tests` step); behaviour that needs the host (limits, fuel, layout parity) is tested in
+`crates/control/tests/text_weight.rs`. The text plugin's `font` parameter (`dejavu` default | `inter`) and
+`font_weight` select the typeface: `dejavu` at weight 400 is the host `TextRun`, everything else is outlined in the
+plugin from bundled Inter with per-character DejaVu fallback; typography presets and the v1 importer set `inter`.
+
 Plugin ABI 1.1.0 adds two worlds: `animation-preset-plugin` (`org.animathio.animations`;
 `PluginHost::animation_preset_command` turns a preset into one keyframe `Command::Batch`,
 shared by `animations.apply`, MCP `apply_animation_preset`, `animathio-cli animations` and

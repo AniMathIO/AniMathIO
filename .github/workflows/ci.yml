@@ -160,6 +160,12 @@ jobs:
       - name: Build plugin authoring example
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo build --manifest-path plugins/examples/hello/Cargo.toml --target wasm32-wasip2 --release --locked
+      # plugins/text is its own Cargo workspace, so `cargo test --workspace` never runs its
+      # unit tests (glyph fallback, wrapping, limits). They compile natively: the wasm
+      # host imports are only called by render_clip, which these tests do not reach.
+      - name: Text plugin unit tests
+        if: steps.changes.outputs.docs_only != 'true'
+        run: cargo test --manifest-path plugins/text/Cargo.toml --locked --target-dir target/plugin-tests
       - name: Check formatting
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo fmt --all --check

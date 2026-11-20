@@ -355,7 +355,7 @@
   {
     "id": "typography_title",
     "name": "Title",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -368,6 +368,7 @@
         "y": 0.4,
         "size": 0.07777777777777778,
         "weight": 600,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -376,7 +377,7 @@
   {
     "id": "typography_subtitle",
     "name": "Subtitle",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -389,6 +390,7 @@
         "y": 0.4,
         "size": 0.044444444444444446,
         "weight": 600,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -397,7 +399,7 @@
   {
     "id": "typography_body",
     "name": "Body",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -410,6 +412,7 @@
         "y": 0.4,
         "size": 0.03888888888888889,
         "weight": 400,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -418,7 +421,7 @@
   {
     "id": "typography_caption",
     "name": "Caption",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -431,6 +434,7 @@
         "y": 0.4,
         "size": 0.03333333333333333,
         "weight": 400,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -439,7 +443,7 @@
   {
     "id": "typography_heading_1",
     "name": "Heading 1",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -452,6 +456,7 @@
         "y": 0.4,
         "size": 0.06666666666666667,
         "weight": 800,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -460,7 +465,7 @@
   {
     "id": "typography_heading_2",
     "name": "Heading 2",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -473,6 +478,7 @@
         "y": 0.4,
         "size": 0.05555555555555555,
         "weight": 800,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -481,7 +487,7 @@
   {
     "id": "typography_heading_3",
     "name": "Heading 3",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -494,6 +500,7 @@
         "y": 0.4,
         "size": 0.05,
         "weight": 800,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -502,7 +509,7 @@
   {
     "id": "typography_heading_4",
     "name": "Heading 4",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -515,6 +522,7 @@
         "y": 0.4,
         "size": 0.044444444444444446,
         "weight": 800,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -523,7 +531,7 @@
   {
     "id": "typography_heading_5",
     "name": "Heading 5",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -536,6 +544,7 @@
         "y": 0.4,
         "size": 0.03888888888888889,
         "weight": 800,
+        "font": "inter",
         "height": 0.2
       }
     ],
@@ -544,7 +553,7 @@
   {
     "id": "typography_heading_6",
     "name": "Heading 6",
-    "animation": "fade",
+    "animation": "none",
     "ramp_ticks": 0,
     "curves": [],
     "layers": [
@@ -557,6 +566,7 @@
         "y": 0.4,
         "size": 0.03333333333333333,
         "weight": 800,
+        "font": "inter",
         "height": 0.2
       }
     ],

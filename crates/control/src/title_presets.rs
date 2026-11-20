@@ -18,7 +18,7 @@ pub struct TitlePreset {
     /// Library section: `compositions` (multi-layer titles) or `typography` (1.x text styles).
     #[serde(default = "default_group")]
     pub group: String,
-    /// Entry/exit motion: fade, slide or scale.
+    /// Entry/exit motion label: fade, slide, scale, or none (no curves, as for typography styles).
     pub animation: String,
     /// Maximum entry/exit duration in integer timeline ticks (short titles use a quarter).
     pub ramp_ticks: i64,
@@ -75,6 +75,10 @@ pub struct TitleLayer {
     /// CSS numeric font weight (400 when omitted).
     #[serde(default = "regular_weight")]
     pub weight: f64,
+    /// Text plugin `font` parameter (`inter`); empty keeps the plugin default (DejaVu Sans).
+    /// Typography styles set `inter` so a weight never decides the typeface.
+    #[serde(default)]
+    pub font: String,
     /// Decorative bar or text-box height.
     #[serde(default)]
     pub height: f64,
@@ -183,6 +187,9 @@ pub fn title_preset_command(
                 if let ClipKind::Plugin { params, .. } = &mut kind {
                     params["align"] = json!("center");
                     params["font_weight"] = json!(layer.weight);
+                    if !layer.font.is_empty() {
+                        params["font"] = json!(layer.font);
+                    }
                     params["fit_width"] = json!(width);
                     params["fit_height"] = json!(layer.height);
                 }

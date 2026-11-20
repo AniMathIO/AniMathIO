@@ -281,6 +281,7 @@ fn imports_every_element_type_and_maps_values() {
         animathio_plugin_api::sources::text("hello".into(), 24.0 / 600.0, [255, 0, 0, 255]);
     if let ClipKind::Plugin { params, .. } = &mut expected_text {
         params["font_weight"] = json!(400.0);
+        params["font"] = json!("inter");
     }
     assert_eq!(clips[3].1.kind, expected_text);
 
@@ -558,8 +559,11 @@ fn preserves_numeric_font_weights_and_warns_on_invalid_values() {
             .unwrap();
         if weight <= 900.0 {
             assert_eq!(params["font_weight"], json!(weight));
+            // Weight never decides the typeface: every imported weight uses Inter.
+            assert_eq!(params["font"], json!("inter"));
         } else {
             assert!(params.get("font_weight").is_none(), "falls back to regular");
+            assert!(params.get("font").is_none(), "keeps the plugin default");
             assert!(
                 report
                     .warnings()

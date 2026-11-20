@@ -725,6 +725,8 @@ fn built_text(
         if weight.is_finite() && (100.0..=900.0).contains(&weight) {
             if let ClipKind::Plugin { params, .. } = &mut kind {
                 params["font_weight"] = serde_json::json!(weight);
+                // A weighted element uses Inter at every weight (400 included), so the weight never switches typeface.
+                params["font"] = serde_json::json!("inter");
             }
         } else {
             report.warn(format!(
