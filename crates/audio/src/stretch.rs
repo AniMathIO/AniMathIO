@@ -7,12 +7,21 @@
 #![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
 use crate::{Error, prepared::Cursor};
 use animathio_core::{Clip, ClipSpeed, TICKS_PER_SECOND, Time};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 const HOPS: usize = 64;
 const WARM: i128 = 8;
 const CACHE_BYTES: usize = 16 * 1024 * 1024;
+/// Summed squares below this (about -120 dBFS over a probe) count as silence.
+const SILENCE: f64 = 1e-12;
 
+/// Whether `clip` plays through the stretcher. Pitch preservation only matters when the
+/// source clock runs at a non-unit rate somewhere. A constant 1x clip (reversed or not)
+/// keeps the exact-sample varispeed path: at 1x it already preserves pitch, reading
+/// reversed or forward samples one for one, and a stretcher would only add grain artifacts.
 pub(crate) fn active(clip: &Clip) -> bool {
     clip.maintain_pitch
         && !clip.time_map.hold
@@ -26,44 +35,58 @@ pub(crate) fn active(clip: &Clip) -> bool {
         }
 }
 
+/// Bounded LRU cache of rendered segments. It changes cost only: eviction, an entry
+/// larger than the budget and cold starts all reproduce the same samples.
 #[derive(Default)]
 pub(crate) struct Cache {
-    entries: HashMap<(u64, usize), Arc<Vec<f32>>>,
+    entries: HashMap<(u64, usize), (u64, Arc<Vec<f32>>)>,
+    clock: u64,
     bytes: usize,
 }
 impl Cache {
-    pub(crate) fn get(&self, key: u64, segment: usize) -> Option<Arc<Vec<f32>>> {
-        self.entries.get(&(key, segment)).cloned()
+    pub(crate) fn get(&mut self, key: u64, segment: usize) -> Option<Arc<Vec<f32>>> {
+        self.clock += 1;
+        let clock = self.clock;
+        self.entries.get_mut(&(key, segment)).map(|(used, entry)| {
+            *used = clock;
+            Arc::clone(entry)
+        })
     }
     pub(crate) fn insert(&mut self, key: u64, segment: usize, samples: Arc<Vec<f32>>) {
-        // A simple bounded generation cache; eviction never changes the result.
-        if self.bytes + samples.len() * 4 > CACHE_BYTES {
-            self.entries.clear();
-            self.bytes = 0;
+        let size = samples.len() * 4;
+        // An oversized segment is never kept, and never evicts its neighbours.
+        if size > CACHE_BYTES {
+            return;
         }
-        if samples.len() * 4 <= CACHE_BYTES {
-            self.bytes += samples.len() * 4;
-            if let Some(old) = self.entries.insert((key, segment), samples) {
+        self.clock += 1;
+        self.bytes += size;
+        if let Some((_, old)) = self.entries.insert((key, segment), (self.clock, samples)) {
+            self.bytes -= old.len() * 4;
+        }
+        while self.bytes > CACHE_BYTES {
+            let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (used, _))| *used)
+                .map(|(k, _)| *k)
+            else {
+                break;
+            };
+            if let Some((_, old)) = self.entries.remove(&oldest) {
                 self.bytes -= old.len() * 4;
             }
         }
     }
 }
 
-/// Retain the two adjacent segments for a mix loop, even when one segment is
-/// larger than the shared cache budget at extreme rates/channel counts.
-#[derive(Default)]
-pub(crate) struct Segments([Option<(usize, Arc<Vec<f32>>)>; 2]);
-impl Segments {
-    pub(crate) fn get(&self, index: usize) -> Option<Arc<Vec<f32>>> {
-        self.0[index % 2]
-            .as_ref()
-            .filter(|(n, _)| *n == index)
-            .map(|(_, v)| Arc::clone(v))
-    }
-    pub(crate) fn insert(&mut self, index: usize, entry: Arc<Vec<f32>>) {
-        self.0[index % 2] = Some((index, entry));
-    }
+/// Fingerprint of everything a clip's stretched signal depends on besides the shared
+/// source and output format: the asset, the placement and the source clock.
+pub(crate) fn key(rate: u32, channels: usize, clip: &Clip) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (rate, channels, clip.range.start.0, clip.source_offset.0).hash(&mut hasher);
+    format!("{:?}{:?}", clip.kind, clip.time_map).hash(&mut hasher);
+    hasher.finish()
 }
 
 pub(crate) fn hop(rate: u32) -> usize {
@@ -71,6 +94,101 @@ pub(crate) fn hop(rate: u32) -> usize {
 }
 pub(crate) fn segment_frames(rate: u32) -> usize {
     hop(rate) * HOPS
+}
+
+/// Reads stretched samples frame by frame for one clip. It keeps the segment being
+/// played and its predecessor (needed for the crossfade at each reset), so neither a
+/// shared-cache lookup nor an `Arc` clone happens per frame.
+pub(crate) struct Reader<'a> {
+    clip: &'a Clip,
+    rate: u32,
+    channels: usize,
+    key: u64,
+    /// First frame the clip plays (dissolve-extended). Segments wholly before it have no
+    /// content to blend with.
+    first_frame: usize,
+    cache: &'a Mutex<Cache>,
+    slots: [Option<(usize, Arc<Vec<f32>>)>; 2],
+}
+impl<'a> Reader<'a> {
+    pub(crate) fn new(
+        clip: &'a Clip,
+        rate: u32,
+        channels: usize,
+        key: u64,
+        first_frame: usize,
+        cache: &'a Mutex<Cache>,
+    ) -> Self {
+        Self {
+            clip,
+            rate,
+            channels,
+            key,
+            first_frame,
+            cache,
+            slots: [None, None],
+        }
+    }
+    fn load(&mut self, index: usize, cursor: &mut Cursor<'_>) -> Result<(), Error> {
+        if self.slots[index % 2]
+            .as_ref()
+            .is_some_and(|(held, _)| *held == index)
+        {
+            return Ok(());
+        }
+        let cached = self
+            .cache
+            .lock()
+            .expect("stretch cache lock")
+            .get(self.key, index);
+        let entry = match cached {
+            Some(entry) => entry,
+            None => {
+                let entry = Arc::new(render(self.clip, self.rate, self.channels, index, cursor)?);
+                self.cache.lock().expect("stretch cache lock").insert(
+                    self.key,
+                    index,
+                    Arc::clone(&entry),
+                );
+                entry
+            }
+        };
+        self.slots[index % 2] = Some((index, entry));
+        Ok(())
+    }
+    fn slot(&self, index: usize) -> &[f32] {
+        &self.slots[index % 2]
+            .as_ref()
+            .expect("segment was loaded")
+            .1
+    }
+    /// Append output frame `frame` (global frame index) to `samples`.
+    pub(crate) fn frame(
+        &mut self,
+        frame: usize,
+        cursor: &mut Cursor<'_>,
+        samples: &mut Vec<f32>,
+    ) -> Result<(), Error> {
+        let channels = self.channels;
+        let span = segment_frames(self.rate);
+        let hop = hop(self.rate);
+        let (segment, offset) = (frame / span, frame % span);
+        self.load(segment, cursor)?;
+        samples.clear();
+        samples.extend_from_slice(&self.slot(segment)[offset * channels..(offset + 1) * channels]);
+        // Blend with the predecessor's independent reconstruction of this hop, unless that
+        // segment lies wholly before the clip starts: it would only add a spurious fade.
+        if segment > 0 && offset < hop && segment * span > self.first_frame {
+            self.load(segment - 1, cursor)?;
+            let previous = self.slot(segment - 1);
+            let weight = offset as f32 / hop as f32;
+            for (channel, sample) in samples.iter_mut().enumerate() {
+                *sample = previous[(span + offset) * channels + channel] * (1.0 - weight)
+                    + *sample * weight;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Render one segment, including the following hop used to blend the next reset.
@@ -83,48 +201,74 @@ pub(crate) fn render(
 ) -> Result<Vec<f32>, Error> {
     let hop = hop(rate);
     let search = (rate as usize / 200).max(1);
+    let ticks = i128::from(TICKS_PER_SECOND);
     let base = (segment * HOPS) as i128;
+    let reverse = clip.time_map.reverse;
+    // Source frames the clip may read: the first one containing `source_offset` through
+    // the last one touching the end of the source span (the mixer's varispeed path
+    // clamps to the same frames).
+    let first = i128::from(clip.source_offset.0) * i128::from(rate) / ticks;
+    let length = clip
+        .time_map
+        .source_length
+        .map_or_else(|| clip.source_bounds().1.0 - clip.source_offset.0, |t| t.0);
+    let end = ((i128::from(clip.source_offset.0) + i128::from(length)) * i128::from(rate) + ticks
+        - 1)
+        / ticks;
+    let width = 2 * hop + 2 * search;
     let mut out = vec![0.0; (HOPS + 1) * hop * channels];
-    let mut previous: Option<Vec<f32>> = None;
-    for grain in base - WARM..=base + HOPS as i128 {
+    // Two grain buffers alternate as "previous" and "current"; no per-grain allocation.
+    let mut region = vec![0.0; width * channels];
+    let mut grains = [vec![0.0; 2 * hop * channels], vec![0.0; 2 * hop * channels]];
+    let mut have_previous = false;
+    for (n, grain) in (base - WARM..=base + HOPS as i128).enumerate() {
         let frame = grain * hop as i128;
-        let local = frame * i128::from(TICKS_PER_SECOND)
-            - i128::from(clip.range.start.0) * i128::from(rate);
+        let local = frame * ticks - i128::from(clip.range.start.0) * i128::from(rate);
         let time = Time(
             i64::try_from(local.div_euclid(i128::from(rate)))
                 .map_err(|e| Error::Invalid(e.to_string()))?,
         );
         let mut position = i128::from(clip.source_time(time).0) * i128::from(rate);
-        if clip.time_map.reverse {
-            position -= i128::from(TICKS_PER_SECOND) - i128::from(rate);
+        if reverse {
+            position -= ticks - i128::from(rate);
         }
-        let anchor = position.div_euclid(i128::from(TICKS_PER_SECOND));
-        let direction = if clip.time_map.reverse { -1 } else { 1 };
-        let first =
-            i128::from(clip.source_offset.0) * i128::from(rate) / i128::from(TICKS_PER_SECOND);
-        let length = clip
-            .time_map
-            .source_length
-            .map_or_else(|| clip.source_bounds().1.0 - clip.source_offset.0, |t| t.0);
-        let end = (i128::from(clip.source_offset.0) + i128::from(length)) * i128::from(rate)
-            / i128::from(TICKS_PER_SECOND);
-        // Fetch the candidate region once. All indexing is in playback order,
-        // so the same overlap/search code also handles reverse clips.
-        let mut region = vec![0.0; (2 * hop + 2 * search) * channels];
-        for (i, dst) in region.chunks_exact_mut(channels).enumerate() {
-            let position = anchor + direction * (i as i128 - search as i128);
-            if position >= first
-                && position < end
-                && let Ok(index) = usize::try_from(position)
-                && let Some(src) = cursor.frame(index)?
-            {
-                dst.copy_from_slice(src);
+        let anchor = position.div_euclid(ticks);
+        // Fetch the candidate region in ascending source order (a reverse clip then never
+        // steps backwards through prepared blocks) and store it in playback order, so the
+        // same overlap/search code also handles reverse clips.
+        let lowest = if reverse {
+            anchor - (width - 1 - search) as i128
+        } else {
+            anchor - search as i128
+        };
+        for k in 0..width {
+            let dst = if reverse { width - 1 - k } else { k };
+            let dst = &mut region[dst * channels..(dst + 1) * channels];
+            let position = lowest + k as i128;
+            let sample = if position >= first && position < end {
+                usize::try_from(position)
+                    .ok()
+                    .map(|index| cursor.frame(index))
+                    .transpose()?
+                    .flatten()
+            } else {
+                None
+            };
+            match sample {
+                Some(src) => dst.copy_from_slice(src),
+                None => dst.fill(0.0),
             }
         }
-        let offset = previous.as_ref().map_or(search, |prev| {
-            best_overlap(&prev[hop * channels..], &region, channels, hop, search)
-        });
-        let current = region[offset * channels..(offset + 2 * hop) * channels].to_vec();
+        let (previous, current) = {
+            let [a, b] = &mut grains;
+            if n % 2 == 0 { (&*b, a) } else { (&*a, b) }
+        };
+        let offset = if have_previous {
+            best_overlap(&previous[hop * channels..], &region, channels, hop, search)
+        } else {
+            search
+        };
+        current.copy_from_slice(&region[offset * channels..(offset + 2 * hop) * channels]);
         for i in 0..2 * hop {
             let output = frame - base * hop as i128 + i as i128;
             if let Ok(output) = usize::try_from(output)
@@ -140,7 +284,7 @@ pub(crate) fn render(
                 }
             }
         }
-        previous = Some(current);
+        have_previous = true;
     }
     Ok(out)
 }
@@ -168,11 +312,16 @@ fn best_overlap(
                 reference += a * a;
             }
         }
-        // Silence chooses the nominal anchor rather than wandering to an edge.
-        let score = if energy * reference > 1e-20 {
-            dot / (energy * reference).sqrt()
-        } else {
+        // Silence has no waveform to match. A silent reference scores every candidate
+        // alike, so the nominal anchor wins. A silent candidate against a real reference
+        // scores the worst possible correlation, so it never beats a genuine match
+        // (including an anti-correlated one) and ties resolve to the nominal anchor.
+        let score = if reference <= SILENCE {
             0.0
+        } else if energy <= SILENCE {
+            -1.0
+        } else {
+            dot / (energy * reference).sqrt()
         };
         if score > best_score
             || (score.total_cmp(&best_score).is_eq()
@@ -190,20 +339,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eviction_and_oversized_segments_remain_bounded() {
+    fn eviction_is_lru_and_oversized_segments_leave_neighbours_alone() {
         let mut cache = Cache::default();
         let entry = Arc::new(vec![0.0; CACHE_BYTES / 8]);
         cache.insert(1, 0, Arc::clone(&entry));
         cache.insert(1, 1, Arc::clone(&entry));
+        assert!(cache.get(1, 0).is_some()); // refresh 0: segment 1 is now the oldest
         cache.insert(1, 2, Arc::clone(&entry));
         assert!(cache.bytes <= CACHE_BYTES);
-        assert!(cache.get(1, 0).is_none());
-        assert!(cache.get(1, 2).is_some());
+        assert!(cache.get(1, 1).is_none());
+        assert!(cache.get(1, 0).is_some() && cache.get(1, 2).is_some());
         let large = Arc::new(vec![0.0; CACHE_BYTES / 4 + 1]);
-        cache.insert(1, 3, Arc::clone(&large));
+        cache.insert(1, 3, large);
         assert!(cache.get(1, 3).is_none());
-        let mut local = Segments::default();
-        local.insert(3, Arc::clone(&large));
-        assert!(Arc::ptr_eq(&local.get(3).unwrap(), &large));
+        // The oversized entry did not flush the rest of the cache.
+        assert!(cache.get(1, 0).is_some() && cache.get(1, 2).is_some());
+    }
+
+    #[test]
+    fn silence_never_beats_a_real_match_and_ties_keep_the_nominal_anchor() {
+        let (hop, search, channels) = (16, 4, 1);
+        let reference = vec![1.0_f32; hop];
+        // Every candidate anti-correlated except a silent one: the silent one must lose.
+        let mut region = vec![-1.0_f32; 2 * hop + 2 * search];
+        for v in &mut region[..hop + 1] {
+            *v = 0.0;
+        }
+        assert_ne!(best_overlap(&reference, &region, channels, hop, search), 0);
+        // All silent: nominal.
+        let region = vec![0.0_f32; 2 * hop + 2 * search];
+        assert_eq!(
+            best_overlap(&reference, &region, channels, hop, search),
+            search
+        );
+        // Silent reference: nominal.
+        let region = vec![0.5_f32; 2 * hop + 2 * search];
+        assert_eq!(
+            best_overlap(&vec![0.0; hop], &region, channels, hop, search),
+            search
+        );
     }
 }

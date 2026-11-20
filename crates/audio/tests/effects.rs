@@ -702,3 +702,53 @@ fn declared_track_chain_latency_is_compensated() {
     let mixer = dry.with_effect_processor(Arc::new(Mock::default()));
     assert_eq!(mixed(&mixer, &project, 0, end * tick), plain);
 }
+
+#[test]
+fn stretched_clips_run_through_the_effect_chain_and_stay_range_independent() {
+    let (mut project, dry) = fixture(2, 0);
+    Command::SetClipSpeed {
+        id: ClipId(0),
+        speed: ClipSpeed::new(3, 2).unwrap(),
+        reverse: false,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert!(project.tracks()[0].clips()[&ClipId(0)].maintain_pitch);
+    let end = project.tracks()[0].clips()[&ClipId(0)].range.end.0;
+    let mixer = dry.clone().with_effect_processor(Arc::new(Mock::default()));
+    let plain = mixed(&dry, &project, 0, end);
+    assert!(plain.iter().any(|s| s.abs() > 0.1));
+
+    // A stateless gain applies to the stretched signal.
+    add(
+        &mut project,
+        AudioChain::Clip(ClipId(0)),
+        fx(1, "gain", &[("gain", 2.0)]),
+    );
+    let doubled = mixed(&mixer, &project, 0, end);
+    for (a, b) in doubled.iter().zip(&plain) {
+        assert_eq!(*a, *b * 2.0);
+    }
+    // A stateful filter after it: adjacent ranges equal one mix, across effect blocks
+    // and stretch segment boundaries, and cold mixers reproduce the same samples.
+    add(
+        &mut project,
+        AudioChain::Clip(ClipId(0)),
+        fx(2, "leaky", &[("decay", 0.5)]),
+    );
+    let whole = mixed(&mixer, &project, 0, end);
+    assert!(whole.iter().all(|s| s.is_finite()));
+    let tick = TICKS_PER_SECOND / i64::from(RATE);
+    for cut in [1_999_i64, 2_048, 30_719, 30_727, 55_001] {
+        let mut parts = mixed(&mixer, &project, 0, cut * tick);
+        parts.extend(mixed(&mixer, &project, cut * tick, end));
+        assert_eq!(parts, whole, "cut at frame {cut}");
+        let cold = dry.clone().with_effect_processor(Arc::new(Mock::default()));
+        assert_eq!(
+            mixed(&cold, &project, cut * tick, (cut + 5_000) * tick),
+            whole[cut as usize..cut as usize + 5_000]
+        );
+    }
+}

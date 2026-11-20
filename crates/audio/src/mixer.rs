@@ -373,14 +373,14 @@ impl Mixer {
             }
             return Ok(());
         }
-        let stretch_key = clip_key(self, clip, play);
-        let mut stretched = crate::stretch::Segments::default();
+        let mut stretched = self.stretch_reader(clip, clip_start);
         let mut samples = Vec::with_capacity(channels);
         for frame in from..to {
             let timeline = frame as i128 * i128::from(TICKS_PER_SECOND);
             let local = timeline - i128::from(clip.range.start.0) * i128::from(self.rate);
+            // Floor division: a dissolve-extended window starts before the clip.
             let time = Time(
-                i64::try_from(local / i128::from(self.rate))
+                i64::try_from(local.div_euclid(i128::from(self.rate)))
                     .map_err(|e| Error::Invalid(e.to_string()))?,
             );
             if param(clip, "muted", time, 0.0) != 0.0 {
@@ -397,15 +397,8 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            if crate::stretch::active(clip) {
-                self.stretched_samples(
-                    clip,
-                    frame,
-                    stretch_key,
-                    &mut cursor,
-                    &mut stretched,
-                    &mut samples,
-                )?;
+            if let Some(reader) = stretched.as_mut() {
+                reader.frame(frame, &mut cursor, &mut samples)?;
             } else {
                 source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
             }
@@ -432,14 +425,13 @@ impl Mixer {
         let mut cursor: Cursor<'_> = source.cursor();
         let (clip_start, clip_end) = sample_bounds(play, self.rate)?;
         let ticks = i128::from(TICKS_PER_SECOND);
-        let stretch_key = clip_key(self, clip, play);
-        let mut stretched = crate::stretch::Segments::default();
+        let mut stretched = self.stretch_reader(clip, clip_start);
         let mut samples = Vec::with_capacity(channels);
         for frame in base.max(clip_start)..(base + EFFECT_BLOCK_FRAMES).min(clip_end) {
             let local =
                 frame as i128 * ticks - i128::from(clip.range.start.0) * i128::from(self.rate);
             let time = Time(
-                i64::try_from(local / i128::from(self.rate))
+                i64::try_from(local.div_euclid(i128::from(self.rate)))
                     .map_err(|e| Error::Invalid(e.to_string()))?,
             );
             if param(clip, "muted", time, 0.0) != 0.0 {
@@ -449,15 +441,8 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            if crate::stretch::active(clip) {
-                self.stretched_samples(
-                    clip,
-                    frame,
-                    stretch_key,
-                    &mut cursor,
-                    &mut stretched,
-                    &mut samples,
-                )?;
+            if let Some(reader) = stretched.as_mut() {
+                reader.frame(frame, &mut cursor, &mut samples)?;
             } else {
                 source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
             }
@@ -468,57 +453,24 @@ impl Mixer {
         Ok(input)
     }
 
-    /// Read canonical WSOLA segments, blending independent histories at resets.
-    #[allow(clippy::too_many_arguments, clippy::cast_precision_loss)]
-    fn stretched_samples(
-        &self,
-        clip: &Clip,
-        frame: usize,
-        key: u64,
-        cursor: &mut Cursor<'_>,
-        held: &mut crate::stretch::Segments,
-        samples: &mut Vec<f32>,
-    ) -> Result<(), Error> {
-        let channels = usize::from(self.channels);
-        let span = crate::stretch::segment_frames(self.rate);
-        let segment = frame / span;
-        let offset = frame % span;
-        let mut get = |index, cursor: &mut Cursor<'_>| -> Result<Arc<Vec<f32>>, Error> {
-            if let Some(entry) = held.get(index) {
-                return Ok(entry);
-            }
-            if let Some(entry) = self
-                .stretch_cache
-                .lock()
-                .expect("stretch cache lock")
-                .get(key, index)
-            {
-                held.insert(index, Arc::clone(&entry));
-                return Ok(entry);
-            }
-            let entry = Arc::new(crate::stretch::render(
-                clip, self.rate, channels, index, cursor,
-            )?);
-            self.stretch_cache
-                .lock()
-                .expect("stretch cache lock")
-                .insert(key, index, Arc::clone(&entry));
-            held.insert(index, Arc::clone(&entry));
-            Ok(entry)
-        };
-        let current = get(segment, cursor)?;
-        samples.clear();
-        samples.extend_from_slice(&current[offset * channels..(offset + 1) * channels]);
-        let hop = crate::stretch::hop(self.rate);
-        if segment > 0 && offset < hop {
-            let previous = get(segment - 1, cursor)?;
-            let weight = offset as f32 / hop as f32;
-            for (channel, sample) in samples.iter_mut().enumerate() {
-                *sample = previous[(span + offset) * channels + channel] * (1.0 - weight)
-                    + *sample * weight;
-            }
-        }
-        Ok(())
+    /// The WSOLA reader for `clip`, or `None` when it plays through the sampling path.
+    /// The cache key is computed once per call, not per frame.
+    fn stretch_reader<'a>(
+        &'a self,
+        clip: &'a Clip,
+        first_frame: usize,
+    ) -> Option<crate::stretch::Reader<'a>> {
+        crate::stretch::active(clip).then(|| {
+            let channels = usize::from(self.channels);
+            crate::stretch::Reader::new(
+                clip,
+                self.rate,
+                channels,
+                crate::stretch::key(self.rate, channels, clip),
+                first_frame,
+                &self.stretch_cache,
+            )
+        })
     }
 
     /// Processed block `block` of a clip's effect chain.
