@@ -1090,6 +1090,16 @@ edited fields and transform handles inside safe areas.
 Text plugin 1.2.0 fills shaped glyph contours together with their original winding,
 preserving counters in canvas text, fitted titles and Classic captions. Normalized
 text runs use the renderer’s shared embedded-font shaping on CPU and GPU.
+Text plugin 1.3.0 adds numeric `font_weight` (100–900, default 400, clamped). Regular
+(400, or an absent parameter) keeps the host's DejaVu Sans `TextRun`, so projects saved
+before 1.3.0 render unchanged. Every other weight is outlined inside the plugin from the
+bundled Inter variable font (SIL OFL; `LICENSE-Inter.txt` ships in the bundle), at any
+value between 100 and 900, including genuine semibold, bold and extra-bold shapes. Weighted
+text keeps the regular layout contract: normalized text wraps at the canvas width, honours
+`align` and explicit newlines and is centred in the clip box; fitted title boxes
+(`fit_width`/`fit_height`) and animated caption styles also honour the weight. The shaper
+advances glyph by glyph (no kerning or ligatures) and needs no host import. The plugin
+still uses ABI 1.2; no frozen WIT records or host imports changed.
 Caption styles (introduced in text plugin 1.1.0, ABI unchanged) add optional parameters that are ignored
 when `caption_style` is absent or `off`: `caption_style` (`off`, `classic`, `"word-highlight"`,
 `karaoke`, `pop`, `"one-word"`, `"bold-outline"`), `words` (space-separated `start:end` pairs in
@@ -1194,5 +1204,3 @@ schema: `noise_profile` enables a learned profile (default 0 keeps adaptive trac
 band extends to Nyquist. Profiles come from a noise-only selection via the shared control
 analysis. They are project parameters, survive bounded mixer warm-up and save/reload,
 and apply at any output sample rate. Existing projects keep adaptive behaviour.
-
-Text plugin 1.3.0 adds numeric `font_weight` (100–900, default 400). Regular text retains DejaVu Sans; other weights use the bundled Inter variable font (SIL OFL), including genuine semibold, bold and extra bold outlines. The text bundle includes Inter’s OFL copyright and license notice. Weighted normalized text uses a fitted outline box; explicit newlines are supported and long lines shrink to fit. Caption styles also honor weight. The plugin still uses ABI 1.2; no frozen WIT records or host imports changed.

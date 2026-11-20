@@ -216,9 +216,9 @@ fn title_cpu_goldens_and_safe_areas() {
                     "centered_title",
                     "lower_third",
                     "caption",
-                    "typography-title",
-                    "typography-heading-1",
-                    "typography-body",
+                    "typography_title",
+                    "typography_heading_1",
+                    "typography_body",
                 ]
                 .contains(&id)
             {

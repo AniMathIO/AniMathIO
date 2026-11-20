@@ -2271,3 +2271,100 @@ fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// The ten 1.x text styles: listed under Typography, one undo step each, exact size/weight.
+#[gpui::test]
+fn typography_presets_add_with_their_weight_in_one_undo_step(cx: &mut TestAppContext) {
+    if !require_plugins("typography_presets_add_with_their_weight_in_one_undo_step") {
+        return;
+    }
+    // 1.x sizes in px against its 360-high canvas, with the legacy weights.
+    let expected = [
+        ("typography_title", 28.0, 600.0),
+        ("typography_subtitle", 16.0, 600.0),
+        ("typography_body", 14.0, 400.0),
+        ("typography_caption", 12.0, 400.0),
+        ("typography_heading_1", 24.0, 800.0),
+        ("typography_heading_2", 20.0, 800.0),
+        ("typography_heading_3", 18.0, 800.0),
+        ("typography_heading_4", 16.0, 800.0),
+        ("typography_heading_5", 14.0, 800.0),
+        ("typography_heading_6", 12.0, 800.0),
+    ];
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.dispatch(actions::FocusLibrary);
+    ui.update(|e, _, cx| e.select_left_tab(LeftTab::Titles, cx));
+    for (id, _, _) in expected {
+        assert!(
+            ui.cx.debug_bounds(&format!("title-{id}")).is_some(),
+            "{id} card is listed"
+        );
+    }
+    for (id, px, weight) in expected {
+        let before = ui.read(|e| e.project.clone());
+        let clips_before = ui.read(clip_count);
+        ui.update(|e, _, cx| e.add_title_preset(id, Time(0), cx));
+        let added = ui.read(|e| e.selected.expect("the added text clip is selected"));
+        ui.read(|e| {
+            assert_eq!(clip_count(e), clips_before + 1, "{id}: one text layer");
+            let animathio_core::ClipKind::Plugin { plugin_id, params } =
+                &e.find_clip(added).expect("clip").kind
+            else {
+                panic!("{id}: plugin clip expected")
+            };
+            assert_eq!(plugin_id, "org.animathio.text");
+            assert_eq!(params["font_weight"], serde_json::json!(weight), "{id}");
+            let size = params["font_size"].as_f64().unwrap();
+            let (width, height) = project_size(&e.project);
+            // Normalized against 360 px of the shorter canvas edge (16:9 here).
+            assert!(width >= height);
+            assert!((size - px / 360.0).abs() < 1e-9, "{id}: size {size}");
+        });
+        let applied = ui.read(|e| e.project.clone());
+        ui.dispatch(Undo);
+        assert_eq!(
+            ui.read(|e| e.project.clone()),
+            before,
+            "{id}: one undo step"
+        );
+        ui.dispatch(Redo);
+        assert_eq!(ui.read(|e| e.project.clone()), applied, "{id}: redo");
+        ui.dispatch(Undo);
+    }
+}
+
+/// Font weight is a schema parameter of the text plugin and edits go through commands.
+#[gpui::test]
+fn text_font_weight_edit_is_a_command_with_undo(cx: &mut TestAppContext) {
+    if !require_plugins("text_font_weight_edit_is_a_command_with_undo") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_title_preset("typography_body", Time(0), cx));
+    let id = ui.read(|e| e.selected.expect("selected"));
+    let weight = |ui: &Ui| {
+        ui.read(|e| match &e.find_clip(id).expect("clip").kind {
+            animathio_core::ClipKind::Plugin { params, .. } => params["font_weight"].clone(),
+            _ => panic!("plugin clip"),
+        })
+    };
+    assert_eq!(weight(&ui), serde_json::json!(400.0));
+    assert!(
+        ui.read(|e| e
+            .plugins
+            .iter()
+            .any(|plugin| plugin.models().iter().any(|m| m.id() == "font_weight"))),
+        "the inspector builds a Font weight field from the schema"
+    );
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|e, _, cx| {
+        e.execute_plugin_param(id, "font_weight".into(), serde_json::json!(700), cx)
+    });
+    assert_eq!(weight(&ui), serde_json::json!(700.0));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(weight(&ui), serde_json::json!(700.0));
+}

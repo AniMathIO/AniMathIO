@@ -290,7 +290,7 @@ shows the registered bindings. Text fields support selection, paste and IME.
 
 ### Titles and social formats
 
-The library's **Titles** tab offers eight animated compositions: centered title,
+The library's **Titles** tab offers eight animated compositions (plus the typography presets below): centered title,
 title + subtitle, lower third, caption bar, chapter card, end card, kinetic word
 pop and math title. Double-click a card to add five seconds at the playhead, or
 drag it to a timeline position. The inspector exposes the linked composition's
@@ -298,7 +298,13 @@ text fields. All layers move together and insertion undoes in one step.
 Thumbnails render on the CPU in the background and are cached per canvas size.
 Text/shapes plugins are required; math titles also need the LaTeX plugin.
 
-Titles includes Title, Subtitle, Body, Caption and Heading 1–6 typography presets from 1.x. Sizes are normalized against a 360-high reference canvas (28, 16, 14, 12 and 24/20/18/16/14/12 respectively), adapting to the shorter canvas edge. Title and Subtitle use weight 600; headings use 800; Body and Caption use 400. Adding a preset is one undo step. Text clips expose Font weight in the inspector (100–900, default 400).
+Below the compositions, a **Typography** section restores the 1.x text styles as ten
+single-layer presets: Title, Subtitle, Body, Caption and Heading 1–6. Their sizes are the
+1.x pixel sizes (28, 16, 14, 12 and 24/20/18/16/14/12) normalized against a 360-high
+canvas, so they scale with the shorter canvas edge. Title and Subtitle use weight 600,
+the headings 800, Body and Caption 400. Adding one is a single undo step and selects the
+text clip; edit its text in the inspector. Select any text clip to change **Font weight**
+(100–900, default 400) in the inspector; every change is an undoable command.
 
 New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
 launcher. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing

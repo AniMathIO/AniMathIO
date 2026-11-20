@@ -559,6 +559,7 @@ fn preserves_numeric_font_weights_and_warns_on_invalid_values() {
         if weight <= 900.0 {
             assert_eq!(params["font_weight"], json!(weight));
         } else {
+            assert!(params.get("font_weight").is_none(), "falls back to regular");
             assert!(
                 report
                     .warnings()

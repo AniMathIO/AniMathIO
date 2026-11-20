@@ -15,6 +15,9 @@ pub struct TitlePreset {
     pub id: String,
     /// Library card label.
     pub name: String,
+    /// Library section: `compositions` (multi-layer titles) or `typography` (1.x text styles).
+    #[serde(default = "default_group")]
+    pub group: String,
     /// Entry/exit motion: fade, slide or scale.
     pub animation: String,
     /// Maximum entry/exit duration in integer timeline ticks (short titles use a quarter).
@@ -78,6 +81,10 @@ pub struct TitleLayer {
     /// Decorative fill.
     #[serde(default)]
     pub color: [u8; 4],
+}
+
+fn default_group() -> String {
+    "compositions".into()
 }
 
 fn regular_weight() -> f64 {

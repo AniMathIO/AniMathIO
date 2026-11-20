@@ -103,7 +103,6 @@ fn fitted_text(
     text: &str,
     font_size: f32,
     weight: f32,
-    align: &str,
     width: f32,
     height: f32,
     color: Color,
@@ -125,27 +124,8 @@ fn fitted_text(
     let line_height = font * 1.5;
     let top = (box_height - count * line_height) / 2.0;
     let mut elements = Vec::new();
-    let shaped = lines
-        .iter()
-        .map(|text| shape_text(text, font, weight))
-        .collect::<Result<Vec<_>, _>>()?;
-    let block_width = shaped
-        .iter()
-        .map(|contours| {
-            let min = contours
-                .iter()
-                .flatten()
-                .map(verb_x)
-                .fold(f32::MAX, f32::min);
-            let max = contours
-                .iter()
-                .flatten()
-                .map(verb_x)
-                .fold(f32::MIN, f32::max);
-            (max - min).max(0.0)
-        })
-        .fold(0.0, f32::max);
-    for (line, contours) in shaped.into_iter().enumerate() {
+    for (line, text) in lines.iter().enumerate() {
+        let contours = shape_text(text, font, weight)?;
         let min_x = contours
             .iter()
             .flatten()
@@ -159,13 +139,7 @@ fn fitted_text(
         if max_x < min_x {
             continue;
         }
-        let remaining = block_width - (max_x - min_x);
-        let ox = match align {
-            "left" => 0.0,
-            "right" => remaining,
-            _ => remaining / 2.0,
-        } + (box_width - block_width) / 2.0
-            - min_x;
+        let ox = (box_width - (max_x - min_x)) / 2.0 - min_x;
         let oy = top + line as f32 * line_height + font;
         let point = |p: Point| Point {
             x: (p.x + ox) / box_width,
@@ -955,12 +929,10 @@ impl Guest for TextPlugin {
                         time_ticks, size,
                     );
                 }
-                return fitted_text(
-                    &text, font_size, weight, "center", fit_width, fit_height, color, size,
-                );
+                return fitted_text(&text, font_size, weight, fit_width, fit_height, color, size);
             }
             if weight != 400.0 {
-                return fitted_text(&text, font_size, weight, &align, 1.0, 1.0, color, size);
+                return weighted_text_run(&text, font_size, weight, &align, color, size);
             }
             // Generic TextRun uses the host's wrapped, embedded-font layout.
             // Keep coordinates and font size relative to the unscaled canvas.
@@ -1027,133 +999,244 @@ fn revealed(text: &str, reveal: f64) -> String {
 
 export!(TextPlugin);
 
+/// Bundled Inter variable font, used for every weight other than regular (400).
+/// Regular keeps the host's DejaVu Sans so existing projects render unchanged.
+const INTER: &[u8] = include_bytes!("../../../apps/animathio/assets/fonts/InterVariable.ttf");
+
+fn invalid(message: &str) -> Diagnostic {
+    Diagnostic {
+        code: "text.invalid".into(),
+        message: message.into(),
+        metadata: vec![],
+    }
+}
+
 fn shape_text(text: &str, size: f32, weight: f32) -> Result<Vec<Vec<PathVerb>>, Diagnostic> {
     if weight == 400.0 {
         return host::shape_text(text, size);
     }
-    Ok(shape_text_skrifa(
-        include_bytes!("../../../apps/animathio/assets/fonts/InterVariable.ttf"),
-        text,
-        size,
-        weight,
-    ))
+    Ok(Face::new(weight)?.outline(text, size))
 }
-fn shape_text_skrifa(
-    font_bytes: &[u8],
+
+/// Inter instanced at one `wght` value. Glyphs are laid out left to right by their
+/// advances (no kerning or ligatures), which is deterministic and needs no host import.
+struct Face<'a> {
+    font: skrifa::FontRef<'a>,
+    location: skrifa::instance::Location,
+}
+
+struct LineMetrics {
+    ascent: f32,
+    line_height: f32,
+}
+
+impl Face<'static> {
+    fn new(weight: f32) -> Result<Self, Diagnostic> {
+        use skrifa::MetadataProvider;
+        let font = skrifa::FontRef::new(INTER).map_err(|_| invalid("bundled font is invalid"))?;
+        let location = font.axes().location([(skrifa::Tag::new(b"wght"), weight)]);
+        Ok(Self { font, location })
+    }
+}
+
+impl Face<'_> {
+    fn size(size: f32) -> skrifa::instance::Size {
+        skrifa::instance::Size::new(size)
+    }
+
+    fn glyph(&self, ch: char) -> skrifa::GlyphId {
+        use skrifa::MetadataProvider;
+        self.font.charmap().map(ch).unwrap_or_default()
+    }
+
+    fn advance(&self, ch: char, size: f32) -> f32 {
+        use skrifa::MetadataProvider;
+        self.font
+            .glyph_metrics(Self::size(size), &self.location)
+            .advance_width(self.glyph(ch))
+            .unwrap_or(size * 0.6)
+    }
+
+    fn width(&self, text: &str, size: f32) -> f32 {
+        text.chars()
+            .filter(|ch| !ch.is_control())
+            .map(|ch| self.advance(ch, size))
+            .sum()
+    }
+
+    fn line_metrics(&self, size: f32) -> LineMetrics {
+        use skrifa::MetadataProvider;
+        let metrics = self.font.metrics(Self::size(size), &self.location);
+        LineMetrics {
+            ascent: metrics.ascent,
+            line_height: metrics.ascent - metrics.descent + metrics.leading,
+        }
+    }
+
+    /// Outlines for one line with the baseline at y = 0 and the pen at x = 0
+    /// (y grows downwards, like the host's `shape-text`).
+    fn outline(&self, text: &str, size: f32) -> Vec<Vec<PathVerb>> {
+        let outlines = skrifa::MetadataProvider::outline_glyphs(&self.font);
+        let mut pen = OutlinePen::default();
+        for ch in text.chars().filter(|ch| !ch.is_control()) {
+            let id = self.glyph(ch);
+            if let Some(glyph) = outlines.get(id) {
+                let settings =
+                    skrifa::outline::DrawSettings::unhinted(Self::size(size), &self.location);
+                let _ = glyph.draw(settings, &mut pen);
+            }
+            pen.cursor_x += self.advance(ch, size);
+        }
+        pen.finish()
+    }
+}
+
+#[derive(Default)]
+struct OutlinePen {
+    paths: Vec<Vec<PathVerb>>,
+    current: Vec<PathVerb>,
+    cursor_x: f32,
+}
+
+impl OutlinePen {
+    fn point(&self, x: f32, y: f32) -> Point {
+        Point {
+            x: self.cursor_x + x,
+            y: -y,
+        }
+    }
+
+    fn flush(&mut self) {
+        if !self.current.is_empty() {
+            self.paths.push(std::mem::take(&mut self.current));
+        }
+    }
+
+    fn finish(mut self) -> Vec<Vec<PathVerb>> {
+        self.flush();
+        self.paths
+    }
+}
+
+impl skrifa::outline::OutlinePen for OutlinePen {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.flush();
+        let p = self.point(x, y);
+        self.current.push(PathVerb::MoveTo(p));
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        let p = self.point(x, y);
+        self.current.push(PathVerb::LineTo(p));
+    }
+
+    fn quad_to(&mut self, cx0: f32, cy0: f32, x: f32, y: f32) {
+        let (c, p) = (self.point(cx0, cy0), self.point(x, y));
+        self.current.push(PathVerb::QuadTo((c, p)));
+    }
+
+    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+        let (a, b, p) = (self.point(cx0, cy0), self.point(cx1, cy1), self.point(x, y));
+        self.current.push(PathVerb::CubicTo((a, b, p)));
+    }
+
+    fn close(&mut self) {
+        self.current.push(PathVerb::Close);
+        self.flush();
+    }
+}
+
+/// Weighted counterpart of the host's normalized `TextRun`: wrapped at the canvas
+/// width, lines aligned inside the block and the block centred in the clip box, so
+/// switching weight does not move the text.
+fn weighted_text_run(
     text: &str,
     font_size: f32,
     weight: f32,
-) -> Vec<Vec<PathVerb>> {
-    if font_bytes.is_empty() || text.is_empty() {
-        return Vec::new();
+    align: &str,
+    color: Color,
+    size: Size,
+) -> Result<Scene, Diagnostic> {
+    let px = font_size * size.height as f32;
+    if !px.is_finite() || px <= 0.0 || px > 1_048_560.0 {
+        return Err(invalid("invalid font size"));
     }
-
-    let Ok(font) = skrifa::FontRef::new(font_bytes) else {
-        return Vec::new();
-    };
-
-    use skrifa::MetadataProvider;
-    let location = font.axes().location([(skrifa::Tag::new(b"wght"), weight)]);
-    let outlines = font.outline_glyphs();
-    let charmap = font.charmap();
-    let metrics = font.glyph_metrics(skrifa::instance::Size::new(font_size), &location);
-
-    struct OutlineCollector {
-        paths: Vec<Vec<PathVerb>>,
-        current: Vec<PathVerb>,
-        cursor_x: f32,
-    }
-
-    impl skrifa::outline::OutlinePen for OutlineCollector {
-        fn move_to(&mut self, x: f32, y: f32) {
-            if !self.current.is_empty() {
-                self.paths.push(std::mem::take(&mut self.current));
+    let (width, height) = (size.width as f32, size.height as f32);
+    let face = Face::new(weight)?;
+    let metrics = face.line_metrics(px);
+    let space = face.advance(' ', px);
+    let mut lines: Vec<String> = Vec::new();
+    for paragraph in text.lines() {
+        let mut line = String::new();
+        let mut line_width = 0.0_f32;
+        for word in paragraph.split(' ').filter(|word| !word.is_empty()) {
+            let word_width = face.width(word, px);
+            if !line.is_empty() && line_width + space + word_width > width {
+                lines.push(std::mem::take(&mut line));
+                line_width = 0.0;
             }
-            self.current.push(PathVerb::MoveTo(Point {
-                x: self.cursor_x + x,
-                y: -y,
-            }));
-        }
-
-        fn line_to(&mut self, x: f32, y: f32) {
-            self.current.push(PathVerb::LineTo(Point {
-                x: self.cursor_x + x,
-                y: -y,
-            }));
-        }
-
-        fn quad_to(&mut self, cx0: f32, cy0: f32, x: f32, y: f32) {
-            self.current.push(PathVerb::QuadTo((
-                Point {
-                    x: self.cursor_x + cx0,
-                    y: -cy0,
-                },
-                Point {
-                    x: self.cursor_x + x,
-                    y: -y,
-                },
-            )));
-        }
-
-        fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
-            self.current.push(PathVerb::CubicTo((
-                Point {
-                    x: self.cursor_x + cx0,
-                    y: -cy0,
-                },
-                Point {
-                    x: self.cursor_x + cx1,
-                    y: -cy1,
-                },
-                Point {
-                    x: self.cursor_x + x,
-                    y: -y,
-                },
-            )));
-        }
-
-        fn close(&mut self) {
-            self.current.push(PathVerb::Close);
-            if !self.current.is_empty() {
-                self.paths.push(std::mem::take(&mut self.current));
+            if !line.is_empty() {
+                line.push(' ');
+                line_width += space;
             }
+            line.push_str(word);
+            line_width += word_width;
         }
+        lines.push(line);
     }
-
-    let mut collector = OutlineCollector {
-        paths: Vec::new(),
-        current: Vec::new(),
-        cursor_x: 0.0,
-    };
-
-    for ch in text.chars() {
-        if ch == ' ' {
-            collector.cursor_x += font_size * 0.32;
-            continue;
-        }
-
-        let glyph_id = charmap.map(ch).unwrap_or_default();
-        if let Some(glyph) = outlines.get(glyph_id) {
-            let draw_settings = skrifa::outline::DrawSettings::unhinted(
-                skrifa::instance::Size::new(font_size),
-                &location,
+    let widths: Vec<f32> = lines.iter().map(|line| face.width(line, px)).collect();
+    let block_width = widths.iter().copied().fold(0.0, f32::max);
+    let top = (height - metrics.line_height * lines.len() as f32) / 2.0;
+    let left = (width - block_width) / 2.0;
+    let mut contours = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let remaining = block_width - widths[index];
+        let x = left
+            + match align {
+                "left" => 0.0,
+                "right" => remaining,
+                _ => remaining / 2.0,
+            };
+        let y = top + index as f32 * metrics.line_height + metrics.ascent;
+        let scale = |p: Point| Point {
+            x: (p.x + x) / width,
+            y: (p.y + y) / height,
+        };
+        for contour in face.outline(line, px) {
+            contours.push(
+                contour
+                    .into_iter()
+                    .map(|verb| match verb {
+                        PathVerb::MoveTo(p) => PathVerb::MoveTo(scale(p)),
+                        PathVerb::LineTo(p) => PathVerb::LineTo(scale(p)),
+                        PathVerb::QuadTo((c, p)) => PathVerb::QuadTo((scale(c), scale(p))),
+                        PathVerb::CubicTo((a, b, p)) => {
+                            PathVerb::CubicTo((scale(a), scale(b), scale(p)))
+                        }
+                        PathVerb::Close => PathVerb::Close,
+                    })
+                    .collect(),
             );
-            let _ = glyph.draw(draw_settings, &mut collector);
         }
-        let advance = metrics.advance_width(glyph_id).unwrap_or(font_size * 0.6);
-        collector.cursor_x += advance;
     }
-
-    if !collector.current.is_empty() {
-        collector.paths.push(collector.current);
-    }
-
-    collector.paths
+    Ok(Scene {
+        coordinate_space: CoordinateSpace::Normalized,
+        elements: vec![fill_contours(contours, color)],
+    })
 }
 
 #[cfg(test)]
 mod weight_tests {
     use super::*;
+
+    fn outline(weight: f32, text: &str) -> Vec<Vec<PathVerb>> {
+        Face::new(weight).unwrap().outline(text, 48.0)
+    }
+
+    fn width(contours: &[Vec<PathVerb>]) -> f32 {
+        let xs = contours.iter().flatten().map(verb_x);
+        xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+    }
 
     #[test]
     fn weight_schema_keeps_regular_as_default() {
@@ -1174,15 +1257,37 @@ mod weight_tests {
     }
 
     #[test]
-    fn variable_font_has_distinct_regular_semibold_bold_outlines() {
-        let font = include_bytes!("../../../apps/animathio/assets/fonts/InterVariable.ttf");
-        let outlines: Vec<_> = [400.0, 600.0, 700.0, 800.0]
+    fn variable_font_has_distinct_semibold_bold_and_heavy_outlines() {
+        let outlines: Vec<_> = [300.0, 600.0, 700.0, 800.0]
             .into_iter()
-            .map(|weight| format!("{:?}", shape_text_skrifa(font, "Heading", 48.0, weight)))
+            .map(|weight| format!("{:?}", outline(weight, "Heading")))
             .collect();
         assert!(outlines.iter().all(|outline| outline.len() > 100));
         for pair in outlines.windows(2) {
             assert_ne!(pair[0], pair[1]);
         }
+        // Heavier faces are wider, so text never overlaps its neighbours.
+        let widths: Vec<_> = [300.0, 600.0, 800.0]
+            .into_iter()
+            .map(|weight| width(&outline(weight, "Heading")))
+            .collect();
+        assert!(
+            widths.windows(2).all(|pair| pair[0] < pair[1]),
+            "{widths:?}"
+        );
+    }
+
+    #[test]
+    fn outlines_sit_on_the_baseline_and_ignore_control_characters() {
+        let a = outline(700.0, "Hi");
+        let b = outline(700.0, "H\ni\t");
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        let ys = a.iter().flatten().filter_map(|verb| match verb {
+            PathVerb::MoveTo(p) | PathVerb::LineTo(p) => Some(p.y),
+            _ => None,
+        });
+        // y grows downwards: ink is above the baseline (negative), never far below it.
+        assert!(ys.clone().fold(f32::MAX, f32::min) < -20.0);
+        assert!(ys.fold(f32::MIN, f32::max) < 1.0);
     }
 }

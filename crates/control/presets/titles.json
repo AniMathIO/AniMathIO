@@ -26,7 +26,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "title_subtitle",
@@ -65,7 +66,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "lower_third",
@@ -126,7 +128,8 @@
           0.04
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "caption",
@@ -168,7 +171,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "chapter_card",
@@ -218,7 +222,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "end_card",
@@ -257,7 +262,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "kinetic_word_pop",
@@ -304,7 +310,8 @@
           0.9
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "math_title",
@@ -342,10 +349,11 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
-    "id": "typography-title",
+    "id": "typography_title",
     "name": "Title",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -362,10 +370,11 @@
         "weight": 600,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-subtitle",
+    "id": "typography_subtitle",
     "name": "Subtitle",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -382,10 +391,11 @@
         "weight": 600,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-body",
+    "id": "typography_body",
     "name": "Body",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -402,10 +412,11 @@
         "weight": 400,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-caption",
+    "id": "typography_caption",
     "name": "Caption",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -422,10 +433,11 @@
         "weight": 400,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-heading-1",
+    "id": "typography_heading_1",
     "name": "Heading 1",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -442,10 +454,11 @@
         "weight": 800,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-heading-2",
+    "id": "typography_heading_2",
     "name": "Heading 2",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -462,10 +475,11 @@
         "weight": 800,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-heading-3",
+    "id": "typography_heading_3",
     "name": "Heading 3",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -482,10 +496,11 @@
         "weight": 800,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-heading-4",
+    "id": "typography_heading_4",
     "name": "Heading 4",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -502,10 +517,11 @@
         "weight": 800,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-heading-5",
+    "id": "typography_heading_5",
     "name": "Heading 5",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -522,10 +538,11 @@
         "weight": 800,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   },
   {
-    "id": "typography-heading-6",
+    "id": "typography_heading_6",
     "name": "Heading 6",
     "animation": "fade",
     "ramp_ticks": 0,
@@ -542,6 +559,7 @@
         "weight": 800,
         "height": 0.2
       }
-    ]
+    ],
+    "group": "typography"
   }
 ]
