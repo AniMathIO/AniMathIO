@@ -42,6 +42,7 @@ fn hello_scene() -> Scene {
                 params: serde_json::Value::Null,
             },
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit: animathio_core::Fit::Stretch,
             transform: animathio_core::Transform::default(),
             params: BTreeMap::new(),

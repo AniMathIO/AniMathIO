@@ -1,0 +1,69 @@
+{
+  "assets": {
+    "8242cb50b48f679c2d59bcd9200ad22f753dd43c7196e8ce7eea1418c81b2213": {
+      "media_type": "audio/wav",
+      "name": "voice.wav"
+    }
+  },
+  "background": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "duration": 0,
+  "format": "animathio",
+  "frame_rate": {
+    "denominator": 1,
+    "numerator": 30
+  },
+  "height": 0,
+  "schemaVersion": 7,
+  "tracks": [
+    {
+      "clips": {
+        "1": {
+          "animations": [],
+          "effects": [],
+          "fit": "stretch",
+          "id": 1,
+          "kind": {
+            "Audio": "8242cb50b48f679c2d59bcd9200ad22f753dd43c7196e8ce7eea1418c81b2213"
+          },
+          "params": {},
+          "range": {
+            "end": 940800000,
+            "start": 0
+          },
+          "source_offset": 0,
+          "time_map": {
+            "hold": false,
+            "phase": 0,
+            "ramps": [],
+            "reverse": false,
+            "source_length": 1411200000,
+            "speed": {
+              "denominator": 2,
+              "numerator": 3
+            }
+          },
+          "transform": {
+            "opacity": 1.0,
+            "rotation": 0.0,
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "x": 0.5,
+            "y": 0.5
+          }
+        }
+      },
+      "gain": 1.0,
+      "id": 1,
+      "locked": false,
+      "muted": false,
+      "name": "Audio",
+      "solo": false
+    }
+  ],
+  "width": 0
+}

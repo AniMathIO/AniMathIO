@@ -1054,21 +1054,35 @@ impl Editor {
                     } else {
                         retime::ramps(&ramps.read(cx).value(), rate)?
                     };
-                    Ok(Command::Batch {
-                        commands: vec![
-                            Command::SetClipSpeed {
-                                id,
-                                speed,
-                                reverse: selected(&reverse, cx) == "Reverse",
-                                ramps: keys,
-                                ripple: selected(&ripple, cx) == "Ripple trailing clips",
-                            },
-                            Command::SetClipMaintainPitch {
-                                id,
-                                maintain_pitch: maintain_pitch.get(),
-                            },
-                        ],
-                    })
+                    // Only edit what changed: a locked linked companion must not reject an
+                    // edit that leaves its own setting alone.
+                    let reverse = selected(&reverse, cx) == "Reverse";
+                    let ripple = selected(&ripple, cx) == "Ripple trailing clips";
+                    let mut commands = Vec::new();
+                    if speed != clip.time_map.speed
+                        || reverse != clip.time_map.reverse
+                        || keys != clip.time_map.ramps
+                        || ripple
+                    {
+                        commands.push(Command::SetClipSpeed {
+                            id,
+                            speed,
+                            reverse,
+                            ramps: keys,
+                            ripple,
+                        });
+                    }
+                    if maintain_pitch.get() != clip.maintain_pitch {
+                        commands.push(Command::SetClipMaintainPitch {
+                            id,
+                            maintain_pitch: maintain_pitch.get(),
+                        });
+                    }
+                    match commands.len() {
+                        0 => Err("Nothing to change".to_string()),
+                        1 => Ok(commands.remove(0)),
+                        _ => Ok(Command::Batch { commands }),
+                    }
                 })();
                 editor.update(cx, |this, cx| match &result {
                     Ok(command) => this.try_execute(command, cx),

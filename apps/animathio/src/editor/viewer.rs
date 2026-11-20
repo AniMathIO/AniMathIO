@@ -814,6 +814,7 @@ mod tests {
             kind: ClipKind::Image(AssetId::of(b"image")),
             fit: Fit::Contain,
             source_time: Time(0),
+            source_taps: Vec::new(),
             transform: Transform::default(),
             params: BTreeMap::new(),
             effects: vec![],

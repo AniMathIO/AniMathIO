@@ -113,3 +113,49 @@ fn double_speed_video() {
 fn reverse_video() {
     golden(true, "video-reverse");
 }
+
+/// Frame `n` of the source is a solid gray of `10 * n`, so averages are easy to predict.
+struct Gray;
+impl FrameSource for Gray {
+    fn frame_at(&mut self, _: &AssetId, time: Time) -> Option<Frame> {
+        let frame = time.0 / (TICKS_PER_SECOND / 30);
+        assert!((0..30).contains(&frame), "source lookup escaped media");
+        let value = u8::try_from(10 * frame).unwrap();
+        Some(Frame {
+            size: (4, 4),
+            pixels: [value, value, value, 255].repeat(16),
+        })
+    }
+}
+fn gray_at(speed: (u32, u32), reverse: bool, output_frame: i64) -> u8 {
+    let mut p = project();
+    Command::SetClipSpeed {
+        id: ClipId(1),
+        speed: ClipSpeed::new(speed.0, speed.1).unwrap(),
+        reverse,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let scene = evaluate(&p, Time(output_frame * TICKS_PER_SECOND / 30));
+    let mut ctx = RenderCtx::new(CpuBackend::default(), Gray);
+    let frame = animathio_render::render(&scene, &mut ctx, (4, 4)).unwrap();
+    assert_eq!(frame.pixels[3 * 4 + 3], 255);
+    frame.pixels[(2 * 4 + 2) * 4]
+}
+#[test]
+fn fast_video_averages_the_source_frames_one_output_frame_spans() {
+    let close = |a: u8, b: u8| assert!(a.abs_diff(b) <= 2, "{a} vs {b}");
+    // 1x and slow motion stay point samples: exactly source frame n.
+    close(gray_at((1, 1), false, 7), 70);
+    close(gray_at((1, 2), false, 8), 40);
+    // 2x output frame 5 spans source frames 10 and 11; frame 2 at 3x spans 6, 7 and 8.
+    close(gray_at((2, 1), false, 5), 105);
+    close(gray_at((3, 1), false, 2), 70);
+    // Reversed 2x: output frame 5 reads source frames 19 and 18 (the span 19.0 down to 17.0).
+    close(gray_at((2, 1), true, 5), 185);
+    // 16x averages sixteen frames: output frame 1 spans source frames 16..32 of a 30-frame
+    // clip... the clip is only 30 source frames long, so use output frame 0 (frames 0..16).
+    close(gray_at((16, 1), false, 0), 75);
+}

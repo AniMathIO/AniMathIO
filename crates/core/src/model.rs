@@ -1,4 +1,6 @@
-use crate::{EffectId, EffectInstance, Error, FrameRate, Keyframes, ParamValue, Time, invalid};
+use crate::{
+    EffectId, EffectInstance, Error, FrameRate, Keyframes, ParamValue, Rounding, Time, invalid,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -749,6 +751,12 @@ pub struct SceneClip {
     pub kind: ClipKind,
     /// Source-local tick position.
     pub source_time: Time,
+    /// Source-local times a video frame is filtered over. Empty for a point sample at
+    /// `source_time`. When the source clock runs faster than the output frame rate, the
+    /// renderer averages the frames due at these evenly spaced times across the output
+    /// frame's interval, so fast video is box filtered over time instead of aliased.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_taps: Vec<Time>,
     /// Evaluated transform.
     pub transform: Transform,
     /// Placement of an image or video source inside the frame.
@@ -800,6 +808,7 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
                 id: clip.id,
                 kind: clip.kind.clone(),
                 source_time: Time(clip.source_time(local_time).0.max(0)),
+                source_taps: video_taps(project, clip, local_time),
                 transform: clip.transform,
                 fit: clip.fit,
                 params: clip.params.clone(),
@@ -834,6 +843,39 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
         }
     }
     scene
+}
+
+/// Most frames averaged into one output frame (the speed limit is 16x).
+const MAX_VIDEO_TAPS: i64 = 16;
+
+/// Source times that filter one output frame of a clip played faster than the project
+/// frame rate: `round(speed)` times spaced evenly through the output frame's interval,
+/// so each covers one output-frame-sized share of the source span (a box filter).
+/// Empty (a point sample) at or near 1x, for slow motion, holds, stills and audio.
+fn video_taps(project: &Project, clip: &Clip, local: Time) -> Vec<Time> {
+    if !matches!(clip.kind, ClipKind::Video(_))
+        || clip.time_map.hold
+        || clip.time_map == crate::ClipTimeMap::default()
+        || local.0 < 0
+    {
+        return Vec::new();
+    }
+    let Ok(frame) = project.frame_rate().frame_to_time(1, Rounding::Floor) else {
+        return Vec::new();
+    };
+    let dt = i128::from(frame.0.max(1));
+    let at = |offset: i128| {
+        let local = i128::from(local.0).saturating_add(offset);
+        clip.source_time(Time(i64::try_from(local).unwrap_or(i64::MAX)))
+    };
+    let span = i128::from(at(dt).0) - i128::from(at(0).0);
+    let count = ((2 * span.abs() + dt) / (2 * dt)).min(i128::from(MAX_VIDEO_TAPS));
+    if count < 2 {
+        return Vec::new();
+    }
+    (0..count)
+        .map(|i| Time(at(dt * (2 * i + 1) / (2 * count)).0.max(0)))
+        .collect()
 }
 
 fn validate_clip_effects_and_animations(clip: &Clip) -> Result<(), Error> {

@@ -123,6 +123,7 @@ fn plugin_clip(plugin_id: impl Into<String>, params: serde_json::Value) -> Scene
             params,
         },
         source_time: Time(0),
+        source_taps: Vec::new(),
         fit: animathio_core::Fit::Stretch,
         transform: animathio_core::Transform::default(),
         params: BTreeMap::new(),

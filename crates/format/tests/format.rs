@@ -542,8 +542,21 @@ fn schema_six_migrates_to_identity_speed_and_current_schema_roundtrips() {
         .as_object_mut()
         .unwrap()
         .remove("time_map");
+    // A schema-6 file predates pitch preservation too: it must load with it off.
+    json["tracks"][0]["clips"]["1"]
+        .as_object_mut()
+        .unwrap()
+        .remove("maintain_pitch");
     let migrated = read_json(serde_json::to_vec(&json).unwrap().as_slice()).unwrap();
-    assert_eq!(migrated, project);
+    assert!(!migrated.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
+    let mut legacy = project.clone();
+    Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: false,
+    }
+    .apply(&mut legacy)
+    .unwrap();
+    assert_eq!(migrated, legacy);
     assert_eq!(
         migrated.tracks()[0].clips()[&ClipId(1)].time_map,
         ClipTimeMap::default()
@@ -746,4 +759,26 @@ fn schema_seven_keeps_legacy_pitch_and_schema_eight_roundtrips_the_option() {
         read_json(json_bytes(&migrated).as_slice()).unwrap(),
         migrated
     );
+}
+
+#[test]
+fn checked_in_schema_seven_project_loads_with_pitch_preservation_off() {
+    // The fixture is a real schema-7 file: no `maintain_pitch` key anywhere.
+    let text = include_str!("fixtures/v7-retimed-audio.json");
+    assert!(!text.contains("maintain_pitch"));
+    let project = read_json(text.as_bytes()).unwrap();
+    let clip = &project.tracks()[0].clips()[&ClipId(1)];
+    assert!(
+        !clip.maintain_pitch,
+        "old projects keep their varispeed sound"
+    );
+    assert_eq!(
+        clip.time_map.speed,
+        animathio_core::ClipSpeed::new(3, 2).unwrap()
+    );
+    // Saving writes the current schema with the explicit flag, and it round-trips.
+    let written: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    assert_eq!(written["schemaVersion"], SCHEMA_VERSION);
+    assert_eq!(written["tracks"][0]["clips"]["1"]["maintain_pitch"], false);
+    assert_eq!(read_json(json_bytes(&project).as_slice()).unwrap(), project);
 }

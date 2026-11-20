@@ -375,3 +375,150 @@ fn maintain_pitch_is_serializable_linked_invertible_and_lock_safe() {
     );
     assert_eq!(p, before);
 }
+
+fn video_project(n: u32, d: u32, reverse: bool) -> Project {
+    // A 30 fps project (the default) with one video second.
+    let mut p = Project::default();
+    for (name, media_type) in [(&b"video"[..], "video/mp4"), (&b"still"[..], "image/png")] {
+        Command::AddAsset {
+            id: AssetId::of(name),
+            asset: Asset {
+                name: "media".into(),
+                media_type: media_type.into(),
+            },
+        }
+        .apply(&mut p)
+        .unwrap();
+    }
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "video"),
+        index: 0,
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(
+            ClipId(1),
+            ClipKind::Video(AssetId::of(b"video")),
+            range(0, TICKS_PER_SECOND),
+        ),
+    }
+    .apply(&mut p)
+    .unwrap();
+    speed(n, d, reverse, false).apply(&mut p).unwrap();
+    p
+}
+
+#[test]
+fn fast_video_frames_carry_box_filter_taps_that_cover_the_source_span() {
+    let frame = TICKS_PER_SECOND / 30;
+    // 3x forward: three taps at the centres of the three source frames one output frame spans.
+    let p = video_project(3, 1, false);
+    let at = |frames: i64| evaluate(&p, Time(frames * frame)).clips[0].clone();
+    let clip = at(2);
+    assert_eq!(clip.source_time, Time(6 * frame));
+    assert_eq!(
+        clip.source_taps,
+        [6, 7, 8].map(|n| Time(n * frame + frame / 2))
+    );
+    // Reversed taps walk backwards through the same span.
+    let p = video_project(2, 1, true);
+    let clip = evaluate(&p, Time(frame)).clips[0].clone();
+    assert_eq!(clip.source_taps.len(), 2);
+    assert!(clip.source_taps[0] > clip.source_taps[1]);
+    // The 16x limit averages at most 16 frames.
+    let p = video_project(16, 1, false);
+    assert_eq!(evaluate(&p, Time(0)).clips[0].source_taps.len(), 16);
+    // Every tap is a valid source time, even in the clip's last output frame.
+    let last = Time(p.tracks()[0].clips()[&ClipId(1)].range.end.0 - 1);
+    assert!(
+        evaluate(&p, last).clips[0]
+            .source_taps
+            .iter()
+            .all(|t| t.0 >= 0 && t.0 < TICKS_PER_SECOND)
+    );
+}
+
+#[test]
+fn point_samples_remain_for_normal_slow_still_and_held_video() {
+    let frame = TICKS_PER_SECOND / 30;
+    for (n, d) in [(1, 1), (1, 2), (5, 4)] {
+        let p = video_project(n, d, false);
+        let scene = evaluate(&p, Time(3 * frame));
+        assert!(scene.clips[0].source_taps.is_empty(), "{n}/{d}");
+    }
+    // An image or audio clip never filters, even when retimed.
+    let mut p = video_project(4, 1, false);
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(
+            ClipId(2),
+            ClipKind::Image(AssetId::of(b"still")),
+            range(TICKS_PER_SECOND, 2 * TICKS_PER_SECOND),
+        ),
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::SetClipSpeed {
+        id: ClipId(2),
+        speed: ClipSpeed::new(4, 1).unwrap(),
+        reverse: false,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert!(
+        evaluate(&p, Time(TICKS_PER_SECOND + frame / 2)).clips[0]
+            .source_taps
+            .is_empty()
+    );
+    // A frame hold shows one frame; the segments around it still filter.
+    let mut p = video_project(2, 1, false);
+    Command::InsertFrameHold {
+        id: ClipId(1),
+        at: Time(3 * frame),
+        frames: 4,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(evaluate(&p, Time(frame)).clips[0].source_taps.len(), 2);
+    assert!(
+        evaluate(&p, Time(5 * frame)).clips[0]
+            .source_taps
+            .is_empty()
+    );
+    assert_eq!(evaluate(&p, Time(9 * frame)).clips[0].source_taps.len(), 2);
+}
+
+#[test]
+fn ramps_filter_only_where_the_speed_exceeds_the_frame_rate() {
+    let frame = TICKS_PER_SECOND / 30;
+    let mut p = video_project(1, 1, false);
+    Command::SetClipSpeed {
+        id: ClipId(1),
+        speed: ClipSpeed::default(),
+        reverse: false,
+        ramps: vec![
+            SpeedPoint {
+                time: Time(0),
+                speed: ClipSpeed::new(1, 1).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(TICKS_PER_SECOND / 2),
+                speed: ClipSpeed::new(4, 1).unwrap(),
+            },
+        ],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let end = p.tracks()[0].clips()[&ClipId(1)].range.end.0;
+    assert!(
+        evaluate(&p, Time(0)).clips[0].source_taps.is_empty(),
+        "starts at 1x"
+    );
+    let late = evaluate(&p, Time(end - 2 * frame));
+    assert!(late.clips[0].source_taps.len() >= 3);
+}

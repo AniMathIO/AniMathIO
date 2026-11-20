@@ -32,6 +32,7 @@ pub fn scene(kind: &str) -> Scene {
                 params,
             },
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit: animathio_core::Fit::Stretch,
             transform: if matches!(kind, "title" | "classic") {
                 Transform {

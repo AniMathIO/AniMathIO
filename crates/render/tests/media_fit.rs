@@ -52,6 +52,7 @@ fn scene(fit: Fit, video: bool) -> Scene {
             },
             fit,
             source_time: Time(0),
+            source_taps: Vec::new(),
             transform: Transform::default(),
             params: BTreeMap::new(),
             effects: vec![],

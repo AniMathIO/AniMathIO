@@ -447,6 +447,7 @@ fn components_built_for_api_0_2_0_still_load_and_render() {
                 params: serde_json::json!({}),
             },
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit: animathio_core::Fit::Stretch,
             transform: Transform::default(),
             params: BTreeMap::new(),

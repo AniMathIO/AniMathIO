@@ -9,7 +9,7 @@ mod gpu;
 pub mod sample;
 mod transition;
 
-use animathio_core::{AssetId, ClipKind, EffectProcessor, Project, Scene, Time};
+use animathio_core::{AssetId, ClipKind, EffectProcessor, Project, Scene, SceneClip, Time};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{Cursor, Write},
@@ -190,6 +190,68 @@ impl ResourcePool {
 pub trait FrameSource {
     /// Return the frame due at this exact source-local tick position, if available.
     fn frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<Frame>;
+}
+
+/// The video frame a scene clip shows. Normally the frame due at `source_time`. When the
+/// source clock outruns the output frame rate, `evaluate` lists `source_taps` instead and
+/// the frames due at those times are averaged with equal weight: a box filter over the
+/// source interval one output frame covers, which turns the aliasing of dropped frames
+/// into motion blur. The result depends only on the scene and the frame source, so
+/// preview, export and tests agree.
+pub(crate) fn video_frame(
+    video: &mut dyn FrameSource,
+    asset: &AssetId,
+    clip: &SceneClip,
+) -> Option<Frame> {
+    if clip.source_taps.len() < 2 {
+        return video.frame_at(asset, clip.source_time);
+    }
+    let mut sums: Vec<u32> = Vec::new();
+    let mut alpha_sums: Vec<u32> = Vec::new();
+    let (mut size, mut count) = ((0, 0), 0_u32);
+    for time in &clip.source_taps {
+        let Some(frame) = video.frame_at(asset, *time) else {
+            continue;
+        };
+        if frame.validate().is_err() {
+            continue;
+        }
+        if count == 0 {
+            size = frame.size;
+            sums = vec![0; frame.pixels.len()];
+            alpha_sums = vec![0; frame.pixels.len() / 4];
+        } else if frame.size != size {
+            continue;
+        }
+        for ((sum, alpha), pixel) in sums
+            .chunks_exact_mut(4)
+            .zip(&mut alpha_sums)
+            .zip(frame.pixels.chunks_exact(4))
+        {
+            let a = u32::from(pixel[3]);
+            for channel in 0..3 {
+                sum[channel] += u32::from(pixel[channel]) * a;
+            }
+            sum[3] += a;
+            *alpha += a;
+        }
+        count += 1;
+    }
+    if count == 0 {
+        return None;
+    }
+    let mut pixels = Vec::with_capacity(sums.len());
+    for (sum, alpha) in sums.chunks_exact(4).zip(&alpha_sums) {
+        for channel in 0..3 {
+            pixels.push(if *alpha == 0 {
+                0
+            } else {
+                u8::try_from((sum[channel] + alpha / 2) / alpha).unwrap_or(u8::MAX)
+            });
+        }
+        pixels.push(u8::try_from((alpha + count / 2) / count).unwrap_or(u8::MAX));
+    }
+    Some(Frame { size, pixels })
 }
 
 /// Video stand-in until the media spike supplies a decoder.

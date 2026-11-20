@@ -224,7 +224,7 @@ impl GpuBackend {
                 self.draw_unit_image(t, image, clip, size);
             }
             ClipKind::Video(id) => {
-                if let Some(frame) = video.frame_at(id, clip.source_time) {
+                if let Some(frame) = crate::video_frame(video, id, clip) {
                     let image = image_data(Arc::new(frame))?;
                     self.draw_unit_image(t, image, clip, size);
                 } else {

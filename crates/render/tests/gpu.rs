@@ -135,6 +135,7 @@ fn gpu_composites_cpu_effect_layers() {
             id: ClipId(0),
             kind: ClipKind::Image(id.clone()),
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit: animathio_core::Fit::Stretch,
             transform: Transform {
                 opacity: 0.75,

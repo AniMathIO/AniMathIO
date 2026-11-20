@@ -327,7 +327,7 @@ impl CpuBackend {
         match &clip.kind {
             ClipKind::Image(id) => draw_image(ctx, pool.image(id)?.as_ref(), clip, canvas)?,
             ClipKind::Video(id) => {
-                if let Some(frame) = video.frame_at(id, clip.source_time) {
+                if let Some(frame) = crate::video_frame(video, id, clip) {
                     draw_image(ctx, &frame, clip, canvas)?;
                 } else {
                     self.placeholder(

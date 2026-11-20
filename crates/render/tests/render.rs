@@ -13,6 +13,7 @@ fn layer(id: u64, kind: ClipKind, transform: Transform) -> SceneClip {
         track: TrackId(id),
         kind,
         source_time: Time(0),
+        source_taps: Vec::new(),
         fit: animathio_core::Fit::Stretch,
         transform,
         params: std::collections::BTreeMap::new(),
