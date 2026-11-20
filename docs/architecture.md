@@ -709,9 +709,9 @@ rendered off-thread and cached in editor session state by project canvas size.
 - **Chapters.** The control layer's `chapters` helper turns the markers into a chapter list
   (a YouTube-style `M:SS Title` block, `WebVTT` chapters or FFmpeg `;FFMETADATA1`), shared by
   the CLI (`markers chapters`, `export --chapters`), the control method `chapters.export` and
-  MCP `export_chapters`. The MP4 muxer (the media backend) has no chapter atom and patching
-  `moov` would shift every chunk offset, so chapters ship as sidecars; `ffmpeg -i v.mp4 -i
-  chapters.ffmeta -map_metadata 1 -codec copy out.mp4` embeds them without re-encoding.
+  MCP `export_chapters`. The MP4 export embeds Nero `chpl` chapters inside `moov/udta` by
+  default (controlled by `Settings::embed_chapters`, disabled with `--no-embed-chapters`);
+  the `--chapters` flag still writes a sidecar file (YouTube, WebVTT or FFmpeg metadata).
 - **Editor.** The `markers` editor module owns the panel, the marker dialog and the ruler
   flags (painted by `support`); `timeline` makes markers snap targets and hit-tests them.
   Markers are selected on the ruler (click, Shift/Ctrl-click toggles, drag moves the whole

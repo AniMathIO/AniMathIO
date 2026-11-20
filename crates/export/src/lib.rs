@@ -15,8 +15,11 @@ use animathio_render::{Frame, RenderCtx, render};
 use serde::{Deserialize, Serialize};
 
 mod audio_source;
+mod chapters;
 mod output;
 mod plugin_check;
+
+pub use chapters::embed_chapters;
 
 pub use output::AtomicOutput;
 
@@ -91,12 +94,25 @@ pub struct Settings {
     pub frame_rate: Option<FrameRate>,
     /// Constant quality, 0..=51 (lower is better).
     pub crf: f32,
+    /// Embed timeline markers as a Nero `chpl` chapter list in the MP4.
+    ///
+    /// When `true` (the default), chapters are embedded whenever the project
+    /// has at least one marker inside the exported range.  Set to `false` to
+    /// suppress the chapter atom entirely.
+    #[serde(default = "default_embed_chapters")]
+    pub embed_chapters: bool,
 }
+
+fn default_embed_chapters() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             frame_rate: None,
             crf: 23.0,
+            embed_chapters: true,
         }
     }
 }
@@ -279,6 +295,13 @@ impl Exporter {
             }) {
                 return Err(Error::Cancelled);
             }
+            // Inject timeline markers as a Nero `chpl` chapter atom when the
+            // option is enabled and the project has markers in the range.
+            let bytes = if settings.embed_chapters {
+                chapters::embed_chapters(bytes, project.markers(), range.start, range.end)
+            } else {
+                bytes
+            };
             Ok(bytes)
         })
     }

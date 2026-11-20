@@ -161,7 +161,8 @@ Options:
       --preset <PRESET>      Delivery preset: `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` or `portrait`
       --crf <CRF>            Constant quality, 0..=51; lower is better (defaults to preset quality or 23)
       --overwrite            Replace an existing output file instead of failing
-      --chapters <CHAPTERS>  Also write the project's markers as chapters to this sidecar file (`.txt` `YouTube` list, `.vtt` `WebVTT`, `.ffmeta` `FFmpeg` metadata). The MP4 muxer has no chapter atom, so chapters ship beside the video
+      --chapters <CHAPTERS>  Also write the project's markers as chapters to this sidecar file (`.txt` `YouTube` list, `.vtt` `WebVTT`, `.ffmeta` `FFmpeg` metadata)
+      --no-embed-chapters    Do not embed a Nero chapter atom (`chpl`) in the MP4. By default chapters are embedded when the project has markers in the exported range
       --bench                Report wall time, fps and opt-in stage timings
   -h, --help                 Print help
 ```

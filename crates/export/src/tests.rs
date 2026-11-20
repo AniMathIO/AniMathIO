@@ -542,3 +542,247 @@ fn light_project_background_survives_mp4_export() {
         &frame.pixels[..4]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Chapter embedding integration tests
+// ---------------------------------------------------------------------------
+//
+// These tests do a real (but tiny) MP4 export and then parse the `chpl` box
+// out of the resulting bytes by hand, so they work without ffprobe in CI.
+
+fn project_with_markers(markers: &[(i64, &str)]) -> (Project, BTreeMap<AssetId, Vec<u8>>) {
+    let mut project = Project::default();
+    Command::SetSettings {
+        width: 160,
+        height: 90,
+        frame_rate: FrameRate::new(30, 1).unwrap(),
+        background: [0, 0, 0, 255],
+        duration: Time(TICKS_PER_SECOND * 3),
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddTrack {
+        track: animathio_core::Track::new(TrackId(10), "V"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    for (i, (ticks, name)) in markers.iter().enumerate() {
+        let mut m =
+            animathio_core::Marker::new(animathio_core::MarkerId(i as u64 + 100), Time(*ticks));
+        m.name = (*name).to_owned();
+        Command::AddMarker { marker: m }
+            .apply(&mut project)
+            .unwrap();
+    }
+    (project, BTreeMap::new())
+}
+
+/// Parse all top-level box ranges `(fourcc, start, end)` from an MP4 byte slice.
+#[allow(clippy::cast_possible_truncation)]
+fn parse_boxes(mp4: &[u8]) -> Vec<([u8; 4], usize, usize)> {
+    let mut pos = 0;
+    let mut out = Vec::new();
+    while pos + 8 <= mp4.len() {
+        let size32 = u32::from_be_bytes(mp4[pos..pos + 4].try_into().unwrap()) as usize;
+        let (size, header) = if size32 == 1 {
+            if pos + 16 > mp4.len() {
+                break;
+            }
+            (
+                u64::from_be_bytes(mp4[pos + 8..pos + 16].try_into().unwrap()) as usize,
+                16,
+            )
+        } else if size32 == 0 {
+            (mp4.len() - pos, 8)
+        } else {
+            (size32, 8)
+        };
+        if size < header || pos + size > mp4.len() {
+            break;
+        }
+        let mut fc = [0u8; 4];
+        fc.copy_from_slice(&mp4[pos + 4..pos + 8]);
+        out.push((fc, pos, pos + size));
+        pos += size;
+    }
+    out
+}
+
+/// Find all boxes named `fourcc` inside a container's payload (after its
+/// 8-byte header).  Returns their byte ranges **within the container slice**.
+fn find_children(container: &[u8], fourcc: [u8; 4]) -> Vec<std::ops::Range<usize>> {
+    let start = if container.len() >= 8 {
+        8
+    } else {
+        return Vec::new();
+    };
+    parse_boxes(&container[start..])
+        .into_iter()
+        .filter(|(fc, _, _)| *fc == fourcc)
+        .map(|(_, s, e)| s + start..e + start)
+        .collect()
+}
+
+/// Extract chapter entries from a `chpl` box slice.
+/// Returns `(timestamp_100ns, title)` pairs.
+fn parse_chpl(chpl: &[u8]) -> Vec<(u64, String)> {
+    // version+flags: bytes 8..12, reserved: byte 12, count: bytes 13..17
+    if chpl.len() < 17 {
+        return Vec::new();
+    }
+    let count = u32::from_be_bytes(chpl[13..17].try_into().unwrap()) as usize;
+    let mut pos = 17;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        if pos + 9 > chpl.len() {
+            break;
+        }
+        let ts = u64::from_be_bytes(chpl[pos..pos + 8].try_into().unwrap());
+        let title_len = chpl[pos + 8] as usize;
+        pos += 9;
+        if pos + title_len > chpl.len() {
+            break;
+        }
+        let title = String::from_utf8_lossy(&chpl[pos..pos + title_len]).into_owned();
+        pos += title_len;
+        out.push((ts, title));
+    }
+    out
+}
+
+#[test]
+fn export_with_three_markers_embeds_chpl_chapters() {
+    // Markers at 0, 1 and 2 seconds inside a 3-second project.
+    let sec = TICKS_PER_SECOND;
+    let (project, assets) =
+        project_with_markers(&[(0, "Intro"), (sec, "Part 2"), (2 * sec, "Outro")]);
+    let range = TimeRange::new(Time(0), Time(3 * sec)).unwrap();
+    let bytes = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            range,
+            Settings::default(),
+            |_| true,
+            |scene| scene,
+        )
+        .unwrap();
+
+    // Find moov → udta → chpl.
+    let boxes = parse_boxes(&bytes);
+    let moov = boxes
+        .iter()
+        .find(|(fc, _, _)| fc == b"moov")
+        .expect("moov must be present");
+    let moov_slice = &bytes[moov.1..moov.2];
+    let udta_ranges = find_children(moov_slice, *b"udta");
+    assert!(!udta_ranges.is_empty(), "udta must be in moov");
+    let udta = &moov_slice[udta_ranges[0].clone()];
+    let chpl_ranges = find_children(udta, *b"chpl");
+    assert!(!chpl_ranges.is_empty(), "chpl must be in udta");
+    let chpl = &udta[chpl_ranges[0].clone()];
+
+    let chapters = parse_chpl(chpl);
+    assert_eq!(chapters.len(), 3, "three chapters");
+    assert_eq!(chapters[0].0, 0, "Intro at 0");
+    assert_eq!(chapters[0].1, "Intro");
+    // 1 second = 10_000_000 hundred-nanosecond units.
+    assert_eq!(chapters[1].0, 10_000_000, "Part 2 at 1 s");
+    assert_eq!(chapters[1].1, "Part 2");
+    assert_eq!(chapters[2].0, 20_000_000, "Outro at 2 s");
+    assert_eq!(chapters[2].1, "Outro");
+}
+
+#[test]
+fn export_with_embed_chapters_false_has_no_chpl() {
+    let sec = TICKS_PER_SECOND;
+    let (project, assets) = project_with_markers(&[(0, "Start"), (sec, "Middle")]);
+    let range = TimeRange::new(Time(0), Time(2 * sec)).unwrap();
+    let settings = Settings {
+        embed_chapters: false,
+        ..Settings::default()
+    };
+    let bytes = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(&project, range, settings, |_| true, |scene| scene)
+        .unwrap();
+
+    let boxes = parse_boxes(&bytes);
+    let moov = boxes.iter().find(|(fc, _, _)| fc == b"moov").unwrap();
+    let moov_slice = &bytes[moov.1..moov.2];
+    // Either no udta, or udta without chpl.
+    for udta_range in find_children(moov_slice, *b"udta") {
+        let udta = &moov_slice[udta_range];
+        assert!(
+            find_children(udta, *b"chpl").is_empty(),
+            "chpl must not appear when embed_chapters is false"
+        );
+    }
+}
+
+#[test]
+fn export_without_markers_has_no_chpl() {
+    let sec = TICKS_PER_SECOND;
+    // project_with_markers with no markers.
+    let (project, assets) = project_with_markers(&[]);
+    let range = TimeRange::new(Time(0), Time(sec)).unwrap();
+    let bytes = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            range,
+            Settings::default(),
+            |_| true,
+            |scene| scene,
+        )
+        .unwrap();
+
+    let boxes = parse_boxes(&bytes);
+    let moov = boxes.iter().find(|(fc, _, _)| fc == b"moov").unwrap();
+    let moov_slice = &bytes[moov.1..moov.2];
+    for udta_range in find_children(moov_slice, *b"udta") {
+        let udta = &moov_slice[udta_range];
+        assert!(
+            find_children(udta, *b"chpl").is_empty(),
+            "chpl must not appear for a project with no markers"
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::assert_is_empty)]
+fn export_chapter_timestamps_shift_by_range_start() {
+    // Export starting at 1 second; marker at 1 s → chapter at 0, marker at 2 s → 1 s.
+    let sec = TICKS_PER_SECOND;
+    let (project, assets) = project_with_markers(&[(sec, "A"), (2 * sec, "B")]);
+    let range = TimeRange::new(Time(sec), Time(3 * sec)).unwrap();
+    let bytes = Exporter::new(&project, &assets)
+        .unwrap()
+        .export(
+            &project,
+            range,
+            Settings::default(),
+            |_| true,
+            |scene| scene,
+        )
+        .unwrap();
+
+    let boxes = parse_boxes(&bytes);
+    let moov = boxes.iter().find(|(fc, _, _)| fc == b"moov").unwrap();
+    let moov_slice = &bytes[moov.1..moov.2];
+    let udta_ranges = find_children(moov_slice, *b"udta");
+    assert!(!udta_ranges.is_empty());
+    let udta = &moov_slice[udta_ranges[0].clone()];
+    let chpl_ranges = find_children(udta, *b"chpl");
+    assert!(!chpl_ranges.is_empty());
+    let chapters = parse_chpl(&udta[chpl_ranges[0].clone()]);
+    assert_eq!(chapters.len(), 2);
+    assert_eq!(chapters[0].0, 0, "marker at range start → 0");
+    assert_eq!(chapters[0].1, "A");
+    assert_eq!(
+        chapters[1].0, 10_000_000,
+        "marker one second in → 10_000_000"
+    );
+    assert_eq!(chapters[1].1, "B");
+}
