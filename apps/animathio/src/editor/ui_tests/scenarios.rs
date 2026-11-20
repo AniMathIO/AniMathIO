@@ -2351,7 +2351,7 @@ fn text_font_weight_edit_is_a_command_with_undo(cx: &mut TestAppContext) {
             .plugin_model(id, "font_weight")
             .is_some_and(|model| matches!(
                 model,
-                crate::inspector::ParamModel::Number { min, max, .. } if min == 100.0 && max == 900.0
+                crate::inspector::ParamModel::Number { min, max, .. } if (min - 100.0).abs() < 1e-9 && (max - 900.0).abs() < 1e-9
             ))),
         "the inspector builds a 100-900 Font weight field from the schema"
     );
