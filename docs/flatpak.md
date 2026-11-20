@@ -30,7 +30,13 @@ To refresh `cargo-sources.json`, install `flatpak-cargo-generator==0.1.5` and
 `python packaging/flatpak/generate-sources.py` with that environment active.
 The generator combines the main lockfile, every plugin lockfile and the hello
 example lockfile before generating a single vendor configuration. Regenerate
-whenever any of those lockfiles changes. The source directory is the current
+whenever any of those lockfiles changes, including Renovate dependency bumps.
+`scripts/check-flatpak-sources.py` (Python 3.11+, no extra packages) compares every
+registry crate in those lockfiles with `cargo-sources.json` by name, version and
+checksum, and also flags crates no lockfile references any more. The `Flatpak cargo
+sources` step of the Rust CI workflow runs it on every pull request and push that is
+not docs-only, so a stale file fails there with the regeneration command rather
+than at the next Flatpak build. The source directory is the current
 checkout; Flathub submission must replace it with a pinned release source.
 
 The build installs both binaries and eight plugin bundles under
