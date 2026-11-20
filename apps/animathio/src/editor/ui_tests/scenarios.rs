@@ -2297,7 +2297,7 @@ fn typography_presets_add_with_their_weight_in_one_undo_step(cx: &mut TestAppCon
     ui.update(|e, _, cx| e.select_left_tab(LeftTab::Titles, cx));
     for (id, _, _) in expected {
         assert!(
-            ui.cx.debug_bounds(&format!("title-{id}")).is_some(),
+            bounds_of(&mut ui, format!("title-{id}")).is_some(),
             "{id} card is listed"
         );
     }
@@ -2344,27 +2344,36 @@ fn text_font_weight_edit_is_a_command_with_undo(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, project, assets);
     ui.update(|e, _, cx| e.add_title_preset("typography_body", Time(0), cx));
     let id = ui.read(|e| e.selected.expect("selected"));
-    let weight = |ui: &Ui| {
-        ui.read(|e| match &e.find_clip(id).expect("clip").kind {
-            animathio_core::ClipKind::Plugin { params, .. } => params["font_weight"].clone(),
-            _ => panic!("plugin clip"),
-        })
-    };
-    assert_eq!(weight(&ui), serde_json::json!(400.0));
+    let weight = |ui: &Ui| ui.read(|e| e.plugin_number_value(id, "font_weight"));
+    assert!((weight(&ui) - 400.0).abs() < 1e-9);
     assert!(
         ui.read(|e| e
-            .plugins
-            .iter()
-            .any(|plugin| plugin.models().iter().any(|m| m.id() == "font_weight"))),
-        "the inspector builds a Font weight field from the schema"
+            .plugin_model(id, "font_weight")
+            .is_some_and(|model| matches!(
+                model,
+                crate::inspector::ParamModel::Number { min, max, .. } if min == 100.0 && max == 900.0
+            ))),
+        "the inspector builds a 100-900 Font weight field from the schema"
     );
     let before = ui.read(|e| e.project.clone());
+    // The inspector's number field commits through this command; out-of-range input clamps.
     ui.update(|e, _, cx| {
-        e.execute_plugin_param(id, "font_weight".into(), serde_json::json!(700), cx)
+        let command = e
+            .plugin_number_command(id, "font_weight", 700.0)
+            .expect("edit command");
+        e.execute(&command, cx);
     });
-    assert_eq!(weight(&ui), serde_json::json!(700.0));
+    assert!((weight(&ui) - 700.0).abs() < 1e-9);
+    let edited = ui.read(|e| e.project.clone());
     ui.dispatch(Undo);
     assert_eq!(ui.read(|e| e.project.clone()), before);
     ui.dispatch(Redo);
-    assert_eq!(weight(&ui), serde_json::json!(700.0));
+    assert_eq!(ui.read(|e| e.project.clone()), edited);
+    ui.update(|e, _, cx| {
+        let command = e
+            .plugin_number_command(id, "font_weight", 5000.0)
+            .expect("edit command");
+        e.execute(&command, cx);
+    });
+    assert!((weight(&ui) - 900.0).abs() < 1e-9);
 }

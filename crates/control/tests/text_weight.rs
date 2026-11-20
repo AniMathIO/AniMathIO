@@ -1,7 +1,7 @@
 //! Text plugin 1.3.0 `font_weight`: schema, rendering and backward compatibility.
 use animathio_core::{
-    ClipId, ClipKind, CoordinateSpace, Fit, ParamValue, Scene, SceneClip, Time, TrackId,
-    Transform, VectorElement,
+    ClipId, ClipKind, CoordinateSpace, Fit, ParamValue, Scene, SceneClip, Time, TrackId, Transform,
+    VectorElement,
 };
 use animathio_plugin_api::sources;
 use animathio_plugin_host::test_support;
@@ -145,4 +145,42 @@ fn weight_is_clamped_and_editable_as_a_plain_parameter() {
         panic!("weighted text failed")
     };
     assert!(matches!(vector.elements[0], VectorElement::FillPath { .. }));
+}
+
+#[test]
+fn set_param_edits_the_weight_of_a_title_clip_through_commands() {
+    use animathio_control::{TitleAddParams, title_preset_command};
+    use animathio_core::{Command, History, Project, TICKS_PER_SECOND, TimeRange, evaluate};
+    let mut project = Project::default();
+    let params = TitleAddParams {
+        preset: "typography_body".into(),
+        fields: BTreeMap::new(),
+        range: TimeRange::new(Time(0), Time(5 * TICKS_PER_SECOND)).unwrap(),
+    };
+    let (command, added) = title_preset_command(&project, &params).unwrap();
+    let mut history = History::default();
+    history.execute(&mut project, &command).unwrap();
+    let mut host = test_support::host();
+    let frame = |project: &Project, host: &mut animathio_plugin_host::PluginHost| {
+        let scene = host.resolve(&evaluate(project, Time(TICKS_PER_SECOND)), SIZE);
+        let mut ctx = animathio_render::RenderCtx::default();
+        animathio_render::render(&scene, &mut ctx, SIZE)
+            .unwrap()
+            .pixels
+    };
+    let regular = frame(&project, &mut host);
+    let edit = Command::SetParam {
+        id: added.clip_id,
+        name: "font_weight".into(),
+        value: Some(800.0),
+    };
+    history.execute(&mut project, &edit).unwrap();
+    let heavy = frame(&project, &mut host);
+    assert_ne!(regular, heavy, "the edit changes the rendered frame");
+    history.undo(&mut project).unwrap();
+    assert_eq!(
+        frame(&project, &mut host),
+        regular,
+        "undo restores the frame"
+    );
 }
