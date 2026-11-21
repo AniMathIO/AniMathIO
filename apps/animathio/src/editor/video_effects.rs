@@ -3,6 +3,7 @@
 //! edit is a `Command` on the clip (`SetEffectParam`, `AddKeyframe` with `Target::Effect`,
 //! `MoveEffect`, ...), so undo/redo, the control protocol and MCP see exactly the same changes.
 //! The cards reuse the audio-effect card model ([`audio_effects::card_models`]).
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use gpui_component::Disableable;
 use gpui_component::switch::Switch;

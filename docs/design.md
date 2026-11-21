@@ -5,11 +5,14 @@ a multi-track timeline, plus math objects, captions, audio tools and plugins. Th
 document is the design system for that editor. It names every colour, size and
 component the UI is allowed to use, and the words it uses.
 
-**Status.** These rules are the 2.3 target. The code is migrating to them through the
-UI rework pull requests. Until the foundation PR lands, `apps/animathio/src/style.rs`
-still holds the 2.2 values; the token tables below list both, so you can tell what
-changes. New UI code follows the target now: take every value from `style.rs` (or from
-the gpui-component `Theme`, which `style.rs` fills), never from a literal.
+**Status.** The 2.3 tokens and shared components are in code (`style/`); components
+migrate per surface (UI rework PRs 2-6). Surface modules that still name a retired
+2.2 constant (the gradient endpoints, the yellow snap guide) read it as a deprecated
+alias for the new token until their PR removes it. Take every value from
+`apps/animathio/src/style/` (or from the gpui-component `Theme`, which
+`style::apply_palette` fills), never from a literal; the `style_guard` test fails a
+file that gains new ad-hoc colour or size literals, and each surface PR ratchets its
+files down to zero.
 
 ## Direction
 
@@ -32,9 +35,13 @@ the gpui-component `Theme`, which `style.rs` fills), never from a literal.
 
 ## Tokens
 
-All tokens live in `apps/animathio/src/style.rs`. Colours are `0xRRGGBB` constants
-read through `style::hex` / `style::hexa`; the gpui-component `Theme` palette is filled
-from them in `install_theme`, so kit widgets and custom elements agree.
+All tokens live in `apps/animathio/src/style/tokens.rs` (re-exported by
+`apps/animathio/src/style/mod.rs` together with the component builders in
+`style/components.rs`). Colours are `0xRRGGBB` constants read through `style::hex`;
+`style::hexa(token, alpha)` exists for the deprecated period, new tints use
+`style::tint(token, Alpha::..)` (see the alpha steps below). The gpui-component
+`Theme` palette is filled from them in `style::install_theme`, so kit widgets and
+custom elements agree.
 
 ### Colour
 
@@ -43,48 +50,53 @@ keep colours behind tokens so one could be added as a second palette later.
 
 **Surfaces and lines**
 
-| Token | 2.3 hex | 2.2 hex | Role |
-|---|---|---|---|
-| `BG` | `#0E0F11` | `#0B0D12` | Window background, the gutter between panels, wells behind tab strips |
-| `PANEL` | `#17181B` | `#11141B` | Docked panel surface (Library, viewer frame, inspector, timeline) |
-| `RAISED` | `#1F2024` | `#171B24` | Inputs, cards, popovers, dialogs, menus, track lanes |
-| `HOVER` | `#27292E` | `#1E2330` | Hovered row, card or ghost button |
-| `PRESSED` | `#2F3237` | (new) | Pressed state, and the fill of an "on" ghost toggle without accent |
-| `STAGE` | `#141416` | `#090B10` (`VIEWER_STAGE`) | Pasteboard around the canvas; lighter than black so a black frame stays visible |
-| `BORDER` | `#2C2E33` | `#262C3A` | Hairlines: panel outlines, dividers, input outlines |
-| `BORDER_STRONG` | `#3C3F46` | (new) | Outline of overlays (dialogs, popovers, tool panels) and of secondary buttons |
+| Token | hex | Role |
+|---|---|---|
+| `BG` | `#0E0F11` | Window background, the gutter between panels, wells behind tab strips |
+| `PANEL` | `#17181B` | Docked panel surface (Library, viewer frame, inspector, timeline) |
+| `RAISED` | `#1F2024` | Inputs, cards, popovers, dialogs, menus, track lanes |
+| `HOVER` | `#27292E` | Hovered row, card or ghost button |
+| `PRESSED` | `#2F3237` | Pressed state, and the fill of an "on" ghost toggle without accent |
+| `STAGE` | `#141416` | Pasteboard around the canvas; lighter than black so a black frame stays visible (`VIEWER_STAGE` reads it as a deprecated alias until PR 4) |
+| `BORDER` | `#2C2E33` | Hairlines: panel outlines, dividers, input outlines |
+| `BORDER_STRONG` | `#3C3F46` | Outline of overlays (dialogs, popovers, tool panels) and of secondary buttons |
 
-The 2.2 palette is tinted blue (hue about 220, saturation 20–30%). The 2.3 neutrals keep
+The 2.2 palette was tinted blue (hue about 220, saturation 20–30%). These neutrals keep
 saturation under 6%, the way grading and editing suites do, so the UI does not shift how
 the footage looks.
 
 **Text**
 
-| Token | 2.3 hex | 2.2 hex | Role |
-|---|---|---|---|
-| `TEXT` | `#E8E9EB` | `#E6E9F0` | Primary text, values, titles |
-| `TEXT_SECONDARY` | `#A9ACB3` | `#9AA3B5` | Labels, inactive tabs, secondary values |
-| `TEXT_MUTED` | `#8F939B` | `#838CA3` | Hints, captions, placeholder text |
-| `TEXT_DISABLED` | `#6B6F77` | (new) | Disabled labels only (exempt from contrast minimums) |
+| Token | hex | Role |
+|---|---|---|
+| `TEXT` | `#E8E9EB` | Primary text, values, titles |
+| `TEXT_SECONDARY` | `#A9ACB3` | Labels, inactive tabs, secondary values |
+| `TEXT_MUTED` | `#969AA2` | Hints, captions, placeholder text |
+| `TEXT_DISABLED` | `#6B6F77` | Disabled labels only (exempt from contrast minimums) |
 
 Every text token except `TEXT_DISABLED` reaches WCAG AA (4.5:1) on `BG`, `PANEL`,
-`RAISED` and `HOVER`; the `muted_text_meets_aa_contrast` test in `style.rs` enforces it
-and must keep covering every text token.
+`RAISED`, `HOVER` and `PRESSED`; the `muted_text_meets_aa_contrast` test in
+`style/mod.rs` enforces it and must keep covering every text token (it also checks
+`ON_ACCENT` on `ACCENT`, and `TEXT` at 7:1 on every resting clip body).
+
+On the selection fill (`ACCENT` at the subtle step) `TEXT` and `TEXT_SECONDARY` reach
+AA over both `PANEL` and `RAISED` (`text_on_selection_fill_meets_aa_contrast`);
+`TEXT_MUTED` does over `PANEL` (4.7:1) but not over a selected `RAISED` card (4.3:1), so
+a selected card sets its meta line in `TEXT_SECONDARY`.
 
 **Accent and semantic colours**
 
-| Token | 2.3 hex | 2.2 hex | Role |
-|---|---|---|---|
-| `ACCENT` | `#0CC0DF` | `#8B7BFF` | Logo cyan. Primary button fill, focus ring, active tab and tool, selected list item border, links, slider fill, snapping guide |
-| `ACCENT_HOVER` | `#3DD0EA` | (new) | Hovered primary button |
-| `ACCENT_PRESSED` | `#09A3BE` | (new) | Pressed primary button |
-| `ON_ACCENT` | `#0E0F11` | `BG` | Text and icons on an accent fill (8.8:1) |
-| `SUCCESS` | `#3FB96F` | `#22C55E` | Completed jobs, success toasts |
-| `WARNING` | `#F0B429` | `#F59E0B` | Warnings, missing plugins, effect warning badges, mute |
-| `DANGER` | `#F26B6F` | `#EF4444` | Errors, destructive actions, validation messages |
-| `PLAYHEAD` | `#FF3131` | `#FF4D6D` | Logo red. Playhead, recording indicator; nothing else |
-| `ACCENT_FROM`, `ACCENT_TO` | retired | `#7C5CFF`, `#22D3EE` | The gradient goes; the primary action is solid `ACCENT` |
-| `SNAP` | retired | `#FACC15` | Snapping uses `ACCENT` |
+| Token | hex | Role |
+|---|---|---|
+| `ACCENT` | `#0CC0DF` | Logo cyan. Primary button fill, focus ring, active tab and tool, selected list item border, links, slider fill, snapping guide |
+| `ACCENT_HOVER` | `#3DD0EA` | Hovered primary button |
+| `ACCENT_PRESSED` | `#09A3BE` | Pressed primary button |
+| `ON_ACCENT` | `#0E0F11` | Text and icons on an accent fill |
+| `SUCCESS` | `#3FB96F` | Completed jobs, success toasts |
+| `WARNING` | `#F0B429` | Warnings, missing plugins, effect warning badges, mute |
+| `DANGER` | `#F26B6F` | Errors, destructive actions, validation messages |
+| `PLAYHEAD` | `#FF3131` | Logo red. Playhead, recording indicator; nothing else |
+| `ACCENT_FROM`, `ACCENT_TO`, `SNAP` | retired | Deprecated aliases of `ACCENT` for files whose surface PR (4/5) has not merged yet: the gradient is gone (the primary action is solid `ACCENT`) and snapping draws `ACCENT` |
 
 The logo colours `#0CC0DF` (cyan), `#8F4D30` (brown) and `#FF3131` (red) come from
 `apps/animathio/assets/brand.svg`. Only cyan and red are UI tokens; brown appears only in
@@ -101,19 +113,19 @@ the logo.
 | scrim | 0.78 | `BG` behind a modal dialog |
 
 **Clip kinds.** Muted so a timeline full of clips stays calm, hue-separated from each
-other, from the accent and from the playhead. Labels on the clip body reach 7:1 or more.
+other, from the accent and from the playhead. `TEXT` on the resting clip body reaches 7:1 or more. The hovered body (+0.08 alpha) is lower (about 6.2:1 for shape and graph), and the clip duration in `TEXT_SECONDARY` reaches only about 3.9-4.9:1 on some bodies; the timeline PR (UI rework PR 4), which paints clips, must lift both (a lighter duration colour or a darker hover step) and extend the test.
 
-| Token | 2.3 hex | 2.2 hex | Kind |
-|---|---|---|---|
-| `CLIP_VIDEO` | `#4C7BD9` | `#3B82F6` | Video |
-| `CLIP_IMAGE` | `#2E9E8F` | `#14B8A6` | Image |
-| `CLIP_AUDIO` | `#3FA866` | `#22C55E` | Audio |
-| `CLIP_TEXT` | `#A15CC9` | `#A855F7` | Text, titles, captions |
-| `CLIP_LATEX` | `#D35A8E` | `#EC4899` | LaTeX |
-| `CLIP_SHAPE` | `#D69A2D` | `#F59E0B` | Shapes |
-| `CLIP_GRAPH` | `#8DB23A` | `#06B6D4` | Graphs and grids (moved off cyan, which is now the accent) |
-| `CLIP_PLUGIN` | `#6B7785` | `#64748B` | Other plugin clips |
-| `CLIP_ERROR` | `#F26B6F` | `#EF4444` | Clip whose source failed |
+| Token | hex | Kind |
+|---|---|---|
+| `CLIP_VIDEO` | `#4C7BD9` | Video |
+| `CLIP_IMAGE` | `#2E9E8F` | Image |
+| `CLIP_AUDIO` | `#3FA866` | Audio |
+| `CLIP_TEXT` | `#A15CC9` | Text, titles, captions |
+| `CLIP_LATEX` | `#D35A8E` | LaTeX |
+| `CLIP_SHAPE` | `#D69A2D` | Shapes |
+| `CLIP_GRAPH` | `#8DB23A` | Graphs and grids (moved off cyan, which is now the accent) |
+| `CLIP_PLUGIN` | `#6B7785` | Other plugin clips |
+| `CLIP_ERROR` | `#F26B6F` | Clip whose source failed |
 
 Marker colours stay the user's choice (`MarkerColor`); they are drawn as flags, never as
 clip bodies.
@@ -123,8 +135,11 @@ clip bodies.
 Two families, both bundled under `apps/animathio/assets/fonts` with their OFL licences:
 
 - **Inter Variable** for all UI text, including numbers in fields. Numeric fields and
-  timecode-like values in proportional text use tabular figures (`tnum`, through
-  gpui `FontFeatures`) so digits do not jitter while scrubbing.
+  timecode-like values in proportional text use tabular figures (`.tabular()`,
+  gpui `FontFeatures`) so digits do not jitter while scrubbing. gpui passes font
+  features through on every platform (cosmic-text on Linux, DirectWrite on Windows,
+  CoreText on macOS) and Inter Variable ships `tnum`, so `.tabular()` is a real
+  setting, not a no-op.
 - **JetBrains Mono** only where text is code or a clock: the transport timecode, the
   scrub pill, LaTeX and Manim source, JSON path fields. Never for labels.
 
@@ -161,14 +176,17 @@ only these:
 | 4 | `gap_4`, `p_4` | 15 | Dialog padding, between form groups |
 | 6 | `gap_6`, `p_6` | 23 | Launcher margins only |
 
-The gutter between docked panels is `space::GUTTER` (6 px × UI scale).
+The gutter between docked panels is `style::gutter()` (6 px × UI scale; the 2.2
+`space::GUTTER` constant reads as a deprecated alias until PR 2 switches the shell
+over).
 
-Lengths are rem (gpui helpers or `rems(..)` from `style.rs`), so they follow UI scale.
+Lengths are rem (gpui helpers such as `rems(..)`, or the `style::size` tokens), so
+they follow UI scale.
 Literal `px(..)` is allowed only for hairlines (1 px), selection and focus strokes (2 px),
 the clip kind band (3 px) and canvas painting, where every length is multiplied by
 `style::ui_scale()`.
 
-**Heights.** Rows and controls come in five heights:
+**Heights.** Rows and controls come in five heights (`style::size`):
 
 | Name | Size | px | Use |
 |---|---|---|---|
@@ -183,7 +201,7 @@ sizes within one row.
 
 ### Radii, borders and elevation
 
-Radii shrink with depth, so nested shapes read as nested:
+Radii (style::radius) shrink with depth, so nested shapes read as nested:
 
 | Token | px | Use |
 |---|---|---|
@@ -212,8 +230,11 @@ through gpui's motion policy.
 
 ## Components
 
-Each component has one implementation in `style.rs` (or a module it re-exports) and is
-used everywhere that kind of thing appears.
+Each component has one implementation in `apps/animathio/src/style/components.rs`
+(re-exported by the `style` module) and is used everywhere that kind of thing appears.
+The rework (PRs 2-6) moves each surface onto them; until a surface migrates it keeps
+its previous look, except for what the theme already restyles (palette, radii, primary
+buttons).
 
 ### Window frame and status bar
 
@@ -252,7 +273,7 @@ Stretch/1:1 in the inspector and any other choice of two to five short options.
 - Active option: `ACCENT` subtle fill, `ACCENT` edge border, `TEXT`, weight 500. Inactive:
   `TEXT_SECONDARY`, `HOVER` fill on hover. The sliding pill animates in `BASE_MS`.
 - Labels are one word where possible. When labels do not fit, show icons only, with a
-  tooltip on each. Arrow keys, Home and End move between options.
+  tooltip on each. Arrow keys, Home and End move between options and move keyboard focus with the selection; a click focuses the option. The focus ring is a constant 2 px edge (transparent at rest), so focusing never shifts the content. The caller owns one `FocusHandle` per option.
 - A heading under a tab strip never repeats the active tab's name.
 
 ### Inspector
@@ -324,9 +345,15 @@ v [icon] Transform                                    [reset]   ROW, HEADING
 | Destructive | Secondary with `DANGER` text; in a confirm dialog whose purpose is destruction, the primary button is `DANGER` filled with `ON_ACCENT` text | Remove, Delete, Discard changes |
 | Link | `ACCENT` text, no fill | "Source", "Open Plugins", inline navigation |
 
-- `style::primary_button` builds the primary variant; other variants come from the kit
-  (`.ghost()`, `.outline()`, `.danger()`) with the theme set from tokens. No other custom
-  button styles.
+- `style::primary_button` builds the primary variant (solid `ACCENT`, no gradient);
+  `style::secondary_button` and `style::destructive_button(label, filled)` build the
+  secondary and destructive looks (the kit's hover layer resets a button's border and
+  text colour, so the outline is an inset hard shadow and the destructive text is the
+  label's own colour; both stay put on hover and press); other variants come from the kit (`.ghost()`, `.outline()`)
+  with the theme set from tokens. No other custom button styles. The kit draws keyboard
+  focus as a 3 px ring in `ACCENT` at 50% **outside** the button's edge, so it stays
+  visible around a solid `ACCENT` fill against the panel; the 2.3 foundation keeps that
+  ring for every variant instead of a separate `TEXT` ring.
 - Labels are a verb, or a verb and an object: "Export", "Add to queue", "Install
   plugin". A button that needs more input before it acts ends in "…" (U+2026).
 - Order in a footer, right-aligned: secondary actions, then Cancel, then the primary
@@ -371,8 +398,11 @@ v [icon] Transform                                    [reset]   ROW, HEADING
 Markers and beats, Automatic cuts, Auto duck, Scenes, Auto reframe and the export queue
 are non-modal panels over the workspace. They share one frame:
 
-- Anchored at the top left of the viewer area (`gap_3` inset), width 24rem, height at
-  most the space above the timeline, so it never covers the clips it is working on.
+- Anchored at the top left of the window below the title bar (`style::ToolPanel` places
+  it at `0.75rem` from the left edge, so today it sits over the Library; the surface PR
+  that adopts it adds an `anchor` option to start at the viewer area), width 24rem,
+  height at most the space above the timeline (title bar, status line and dock heights
+  all scale with UI scale), so it never covers the clips it is working on.
   All of them open on the same side. `RAISED` fill, `BORDER_STRONG` outline,
   `radius::OVERLAY`, `shadow_lg`.
 - Header as a panel header (`HEADER`), title in `TITLE`, close button (`X`) at the
@@ -394,7 +424,7 @@ success toasts dismiss themselves; warnings and errors stay until closed.
 
 ### Empty states
 
-An empty panel or list is centred in its space: a Lucide icon (1.5rem, `TEXT_MUTED`),
+An empty panel or list is centred horizontally in its space (`style::empty_state` fills the width; give it a `flex_1` parent to centre it vertically in a panel): a Lucide icon (1.5rem, `TEXT_MUTED`),
 one line in `BODY` `TEXT_SECONDARY` that says what will be here, and one button that
 adds it.
 
@@ -406,7 +436,9 @@ adds it.
 | Effects, no plugin loaded | "No effect plugins are loaded." | Open Plugins (link) |
 | Timeline, no clips | "Drag media or an element here." | none |
 
-`support::empty_state` builds it; it takes the icon, the line and an optional action.
+`style::empty_state` builds it (icon, line, optional action); `support::empty_state`
+delegates to it for the text-only calls that have not migrated yet (PR 2 switches
+them).
 
 ### Library cards and lists
 
@@ -476,8 +508,8 @@ The launcher is a start page, not a landing page.
 | Element | Hover | Pressed | Selected / on | Keyboard focus | Disabled |
 |---|---|---|---|---|---|
 | Ghost button | `HOVER` fill, `TEXT` | `PRESSED` fill | `ACCENT` subtle fill, `ACCENT` icon | 2 px `ACCENT` ring | `TEXT_DISABLED`, no hover |
-| Secondary button | `HOVER` fill | `PRESSED` fill | n/a | 2 px `ACCENT` ring | `TEXT_DISABLED`, `BORDER` outline |
-| Primary button | `ACCENT_HOVER` | `ACCENT_PRESSED` | n/a | 2 px `TEXT` ring (the accent would vanish) | `RAISED` fill, `TEXT_DISABLED` text |
+| Secondary button | `HOVER` fill, outline and text unchanged | `PRESSED` fill | n/a | 2 px `ACCENT` ring | `TEXT_DISABLED` (the `BORDER_STRONG` outline stays) |
+| Primary button | `ACCENT_HOVER` | `ACCENT_PRESSED` | n/a | the kit's outer 3 px `ACCENT` ring at 50%, visible around the fill | `RAISED` fill, `TEXT_DISABLED` text |
 | List row, card | `HOVER` fill | `PRESSED` fill | `ACCENT` subtle fill, 1 px `ACCENT` border | 2 px `ACCENT` ring | 50% opacity |
 | Tab option | `HOVER` fill | `PRESSED` fill | sliding `ACCENT` pill | 2 px `ACCENT` ring | `TEXT_DISABLED` |
 | Input | `BORDER_STRONG` outline | n/a | n/a | `ACCENT` outline and ring | `BG` fill, `TEXT_DISABLED` |
@@ -599,12 +631,21 @@ See [Keyboard shortcuts](keyboard-shortcuts.md) for the Premiere default keymap.
 
 ## Reproducing panel screenshots
 
+The developer launch options for captures include selection and dialog hooks: `--screenshot-panel=select-<kind>` (kinds `image`, `video`, `audio`,
+`text`, `shapes`, `latex`, `graph`) selects the first clip of that kind (audio
+also scrolls the timeline to the bottom), so inspector and timeline shots show a
+real selection; `--screenshot-panel=export`, `preferences` and `settings` open
+the Export, Preferences and Project settings dialogs on the next turn (add a
+LaTeX and a graph clip first for representative inspector captures, as in the
+recipe below).
+
 The developer launch option `--screenshot-panel=markers` opens the same panel as
 Clip > Markers and beat sync. `--screenshot-panel=duck` selects the first audio clip as the voice and opens Auto duck (the other
 audio tracks are suggested as music, then the normal analysis runs), and scrolls the timeline to the bottom so the shaded music rows are visible. `--screenshot-panel=autocut` selects the first audio
 clip in track order and runs the normal asynchronous analysis before showing its
 review. `--screenshot-panel=record` opens the Media tab's recorder mid-take on a scripted tone (never a real input). `--screenshot-panel=media|titles|effects|elements` open those Library tabs and
-`--screenshot-panel=math` opens the Add math object dialog (LaTeX). `--screenshot-panel=plugins` opens the Library's Plugins tab, and
+`--screenshot-panel=math` opens the Add math object dialog (LaTeX). Unknown
+panel names are listed (with the selection and dialog hooks) on stderr. `--screenshot-panel=plugins` opens the Library's Plugins tab, and
 `--screenshot-panel=plugins-browse` also opens Browse, which fetches the community index
 only when the Community plugins switch is already on. Pass a project path as usual; none
 of these options applies edits. The control protocol can create markers and propose cuts

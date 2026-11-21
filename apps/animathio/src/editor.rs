@@ -738,6 +738,12 @@ pub(crate) struct Editor {
     env: EditorEnv,
 }
 
+/// Whether a plugin clip is the kind a `--screenshot-panel=select-<kind>` hook asks for.
+/// Ids are matched by their last segment: `org.animathio.shapes` contains "math".
+fn plugin_matches_capture_kind(plugin_id: &str, kind: &str) -> bool {
+    plugin_id.rsplit('.').next() == Some(kind)
+}
+
 impl Editor {
     /// Developer capture hook: use the same handlers as the editor menus.
     pub(crate) fn open_screenshot_panel(
@@ -747,6 +753,35 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         match panel {
+            // Select the first clip of a kind (image, audio, video, or the last
+            // segment of a plugin id: text, shapes, latex, graph) so inspector captures
+            // show a real selection. Audio sits below the visual tracks.
+            panel if let Some(kind) = panel.strip_prefix("select-") => {
+                let matches_kind = |clip: &animathio_core::Clip| match &clip.kind {
+                    animathio_core::ClipKind::Image(_) => kind == "image",
+                    animathio_core::ClipKind::Video(_) => kind == "video",
+                    animathio_core::ClipKind::Audio(_) => kind == "audio",
+                    animathio_core::ClipKind::Plugin { plugin_id, .. } => {
+                        plugin_matches_capture_kind(plugin_id, kind)
+                    }
+                    _ => false,
+                };
+                let found = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .flat_map(|track| track.clips().values())
+                    .find(|clip| matches_kind(clip))
+                    .map(|clip| clip.id);
+                if let Some(id) = found {
+                    self.select_only(id, cx);
+                    if kind == "audio" {
+                        self.timeline_scroll_handle.scroll_to_bottom();
+                    }
+                } else {
+                    self.clear_selection(cx);
+                }
+            }
             "markers" => self.open_marker_panel(cx),
             "autocut" => {
                 let audio = self
@@ -834,8 +869,21 @@ impl Editor {
                     });
                 });
             }
+            // The Export, Preferences and Project settings dialogs (opened on the
+            // next turn, once the window's `Root` hosts the layers).
+            "export" | "preferences" | "settings" => {
+                let editor = cx.entity();
+                let panel = panel.to_string();
+                window.defer(cx, move |window, cx| {
+                    editor.update(cx, |editor, cx| match panel.as_str() {
+                        "export" => editor.open_export_dialog(window, cx),
+                        "preferences" => editor.open_preferences(window, cx),
+                        _ => editor.open_settings(window, cx),
+                    });
+                });
+            }
             _ => eprintln!(
-                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins, plugins-browse, media, record, titles, effects, elements or math"
+                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins, plugins-browse, media, record, titles, effects, elements, math, select-image, select-video, select-audio, select-text, select-shapes, select-latex, select-graph, export, preferences or settings"
             ),
         }
     }
@@ -1358,5 +1406,22 @@ impl Editor {
         let path = self.window_tracker.save_path.take();
         self.window_tracker = crate::window_state::BoundsTracker::seeded(bounds, uuid);
         self.window_tracker.save_path = path;
+    }
+}
+
+#[cfg(test)]
+mod capture_hook_tests {
+    use super::plugin_matches_capture_kind as matches;
+
+    #[test]
+    fn plugin_kinds_match_their_own_id_only() {
+        assert!(matches("org.animathio.latex", "latex"));
+        assert!(matches("org.animathio.graph", "graph"));
+        assert!(matches("org.animathio.text", "text"));
+        assert!(matches("org.animathio.shapes", "shapes"));
+        // "animathio" contains "math": a substring match would select every plugin clip.
+        assert!(!matches("org.animathio.shapes", "latex"));
+        assert!(!matches("org.animathio.text", "graph"));
+        assert!(!matches("org.animathio.latex", "shapes"));
     }
 }

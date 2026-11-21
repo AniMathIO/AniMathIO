@@ -5,6 +5,7 @@
 //! newly enabled plugins load, disabled ones unload, the inspector's plugin list refreshes and
 //! the preview re-renders, so clips of an unloaded plugin show the missing-plugin placeholder
 //! and clips of a newly loaded one render, all without a restart.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style::{self, color, hex};

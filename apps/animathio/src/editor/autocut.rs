@@ -1,5 +1,7 @@
 //! Automatic-cut review panel and background analysis. Drafts are invalidated on
 //! edits or setting changes; applying enabled cuts is one command history entry.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use crate::style;
 use animathio_control::{

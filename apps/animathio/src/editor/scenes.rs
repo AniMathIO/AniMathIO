@@ -1,4 +1,6 @@
 //! Cancellable scene analysis and explicit review before applying edits.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use animathio_control::{SceneDraft, SceneParams, detect_scenes, scene_command};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

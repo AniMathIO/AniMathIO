@@ -1,4 +1,5 @@
 //! Resizable workspace. Only view state is written to the layout sidecar.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style::{self, color};

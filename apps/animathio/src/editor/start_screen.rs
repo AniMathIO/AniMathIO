@@ -1,4 +1,6 @@
 //! Project launcher. Decorative motion lives only here, never during playback.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use crate::style::{self, color};
 use animathio_control::ExportPreset;

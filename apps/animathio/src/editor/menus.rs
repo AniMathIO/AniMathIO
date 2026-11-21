@@ -1,4 +1,5 @@
 //! Title bar, application menus, context menus and status.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::actions::*;
 use super::*;
