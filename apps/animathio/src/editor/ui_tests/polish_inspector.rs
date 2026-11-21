@@ -6,7 +6,10 @@ use animathio_core::ClipKind;
 use gpui::{px, size};
 
 use super::fixtures::*;
-use super::{ClipId, Command, LeftTab, Time, Ui, actions, require_plugins};
+use super::{
+    Clip, ClipId, Command, LeftTab, TICKS_PER_SECOND, Time, TimeRange, Track, TrackId, Ui, actions,
+    require_plugins,
+};
 use crate::editor::support::project_size;
 use crate::editor::timeline_view::track_has_audio;
 
@@ -243,34 +246,64 @@ fn only_tracks_with_sound_have_audio_header_controls(cx: &mut gpui::TestAppConte
 /// Hiding a picture-only track is the existing mute command, which the renderer already honors.
 #[gpui::test]
 fn the_eye_toggle_hides_a_picture_track_through_the_mute_command(cx: &mut gpui::TestAppContext) {
-    let (project, assets) = sample();
+    let (mut project, assets) = sample();
+    let track = TrackId(900);
+    Command::Batch {
+        commands: vec![
+            Command::AddTrack {
+                track: Track::new(track, "Titles"),
+                index: 0,
+            },
+            Command::AddClip {
+                track,
+                clip: Clip::new(
+                    ClipId(900),
+                    ClipKind::Plugin {
+                        plugin_id: "org.animathio.text".into(),
+                        params: serde_json::Value::Null,
+                    },
+                    TimeRange::new(Time(0), Time(TICKS_PER_SECOND)).unwrap(),
+                ),
+            },
+        ],
+    }
+    .apply(&mut project)
+    .expect("add a text track");
     let mut ui = Ui::open(cx, project, assets);
-    let track = ui.read(|e| {
-        e.project
+    assert!(ui.read(|e| {
+        let t = e
+            .project
             .tracks()
             .iter()
-            .find(|t| !track_has_audio(t))
-            .map(animathio_core::Track::id)
-    });
-    let Some(track) = track else {
-        eprintln!("sample has no picture-only track");
-        return;
-    };
-    ui.update(|e, _, cx| {
-        e.execute(
-            &Command::SetTrackMuted {
-                id: track,
-                muted: true,
-            },
-            cx,
-        );
-    });
+            .find(|t| t.id() == track)
+            .expect("text track");
+        !track_has_audio(t) && !t.is_muted()
+    }));
+    // A tall window keeps every track header on screen.
+    ui.cx.simulate_resize(size(px(1600.), px(2400.)));
+    ui.settle();
+    // Click the eye pill in the track header, like a user would.
+    let pill = ui
+        .cx
+        .debug_bounds(Box::leak(
+            format!("track-mute-{}", track.0).into_boxed_str(),
+        ))
+        .expect("the text track header shows its eye pill");
+    ui.click(pill.center(), gpui::Modifiers::default());
     assert!(ui.read(|e| {
         e.project
             .tracks()
             .iter()
             .any(|t| t.id() == track && t.is_muted())
     }));
+    // The solo pill stays on picture tracks: solo hides every other track from the picture.
+    assert!(
+        ui.cx
+            .debug_bounds(Box::leak(
+                format!("track-solo-{}", track.0).into_boxed_str()
+            ))
+            .is_some()
+    );
     ui.dispatch(actions::Undo);
     assert!(ui.read(|e| {
         e.project
@@ -352,11 +385,20 @@ fn first_run_in_a_short_window_starts_with_small_tracks(cx: &mut gpui::TestAppCo
     let (project, assets) = sample();
     let mut env = private_env("first-run-density");
     env.adaptive_density = true;
-    let mut ui = Ui::open_with_env(cx, project, assets, env);
-    ui.cx.simulate_resize(size(px(1280.), px(720.)));
-    ui.settle();
-    ui.update(|_, window, _| window.refresh());
+    // Resize in the same step as opening, before any frame has settled.
+    let mut ui = Ui::open_sized(cx, project, assets, env, Some(size(px(1280.), px(720.))));
     assert!(ui.read(|e| e.compact_height));
-    // The decision is made once, on the first editor frame, at whatever size the window opened.
+    // The decision waits for a stable window size, then is made once.
     assert!(ui.read(|e| e.density_decided));
+    assert_eq!(
+        ui.read(|e| e.dock.track_height),
+        crate::layout::TrackHeight::Small
+    );
+    // A later resize never changes it again.
+    ui.cx.simulate_resize(size(px(1920.), px(1080.)));
+    ui.settle();
+    assert_eq!(
+        ui.read(|e| e.dock.track_height),
+        crate::layout::TrackHeight::Small
+    );
 }

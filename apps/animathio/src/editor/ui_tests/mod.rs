@@ -89,6 +89,18 @@ impl Ui {
         assets: BTreeMap<AssetId, Vec<u8>>,
         env: EditorEnv,
     ) -> Self {
+        Self::open_sized(cx, project, assets, env, None)
+    }
+
+    /// Like [`Self::open_with_env`], but the window is resized to `window_size` before the
+    /// editor draws its first frame.
+    pub(super) fn open_sized(
+        cx: &mut TestAppContext,
+        project: Project,
+        assets: BTreeMap<AssetId, Vec<u8>>,
+        env: EditorEnv,
+        window_size: Option<gpui::Size<gpui::Pixels>>,
+    ) -> Self {
         cx.update(|cx| {
             gpui_component::init(cx);
             crate::style::install_theme(cx, true, true);
@@ -96,12 +108,27 @@ impl Ui {
         });
         let slot: Rc<RefCell<Option<Entity<Editor>>>> = Rc::default();
         let capture = slot.clone();
-        let window = cx.add_window(move |window, cx| {
-            let editor = cx.new(|cx| {
-                Editor::with_env(cx, window, project, assets, None, false, None, false, env)
-            });
-            *capture.borrow_mut() = Some(editor.clone());
-            gpui_component::Root::new(editor, window, cx)
+        // Opened at `window_size` (the test display's size by default), so the very first frame
+        // already sees it.
+        let window = cx.update(|cx| {
+            let bounds = window_size.map_or_else(
+                || gpui::Bounds::maximized(None, cx),
+                |window_size| gpui::Bounds::new(gpui::Point::default(), window_size),
+            );
+            cx.open_window(
+                gpui::WindowOptions {
+                    window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                move |window, cx| {
+                    let editor = cx.new(|cx| {
+                        Editor::with_env(cx, window, project, assets, None, false, None, false, env)
+                    });
+                    *capture.borrow_mut() = Some(editor.clone());
+                    cx.new(|cx| gpui_component::Root::new(editor, window, cx))
+                },
+            )
+            .expect("open the test window")
         });
         let cx = VisualTestContext::from_window(*window, cx).into_mut();
         cx.run_until_parked();

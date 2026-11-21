@@ -64,6 +64,8 @@ struct GizmoDrag {
     handle: Handle,
     preserve_aspect: bool,
     visible_scale: [f64; 2],
+    /// Offset of the clip's ink from its own centre, in unit-box fractions (zero without bounds).
+    content_offset: [f64; 2],
     /// Last unwrapped rotation delta of a rotate drag, in radians.
     rotation: std::cell::Cell<f64>,
 }
@@ -415,8 +417,17 @@ fn dragged_transform(
                 let sy = t.scale_y * drag.visible_scale[1];
                 let ex = (sx * cos).abs() + (sy * h / w * sin).abs();
                 let ey = (sy * cos).abs() + (sx * w / h * sin).abs();
-                (t.x, guides[0]) = snap_axis(t.x, ex, 6. / w);
-                (t.y, guides[1]) = snap_axis(t.y, ey, 6. / h);
+                // The selection box is centred on the ink, which sits off the clip centre by the
+                // rotated content offset; snap the box, not the clip origin.
+                let (ox, oy) = (
+                    drag.content_offset[0] * t.scale_x * w,
+                    drag.content_offset[1] * t.scale_y * h,
+                );
+                let shift = [(ox * cos - oy * sin) / w, (ox * sin + oy * cos) / h];
+                (t.x, guides[0]) = snap_axis(t.x + shift[0], ex, 6. / w);
+                (t.y, guides[1]) = snap_axis(t.y + shift[1], ey, 6. / h);
+                t.x -= shift[0];
+                t.y -= shift[1];
             }
         }
         Handle::Scale(x, y) => {
@@ -498,9 +509,16 @@ impl Editor {
     ) -> Option<ContentRect> {
         use std::hash::{Hash as _, Hasher as _};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        serde_json::to_string(&(&clip.kind, &clip.params, clip.source_time, canvas))
-            .unwrap_or_default()
-            .hash(&mut hasher);
+        let generation = self.plugin_host.as_ref().map_or(0, PluginHost::generation);
+        serde_json::to_string(&(
+            &clip.kind,
+            &clip.params,
+            clip.source_time,
+            canvas,
+            generation,
+        ))
+        .unwrap_or_default()
+        .hash(&mut hasher);
         let key = hasher.finish();
         if let Some(cache) = &self.viewer_state.content
             && cache.id == clip.id
@@ -650,6 +668,7 @@ impl Editor {
                                 fitted.scale_x / transform.scale_x,
                                 fitted.scale_y / transform.scale_y,
                             ],
+                            content_offset: this.viewer_state.content_offset(id),
                             preserve_aspect: this
                                 .find_clip(id)
                                 .is_some_and(|clip| clip.fit == Fit::Contain),
@@ -1148,6 +1167,7 @@ mod tests {
             handle: Handle::Scale(0.5, 0.),
             preserve_aspect: false,
             visible_scale: [1., 1.],
+            content_offset: [0., 0.],
             rotation: std::cell::Cell::new(0.),
         };
         // The right handle of a mirrored clip sits at -0.2 of the canvas width;
@@ -1190,6 +1210,36 @@ mod tests {
     }
 
     #[core::prelude::v1::test]
+    fn move_snaps_the_ink_box_not_the_clip_origin() {
+        let frame = Bounds::new(Point::default(), size(px(1000.), px(1000.)));
+        let drag = GizmoDrag {
+            id: ClipId(1),
+            origin: Point::default(),
+            transform: Transform {
+                x: 0.5,
+                y: 0.5,
+                scale_x: 1.,
+                scale_y: 1.,
+                ..Transform::default()
+            },
+            handle: Handle::Move,
+            preserve_aspect: false,
+            visible_scale: [0.2, 0.2],
+            // Ink centred 0.25 of the unit box right of the clip centre.
+            content_offset: [0.25, 0.],
+            rotation: std::cell::Cell::new(0.),
+        };
+        let (t, guides) = dragged_transform(&drag, frame, point(px(-250.), px(0.)), false, true);
+        // Moving the origin 0.25 left puts the ink box centre on 0.5: snapped, origin at 0.25.
+        assert!((t.x - 0.25).abs() < 1e-9, "{}", t.x);
+        assert_eq!(guides[0], Some(0.5));
+        // The origin on the centre line (ink off to the side) must not snap.
+        let (t, guides) = dragged_transform(&drag, frame, point(px(0.), px(0.)), false, true);
+        assert!((t.x - 0.5).abs() < 1e-9, "{}", t.x);
+        assert_eq!(guides[0], None);
+    }
+
+    #[core::prelude::v1::test]
     fn move_snaps_edges_and_shift_scale_preserves_aspect() {
         let frame = Bounds::new(Point::default(), size(px(1000.), px(500.)));
         let drag = GizmoDrag {
@@ -1204,6 +1254,7 @@ mod tests {
             handle: Handle::Move,
             preserve_aspect: false,
             visible_scale: [1., 1.],
+            content_offset: [0., 0.],
             rotation: std::cell::Cell::new(0.),
         };
         let (t, guides) = dragged_transform(&drag, frame, point(px(99.), px(0.)), false, true);
@@ -1213,6 +1264,7 @@ mod tests {
             handle: Handle::Scale(0.5, 0.5),
             preserve_aspect: false,
             visible_scale: [1., 1.],
+            content_offset: [0., 0.],
             rotation: std::cell::Cell::new(0.),
             ..drag
         };

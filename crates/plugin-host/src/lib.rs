@@ -790,6 +790,9 @@ pub struct PluginHost {
     /// Ids of loaded plugins that came from the community folder (the only ones
     /// [`Self::sync_community_plugins`] may unload).
     community_ids: BTreeSet<String>,
+    /// Bumped whenever a plugin is loaded or unloaded, so callers can invalidate anything
+    /// derived from what the loaded plugins draw.
+    generation: u64,
 }
 
 /// What [`PluginHost::sync_community_plugins`] changed.
@@ -887,6 +890,7 @@ impl PluginHost {
             _epoch_ticker: epoch_ticker,
             load_failures: Vec::new(),
             community_ids: BTreeSet::new(),
+            generation: 0,
         })
     }
 
@@ -1055,6 +1059,7 @@ impl PluginHost {
     /// already hold an effect handle see the removal immediately (the registries are shared).
     pub fn unload_plugin(&mut self, plugin_id: &str) -> bool {
         let existed = self.plugins.remove(plugin_id).is_some();
+        self.generation += 1;
         self.effects.unregister(plugin_id);
         self.audio_effects.unregister(plugin_id);
         self.presets.remove(plugin_id);
@@ -1194,6 +1199,7 @@ impl PluginHost {
         bound_manifest(&mut wit_manifest);
         let inspector_schema = wit_manifest_to_inspector(&wit_manifest);
 
+        self.generation += 1;
         self.plugins.insert(
             id.clone(),
             LoadedPlugin {
@@ -1207,6 +1213,12 @@ impl PluginHost {
         );
 
         Ok(id)
+    }
+
+    /// A counter that changes every time a plugin is loaded or unloaded.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Get inspector schema for a loaded plugin.

@@ -37,12 +37,17 @@ pub(super) enum SizeUnits {
     Percent,
     /// A fraction of the canvas height (the text plugin's normalized space).
     Normalized,
+    /// A fraction of the short canvas edge (the LaTeX plugin's normalized space).
+    NormalizedShort,
 }
 
 impl SizeUnits {
-    pub(super) fn parse(name: &str) -> Self {
+    /// The unit named by a plugin's `units` parameter; the plugin decides what `normalized`
+    /// is relative to.
+    pub(super) fn parse(plugin_id: &str, name: &str) -> Self {
         match name {
             "percent" => Self::Percent,
+            "normalized" if plugin_id == "org.animathio.latex" => Self::NormalizedShort,
             "normalized" => Self::Normalized,
             _ => Self::Pixels,
         }
@@ -66,6 +71,7 @@ pub(super) fn size_to_display(model: f64, units: SizeUnits, canvas: (u32, u32)) 
         SizeUnits::Percent => model,
         SizeUnits::Pixels => model / short * 100.0,
         SizeUnits::Normalized => model * 100.0 * height / short,
+        SizeUnits::NormalizedShort => model * 100.0,
     }
 }
 
@@ -77,6 +83,7 @@ pub(super) fn size_to_model(display: f64, units: SizeUnits, canvas: (u32, u32)) 
         SizeUnits::Percent => display,
         SizeUnits::Pixels => display / 100.0 * short,
         SizeUnits::Normalized => display / 100.0 * short / height,
+        SizeUnits::NormalizedShort => display / 100.0,
     }
 }
 
@@ -176,6 +183,39 @@ mod tests {
         assert!((shown - 14.222_222).abs() < 1e-4);
         assert!((size_to_model(shown, SizeUnits::Normalized, portrait) - 0.08).abs() < 1e-9);
         assert_eq!(size_to_display(12.0, SizeUnits::Percent, canvas), 12.0);
+    }
+
+    /// Each plugin's own pixel formula for a normalized size: text is a fraction of the height
+    /// (`font_size * size.height`), LaTeX of the short edge (`size * min(w, h)`). Converting the
+    /// shown percentage back through the display rule must give the same pixels, both ways.
+    #[core::prelude::v1::test]
+    fn portrait_normalized_sizes_match_each_plugin() {
+        let canvas = (1080_u32, 1920_u32);
+        let short = f64::from(canvas.0.min(canvas.1));
+        let height = f64::from(canvas.1);
+        // Each plugin multiplies the normalized size by its own edge to get pixels.
+        let units = [
+            ("org.animathio.text", SizeUnits::Normalized, height),
+            ("org.animathio.latex", SizeUnits::NormalizedShort, short),
+        ];
+        for (plugin, expected_units, edge) in units {
+            let pixels = |model: f64| model * edge;
+            assert_eq!(SizeUnits::parse(plugin, "normalized"), expected_units);
+            // Model -> display: percent of the short edge equals the rendered pixels / short.
+            let model = 0.05;
+            let shown = size_to_display(model, expected_units, canvas);
+            assert!(
+                (shown - pixels(model) / short * 100.0).abs() < 1e-9,
+                "{plugin}"
+            );
+            // Display -> model: typing a percentage stores the value that renders those pixels.
+            let typed = 10.0;
+            let stored = size_to_model(typed, expected_units, canvas);
+            assert!(
+                (pixels(stored) - typed / 100.0 * short).abs() < 1e-9,
+                "{plugin}"
+            );
+        }
     }
 
     #[core::prelude::v1::test]

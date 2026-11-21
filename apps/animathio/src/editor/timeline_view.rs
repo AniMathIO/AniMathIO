@@ -1792,18 +1792,18 @@ impl Editor {
                         }),
                     )
                 })
-                .when(has_audio, |controls| {
-                    controls.child(header_pill(
-                        ("track-solo", id.0),
-                        IconName::Headphones,
-                        if solo { "Unsolo track" } else { "Solo track" },
-                        solo,
-                        crate::style::color::SUCCESS,
-                        cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
-                        }),
-                    ))
-                })
+                // Solo also hides every other track from the picture (`evaluate` skips non-solo
+                // tracks while any is soloed), so picture-only tracks keep the pill.
+                .child(header_pill(
+                    ("track-solo", id.0),
+                    IconName::Headphones,
+                    if solo { "Unsolo track" } else { "Solo track" },
+                    solo,
+                    crate::style::color::SUCCESS,
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
+                    }),
+                ))
                 .child(header_pill(
                     ("track-lock", id.0),
                     if locked {

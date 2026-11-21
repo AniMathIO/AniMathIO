@@ -518,7 +518,7 @@ impl Editor {
             return None;
         }
         let units = self.plugin_text_value(id, "units", "pixels");
-        Some(SizeUnits::parse(&units))
+        Some(SizeUnits::parse(plugin_id, &units))
     }
 
     /// The stored value for what the inspector shows or the user typed (font sizes are
@@ -1406,8 +1406,12 @@ impl Editor {
     ) -> Div {
         let name = model.id().to_owned();
         // Only values that interpolate get keyframe controls; text, choices and switches do not.
-        let diamond =
-            is_animatable(model).then(|| self.row_diamond(id, &Target::Param(name.clone()), cx));
+        // A param that already has keys keeps its controls, since edits then add keys.
+        let target = Target::Param(name.clone());
+        let has_keys = self
+            .find_clip(id)
+            .is_some_and(|clip| clip.animations.iter().any(|a| a.target == target));
+        let diamond = (is_animatable(model) || has_keys).then(|| self.row_diamond(id, &target, cx));
         let mut label = model.label().to_owned().into_any_element();
         let control = match model {
             ParamModel::Number { step, min, max, .. } => {

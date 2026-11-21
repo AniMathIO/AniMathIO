@@ -671,6 +671,10 @@ pub(crate) struct Editor {
     compact_height: bool,
     /// The first-run density default was decided (see `apply_density_default`).
     density_decided: bool,
+    /// The window height seen on the previous frame while the density is undecided: the default
+    /// is only chosen once two consecutive frames agree, so a transient size at window creation
+    /// does not lock a track height in.
+    density_probe: Option<f32>,
     /// A dock layout file existed at startup, so the user's track height is not overridden.
     dock_persisted: bool,
     left_tab: LeftTab,
@@ -972,6 +976,7 @@ impl Editor {
             dock: DockLayout::load(),
             compact_height: false,
             density_decided: false,
+            density_probe: None,
             dock_persisted: DockLayout::config_path().is_some_and(|path| path.exists()),
             left_tab: LeftTab::Media,
             previous_left_tab: LeftTab::Media,
@@ -1177,8 +1182,14 @@ impl Editor {
     /// transport, and a first run (no saved layout) in one starts with small track rows so more
     /// than a few tracks fit. A saved track height is never overridden.
     fn apply_density(&mut self, window: &Window) {
-        self.compact_height = f32::from(window.viewport_size().height) < COMPACT_WINDOW_HEIGHT;
+        let height = f32::from(window.viewport_size().height);
+        self.compact_height = height < COMPACT_WINDOW_HEIGHT;
         if !self.density_decided && !self.is_start_screen() {
+            if self.density_probe != Some(height) {
+                self.density_probe = Some(height);
+                window.request_animation_frame();
+                return;
+            }
             self.density_decided = true;
             if !self.env.adaptive_density {
                 return;

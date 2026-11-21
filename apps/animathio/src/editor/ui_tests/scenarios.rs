@@ -4093,8 +4093,12 @@ fn plugin_errors_lose_their_transport_prefixes() {
 }
 
 #[gpui::test]
-fn inspector_leads_with_content_for_generated_clips_and_speed_for_media(cx: &mut TestAppContext) {
-    if !require_plugins("inspector_leads_with_content_for_generated_clips_and_speed_for_media") {
+fn inspector_leads_with_content_for_generated_clips_and_audio_for_audio_clips(
+    cx: &mut TestAppContext,
+) {
+    if !require_plugins(
+        "inspector_leads_with_content_for_generated_clips_and_audio_for_audio_clips",
+    ) {
         return;
     }
     let top = |ui: &mut Ui, section: &str| {

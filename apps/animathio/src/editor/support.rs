@@ -64,6 +64,7 @@ pub(super) fn header_pill(
     let scale = style::ui_scale();
     div()
         .id(id)
+        .debug_selector(move || format!("{}-{}", id.0, id.1))
         .w(px(22. * scale))
         .h(px(20. * scale))
         .flex_shrink_0()
