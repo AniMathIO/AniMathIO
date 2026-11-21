@@ -41,7 +41,7 @@ This describes authoring in 2.x; importing saved 1.x projects has the limitation
 | Element list, order, placement and timing | Multi-track timeline, track order and inspector → Transform | Moved |
 | Manim source import | File → Import Manim scene | Moved |
 | Canvas settings and MP4 video export | File → Project settings; Export dialog | Moved |
-| WebM video export | No WebM output backend ([#303](https://github.com/AniMathIO/AniMathIO/issues/303)) | Missing |
+| WebM video export | Export dialog → Format (WebM, VP9 + Opus); `animathio-cli export --format webm` | Moved |
 
 Plugin clip sources appear only in Elements. Plugins is the installed inventory:
 all loaded kinds, versions, enabled status and source directories. Titles contains
@@ -105,8 +105,10 @@ where they matter.
 
 ## Not covered by this importer
 
-- **WebM export.** Video clips import as ordinary video clips and export to H.264 + AAC
-  MP4 like any other project; WebM output is not implemented.
+- **WebM export** is available (VP9 video, Opus audio) through the Export dialog's Format
+  selector, `animathio-cli export --format webm`, the control `export` method and MCP `export_video`.
+  MP4 stays the default. Differences from MP4: WebM carries no chapters, the VP9 encoder is slower
+  than the H.264 one and its files are larger at the same CRF, and it has no VP8 or AV1 variants.
 - **Manim import** is a separate importer (`crates/import-manim`), run inside the
   `org.animathio.import-manim` plugin and used via `animathio-cli import-manim`, the
   editor's **Import Manim scene…** dialog or the MCP `import_manim_scene` tool.

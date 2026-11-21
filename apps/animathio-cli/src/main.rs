@@ -91,7 +91,7 @@ enum Action {
         #[command(flatten)]
         size: OutputSize,
     },
-    /// Export an offline H.264 + AAC MP4.
+    /// Export an offline video: H.264 + AAC MP4 or VP9 + Opus `WebM`.
     Export {
         project: PathBuf,
         #[arg(short, long)]
@@ -111,6 +111,10 @@ enum Action {
         /// Constant quality, 0..=51; lower is better (defaults to preset quality or 23).
         #[arg(long)]
         crf: Option<f32>,
+        /// Output container: `mp4` (H.264 + AAC) or `webm` (VP9 + Opus). Defaults to `webm` for
+        /// an output ending in `.webm`, otherwise `mp4`.
+        #[arg(long, value_parser = parse_export_format)]
+        format: Option<animathio_export::Format>,
         /// Replace an existing output file instead of failing.
         #[arg(long)]
         overwrite: bool,
@@ -119,7 +123,7 @@ enum Action {
         #[arg(long)]
         chapters: Option<PathBuf>,
         /// Do not embed a Nero chapter atom (`chpl`) in the MP4. By default chapters are
-        /// embedded when the project has markers in the exported range.
+        /// embedded when the project has markers in the exported range. `WebM` carries none.
         #[arg(long)]
         no_embed_chapters: bool,
         /// Report wall time, fps and opt-in stage timings.
@@ -301,6 +305,15 @@ impl OutputSize {
     }
 }
 
+fn parse_export_format(value: &str) -> std::result::Result<animathio_export::Format, String> {
+    value.parse().map_err(|error: animathio_export::Error| {
+        error
+            .to_string()
+            .trim_start_matches("invalid export: ")
+            .to_owned()
+    })
+}
+
 fn parse_export_preset(
     value: &str,
 ) -> std::result::Result<animathio_control::ExportPreset, String> {
@@ -435,11 +448,13 @@ fn run(cli: Cli) -> Result<()> {
             fps,
             preset,
             crf,
+            format,
             overwrite,
             chapters,
             no_embed_chapters,
             bench,
         } => {
+            let format = animathio_export::Format::resolve(format, &output)?;
             let mut bundle = load(&project)?;
             // Refuse to overwrite the project file itself with the export (or
             // the chapters sidecar): that would destroy the project.
@@ -494,6 +509,7 @@ fn run(cli: Cli) -> Result<()> {
                     frame_rate: fps,
                     crf: crf.unwrap_or(defaults.crf),
                     embed_chapters: !no_embed_chapters,
+                    format,
                 },
                 &destination,
                 |progress| {

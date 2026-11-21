@@ -399,7 +399,8 @@ drops its overview strip, the transport gets slimmer, and a first run (no saved 
 with small tracks. Library, Inspector and Timeline show a thin scrollbar whenever they overflow;
 when the Library is too narrow for tab labels, its header names the active tab.
 
-Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
+Export opens a form with a Format selector (MP4 with H.264 + AAC, the default, or WebM with VP9 +
+Opus; switching it rewrites a `.mp4`/`.webm` extension in the path, and WebM carries no chapters), a path chooser, whole/in-out/custom range and shared
 `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` and `portrait` presets (30 fps, CRF 18).
 Presets apply to an export snapshot, keeping project settings unchanged. Existing
 files require confirmation. Exports never block the editor: "Add to queue" or "Export now"

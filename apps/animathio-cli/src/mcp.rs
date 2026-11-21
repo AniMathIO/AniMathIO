@@ -395,10 +395,12 @@ pub(crate) struct RenderFrame {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ExportVideo {
     pub(crate) path: String,
+    /// Container: `mp4` (H.264 + AAC, the default) or `webm` (VP9 + Opus). When omitted, a path
+    /// ending in `.webm` selects webm.
     pub(crate) format: Option<String>,
     #[serde(default)]
     pub(crate) overwrite: bool,
-    /// Embed the markers as MP4 chapters (default true).
+    /// Embed the markers as MP4 chapters (default true). Ignored for webm.
     pub(crate) embed_chapters: Option<bool>,
 }
 
@@ -2716,7 +2718,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Choose a delivery format: sets the project resolution and 30 fps (one undo step) and makes export_video use high-quality H.264 (CRF 18). Presets: youtube_1080p (1920x1080), youtube_4k (3840x2160), shorts_vertical (1080x1920), square (1080x1080). Positions are canvas fractions, so existing clips keep their relative layout."
+        description = "Choose a delivery format: sets the project resolution and 30 fps (one undo step) and makes export_video use high quality (CRF 18). Presets: youtube_1080p (1920x1080), youtube_4k (3840x2160), shorts_vertical (1080x1920), square (1080x1080). Positions are canvas fractions, so existing clips keep their relative layout."
     )]
     async fn set_export_preset(
         &self,
@@ -2739,15 +2741,20 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Export an offline H.264 + AAC MP4 snapshot of the project. Missing parent directories are created; an existing file is only replaced when overwrite is true. Timeline markers are embedded as MP4 chapters (Nero chpl) unless embed_chapters is false."
+        description = "Export an offline snapshot of the project as MP4 (H.264 + AAC, default) or WebM (VP9 + Opus, format \"webm\"). Missing parent directories are created; an existing file is only replaced when overwrite is true. MP4 embeds timeline markers as chapters (Nero chpl) unless embed_chapters is false; WebM carries no chapters. The format must agree with a .mp4/.webm file name."
     )]
     async fn export_video(
         &self,
         Parameters(p): Parameters<ExportVideo>,
     ) -> Result<CallToolResult, McpError> {
-        if p.format.as_deref().is_some_and(|format| format != "mp4") {
-            return Err(unsupported("only mp4 export is available"));
-        }
+        let format = p
+            .format
+            .as_deref()
+            .map(str::parse::<animathio_export::Format>)
+            .transpose()
+            .map_err(|error| invalid(&error.to_string()))?;
+        let format = animathio_export::Format::resolve(format, std::path::Path::new(&p.path))
+            .map_err(|error| invalid(&error.to_string()))?;
         let mut backend = self.backend.lock().await;
         let mut settings = self
             .export_preset
@@ -2755,6 +2762,7 @@ impl McpServer {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .map(ExportPreset::export_settings)
             .unwrap_or_default();
+        settings.format = format;
         if let Some(embed) = p.embed_chapters {
             settings.embed_chapters = embed;
         }
