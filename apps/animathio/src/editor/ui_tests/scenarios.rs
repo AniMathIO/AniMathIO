@@ -3284,6 +3284,37 @@ fn assist_cancel_ignores_the_result(cx: &mut TestAppContext) {
     assert!(!ui.cx.update(|_, cx| assist.read(cx).is_converting()));
 }
 
+/// Cancelling after the keyring read keeps its answer, so the next Convert (or the setup form)
+/// does not read the keyring a second time.
+#[gpui::test]
+fn assist_cancel_keeps_the_key_status_it_already_read(cx: &mut TestAppContext) {
+    use crate::editor::assist::{KeyStatus, cached_key_status_for_tests};
+    let mock = MockAssist::blocking();
+    let (mut ui, _panel, assist) = assist_ui(cx, &mock);
+    type_prose(&mut ui, &assist, "x squared");
+    ui.cx.update(|_, cx| {
+        assist.update(cx, |assist, _| {
+            assist.set_settings(assist_settings("https://api.openai.com/v1"));
+        });
+    });
+    let status = |ui: &mut Ui| {
+        ui.cx
+            .update(|_, cx| cached_key_status_for_tests(cx, "https://api.openai.com:443"))
+    };
+    assert_eq!(status(&mut ui), None);
+    ui.cx.update(|_, cx| {
+        assist.update(cx, |assist, cx| {
+            assist.convert(cx);
+            assist.cancel(cx);
+        });
+    });
+    ui.settle();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    ui.advance_clock(std::time::Duration::from_millis(30));
+    ui.settle();
+    assert_eq!(status(&mut ui), Some(KeyStatus::Missing));
+}
+
 #[gpui::test]
 fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) {
     use crate::editor::assist::Message;

@@ -291,7 +291,7 @@ impl HttpConverter {
                 AssistError::Timeout(self.timeout_secs())
             }
             ureq::Error::BodyExceedsLimit(_) => AssistError::BadResponse("reply too large".into()),
-            other => AssistError::Network(redact(&other.to_string(), endpoint)),
+            other => AssistError::Network(bounded(&redact(&other.to_string(), endpoint))),
         }
     }
 }
@@ -415,6 +415,24 @@ mod tests {
         let shown = bounded(&redact(&text, &endpoint));
         assert!(!shown.contains("sk-"), "{shown}");
         assert!(!shown.contains(&key[..4]), "{shown}");
+    }
+
+    #[test]
+    fn transport_errors_are_redacted_and_bounded() {
+        let settings = crate::AssistSettings {
+            base_url: "https://api.example.test/v1".into(),
+            model: "m".into(),
+        };
+        let key = "sk-0123456789abcdef";
+        let endpoint = Endpoint::new(&settings, crate::Secret::new(key)).unwrap();
+        let message = format!("connection reset by {key}\n{}", "x".repeat(1000));
+        let error = ureq::Error::Io(std::io::Error::other(message));
+        let AssistError::Network(shown) = HttpConverter::new().map_error(&error, &endpoint) else {
+            panic!("a transport error maps to Network");
+        };
+        assert!(!shown.contains(key) && !shown.contains("sk-"), "{shown}");
+        assert!(shown.chars().count() <= MAX_DETAIL_CHARS + 1, "{shown}");
+        assert!(!shown.contains('\n'));
     }
 
     #[test]

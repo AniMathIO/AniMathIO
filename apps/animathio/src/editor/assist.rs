@@ -451,6 +451,10 @@ impl AssistPanel {
                 },
             };
             if token.is_cancelled() {
+                // The keyring was read: keep its answer so the next Convert need not read it again.
+                if let Some(status) = key_status {
+                    let _ = this.update(cx, |_, cx| set_key_status(cx, &origin, status));
+                }
                 return;
             }
             let had_key = key.is_some();
@@ -477,6 +481,10 @@ impl AssistPanel {
                         }
                         Err(std::sync::mpsc::TryRecvError::Empty) => {
                             if token.is_cancelled() {
+                                if let Some(status) = key_status {
+                                    let _ = this
+                                        .update(cx, |_, cx| set_key_status(cx, &origin, status));
+                                }
                                 return;
                             }
                             cx.background_executor().timer(RESULT_POLL).await;
