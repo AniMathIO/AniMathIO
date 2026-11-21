@@ -1083,9 +1083,32 @@ fn webm_export_decodes_cleanly_with_libvpx_and_libopus_when_ffmpeg_is_installed(
         .output()
         .unwrap();
     assert!(decode.status.success());
-    assert!(
-        decode.stderr.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&decode.stderr)
-    );
+    if !decode.stderr.is_empty() {
+        // Name the offending packets: index, timestamp, size and the first bytes (the Opus TOC).
+        let mut demuxer = filmcraft_matroska::Demuxer::from_slice(&bytes).unwrap();
+        let mut packets = Vec::new();
+        let mut index = 0;
+        while let Some(packet) = demuxer.next_packet().unwrap() {
+            if demuxer.tracks()[packet.track].kind == filmcraft_matroska::TrackKind::Audio {
+                let head: Vec<String> = packet
+                    .data
+                    .iter()
+                    .take(4)
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                packets.push(format!(
+                    "#{index} pts {} ns len {} [{}]",
+                    packet.pts_ns,
+                    packet.data.len(),
+                    head.join(" ")
+                ));
+                index += 1;
+            }
+        }
+        panic!(
+            "{}\naudio packets:\n{}",
+            String::from_utf8_lossy(&decode.stderr),
+            packets.join("\n")
+        );
+    }
 }
