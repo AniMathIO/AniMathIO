@@ -502,6 +502,7 @@ impl Editor {
         let clip_voice = !review.params.voice_clips.is_empty();
         panel = panel.child(
             Button::new("duck-voice-clip")
+                .debug_selector(|| "duck-voice-clip".into())
                 .compact()
                 .disabled(!selected_audio && !clip_voice)
                 .icon(icons::icon(if clip_voice {

@@ -31,6 +31,7 @@ use super::*;
 use crate::editor_env::{PluginSource, built_plugins_dir};
 
 mod fixtures;
+mod polish_audio;
 mod polish_inspector;
 mod polish_p1;
 mod polish_plugins;
