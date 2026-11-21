@@ -3553,6 +3553,12 @@ fn library_tabs_are_icon_only_at_the_default_dock_width_and_fit(cx: &mut TestApp
     assert!(crate::layout::DockLayout::default().left_width < LIBRARY_TABS_LABEL_WIDTH);
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
+    // `Editor::new` loads the dock layout persisted in the shared test config dir, which other
+    // tests rewrite (a closed Library panel) while this one runs in parallel; pin the default.
+    ui.update(|e, _, cx| {
+        e.dock = crate::layout::DockLayout::default();
+        cx.notify();
+    });
     ui.cx
         .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
     ui.settle();
