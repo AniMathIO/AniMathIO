@@ -173,6 +173,13 @@ effects migrate in `format` to plugin clips/effects on load. Video frames come f
 the fallback when no frame source is attached. Do not add runtime
 resources to `Project` or store evaluated animation state in the renderer.
 
+`plugins/text` is its own Cargo workspace, so `cargo test --workspace` skips its native unit tests: run
+`cargo test --manifest-path plugins/text/Cargo.toml --locked --target-dir target/plugin-tests` (CI has a
+`Text plugin unit tests` step); behaviour that needs the host (limits, fuel, layout parity) is tested in
+`crates/control/tests/text_weight.rs`. The text plugin's `font` parameter (`dejavu` default | `inter`) and
+`font_weight` select the typeface: `dejavu` at weight 400 is the host `TextRun`, everything else is outlined in the
+plugin from bundled Inter with per-character DejaVu fallback; typography presets and the v1 importer set `inter`.
+
 Plugin ABI 1.1.0 adds two worlds: `animation-preset-plugin` (`org.animathio.animations`;
 `PluginHost::animation_preset_command` turns a preset into one keyframe `Command::Batch`,
 shared by `animations.apply`, MCP `apply_animation_preset`, `animathio-cli animations` and
@@ -191,9 +198,10 @@ it through the curve target `effect:<plugin>:<effect>:<param>`, which `presets.r
 (preferably not bypassed; a bypassed one is re-enabled in the batch) or newly added (`Command::AddEffect`,
 same batch) effect instance. The effect declares in its manifest metadata (`effect.slide.identity`) when it
 is an identity, `EffectProcessor::is_identity` reads that, and the renderer then skips the instance and the
-layer path. Per-character slides live in the text plugin (1.3.0, ABI 1.3): the `char_slide*` parameters,
+layer path. Per-character slides live in the text plugin (1.4.0, ABI 1.3): the `char_slide*` parameters,
 keyframed by the `character-slide-*` presets, use exact glyph units (the `text-layout` host import for wrapped
-text, per-character `shape-text` for fitted/pixel text), stagger by normalized position and are drawn as
+text, per-character `shape-text` for fitted/pixel text; weighted or `font = inter` text takes its units from the plugin's
+Inter shaper instead, so the typeface never changes while sliding), stagger by normalized position and are drawn as
 filled paths only mid-animation; any `caption_style` (Classic included) ignores `char_slide*` and the presets refuse such a clip.
 The renderer and the host's `layout-text` import share one layout, the `animathio-text-layout` crate (parley setup, wrapping,
 alignment, block centring); never copy it, the exactness test in `crates/plugin-host/src/text_layout.rs` compares glyph ids and

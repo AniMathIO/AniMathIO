@@ -15,7 +15,10 @@ pub struct TitlePreset {
     pub id: String,
     /// Library card label.
     pub name: String,
-    /// Entry/exit motion: fade, slide or scale.
+    /// Library section: `compositions` (multi-layer titles) or `typography` (1.x text styles).
+    #[serde(default = "default_group")]
+    pub group: String,
+    /// Entry/exit motion label: fade, slide, scale, or none (no curves, as for typography styles).
     pub animation: String,
     /// Maximum entry/exit duration in integer timeline ticks (short titles use a quarter).
     pub ramp_ticks: i64,
@@ -69,12 +72,27 @@ pub struct TitleLayer {
     /// Font height relative to the shorter canvas dimension.
     #[serde(default)]
     pub size: f64,
+    /// CSS numeric font weight (400 when omitted).
+    #[serde(default = "regular_weight")]
+    pub weight: f64,
+    /// Text plugin `font` parameter (`inter`); empty keeps the plugin default (`DejaVu` Sans).
+    /// Typography styles set `inter` so a weight never decides the typeface.
+    #[serde(default)]
+    pub font: String,
     /// Decorative bar or text-box height.
     #[serde(default)]
     pub height: f64,
     /// Decorative fill.
     #[serde(default)]
     pub color: [u8; 4],
+}
+
+fn default_group() -> String {
+    "compositions".into()
+}
+
+fn regular_weight() -> f64 {
+    400.0
 }
 
 /// Parameters for `titles.add`; times are integer ticks.
@@ -168,6 +186,10 @@ pub fn title_preset_command(
                 let mut kind = animathio_plugin_api::sources::text(content.clone(), font, [255; 4]);
                 if let ClipKind::Plugin { params, .. } = &mut kind {
                     params["align"] = json!("center");
+                    params["font_weight"] = json!(layer.weight);
+                    if !layer.font.is_empty() {
+                        params["font"] = json!(layer.font);
+                    }
                     params["fit_width"] = json!(width);
                     params["fit_height"] = json!(layer.height);
                 }

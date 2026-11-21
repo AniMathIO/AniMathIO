@@ -26,7 +26,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "title_subtitle",
@@ -65,7 +66,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "lower_third",
@@ -126,7 +128,8 @@
           0.04
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "caption",
@@ -168,7 +171,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "chapter_card",
@@ -218,7 +222,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "end_card",
@@ -257,7 +262,8 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "kinetic_word_pop",
@@ -304,7 +310,8 @@
           0.9
         ]
       }
-    ]
+    ],
+    "group": "compositions"
   },
   {
     "id": "math_title",
@@ -342,6 +349,227 @@
           0.0
         ]
       }
-    ]
+    ],
+    "group": "compositions"
+  },
+  {
+    "id": "typography_title",
+    "name": "Title",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Title",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.07777777777777778,
+        "weight": 600,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_subtitle",
+    "name": "Subtitle",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Subtitle",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.044444444444444446,
+        "weight": 600,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_body",
+    "name": "Body",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Body",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03888888888888889,
+        "weight": 400,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_caption",
+    "name": "Caption",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Caption",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03333333333333333,
+        "weight": 400,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_heading_1",
+    "name": "Heading 1",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 1",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.06666666666666667,
+        "weight": 800,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_heading_2",
+    "name": "Heading 2",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 2",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.05555555555555555,
+        "weight": 800,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_heading_3",
+    "name": "Heading 3",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 3",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.05,
+        "weight": 800,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_heading_4",
+    "name": "Heading 4",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 4",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.044444444444444446,
+        "weight": 800,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_heading_5",
+    "name": "Heading 5",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 5",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03888888888888889,
+        "weight": 800,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
+  },
+  {
+    "id": "typography_heading_6",
+    "name": "Heading 6",
+    "animation": "none",
+    "ramp_ticks": 0,
+    "curves": [],
+    "layers": [
+      {
+        "kind": "text",
+        "field": "title",
+        "default": "Heading 6",
+        "x": 0.5,
+        "width": 0.84,
+        "y": 0.4,
+        "size": 0.03333333333333333,
+        "weight": 800,
+        "font": "inter",
+        "height": 0.2
+      }
+    ],
+    "group": "typography"
   }
 ]

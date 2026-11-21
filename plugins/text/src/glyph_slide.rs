@@ -352,7 +352,7 @@ pub fn split_contours<E>(
 }
 
 /// Combining marks and joiners attach to the character before them.
-fn is_mark(ch: char) -> bool {
+pub fn is_mark(ch: char) -> bool {
     matches!(u32::from(ch),
         0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF
         | 0xFE00..=0xFE0F | 0xFE20..=0xFE2F | 0x200C | 0x200D)

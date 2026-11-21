@@ -126,10 +126,28 @@ impl Editor {
                 .text_color(hex(color::TEXT_SECONDARY))
                 .child("Double-click to add at playhead, or drag to timeline"),
         );
+        let mut section = "";
         for preset in title_presets()
             .iter()
             .filter(|p| self.library_matches(LeftTab::Titles, &p.name))
         {
+            if preset.group != section {
+                section = &preset.group;
+                cards = cards.child(
+                    div()
+                        .w_full()
+                        .px_1()
+                        .pt_1()
+                        .text_size(crate::style::type_size::XS)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(hex(color::TEXT_SECONDARY))
+                        .child(if section == "typography" {
+                            "Typography"
+                        } else {
+                            "Compositions"
+                        }),
+                );
+            }
             let id = preset.id.clone();
             let drag = id.clone();
             let keyboard_id = id.clone();

@@ -277,10 +277,13 @@ fn imports_every_element_type_and_maps_values() {
     )));
 
     // Text is a first-party component with normalized font size.
-    assert_eq!(
-        clips[3].1.kind,
-        animathio_plugin_api::sources::text("hello".into(), 24.0 / 600.0, [255, 0, 0, 255])
-    );
+    let mut expected_text =
+        animathio_plugin_api::sources::text("hello".into(), 24.0 / 600.0, [255, 0, 0, 255]);
+    if let ClipKind::Plugin { params, .. } = &mut expected_text {
+        params["font_weight"] = json!(400.0);
+        params["font"] = json!("inter");
+    }
+    assert_eq!(clips[3].1.kind, expected_text);
 
     // Mafs: static PNG image with the mafs marker and effect.
     let mafs_clip = &clips[4].1;
@@ -760,4 +763,50 @@ fn slide_in_and_out_on_one_clip_share_one_effect_and_one_set_of_text_keys() {
             .collect::<Vec<_>>(),
         [1.0, 1.0, 2.0, 2.0]
     );
+}
+
+#[test]
+fn preserves_numeric_font_weights_and_warns_on_invalid_values() {
+    for weight in [400.0, 600.0, 700.0, 800.0, 999.0] {
+        let (bytes, _, _, _) = fixture();
+        let mut plain = Vec::new();
+        flate2::read::ZlibDecoder::new(bytes.as_slice())
+            .read_to_end(&mut plain)
+            .unwrap();
+        let mut value: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+        let element = value["editorElements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|element| element["type"] == "text")
+            .unwrap();
+        element["properties"]["fontWeight"] = json!(weight);
+        let (project, _, report) =
+            import_v1_with_report(&serde_json::to_vec(&value).unwrap()).unwrap();
+        let params = project
+            .tracks()
+            .iter()
+            .flat_map(|track| track.clips().values())
+            .find_map(|clip| match &clip.kind {
+                ClipKind::Plugin { plugin_id, params } if plugin_id == "org.animathio.text" => {
+                    Some(params)
+                }
+                _ => None,
+            })
+            .unwrap();
+        if weight <= 900.0 {
+            assert_eq!(params["font_weight"], json!(weight));
+            // Weight never decides the typeface: every imported weight uses Inter.
+            assert_eq!(params["font"], json!("inter"));
+        } else {
+            assert!(params.get("font_weight").is_none(), "falls back to regular");
+            assert!(params.get("font").is_none(), "keeps the plugin default");
+            assert!(
+                report
+                    .warnings()
+                    .iter()
+                    .any(|warning| warning.contains("invalid fontWeight"))
+            );
+        }
+    }
 }
