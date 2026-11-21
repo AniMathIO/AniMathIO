@@ -1,0 +1,85 @@
+{
+  "format": "animathio",
+  "schemaVersion": 7,
+  "frame_rate": {
+    "numerator": 30,
+    "denominator": 1
+  },
+  "tracks": [
+    {
+      "id": 1,
+      "name": "Heading 1 / title",
+      "clips": {
+        "2": {
+          "id": 2,
+          "link_group": 2,
+          "kind": {
+            "Plugin": {
+              "plugin_id": "org.animathio.text",
+              "params": {
+                "_title_field": "title",
+                "_title_preset": "typography_heading_1",
+                "align": "center",
+                "color": [
+                  255,
+                  255,
+                  255,
+                  255
+                ],
+                "fit_height": 0.2,
+                "fit_width": 0.84,
+                "font": "inter",
+                "font_size": 0.06666666666666667,
+                "font_weight": 800.0,
+                "text": "Heading 1",
+                "units": "normalized"
+              }
+            }
+          },
+          "range": {
+            "start": 3528000000,
+            "end": 7056000000
+          },
+          "source_offset": 0,
+          "time_map": {
+            "speed": {
+              "numerator": 1,
+              "denominator": 1
+            },
+            "reverse": false,
+            "ramps": [],
+            "hold": false,
+            "phase": 0,
+            "source_length": null
+          },
+          "transform": {
+            "x": 0.5,
+            "y": 0.5,
+            "scale_x": 0.84,
+            "scale_y": 0.2,
+            "rotation": 0.0,
+            "opacity": 1.0
+          },
+          "fit": "stretch",
+          "params": {},
+          "effects": [],
+          "animations": []
+        }
+      },
+      "gain": 1.0,
+      "muted": false,
+      "solo": false,
+      "locked": false
+    }
+  ],
+  "assets": {},
+  "width": 1920,
+  "height": 1080,
+  "background": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "duration": 0
+}
