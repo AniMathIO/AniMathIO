@@ -36,6 +36,9 @@ Plugins** opens the corresponding tab even when the Library is hidden. The exist
 Library and Effects focus shortcuts still open Media and Effects respectively.
 Arrow keys, Home and End move focus and selection between tabs; Tab continues to
 search, cards and buttons. Every tab retains its own search when switching away.
+At the default dock width the tabs are icon-only (hover for the name); they show
+their labels once the dock is at least 400 px wide. Elements cards flow into two
+columns at the default width and three in a wide dock.
 
 | Tab | Contents and actions |
 | --- | --- |
@@ -68,6 +71,15 @@ and the separately tracked gaps.
 | Titles | Effects |
 | --- | --- |
 | ![Titles](../docs/screenshots/editor-titles.png) | ![Effects](../docs/screenshots/editor-library-effects.png) |
+
+### Small windows (1280 × 720)
+
+1280 × 720 is the smallest supported window. The launcher, the Add math object dialog and the
+Library are laid out so that their key controls are visible there without scrolling:
+
+| Launcher | Add math object | Library |
+| --- | --- | --- |
+| ![Launcher at 1280 x 720](../docs/screenshots/720p-launcher.png) | ![Math dialog at 1280 x 720](../docs/screenshots/720p-math-dialog.png) | ![Library at 1280 x 720](../docs/screenshots/720p-library.png) |
 
 ### Community plugins
 
@@ -425,7 +437,8 @@ any other weight switches to Inter, so keyframing the weight of such a clip chan
 choose `inter` for a weight that varies smoothly.
 
 New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
-launcher. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
+launcher. The launcher pins **Open project**, **Import v1** and **Import Manim** in its
+hero, so they stay visible in a 1280 × 720 window. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
 another tile starts that format. The launcher, project settings and export dialog
 share 1080p, 4K, 9:16, square and 4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
 and `fields`; see [the control guide](mcp.md#title-preset-library).
@@ -516,7 +529,9 @@ The library's **Elements** tab provides grouped preview cards for LaTeX, text, p
 vectors, polygons, plots, circles, ellipses and Cartesian/polar grids. Click a
 card for typed fields and a live preview, use its plus button for defaults, or
 drag it onto the timeline. Double-click an existing object to edit it. LaTeX has
-snippets, formula templates and a Write on preset. See the
+snippets, formula templates and a Write on preset. In its dialog, Colour and Write on sit
+beside the source (above the palette); a window at least 960 px wide puts the Snippets and
+Templates palette in a second column, so nothing is below a scroll at 1280 × 720. See the
 [math workflow](architecture.md#mathematical-object-workflow) and the
 [CLI guide](cli.md) for automation equivalents.
 

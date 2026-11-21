@@ -65,7 +65,8 @@ The violet-to-cyan UI action accent remains defined in `style.rs`.
 
 The workspace wraps each resizable pane in a rounded panel with a consistent
 icon/title/action header and 6px shared gutters. The library uses a sliding active
-pill for Media, Elements, Titles, Effects and Plugins. Each tab keeps its own
+pill for Media, Elements, Titles, Effects and Plugins; below a 400 px dock the tabs are
+icon-only with tooltips, which covers the default width (`LIBRARY_TABS_LABEL_WIDTH`). Each tab keeps its own
 search; only Media has asset-kind filters and grid/list controls. Elements groups
 text/formulas, geometry and graphs/grids, followed by additional shape sources and
 third-party plugins. Plugins is an inventory of all loaded plugin kinds, versions,
@@ -77,7 +78,9 @@ frame rate, duration, autosave policy, requested preview renderer and export que
 
 The launcher offers five canvas preset cards, a Templates section with cached CPU
 thumbnails, aspect labels and user-template deletion, recent-project cards with
-cached modification times, media drops and Open / Import v1 / Import Manim.
+cached modification times and media drops. Open project, Import v1 and Import Manim are
+pinned in the hero so they stay above the fold at 1280×720; the page scrolls (with a scrollbar)
+for the rest.
 Its quiet gradient glow runs only while the launcher is visible. Card lifts and
 tab changes settle in 180ms. Preferences > Motion > Reduce motion makes the glow
 static and disables decorative widget transitions through GPUI's motion policy;
@@ -133,7 +136,8 @@ The developer launch option `--screenshot-panel=markers` opens the same panel as
 Clip > Markers and beat sync. `--screenshot-panel=duck` selects the first audio clip as the voice and opens Auto duck (the other
 audio tracks are suggested as music, then the normal analysis runs), and scrolls the timeline to the bottom so the shaded music rows are visible. `--screenshot-panel=autocut` selects the first audio
 clip in track order and runs the normal asynchronous analysis before showing its
-review. `--screenshot-panel=plugins` opens the Library's Plugins tab, and
+review. `--screenshot-panel=media|titles|effects|elements` open those Library tabs and
+`--screenshot-panel=math` opens the Add math object dialog (LaTeX). `--screenshot-panel=plugins` opens the Library's Plugins tab, and
 `--screenshot-panel=plugins-browse` also opens Browse, which fetches the community index
 only when the Community plugins switch is already on. Pass a project path as usual; none
 of these options applies edits. The control protocol can create markers and propose cuts
@@ -162,6 +166,16 @@ scripts/virtual-display.sh --screenshot docs/screenshots/editor-autocut.png 30 \
 scripts/virtual-display.sh --screenshot docs/screenshots/editor-auto-duck.png 30 \
   ./target/release/animathio --screenshot-panel=duck target/screenshot-project.amio
 ```
+
+`scripts/virtual-display.sh --size WxH` sets the virtual screen (for example `--size 1280x720`
+for the smallest supported window) and `--crop WxH+X+Y` keeps a rectangle of the capture:
+at 1920×1080 a first-run window is the 90% restore size, so `--crop 1728x972+96+54` is the
+window without the black margin (the `editor-*.png` shots). The window only appears after the
+renderer and plugins have started and the root window is solid black until then, so a capture is
+retried until the screen is no longer black; a run that never paints fails with a message
+instead of writing a black PNG (this was the black launcher capture in #286: the delay was
+shorter than the start-up). The script also parks the pointer over the title bar so no card
+shows a hover state.
 
 The private config directory avoids changing personal preferences. Captures use
 1920×1080 Xvfb, silent audio and release binaries with first-party plugins. Inspect

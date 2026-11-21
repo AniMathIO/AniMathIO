@@ -127,7 +127,7 @@ fn main() {
                         if let Some(panel) = std::env::args().find_map(|arg| {
                             arg.strip_prefix("--screenshot-panel=").map(str::to_owned)
                         }) {
-                            editor.open_screenshot_panel(&panel, cx);
+                            editor.open_screenshot_panel(&panel, window, cx);
                         }
                         let mut local = window_bounds.get_bounds();
                         local.origin -= display_bounds.origin;

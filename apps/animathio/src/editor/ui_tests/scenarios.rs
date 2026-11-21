@@ -2516,9 +2516,9 @@ fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
 fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
     let (project, assets) = voice_and_music();
     let mut ui = Ui::open(cx, project, assets);
-    ui.update(|editor, _, cx| editor.open_screenshot_panel("markers", cx));
+    ui.update(|editor, window, cx| editor.open_screenshot_panel("markers", window, cx));
     assert!(ui.read(|editor| editor.marker_panel.is_some()));
-    ui.update(|editor, _, cx| editor.open_screenshot_panel("autocut", cx));
+    ui.update(|editor, window, cx| editor.open_screenshot_panel("autocut", window, cx));
     ui.settle();
     ui.read(|editor| {
         assert_eq!(editor.selected, Some(VOICE_CLIP));
@@ -2534,7 +2534,7 @@ fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
             "voice pause detected despite music bed"
         );
     });
-    ui.update(|editor, _, cx| editor.open_screenshot_panel("duck", cx));
+    ui.update(|editor, window, cx| editor.open_screenshot_panel("duck", window, cx));
     ui.settle();
     ui.read(|editor| {
         assert_eq!(editor.selected, Some(VOICE_CLIP));
@@ -3525,6 +3525,129 @@ fn dropping_the_assist_panel_cancels_the_request(cx: &mut TestAppContext) {
         ui.advance_clock(std::time::Duration::from_millis(30));
         ui.settle();
         std::thread::sleep(std::time::Duration::from_millis(2));
+
+#[gpui::test]
+fn launcher_open_and_imports_are_pinned_in_view_at_720p(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    assert!(ui.read(Editor::is_start_screen));
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.settle();
+    for selector in ["start-open", "start-v1", "start-manim"] {
+        let bounds = ui
+            .cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is rendered"));
+        // Above the status bar and the window edge, without scrolling the launcher.
+        assert!(bounds.bottom() <= gpui::px(680.), "{selector}: {bounds:?}");
+        assert!(bounds.right() <= gpui::px(1280.), "{selector}: {bounds:?}");
+        assert!(bounds.size.width > gpui::px(40.), "{selector}: {bounds:?}");
+    }
+}
+
+#[gpui::test]
+fn library_tabs_are_icon_only_at_the_default_dock_width_and_fit(cx: &mut TestAppContext) {
+    use crate::editor::workspace::LIBRARY_TABS_LABEL_WIDTH;
+    assert!(crate::layout::DockLayout::default().left_width < LIBRARY_TABS_LABEL_WIDTH);
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.settle();
+    let mut previous_right = gpui::px(0.);
+    for name in ["media", "elements", "titles", "effects", "plugins"] {
+        let bounds = bounds_of(&mut ui, format!("library-tab-{name}")).expect("tab rendered");
+        assert!(bounds.size.width >= gpui::px(30.), "{name}: {bounds:?}");
+        assert!(
+            bounds.left() >= previous_right,
+            "{name} overlaps its neighbour"
+        );
+        previous_right = bounds.right();
+    }
+    // The dock stays within its panel: the last tab ends left of the preview.
+    assert!(previous_right < gpui::px(300.));
+}
+
+#[test]
+fn element_cards_use_the_dock_width() {
+    use crate::editor::math::element_card_columns;
+    assert_eq!(element_card_columns(200.), 1);
+    assert_eq!(element_card_columns(260.), 2);
+    assert_eq!(element_card_columns(340.), 3);
+    assert_eq!(element_card_columns(640.), 3);
+}
+
+/// The Add math object dialog at `width` x `height`: every control is laid out inside the dialog
+/// form's visible area (not below a scroll) or, for the palette, inside the window.
+fn math_dialog_controls(
+    cx: &mut TestAppContext,
+    width: f32,
+    height: f32,
+) -> Vec<(&'static str, gpui::Bounds<gpui::Pixels>)> {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
+    ui.settle();
+    ui.update(|e, window, cx| e.open_math(MathObjectKind::Latex, None, window, cx));
+    ui.settle();
+    [
+        "math-form",
+        "math-colour-row",
+        "math-write-on",
+        "math-palette",
+    ]
+    .into_iter()
+    .map(|selector| {
+        (
+            selector,
+            ui.cx
+                .debug_bounds(selector)
+                .unwrap_or_else(|| panic!("{selector} is rendered at {width}x{height}")),
+        )
+    })
+    .collect()
+}
+
+#[gpui::test]
+fn math_dialog_shows_colour_write_on_and_templates_at_720p(cx: &mut TestAppContext) {
+    let controls = math_dialog_controls(cx, 1280., 720.);
+    let bounds = |name: &str| controls.iter().find(|(n, _)| *n == name).unwrap().1;
+    let form = bounds("math-form");
+    // Wide window: the palette sits beside the form, fully inside the window.
+    let palette = bounds("math-palette");
+    assert!(
+        palette.left() >= form.right() - gpui::px(1.),
+        "{palette:?} {form:?}"
+    );
+    assert!(palette.bottom() <= gpui::px(720.));
+    assert!(palette.right() <= gpui::px(1280.));
+    // Colour and Write on need no scrolling inside the form.
+    for name in ["math-colour-row", "math-write-on"] {
+        let control = bounds(name);
+        assert!(
+            control.top() >= form.top() && control.bottom() <= form.bottom() + gpui::px(1.),
+            "{name}: {control:?} in {form:?}"
+        );
+        assert!(control.bottom() <= gpui::px(720.));
+    }
+}
+
+#[gpui::test]
+fn math_dialog_keeps_colour_and_write_on_above_the_palette_in_a_narrow_window(
+    cx: &mut TestAppContext,
+) {
+    let controls = math_dialog_controls(cx, 900., 720.);
+    let bounds = |name: &str| controls.iter().find(|(n, _)| *n == name).unwrap().1;
+    let form = bounds("math-form");
+    for name in ["math-colour-row", "math-write-on"] {
+        let control = bounds(name);
+        assert!(
+            control.bottom() <= form.bottom() + gpui::px(1.),
+            "{name}: {control:?} in {form:?}"
+        );
+        // Before the palette, so the palette is the part that scrolls.
+        assert!(control.bottom() <= bounds("math-palette").top());
     }
 }
 
