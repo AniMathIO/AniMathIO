@@ -36,7 +36,7 @@ changelog_path = "CHANGELOG.md"
 changelog_update = true
 # The CLI is the one tagged package, but the release covers the whole workspace:
 # include commits that touch any workspace crate in its changelog.
-changelog_include = ["animathio", "animathio-audio", "animathio-control", "animathio-core", "animathio-export", "animathio-format", "animathio-import-manim", "animathio-import-v1", "animathio-media", "animathio-plugin-api", "animathio-plugin-host", "animathio-render", "animathio-text-layout", "animathio-transcribe", "animathio-typeset"]
+changelog_include = ["animathio", "animathio-assist", "animathio-audio", "animathio-control", "animathio-core", "animathio-export", "animathio-format", "animathio-import-manim", "animathio-import-v1", "animathio-media", "animathio-plugin-api", "animathio-plugin-host", "animathio-render", "animathio-text-layout", "animathio-transcribe", "animathio-typeset"]
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
 # Only this package creates the shared tag and release.

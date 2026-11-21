@@ -254,6 +254,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "animathio-assist"
+version = "2.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "ureq",
+]
+
+[[package]]
 name = "animathio-audio"
 version = "2.2.0"
 dependencies = [
