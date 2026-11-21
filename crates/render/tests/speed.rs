@@ -150,12 +150,60 @@ fn fast_video_averages_the_source_frames_one_output_frame_spans() {
     // 1x and slow motion stay point samples: exactly source frame n.
     close(gray_at((1, 1), false, 7), 70);
     close(gray_at((1, 2), false, 8), 40);
-    // 2x output frame 5 spans source frames 10 and 11; frame 2 at 3x spans 6, 7 and 8.
-    close(gray_at((2, 1), false, 5), 105);
-    close(gray_at((3, 1), false, 2), 70);
-    // Reversed 2x: output frame 5 reads source frames 19 and 18 (the span 19.0 down to 17.0).
-    close(gray_at((2, 1), true, 5), 185);
-    // 16x averages sixteen frames: output frame 1 spans source frames 16..32 of a 30-frame
-    // clip... the clip is only 30 source frames long, so use output frame 0 (frames 0..16).
-    close(gray_at((16, 1), false, 0), 75);
+    // The taps are centred on the output frame's own source time (the point sample), so
+    // 2x output frame 5 (source frame 10) averages the frames 9 and 10 either side of it
+    // and frame 2 at 3x (source 6) the frames 5, 6 and 7.
+    close(gray_at((2, 1), false, 5), 95);
+    close(gray_at((3, 1), false, 2), 60);
+    // Reversed 2x: output frame 5 is source 20.0 (the point sample, frame 19, lies just
+    // below it) and its taps are 20.5 and 19.5, frames 20 and 19.
+    close(gray_at((2, 1), true, 5), 195);
+    // 16x averages sixteen frames: output frame 1 (source frame 16) spans 8 through 23.
+    close(gray_at((16, 1), false, 1), 155);
+}
+
+/// A source that counts what the blender asks for and reports a coarser frame rate than
+/// the taps, so several taps land on one decoded frame.
+struct Counting {
+    fetches: std::rc::Rc<std::cell::Cell<usize>>,
+}
+impl FrameSource for Counting {
+    fn frame_at(&mut self, asset: &AssetId, time: Time) -> Option<Frame> {
+        self.fetches.set(self.fetches.get() + 1);
+        Gray.frame_at(asset, time)
+    }
+    fn frame_index(&mut self, _: &AssetId, time: Time) -> Option<i64> {
+        // A 15 fps source: two project frames per decoded frame.
+        Some(time.0 / (TICKS_PER_SECOND / 15))
+    }
+}
+
+#[test]
+fn taps_on_the_same_decoded_frame_are_fetched_once_and_keep_their_weight() {
+    let mut p = project();
+    Command::SetClipSpeed {
+        id: ClipId(1),
+        speed: ClipSpeed::new(4, 1).unwrap(),
+        reverse: false,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    // Output frame 2 is source frame 8; the four taps sit at 6.5, 7.5, 8.5 and 9.5 frames,
+    // which are decoded frames 3, 3, 4 and 4 of a 15 fps source.
+    let scene = evaluate(&p, Time(2 * TICKS_PER_SECOND / 30));
+    assert_eq!(scene.clips[0].source_taps.len(), 4);
+    let fetches = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut ctx = RenderCtx::new(
+        CpuBackend::default(),
+        Counting {
+            fetches: fetches.clone(),
+        },
+    );
+    let frame = animathio_render::render(&scene, &mut ctx, (4, 4)).unwrap();
+    assert_eq!(fetches.get(), 2, "one fetch per distinct decoded frame");
+    // Each fetched picture (gray 60 and 80) stands for two taps.
+    let value = frame.pixels[(2 * 4 + 2) * 4];
+    assert!(value.abs_diff(70) <= 1, "{value}");
 }

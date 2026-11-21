@@ -9,7 +9,9 @@ mod gpu;
 pub mod sample;
 mod transition;
 
-use animathio_core::{AssetId, ClipKind, EffectProcessor, Project, Scene, SceneClip, Time};
+use animathio_core::{
+    AssetId, ClipKind, EffectProcessor, Project, Rounding, Scene, SceneClip, Time,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{Cursor, Write},
@@ -185,19 +187,52 @@ impl ResourcePool {
     }
 }
 
+/// A decoded frame shared with its source without copying (the media pool keeps its
+/// frames in `Arc`s). Only the blending path needs it.
+#[derive(Clone)]
+pub struct SharedFrame {
+    /// Pixel dimensions.
+    pub size: Size,
+    /// Exactly width × height × 4 bytes.
+    pub pixels: Arc<[u8]>,
+}
+
 /// Random-access video adapter. Results must depend only on asset and media time.
 /// Implementations own their decoder resources and must not advance a playback clock.
 pub trait FrameSource {
     /// Return the frame due at this exact source-local tick position, if available.
     fn frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<Frame>;
+    /// The same frame as [`FrameSource::frame_at`], shared instead of copied. The default
+    /// copies; sources that already hold their frames in an `Arc` override it.
+    fn shared_frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<SharedFrame> {
+        let frame = self.frame_at(asset, media_time)?;
+        Some(SharedFrame {
+            size: frame.size,
+            pixels: frame.pixels.into(),
+        })
+    }
+    /// Which decoded frame of the asset is due at `media_time` (its index at the source's
+    /// own frame rate), when the source knows. Equal indices are the same picture, so
+    /// the blending path decodes and weights them once. `None` means "unknown": the
+    /// time is treated as distinct.
+    fn frame_index(&mut self, _asset: &AssetId, _media_time: Time) -> Option<i64> {
+        None
+    }
 }
+
+/// Accumulator pixels handled per pass of the blender: a small fixed buffer instead of
+/// one wide sum per pixel of the frame.
+const BLEND_CHUNK_PIXELS: usize = 1 << 14;
 
 /// The video frame a scene clip shows. Normally the frame due at `source_time`. When the
 /// source clock outruns the output frame rate, `evaluate` lists `source_taps` instead and
-/// the frames due at those times are averaged with equal weight: a box filter over the
-/// source interval one output frame covers, which turns the aliasing of dropped frames
-/// into motion blur. The result depends only on the scene and the frame source, so
-/// preview, export and tests agree.
+/// the frames due at those times are averaged: a box filter over the source interval one
+/// output frame covers, which turns the aliasing of dropped frames into motion blur. Taps
+/// that land on the same decoded frame are fetched once and weighted by how many taps
+/// they cover (so a source slower than the taps does not change the filter, only the
+/// work); the blend reads the shared frames in place and accumulates a chunk of pixels at
+/// a time. The result depends only on the scene and the frame source, so preview, export
+/// and tests agree.
 pub(crate) fn video_frame(
     video: &mut dyn FrameSource,
     asset: &AssetId,
@@ -206,42 +241,70 @@ pub(crate) fn video_frame(
     if clip.source_taps.len() < 2 {
         return video.frame_at(asset, clip.source_time);
     }
-    // Per pixel: alpha-weighted colour sums and the alpha sum.
-    let mut sums: Vec<[u32; 4]> = Vec::new();
-    let (mut size, mut count) = ((0, 0), 0_u32);
+    // Distinct decoded frames with the number of taps each covers, in tap order.
+    let mut frames: Vec<(SharedFrame, Option<i64>, u32)> = Vec::new();
+    let mut size = None;
     for time in &clip.source_taps {
-        let Some(frame) = video.frame_at(asset, *time) else {
+        let index = video.frame_index(asset, *time);
+        if let Some(index) = index
+            && let Some(entry) = frames.iter_mut().find(|entry| entry.1 == Some(index))
+        {
+            entry.2 += 1;
+            continue;
+        }
+        let Some(frame) = video.shared_frame_at(asset, *time) else {
             continue;
         };
-        if frame.validate().is_err() {
+        let valid = frame.pixels.len() == frame.size.0 as usize * frame.size.1 as usize * 4
+            && check_size(frame.size).is_ok();
+        if !valid || size.is_some_and(|size| size != frame.size) {
             continue;
         }
-        if count == 0 {
-            size = frame.size;
-            sums = vec![[0; 4]; frame.pixels.len() / 4];
-        } else if frame.size != size {
-            continue;
+        size = Some(frame.size);
+        // Same allocation (a source returning one cached frame for nearby times).
+        if let Some(entry) = frames
+            .iter_mut()
+            .find(|entry| Arc::ptr_eq(&entry.0.pixels, &frame.pixels))
+        {
+            entry.2 += 1;
+        } else {
+            frames.push((frame, index, 1));
         }
-        for (sum, pixel) in sums.iter_mut().zip(frame.pixels.as_chunks::<4>().0) {
-            let alpha = u32::from(pixel[3]);
-            sum[0] += u32::from(pixel[0]) * alpha;
-            sum[1] += u32::from(pixel[1]) * alpha;
-            sum[2] += u32::from(pixel[2]) * alpha;
-            sum[3] += alpha;
-        }
-        count += 1;
     }
-    if count == 0 {
-        return None;
+    let size = size?;
+    if let [(only, ..)] = frames.as_slice() {
+        return Some(Frame {
+            size,
+            pixels: only.pixels.to_vec(),
+        });
     }
-    let mut pixels = Vec::with_capacity(sums.len() * 4);
-    for sum in &sums {
-        let alpha = sum[3];
-        for total in &sum[..3] {
-            let value = (total + alpha / 2).checked_div(alpha).unwrap_or(0);
-            pixels.push(u8::try_from(value).unwrap_or(u8::MAX));
+    let count: u32 = frames.iter().map(|entry| entry.2).sum();
+    let total = size.0 as usize * size.1 as usize;
+    let mut pixels = vec![0_u8; total * 4];
+    // Per pixel: alpha-weighted colour sums and the alpha sum, for one chunk at a time.
+    let mut sums = vec![[0_u32; 4]; BLEND_CHUNK_PIXELS.min(total)];
+    for (chunk_index, out) in pixels.chunks_mut(BLEND_CHUNK_PIXELS * 4).enumerate() {
+        let first = chunk_index * BLEND_CHUNK_PIXELS * 4;
+        let sums = &mut sums[..out.len() / 4];
+        sums.fill([0; 4]);
+        for (frame, _, weight) in &frames {
+            let source = &frame.pixels[first..first + out.len()];
+            for (sum, pixel) in sums.iter_mut().zip(source.as_chunks::<4>().0) {
+                let alpha = u32::from(pixel[3]) * weight;
+                sum[0] += u32::from(pixel[0]) * alpha;
+                sum[1] += u32::from(pixel[1]) * alpha;
+                sum[2] += u32::from(pixel[2]) * alpha;
+                sum[3] += alpha;
+            }
         }
-        pixels.push(u8::try_from((alpha + count / 2) / count).unwrap_or(u8::MAX));
+        for (sum, out) in sums.iter().zip(out.as_chunks_mut::<4>().0) {
+            let alpha = sum[3];
+            for (total, out) in sum[..3].iter().zip(&mut out[..3]) {
+                let value = (total + alpha / 2).checked_div(alpha).unwrap_or(0);
+                *out = u8::try_from(value).unwrap_or(u8::MAX);
+            }
+            out[3] = u8::try_from((alpha + count / 2) / count).unwrap_or(u8::MAX);
+        }
     }
     Some(Frame { size, pixels })
 }
@@ -266,21 +329,47 @@ impl FrameSource for animathio_media::MediaPool {
             pixels: frame.pixels.to_vec(),
         })
     }
+    fn shared_frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<SharedFrame> {
+        let frame = animathio_media::MediaPool::frame_at(self, asset.clone(), media_time).ok()?;
+        Some(SharedFrame {
+            size: (frame.width, frame.height),
+            pixels: frame.pixels.clone(),
+        })
+    }
+    fn frame_index(&mut self, asset: &AssetId, media_time: Time) -> Option<i64> {
+        let rate = self.info(asset)?.video?.frame_rate;
+        rate.time_to_frame(media_time, Rounding::Floor).ok()
+    }
 }
 
 struct AssetFrameSource {
     pool: animathio_media::MediaPool,
     pending: BTreeMap<AssetId, Arc<[u8]>>,
 }
-impl FrameSource for AssetFrameSource {
-    fn frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<Frame> {
+impl AssetFrameSource {
+    /// Register the asset's bytes with the pool on first use.
+    fn open(&mut self, asset: &AssetId) -> bool {
         if let Some(bytes) = self.pending.remove(asset)
             && let Err(error) = self.pool.add_bytes(asset.clone(), bytes)
         {
             eprintln!("video asset {asset:?}: {error}");
-            return None;
+            return false;
         }
-        FrameSource::frame_at(&mut self.pool, asset, media_time)
+        true
+    }
+}
+impl FrameSource for AssetFrameSource {
+    fn frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<Frame> {
+        self.open(asset)
+            .then(|| FrameSource::frame_at(&mut self.pool, asset, media_time))?
+    }
+    fn shared_frame_at(&mut self, asset: &AssetId, media_time: Time) -> Option<SharedFrame> {
+        self.open(asset)
+            .then(|| FrameSource::shared_frame_at(&mut self.pool, asset, media_time))?
+    }
+    fn frame_index(&mut self, asset: &AssetId, media_time: Time) -> Option<i64> {
+        self.open(asset)
+            .then(|| FrameSource::frame_index(&mut self.pool, asset, media_time))?
     }
 }
 
@@ -555,5 +644,129 @@ mod selection_tests {
         let selected = select_backend(BackendKind::Gpu, || Ok(CpuBackend::default()));
         assert_eq!(selected.kind, BackendKind::Gpu);
         assert!(selected.fallback.is_none());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+mod blend_bench {
+    use super::*;
+    use animathio_core::{ClipId, Fit, TrackId, Transform};
+
+    /// The previous blender, kept only to measure against: a `Vec<[u32; 4]>` of sums the
+    /// size of the frame, and every tap copied out of its source.
+    fn legacy(video: &mut dyn FrameSource, asset: &AssetId, clip: &SceneClip) -> Option<Frame> {
+        let mut sums: Vec<[u32; 4]> = Vec::new();
+        let (mut size, mut count) = ((0, 0), 0_u32);
+        for time in &clip.source_taps {
+            let frame = video.frame_at(asset, *time)?;
+            if count == 0 {
+                size = frame.size;
+                sums = vec![[0; 4]; frame.pixels.len() / 4];
+            }
+            for (sum, pixel) in sums.iter_mut().zip(frame.pixels.as_chunks::<4>().0) {
+                let alpha = u32::from(pixel[3]);
+                sum[0] += u32::from(pixel[0]) * alpha;
+                sum[1] += u32::from(pixel[1]) * alpha;
+                sum[2] += u32::from(pixel[2]) * alpha;
+                sum[3] += alpha;
+            }
+            count += 1;
+        }
+        let mut pixels = Vec::with_capacity(sums.len() * 4);
+        for sum in &sums {
+            let alpha = sum[3];
+            for total in &sum[..3] {
+                let value = (total + alpha / 2).checked_div(alpha).unwrap_or(0);
+                pixels.push(u8::try_from(value).unwrap_or(u8::MAX));
+            }
+            pixels.push(u8::try_from((alpha + count / 2) / count).unwrap_or(u8::MAX));
+        }
+        Some(Frame { size, pixels })
+    }
+
+    /// Distinct frames of one size held in `Arc`s, like the media pool's cache.
+    struct Pool {
+        size: Size,
+        frames: Vec<Arc<[u8]>>,
+    }
+    impl Pool {
+        fn new(size: Size, count: u8) -> Self {
+            let bytes = size.0 as usize * size.1 as usize * 4;
+            Self {
+                size,
+                frames: (0..count)
+                    .map(|n| {
+                        (0..bytes)
+                            .map(|i| (i as u8).wrapping_mul(7).wrapping_add(n.wrapping_mul(13)))
+                            .collect::<Vec<u8>>()
+                            .into()
+                    })
+                    .collect(),
+            }
+        }
+    }
+    impl FrameSource for Pool {
+        fn frame_at(&mut self, _: &AssetId, time: Time) -> Option<Frame> {
+            Some(Frame {
+                size: self.size,
+                pixels: self.frames[time.0 as usize].to_vec(),
+            })
+        }
+        fn shared_frame_at(&mut self, _: &AssetId, time: Time) -> Option<SharedFrame> {
+            Some(SharedFrame {
+                size: self.size,
+                pixels: self.frames[time.0 as usize].clone(),
+            })
+        }
+    }
+
+    fn clip() -> SceneClip {
+        SceneClip {
+            track: TrackId(0),
+            id: ClipId(0),
+            kind: ClipKind::Error(String::new()),
+            source_time: Time(0),
+            source_taps: (0..16).map(Time).collect(),
+            transform: Transform::default(),
+            fit: Fit::default(),
+            params: BTreeMap::new(),
+            effects: Vec::new(),
+            transition: None,
+        }
+    }
+
+    #[test]
+    fn blending_matches_the_previous_implementation_bit_for_bit() {
+        // A size that is not a multiple of the accumulator chunk, so the last chunk is short.
+        let mut pool = Pool::new((203, 97), 16);
+        let (clip, asset) = (clip(), AssetId::of(b"blend"));
+        let old = legacy(&mut pool, &asset, &clip).unwrap();
+        let new = video_frame(&mut pool, &asset, &clip).unwrap();
+        assert_eq!(old.size, new.size);
+        assert_eq!(old.pixels, new.pixels);
+    }
+
+    /// `cargo test -p animathio-render --release --lib -- --ignored --nocapture blend_cost`
+    #[test]
+    #[ignore = "timing measurement"]
+    fn blend_cost_of_one_16x_1080p_output_frame() {
+        let (clip, asset) = (clip(), AssetId::of(b"bench"));
+        let mut pool = Pool::new((1920, 1080), 16);
+        let time = |f: &mut dyn FnMut()| {
+            f(); // warm up
+            let start = std::time::Instant::now();
+            for _ in 0..5 {
+                f();
+            }
+            start.elapsed() / 5
+        };
+        let old = time(&mut || {
+            std::hint::black_box(legacy(&mut pool, &asset, &clip));
+        });
+        let new = time(&mut || {
+            std::hint::black_box(video_frame(&mut pool, &asset, &clip));
+        });
+        eprintln!("blend 16 taps at 1080p: previous {old:?}, now {new:?}");
     }
 }

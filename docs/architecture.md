@@ -833,8 +833,10 @@ frames reading that source frame, and ripples the tail and unlocked trailing
 clips. Each linked pair gets independently linked head, hold and tail segments.
 Audio holds are silent. Other clips spanning the insertion point are unchanged.
 
-Schema 8 adds `Clip::maintain_pitch`. New clips enable it; missing fields in
-schema 1–7 projects default to false, preserving the previous sound. The
+Schema 8 adds `Clip::maintain_pitch`. New clips enable it and so does the serde
+default for a schema-8 clip that lacks the field (the same as `Clip::new` and the v1
+importer); the 7 -> 8 migration writes `false` into every clip of an older project,
+preserving the previous sound. The
 serializable, invertible `Command::SetClipMaintainPitch` updates the clip and
 linked companions atomically; locked companions reject the edit.
 
@@ -845,7 +847,18 @@ WSOLA in `crates/audio/src/stretch.rs`, shared by preview and export. Native-rat
 within 5 ms of each exact source-clock anchor. All channels share the selected
 shift. Reverse reads the grains backwards; frame holds remain silent. Each
 64-hop segment reconstructs eight warm-up grains from a fixed entry point, and
-adjacent segments crossfade for one hop. A bounded 16 MiB cache only avoids
+adjacent segments crossfade for one hop. Two independent reconstructions of a tone
+differ by a phase, so crossfading them as they are would cancel it (a dip every 640
+ms): each segment is first slid onto its predecessor's tail by the lag (at most 5 ms,
+the smallest of the best-correlating ones) found from the two raw segments alone. The
+slide is full size at the join and ramps linearly to zero across the segment (a cubic
+read, a pitch change of lag over 30720 frames, under 0.8% and typically a few cents),
+so the next join sees an unshifted tail and no lag accumulates or depends on earlier
+segments: the result is still a pure function of the clip. Tests hold the per-hop RMS
+of stretched sine and chirp within 20% of the median across the resets, forward and
+reverse, at half and double speed. The cache key covers the source end the stretcher
+may read (the recorded `source_length`, or for a clock without one the integral to the
+clip's end), so a tail trim never reuses segments of the longer clip. A bounded 16 MiB cache only avoids
 recomputation: cold seeks, eviction and arbitrary request boundaries produce the
 same samples. Temporary memory and seek work are independent of asset length.
 This is a basic time stretcher: transients and extreme rates can produce artifacts;
@@ -861,11 +874,22 @@ larger than the budget is never cached and never flushes the rest).
 Video above 1x is filtered rather than decimated. `evaluate` gives each video
 `SceneClip` a `source_taps` list when the clip's source clock covers about two or
 more source frames per output frame: `round(speed)` source times (at most 16) spaced
-evenly across the output frame's interval, read through the exact retiming clock, so
-ramps and reverse work. The renderer (CPU and GPU preview alike) averages the frames
-due at those times with equal weight, alpha-weighted per pixel with integer rounding,
-a box filter over time that turns dropped-frame aliasing into motion blur. At or near
-1x, slow motion, holds and stills there are no taps and the path is the exact point
+evenly through an interval one output frame wide and centred on the frame's own time,
+read through the exact retiming clock, so ramps and reverse work (centred, so the
+average sits where the single point sample of 1x lies and the picture does not jump
+when the tap count goes from 1 to 2). The renderer (CPU and GPU preview alike) averages
+the frames due at those times, alpha-weighted per pixel with integer rounding, a box
+filter over time that turns dropped-frame aliasing into motion blur. A source reports
+which decoded frame each tap lands on (`FrameSource::frame_index`), and taps on the
+same frame are fetched once and weighted by their number, so a source slower than the
+taps costs less and the filter does not change; frames are read in place from the media
+pool's `Arc`s (`FrameSource::shared_frame_at`, no copy per tap) and summed a chunk of
+pixels at a time (no frame-sized accumulator). Known limit: the tap count follows the
+speed against the *project* frame rate because the project model holds no source frame
+rate; a source faster than the project (for example 60 fps footage at 2x in a 30 fps
+project) is therefore sampled by fewer taps than it has frames in the span and keeps
+some aliasing, and a variable-rate source's frame indices are nominal. At or near 1x,
+slow motion, holds and stills there are no taps and the path is the exact point
 sample. Output stays a pure function of the scene and the frame source.
 
 Identity rates retain the existing bit-exact mixer path with either setting.
@@ -876,7 +900,8 @@ The editor's `retime` module provides the Speed inspector section and exact
 percentage/frame-key parsing. The Speed/Duration dialog accepts constant speed,
 duration or ramp keys; editing duration quantizes the implied ratio to a millionth
 (and may differ by a tick/frame boundary). Existing subframe ramp keys survive an
-unchanged dialog submission. Ctrl+R opens the dialog from the timeline; the Rate
+unchanged dialog submission (keys are shown and compared on the clip's own clock, see
+below). Ctrl+R opens the dialog from the timeline; the Rate
 Stretch tool respects the clip pitch setting. Speed ramps have graphical handles on the
 timeline (see below). The CLI's
 `animathio-cli set-clip-speed` and `animathio-cli freeze-frame` and the MCP tools
@@ -885,16 +910,29 @@ route through the shared commands and source-limit guards. The CLI accepts
 `maintain_pitch`. Omitting the option preserves the clip setting. The inspector
 and Speed/Duration dialog expose a **Maintain pitch** checkbox.
 
-**Speed-ramp handles.** For the selected clip with ramp keys the timeline draws the
-speed curve (log scale, 6.25% to 1600%, a 100% guide in the middle) and a square handle
-per key (`apps/animathio/src/speed_ramp.rs` holds the geometry and commands). Dragging a
-handle moves the key in time (between its neighbours, at least one frame from each) and in
-speed (whole percent, magnetic at 100%); Alt-click a handle removes the key; Alt-click the
-selected clip adds a key at the pointer on the current curve, so nothing changes until it
-is dragged. Every gesture ends in exactly one `Command::SetClipSpeed` with the new key
-list, so it is one undo step, follows linked companions and passes the same source-limit
-and overlap checks as the dialog (no ripple). The clip's length changes with its curve;
-keys keep their clip-local times.
+**Speed-ramp handles.** For the selected clip the timeline draws a faint 100% guide
+and, when it has ramp keys, the speed curve (log scale, 6.25% to 1600%, 100% in the
+middle) and a square handle per key (`apps/animathio/src/speed_ramp.rs` holds the geometry
+and commands). Dragging a handle moves the key in time (between its neighbours, at least
+one frame from each) and in speed (whole percent, magnetic at 100%); Alt-click a handle
+removes the key; Alt-click the selected clip adds a key at the pointer on the current
+curve, and the inspector's **Add speed key at playhead** does the same at the playhead,
+so nothing changes until the new key is dragged (the speed is interpolated in millionth
+units, one rounding to the nearest unit). A press inside a trim-edge zone always trims
+(a key drawn on a clip edge is changed from the dialog), fade and keyframe handles come
+first too, a pointer outside the clip block never grabs a key and a clip row too short
+for the lane shows no keys and takes no Alt-click. Every gesture ends in exactly one
+`Command::SetClipSpeed` with the new key list, so it is one undo step, follows linked
+companions and passes the same source-limit and overlap checks as the dialog (no ripple).
+The clip's length changes with its curve.
+
+Keys live on the ramp's own clock (`ClipTimeMap::phase` ticks ahead of the clip, left by
+head trims and splits), so a key is drawn at `key.time - phase` and handles exist only
+for keys inside the clip. `SetClipSpeed` rebuilds the clock from the clip's first tick
+(phase zero), so the editor sends the keys rebased by `ClipTimeMap::local_ramps(length)`:
+keys outside the clip are dropped and exactly interpolated keys are put at the cut, which
+keeps the curve inside the clip unchanged; the Speed/Duration dialog shows and compares its
+ramp text the same way. The curve is evaluated by `ClipTimeMap::speed_at_curve`.
 
 ## Mathematical object workflow
 
