@@ -36,6 +36,7 @@ mod ripple;
 mod selection;
 mod speed_ramp;
 mod style;
+mod style_guard;
 mod subtitle_job;
 mod timecode;
 mod timeline;

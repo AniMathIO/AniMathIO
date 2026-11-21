@@ -1,4 +1,6 @@
 //! Math library and a reusable, draft-based object editor. Preview never mutates the project.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::assist::{AssistEvent, AssistPanel};
 use super::*;
 use crate::style::{self, color, hex};

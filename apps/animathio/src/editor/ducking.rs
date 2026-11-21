@@ -1,5 +1,7 @@
 //! "Auto duck…" panel: pick the voice source and music tracks, tune depth and ramps, review
 //! the ducked spans on the timeline, then apply one undoable batch of gain keyframes.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use crate::style;
 use animathio_control::{DuckParams, DuckProposal, duck_command, propose_duck, timecode};

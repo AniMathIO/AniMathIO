@@ -1,5 +1,6 @@
 //! Export Queue popover: opened from the status bar, View menu or the export
 //! dialog. Lists every job with progress, ETA, cancel, reveal/open and errors.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::export_queue::{JobState, format_duration, open_file, reveal};

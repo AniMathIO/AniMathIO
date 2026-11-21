@@ -1,6 +1,7 @@
 //! Caption style picker: used by the Generate subtitles dialog (chooses the look of the
 //! clips about to be created) and by the inspector for a selected caption (restyles every
 //! caption on its track as one `Command::Batch`, so undo is one step).
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style::{color, hex};

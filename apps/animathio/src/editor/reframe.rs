@@ -1,4 +1,6 @@
 //! Subject-aware auto-reframe settings and cancellable worker.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use animathio_control::{ReframeParams, analyse_reframe, reframe_command};
 use gpui_component::{

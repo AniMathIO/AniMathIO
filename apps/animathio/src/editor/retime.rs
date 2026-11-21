@@ -1,4 +1,6 @@
 //! Speed/Duration inspector and exact parsing of frame-based ramp keys.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use crate::style;
 use animathio_core::{ClipSpeed, FrameRate, SpeedPoint};

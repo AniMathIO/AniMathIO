@@ -1,4 +1,6 @@
 //! Title library cards, CPU thumbnail cache and linked text-field inspector.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use crate::style::{color, hex};
 use animathio_control::{TitleAddParams, title_preset_command, title_presets};

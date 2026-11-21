@@ -1,4 +1,5 @@
 //! Transport.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style::{self, color, hex, hexa};

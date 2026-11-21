@@ -8,6 +8,7 @@
 //! encode, hash and decode check run on a background task ("Saving recording…"); cancelling
 //! or replacing the project while it runs discards the take. Cancelling drops the audio and
 //! closes the device; the project is untouched until Stop.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style::{self, color, hex};

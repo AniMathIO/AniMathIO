@@ -3,6 +3,7 @@
 //! Presets come from loaded animation-preset plugins (`org.animathio.animations`).
 //! Applying one writes ordinary keyframes as a single `Command::Batch`, so the
 //! result renders without the plugin and one undo restores the previous keys.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style::{color, hex};

@@ -1,6 +1,7 @@
 //! Audio-effect chains in the inspector: list, add, remove, reorder, bypass and scrub the
 //! numeric parameters of a clip's audio effects. Every edit is a `Command` on the clip's
 //! `AudioChain`, so undo/redo, the control protocol and MCP see exactly the same changes.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use gpui_component::switch::Switch;
 
