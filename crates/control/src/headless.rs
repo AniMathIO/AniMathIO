@@ -1170,6 +1170,47 @@ mod tests {
     }
 
     #[test]
+    fn export_selects_webm_through_settings_and_rejects_a_clashing_name() {
+        let mut handler = text_project();
+        let dir = tempfile::tempdir().unwrap();
+        let webm = |output: PathBuf| {
+            let mut params = export_params(output, false);
+            params.settings.format = animathio_export::Format::Webm;
+            params
+        };
+        let output = dir.path().join("clip.webm");
+        handler
+            .handle(Call::Export {
+                params: webm(output.clone()),
+            })
+            .unwrap();
+        let bytes = fs::read(&output).unwrap();
+        assert!(bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "EBML header");
+
+        // The default format is MP4, so a `.webm` name without `settings.format` is refused
+        // (and so is the reverse), leaving nothing behind.
+        let clash = dir.path().join("other.webm");
+        let error = handler
+            .handle(Call::Export {
+                params: export_params(clash.clone(), false),
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("ends in .webm"), "{error}");
+        let error = handler
+            .handle(Call::Export {
+                params: webm(dir.path().join("other.mp4")),
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("ends in .mp4"), "{error}");
+        assert!(!clash.exists() && !dir.path().join("other.mp4").exists());
+
+        // Settings JSON from before the format field still means MP4.
+        let params: crate::method::ExportParams =
+            serde_json::from_value(serde_json::json!({"output": "x.mp4"})).unwrap();
+        assert_eq!(params.settings.format, animathio_export::Format::Mp4);
+    }
+
+    #[test]
     fn export_refuses_the_open_project_file_and_leaves_it_untouched() {
         let mut handler = text_project();
         let dir = tempfile::tempdir().unwrap();

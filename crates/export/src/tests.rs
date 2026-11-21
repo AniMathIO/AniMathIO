@@ -1,3 +1,14 @@
+#![allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::chunks_exact_to_as_chunks,
+    clippy::items_after_statements,
+    clippy::similar_names,
+    clippy::too_many_lines
+)]
+
 use super::*;
 use animathio_core::{Asset, Clip, ClipId, Command, Track, TrackId};
 use std::process::Command as Process;
@@ -661,4 +672,452 @@ fn settings_without_the_chapter_field_default_to_embedding() {
     let off: Settings =
         serde_json::from_str(r#"{"frame_rate":null,"crf":20.0,"embed_chapters":false}"#).unwrap();
     assert!(!off.embed_chapters);
+}
+
+// WebM (VP9 + Opus) export through the same pipeline.
+
+fn webm_settings() -> Settings {
+    Settings {
+        format: Format::Webm,
+        ..Settings::default()
+    }
+}
+
+fn psnr_rgba(a: &[u8], b: &[u8]) -> f64 {
+    assert_eq!(a.len(), b.len());
+    let mse = a
+        .chunks_exact(4)
+        .zip(b.chunks_exact(4))
+        .flat_map(|(x, y)| (0..3).map(move |c| f64::from(x[c]) - f64::from(y[c])))
+        .map(|d| d * d)
+        .sum::<f64>()
+        / (a.len() / 4 * 3) as f64;
+    if mse == 0.0 {
+        999.0
+    } else {
+        10.0 * (255.0_f64 * 255.0 / mse).log10()
+    }
+}
+
+#[test]
+fn webm_export_decodes_to_the_preview_frames_and_the_mixed_audio() {
+    use animathio_media::{Matrix, MediaKind};
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), duration(&project)).unwrap();
+    let mut events = Vec::new();
+    let bytes = export_with_plugins(&project, &assets, range, webm_settings(), |p| {
+        events.push(p);
+        true
+    })
+    .unwrap();
+    assert_eq!(
+        events.first(),
+        Some(&Progress {
+            completed: 0,
+            total: 60
+        })
+    );
+    assert_eq!(
+        events.last(),
+        Some(&Progress {
+            completed: 60,
+            total: 60
+        })
+    );
+    assert!(bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "EBML header");
+
+    let backend = FilmCraftBackend::new();
+    let shared: Arc<[u8]> = Arc::from(bytes.clone());
+    let info = backend.probe_bytes("export.webm", shared.clone()).unwrap();
+    assert_eq!(info.kind, MediaKind::Movie);
+    assert_eq!(info.container, "WebM");
+    let video_info = info.video.clone().unwrap();
+    assert_eq!((video_info.width, video_info.height), (160, 90));
+    assert_eq!(video_info.codec, "VP9");
+    assert_eq!(video_info.color.matrix, Matrix::Bt709);
+    assert_eq!(info.audio.len(), 1);
+    assert_eq!(info.audio[0].sample_rate, 48_000);
+    assert_eq!(info.audio[0].channels, 2);
+    assert!(info.audio[0].codec.to_lowercase().contains("opus"));
+    // The video ends at 2 s; the audio track may run up to one 20 ms Opus packet longer (the
+    // flushed encoder lag plus padding of the last packet; WebM has no DiscardPadding here).
+    let half_frame = TICKS_PER_SECOND / 60;
+    let opus_packet = TICKS_PER_SECOND / 50;
+    assert!(
+        info.duration.0 >= 2 * TICKS_PER_SECOND - half_frame
+            && info.duration.0 <= 2 * TICKS_PER_SECOND + opus_packet,
+        "duration {}",
+        info.duration.0
+    );
+
+    // Frame n of the file is frame n of the preview renderer. Both codecs are lossy, and the
+    // decode path has its own colour rounding, so the bar is the MP4 export of the same project.
+    let mp4 = export_with_plugins(&project, &assets, range, Settings::default(), |_| true).unwrap();
+    let mp4_decoder = backend
+        .open_video_bytes("export.mp4", Arc::from(mp4))
+        .unwrap();
+    let decoder = backend
+        .open_video_bytes("export.webm", shared.clone())
+        .unwrap();
+    let mut preview = RenderCtx::from_assets(assets.clone()).unwrap();
+    let rate = project.frame_rate();
+    for index in [0_i64, 1, 29, 30, 58, 59] {
+        let time = rate.frame_to_time(index, Rounding::Nearest).unwrap();
+        let expected = render(
+            &animathio_plugin_host::test_support::resolve(&evaluate(&project, time), (160, 90)),
+            &mut preview,
+            (160, 90),
+        )
+        .unwrap();
+        let decoded = decoder.frame_at(time).unwrap();
+        assert_eq!((decoded.width, decoded.height), (160, 90));
+        let psnr = psnr_rgba(&decoded.pixels, &expected.pixels);
+        let mp4_psnr = psnr_rgba(
+            &mp4_decoder.frame_at(time).unwrap().pixels,
+            &expected.pixels,
+        );
+        assert!(
+            psnr > 20.0 && psnr + 1.5 >= mp4_psnr,
+            "frame {index}: WebM PSNR {psnr:.1} dB vs MP4 {mp4_psnr:.1} dB"
+        );
+    }
+
+    // The container carries 60 video frames and one Opus packet per 20 ms (plus one that flushes
+    // the encoder lag), ascending in time.
+    let mut demuxer = filmcraft_matroska::Demuxer::from_slice(&bytes).unwrap();
+    let delay = demuxer
+        .tracks()
+        .iter()
+        .find(|t| t.kind == filmcraft_matroska::TrackKind::Audio)
+        .unwrap()
+        .codec_delay_ns as i64;
+    let (mut video, mut audio, mut last) = (0, 0, i64::MIN / 2);
+    while let Some(packet) = demuxer.next_packet().unwrap() {
+        let is_audio = demuxer.tracks()[packet.track].kind == filmcraft_matroska::TrackKind::Audio;
+        let stored = packet.pts_ns + if is_audio { delay } else { 0 };
+        assert!(stored >= last - 500_000, "packets out of order");
+        last = last.max(stored);
+        if is_audio {
+            audio += 1;
+        } else {
+            video += 1;
+        }
+    }
+    assert_eq!((video, audio), (60, 101));
+
+    // Audio: the decoded stream is the mixer's output (same lattice, pre-skip honoured), and the
+    // timestamps line up: no lag between the decoded and the reference samples.
+    let mut reference = Vec::new();
+    Exporter::new(&project, &assets)
+        .unwrap()
+        .encode_frames(
+            &project,
+            range,
+            rate,
+            &mut |_| true,
+            &mut |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
+            |_, pcm| {
+                reference.extend_from_slice(&pcm);
+                Ok(())
+            },
+        )
+        .unwrap();
+    let decoded = backend
+        .open_audio_bytes("export.webm", shared)
+        .unwrap()
+        .samples(Time(0), 96_000)
+        .unwrap();
+    assert_eq!(decoded.len(), reference.len());
+    let energy = |lag: i64| {
+        let (mut signal, mut error) = (0.0_f64, 0.0_f64);
+        for n in 2_000..94_000_i64 {
+            let want = f64::from(reference[n as usize]);
+            let got = f64::from(decoded[(n + lag) as usize]);
+            signal += want * want;
+            error += (want - got) * (want - got);
+        }
+        (signal, error)
+    };
+    let (signal, error) = energy(0);
+    assert!(signal > 1.0, "the fixture audio is not silent");
+    let snr = 10.0 * (signal / error).log10();
+    assert!(snr > 10.0, "decoded audio SNR {snr:.1} dB");
+    for lag in [-96_i64, -48, -8, 8, 48, 96] {
+        assert!(energy(lag).1 > error, "lag {lag} fits better than zero lag");
+    }
+}
+
+#[test]
+fn webm_export_is_deterministic_and_pipelined_equals_serial() {
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 5)).unwrap();
+    let rate = project.frame_rate();
+    let mut serial = Exporter::new(&project, &assets).unwrap();
+    let mut encoder = WebmEncoder::new(EncoderConfig::with_audio(
+        VideoConfig::new(160, 90, rate),
+        AudioConfig::new(48_000, 2, 128_000),
+    ))
+    .unwrap();
+    serial
+        .encode_frames(
+            &project,
+            range,
+            rate,
+            &mut |_| true,
+            &mut |scene| animathio_plugin_host::test_support::resolve(&scene, (160, 90)),
+            |frame, pcm| {
+                encoder.encode_video_frame(&frame.pixels)?;
+                encoder.encode_audio(&pcm)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let expected = encoder.finish().unwrap();
+    let first = export_with_plugins(&project, &assets, range, webm_settings(), |_| true).unwrap();
+    let second = export_with_plugins(&project, &assets, range, webm_settings(), |_| true).unwrap();
+    assert_eq!(first, expected);
+    assert_eq!(second, expected);
+}
+
+#[test]
+fn webm_export_to_file_is_atomic_and_cancellable() {
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 3)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("nested/clip.webm");
+    let error = export_file_with_plugins(
+        &project,
+        &assets,
+        range,
+        webm_settings(),
+        &Destination::new(&output),
+        |progress| progress.completed < 2,
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Cancelled), "{error:?}");
+    assert!(!output.exists());
+    assert_eq!(
+        entries(output.parent().unwrap()).len(),
+        0,
+        "no temp file survives"
+    );
+
+    let path = export_file_with_plugins(
+        &project,
+        &assets,
+        range,
+        webm_settings(),
+        &Destination::new(&output),
+        |_| true,
+    )
+    .unwrap();
+    assert_eq!(path, output);
+    assert_eq!(entries(output.parent().unwrap()), vec![output.clone()]);
+    let info = FilmCraftBackend::new().probe(&output).unwrap();
+    assert_eq!(info.container, "WebM");
+    assert_eq!(info.video.unwrap().codec, "VP9");
+    let rejected = export_file_with_plugins(
+        &project,
+        &assets,
+        range,
+        webm_settings(),
+        &Destination::new(&output),
+        |_| true,
+    );
+    assert!(
+        matches!(rejected, Err(Error::AlreadyExists(_))),
+        "{rejected:?}"
+    );
+}
+
+#[test]
+fn format_and_file_extension_must_agree() {
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 10)).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    for (name, settings, wanted) in [
+        ("clip.webm", Settings::default(), "ends in .webm"),
+        ("clip.MP4", webm_settings(), "ends in .mp4"),
+    ] {
+        let output = dir.path().join(name);
+        let error = export_file_with_plugins(
+            &project,
+            &assets,
+            range,
+            settings,
+            &Destination::new(&output),
+            |_| true,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&error, Error::Invalid(message) if message.contains(wanted)),
+            "{error:?}"
+        );
+        assert!(!output.exists());
+    }
+    assert_eq!(entries(dir.path()).len(), 0);
+
+    use std::path::Path;
+    assert_eq!(Format::for_path(Path::new("a/b.WebM")), Some(Format::Webm));
+    assert_eq!(Format::for_path(Path::new("b.mp4")), Some(Format::Mp4));
+    assert_eq!(Format::for_path(Path::new("b.mov")), None);
+    assert_eq!(
+        Format::resolve(None, Path::new("b.webm")).unwrap(),
+        Format::Webm
+    );
+    assert_eq!(Format::resolve(None, Path::new("b")).unwrap(), Format::Mp4);
+    assert_eq!(
+        Format::resolve(Some(Format::Webm), Path::new("b.mkv")).unwrap(),
+        Format::Webm
+    );
+    assert!(Format::resolve(Some(Format::Mp4), Path::new("b.webm")).is_err());
+    assert_eq!("WEBM".parse::<Format>().unwrap(), Format::Webm);
+    assert!(
+        matches!("avi".parse::<Format>(), Err(Error::Invalid(m)) if m.contains("mp4 and webm"))
+    );
+}
+
+#[test]
+fn settings_format_defaults_to_mp4_and_round_trips() {
+    let old: Settings = serde_json::from_str(r#"{"frame_rate":null,"crf":20.0}"#).unwrap();
+    assert_eq!(old.format, Format::Mp4);
+    let webm: Settings =
+        serde_json::from_str(r#"{"frame_rate":null,"crf":20.0,"format":"webm"}"#).unwrap();
+    assert_eq!(webm.format, Format::Webm);
+    assert_eq!(
+        serde_json::to_value(webm).unwrap()["format"],
+        serde_json::json!("webm")
+    );
+    assert!(
+        serde_json::from_str::<Settings>(r#"{"frame_rate":null,"crf":20.0,"format":"avi"}"#)
+            .is_err()
+    );
+}
+
+#[test]
+fn webm_carries_no_chapters_and_ignores_the_setting() {
+    let (mut project, assets) = project();
+    add_marker(&mut project, 1, 500, "Intro");
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 2)).unwrap();
+    let with = export_with_plugins(&project, &assets, range, webm_settings(), |_| true).unwrap();
+    let without = export_with_plugins(
+        &project,
+        &assets,
+        range,
+        Settings {
+            embed_chapters: false,
+            ..webm_settings()
+        },
+        |_| true,
+    )
+    .unwrap();
+    assert_eq!(with, without);
+    assert!(chapters::read_chpl(&with).is_none());
+}
+
+#[test]
+fn webm_rejects_odd_dimensions_with_a_clear_error() {
+    let (mut project, assets) = project();
+    Command::SetSettings {
+        width: 161,
+        height: 91,
+        frame_rate: project.frame_rate(),
+        background: [0, 0, 0, 255],
+        duration: project.duration(),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 10)).unwrap();
+    let error =
+        export_with_plugins(&project, &assets, range, webm_settings(), |_| true).unwrap_err();
+    assert!(error.to_string().contains("even"), "{error}");
+}
+
+#[test]
+fn webm_export_decodes_cleanly_with_libvpx_and_libopus_when_ffmpeg_is_installed() {
+    // ffmpeg is only a decoder oracle here (the export never runs it); skipped when absent.
+    let Ok(version) = Process::new("ffprobe").arg("-version").output() else {
+        eprintln!("ffprobe absent; independent WebM decode check skipped");
+        return;
+    };
+    assert!(version.status.success());
+    let (project, assets) = project();
+    let range = TimeRange::new(Time(0), duration(&project)).unwrap();
+    let bytes = export_with_plugins(&project, &assets, range, webm_settings(), |_| true).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("export.webm");
+    std::fs::write(&path, &bytes).unwrap();
+    let probe = Process::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-count_frames",
+            "-show_streams",
+            "-show_format",
+            "-of",
+            "json",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        probe.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probe.stderr)
+    );
+    let probe: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+    let streams = probe["streams"].as_array().unwrap();
+    let video = streams.iter().find(|s| s["codec_type"] == "video").unwrap();
+    let audio = streams.iter().find(|s| s["codec_type"] == "audio").unwrap();
+    assert_eq!(video["codec_name"], "vp9");
+    assert_eq!(audio["codec_name"], "opus");
+    assert_eq!(video["nb_read_frames"], "60");
+    assert_eq!(video["color_space"], "bt709");
+    let seconds = |v: &serde_json::Value| v.as_str().unwrap().parse::<f64>().unwrap();
+    assert!((seconds(&probe["format"]["duration"]) - 2.0).abs() <= 0.02);
+    assert!(seconds(&video["start_time"]).abs() <= 0.001);
+    // Newer ffmpeg applies the Opus CodecDelay to the start time (0); older releases report the
+    // first packet's timestamp, one pre-skip (2.5 ms, printed as -0.003) before zero. Either way it is
+    // not later.
+    let audio_start = seconds(&audio["start_time"]);
+    assert!(
+        (-0.0035..=0.001).contains(&audio_start),
+        "audio start_time {audio_start}"
+    );
+    // Both streams decode end to end without a single warning.
+    let decode = Process::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(&path)
+        .args(["-f", "null", "-"])
+        .output()
+        .unwrap();
+    assert!(decode.status.success());
+    if !decode.stderr.is_empty() {
+        // Name the offending packets: index, timestamp, size and the first bytes (the Opus TOC).
+        let mut demuxer = filmcraft_matroska::Demuxer::from_slice(&bytes).unwrap();
+        let mut packets = Vec::new();
+        let mut index = 0;
+        while let Some(packet) = demuxer.next_packet().unwrap() {
+            if demuxer.tracks()[packet.track].kind == filmcraft_matroska::TrackKind::Audio {
+                let head: Vec<String> = packet
+                    .data
+                    .iter()
+                    .take(4)
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                packets.push(format!(
+                    "#{index} pts {} ns len {} [{}]",
+                    packet.pts_ns,
+                    packet.data.len(),
+                    head.join(" ")
+                ));
+                index += 1;
+            }
+        }
+        panic!(
+            "{}\naudio packets:\n{}",
+            String::from_utf8_lossy(&decode.stderr),
+            packets.join("\n")
+        );
+    }
 }

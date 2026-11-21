@@ -1,4 +1,4 @@
-//! Production media runtime: probing, decoding, pooling and MP4 export.
+//! Production media runtime: probing, decoding, pooling and MP4 / WebM export.
 //!
 //! FilmCraft is the primary backend; the [`MediaBackend`] trait is ready for a future FFmpeg
 //! fallback. The [`MediaPool`] is the engine-owned resource pool keyed by [`AssetId`]: it owns
@@ -27,6 +27,7 @@ mod info;
 pub mod limits;
 mod pool;
 mod time;
+mod webm;
 
 pub use backend::{AudioDecoder, FilmCraftBackend, MediaBackend, VideoDecoder};
 pub use color::{ColorInfo, ColorRange, Matrix, Primaries, Transfer};
@@ -34,6 +35,7 @@ pub use encoder::{AudioConfig, EncoderConfig, Mp4Encoder, Quality, VideoConfig};
 pub use frame::Frame;
 pub use info::{AudioStreamInfo, MediaInfo, MediaKind, VideoStreamInfo};
 pub use pool::{MediaPool, MediaPoolConfig};
+pub use webm::WebmEncoder;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 

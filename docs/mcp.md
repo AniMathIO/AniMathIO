@@ -88,7 +88,7 @@ surfaced by `animathio-cli mcp` without protocol changes.
 | `command.apply` | `{ command }` | — (applied through the shared history) |
 | `history.undo` / `history.redo` | — | whether an edit was undone/redone |
 | `render.frame` | `{ params: { time, width, height, output? } }` | `{ size, base64?, path? }` |
-| `export` | `{ params: { output, from?, to?, settings?, overwrite? } }` | destination path (after completion); `settings` is `{ frame_rate?, crf, embed_chapters? }` and `embed_chapters` (default `true`) embeds the markers in the range as MP4 chapters |
+| `export` | `{ params: { output, from?, to?, settings?, overwrite? } }` | destination path (after completion); `settings` is `{ frame_rate?, crf, embed_chapters?, format? }`; `format` is `"mp4"` (default, H.264 + AAC) or `"webm"` (VP9 + Opus), and a `.mp4`/`.webm` file name that contradicts it is an error; `embed_chapters` (default `true`) embeds the markers in the range as MP4 chapters (WebM carries none) |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
 | `media.add` | `{ path }` | track_id, clip_id; bounded import and placement in one undo step, with a single video/audio probe before retaining bytes. The clip takes the probed media length (images: the project duration, else three seconds); placing a file that is already in the project reuses its asset |
@@ -137,7 +137,7 @@ writer creates them — but their nearest existing ancestor must be a directory.
 unless `overwrite` is `true`, and refuses an output that names the open project
 file with `invalid path: the output path is the open project file; choose a
 different file name` (both handlers: the connected editor and the headless
-`--project` mode), and writes the MP4 through a temporary file in the
+`--project` mode), and writes the video through a temporary file in the
 destination directory that is renamed into place only on success, so a cancelled
 or failed export never leaves a partial file. Control math/graph positions are
 normalized canvas fractions and their colors are `[r, g, b, a]` bytes. Durations
@@ -194,7 +194,7 @@ clears its undo history.
 | `set_playing` | Start / pause playback | |
 | `save_project` | Save to a path, or overwrite the current file | |
 | `render_frame` | Render one frame to PNG | base64 return, or written to a path |
-| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; `embed_chapters` (default `true`) embeds the markers as MP4 chapters; creates missing parent directories; requires `overwrite: true` to replace an existing file; refuses an output that is the open project file; returns the written path |
+| `export_video` | Export an offline MP4 (H.264 + AAC) or WebM (VP9 + Opus) | `format` is `mp4` or `webm`; when omitted a `.webm` path selects `webm`, otherwise `mp4`; a format that contradicts a `.mp4`/`.webm` file name is rejected; `embed_chapters` (default `true`) embeds the markers as MP4 chapters and is ignored for WebM; creates missing parent directories; requires `overwrite: true` to replace an existing file; refuses an output that is the open project file; returns the written path |
 | `import_v1` | Import a v1 `.animathio` project, replacing the current one | |
 | `add_transition` | Add a transition on the cut between two adjacent clips | `kind`: `cross_dissolve` (default), `dip_to_black`, `dip_to_white`, `wipe` (+ `direction`: `left_to_right`/`right_to_left`/`top_to_bottom`/`bottom_to_top`); edit point by `between_clip_a` + `clip_b`, or by the nearest cut to `at_time_ms` (optionally on `track`); `duration_ms` is centred on the cut |
 | `list_transitions` | List transitions | id, track, clips, kind, `cut_ms`, `duration_ms` |
@@ -439,7 +439,7 @@ chapter at 0:00, markers closer than `min_length_ms` merged), `vtt` (WebVTT chap
 chapters.ffmeta -map_metadata 1 -codec copy out.mp4`).
 
 `export` and `export_video` also embed the markers inside the exported range in the MP4
-itself, as a Nero `chpl` chapter list in `moov/udta` (read by VLC, mpv and FFmpeg), unless
+itself (MP4 only; WebM output has no chapter support, use the sidecar formats above), as a Nero `chpl` chapter list in `moov/udta` (read by VLC, mpv and FFmpeg), unless
 `settings.embed_chapters` / `embed_chapters` is `false`. Chapter times are relative to the
 start of the exported range; an unnamed marker becomes `Chapter N`, where `N` is its
 position among all the project's markers by time (markers outside the range still count, so

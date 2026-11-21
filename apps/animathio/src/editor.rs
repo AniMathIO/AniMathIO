@@ -834,8 +834,15 @@ impl Editor {
                     });
                 });
             }
+            // The Export dialog (needs a project with clips; it opens on the next turn, like math).
+            "export" => {
+                let editor = cx.entity();
+                window.defer(cx, move |window, cx| {
+                    editor.update(cx, |editor, cx| editor.open_export_dialog(window, cx));
+                });
+            }
             _ => eprintln!(
-                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins, plugins-browse, media, record, titles, effects, elements or math"
+                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins, plugins-browse, media, record, titles, effects, elements, math or export"
             ),
         }
     }

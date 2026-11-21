@@ -57,10 +57,10 @@ pub struct RenderFrameResult {
     pub path: Option<String>,
 }
 
-/// Offline MP4 export arguments. All times are integer timeline ticks.
+/// Offline video export arguments. All times are integer timeline ticks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExportParams {
-    /// Destination MP4 file.
+    /// Destination video file; a `.mp4` or `.webm` name must match `settings.format`.
     pub output: PathBuf,
     /// Inclusive start, default zero.
     #[serde(default)]
@@ -68,7 +68,7 @@ pub struct ExportParams {
     /// Exclusive end, default project duration.
     #[serde(default)]
     pub to: Option<Time>,
-    /// Encoding quality and optional rational frame rate.
+    /// Container (`format`: `mp4` default or `webm`), encoding quality and optional rational frame rate.
     #[serde(default)]
     pub settings: animathio_export::Settings,
     /// Replace an existing output file instead of failing with `AlreadyExists`.

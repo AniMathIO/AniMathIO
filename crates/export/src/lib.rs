@@ -1,6 +1,7 @@
-//! Offline frame-stepped H.264/AAC export using the preview renderer and audio mixer.
+//! Offline frame-stepped export (H.264/AAC MP4 or VP9/Opus `WebM`) using the preview renderer and
+//! audio mixer.
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use animathio_audio::{AudioPool, Mixer};
@@ -10,6 +11,7 @@ use animathio_core::{
 };
 use animathio_media::{
     AudioConfig, EncoderConfig, FilmCraftBackend, MediaBackend, Mp4Encoder, Quality, VideoConfig,
+    WebmEncoder,
 };
 use animathio_render::{Frame, RenderCtx, render};
 use serde::{Deserialize, Serialize};
@@ -23,10 +25,113 @@ pub use chapters::{ChapterError, MAX_CHAPTERS, embed_chapters};
 
 pub use output::AtomicOutput;
 
-/// Where an offline export writes its MP4.
+/// Output container and codecs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Format {
+    /// MP4 with H.264 video and AAC audio (the default). Can embed chapters.
+    #[default]
+    Mp4,
+    /// `WebM` with VP9 video and Opus audio. No chapters.
+    Webm,
+}
+
+impl Format {
+    /// Every format, in selector order.
+    pub const ALL: [Self; 2] = [Self::Mp4, Self::Webm];
+
+    /// Stable lowercase name used in JSON, the CLI and MCP (`mp4`, `webm`); also the file extension.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Mp4 => "mp4",
+            Self::Webm => "webm",
+        }
+    }
+
+    /// File extension without the dot.
+    #[must_use]
+    pub const fn extension(self) -> &'static str {
+        self.name()
+    }
+
+    /// Human-readable choice for selectors.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Mp4 => "MP4 (H.264 + AAC)",
+            Self::Webm => "WebM (VP9 + Opus)",
+        }
+    }
+
+    /// Whether timeline markers can be embedded as chapters in this container.
+    #[must_use]
+    pub const fn supports_chapters(self) -> bool {
+        matches!(self, Self::Mp4)
+    }
+
+    /// The format a file name asks for, from its extension (`.mp4`, `.webm`, any case).
+    #[must_use]
+    pub fn for_path(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?;
+        Self::ALL
+            .into_iter()
+            .find(|format| format.extension().eq_ignore_ascii_case(extension))
+    }
+
+    /// Resolve an optional explicit choice against the output path: an explicit format wins and
+    /// must agree with a `.mp4`/`.webm` extension, otherwise the extension picks the format and
+    /// MP4 is the default.
+    pub fn resolve(explicit: Option<Self>, path: &Path) -> Result<Self, Error> {
+        match explicit {
+            Some(format) => {
+                format.check_path(path)?;
+                Ok(format)
+            }
+            None => Ok(Self::for_path(path).unwrap_or_default()),
+        }
+    }
+
+    /// Fail when `path` ends in the extension of the other format.
+    pub fn check_path(self, path: &Path) -> Result<(), Error> {
+        match Self::for_path(path) {
+            Some(other) if other != self => Err(Error::Invalid(format!(
+                "the output file ends in .{} but the export format is {}; use a .{} file name or choose {}",
+                other.extension(),
+                self.name(),
+                self.extension(),
+                other.name(),
+            ))),
+            _ => Ok(()),
+        }
+    }
+}
+
+impl std::fmt::Display for Format {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl std::str::FromStr for Format {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self, Error> {
+        Self::ALL
+            .into_iter()
+            .find(|format| format.name().eq_ignore_ascii_case(value.trim()))
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "unknown export format '{value}'; supported formats are mp4 and webm"
+                ))
+            })
+    }
+}
+
+/// Where an offline export writes its video file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Destination {
-    /// Final MP4 path; missing parent directories are created.
+    /// Final output path; missing parent directories are created.
     pub path: PathBuf,
     /// Replace an existing file instead of failing with [`Error::AlreadyExists`].
     pub overwrite: bool,
@@ -95,12 +200,16 @@ pub enum Error {
 pub struct Settings {
     /// Override the project frame rate, including rational NTSC rates.
     pub frame_rate: Option<FrameRate>,
-    /// Constant quality, 0..=51 (lower is better).
+    /// Constant quality, 0..=51 (lower is better). The same scale for both formats.
     pub crf: f32,
     /// Embed the timeline markers inside the exported range as a Nero `chpl` chapter list
-    /// (at most [`MAX_CHAPTERS`]). Nothing is written when no marker is in range.
+    /// (at most [`MAX_CHAPTERS`]). Nothing is written when no marker is in range. MP4 only:
+    /// `WebM` output carries no chapters and ignores this.
     #[serde(default = "default_embed_chapters")]
     pub embed_chapters: bool,
+    /// Output container and codecs.
+    #[serde(default)]
+    pub format: Format,
 }
 
 fn default_embed_chapters() -> bool {
@@ -113,6 +222,7 @@ impl Default for Settings {
             frame_rate: None,
             crf: 23.0,
             embed_chapters: true,
+            format: Format::Mp4,
         }
     }
 }
@@ -242,10 +352,7 @@ impl Exporter {
         }) {
             return Err(Error::Cancelled);
         }
-        let mut encoder = Mp4Encoder::new(EncoderConfig::with_audio(
-            video,
-            AudioConfig::new(48_000, 2, 128_000),
-        ))?;
+        let mut encoder = FormatEncoder::new(settings.format, video)?;
         // One queued frame bounds memory while rendering overlaps encoding. The
         // worker receives owned buffers, preserving frame/audio order without copies.
         std::thread::scope(|scope| {
@@ -295,7 +402,7 @@ impl Exporter {
             }) {
                 return Err(Error::Cancelled);
             }
-            if settings.embed_chapters {
+            if settings.embed_chapters && settings.format.supports_chapters() {
                 Ok(embed_chapters(bytes, project.markers(), range)?)
             } else {
                 Ok(bytes)
@@ -307,7 +414,8 @@ impl Exporter {
     ///
     /// Missing parent directories are created and an existing file is only
     /// replaced when `destination.overwrite` is set; otherwise the job fails
-    /// with [`Error::AlreadyExists`]. The MP4 is written to a temporary file
+    /// with [`Error::AlreadyExists`]. A `.mp4` or `.webm` destination must match
+    /// `settings.format` (see [`Format::resolve`]). The file is written to a temporary file
     /// next to the destination and renamed into place on success, so a failed
     /// or cancelled export leaves no partial output (and no temp file) behind.
     pub fn export_to_file(
@@ -319,6 +427,7 @@ impl Exporter {
         progress: impl FnMut(Progress) -> bool,
         resolve: impl FnMut(Scene) -> Scene,
     ) -> Result<PathBuf, Error> {
+        settings.format.check_path(&destination.path)?;
         let mut output = AtomicOutput::create(&destination.path, destination.overwrite)?;
         let bytes = self.export(project, range, settings, progress, resolve)?;
         output.write_all(&bytes)?;
@@ -365,6 +474,44 @@ impl Exporter {
             }
         }
         Ok(())
+    }
+}
+
+/// The selected container's encoder behind one interface.
+enum FormatEncoder {
+    Mp4(Box<Mp4Encoder>),
+    Webm(Box<WebmEncoder>),
+}
+
+impl FormatEncoder {
+    /// 48 kHz stereo audio at 128 kbit/s in both containers.
+    fn new(format: Format, video: VideoConfig) -> Result<Self, Error> {
+        let config = EncoderConfig::with_audio(video, AudioConfig::new(48_000, 2, 128_000));
+        Ok(match format {
+            Format::Mp4 => Self::Mp4(Box::new(Mp4Encoder::new(config)?)),
+            Format::Webm => Self::Webm(Box::new(WebmEncoder::new(config)?)),
+        })
+    }
+
+    fn encode_video_frame(&mut self, rgba: &[u8]) -> Result<(), animathio_media::MediaError> {
+        match self {
+            Self::Mp4(encoder) => encoder.encode_video_frame(rgba),
+            Self::Webm(encoder) => encoder.encode_video_frame(rgba),
+        }
+    }
+
+    fn encode_audio(&mut self, interleaved: &[f32]) -> Result<(), animathio_media::MediaError> {
+        match self {
+            Self::Mp4(encoder) => encoder.encode_audio(interleaved),
+            Self::Webm(encoder) => encoder.encode_audio(interleaved),
+        }
+    }
+
+    fn finish(self) -> Result<Vec<u8>, animathio_media::MediaError> {
+        match self {
+            Self::Mp4(encoder) => encoder.finish(),
+            Self::Webm(encoder) => encoder.finish(),
+        }
     }
 }
 
