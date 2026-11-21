@@ -109,6 +109,15 @@ jobs:
       - name: Sub-workspace lockfiles
         if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-plz-'))
         run: scripts/sync-sub-lockfiles.sh --check
+      # The offline Flatpak build vendors every crate from
+      # packaging/flatpak/cargo-sources.json, so a lockfile change (a Renovate
+      # bump, a new dependency) without regenerating it breaks that build only
+      # when the slow Flatpak workflow next runs. Compare the file with every
+      # lockfile on each non-docs run (lockfiles are never docs-only changes);
+      # the fix command is printed on failure. Needs only python3.
+      - name: Flatpak cargo sources
+        if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
+        run: python3 scripts/check-flatpak-sources.py
       - name: Install Linux development headers
         if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         run: |
