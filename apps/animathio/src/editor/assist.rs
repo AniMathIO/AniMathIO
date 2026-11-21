@@ -23,6 +23,13 @@ use gpui_component::{ActiveTheme, Disableable, Sizable};
 use crate::icons::{self, IconName};
 use crate::style::{self, color, hex};
 
+/// Whether the "Describe in words" disclosure was left open; remembered for the app's lifetime
+/// (an app global, so separate test windows never share it) so a user who works with it does not
+/// reopen it on every dialog.
+struct AssistOpenMemory(bool);
+
+impl Global for AssistOpenMemory {}
+
 /// The converter the editor was built with ([`crate::editor_env::EditorEnv::assist`]).
 pub(super) struct AssistBackend(pub(super) Arc<dyn Converter>);
 
@@ -108,6 +115,9 @@ pub(super) struct AssistPanel {
     model: Entity<InputState>,
     api_key: Entity<InputState>,
     setup_open: bool,
+    /// The disclosure is closed by default so the LaTeX form fits without scrolling; once
+    /// opened it stays open for the rest of the session ([`AssistOpenMemory`]).
+    open: bool,
     converting: bool,
     cancel: Option<CancelToken>,
     generation: u64,
@@ -142,6 +152,9 @@ impl AssistPanel {
         });
         Self {
             setup_open: !settings.is_configured(),
+            open: cx
+                .try_global::<AssistOpenMemory>()
+                .is_some_and(|memory| memory.0),
             settings,
             converter,
             prose,
@@ -246,6 +259,18 @@ impl AssistPanel {
     #[cfg(test)]
     pub(super) fn is_setup_open(&self) -> bool {
         self.setup_open
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Expand or collapse the panel and remember the choice for later panels this session.
+    pub(super) fn toggle_open(&mut self, cx: &mut Context<Self>) {
+        self.open = !self.open;
+        cx.set_global(AssistOpenMemory(self.open));
+        cx.notify();
     }
 
     /// Open or close the setup form. Opening it is the user action that may read the keyring.
@@ -588,15 +613,32 @@ impl Render for AssistPanel {
         let key = self.key_status(cx);
         let secondary = hex(color::TEXT_SECONDARY);
         let configured = self.settings.is_configured();
+        let open = self.open;
         let mut panel = div().id("assist-panel").flex().flex_col().gap_2().child(
             div()
+                .id("assist-toggle")
+                .debug_selector(|| "assist-toggle".into())
                 .flex()
                 .items_center()
                 .gap_1()
+                .cursor_pointer()
                 .font_weight(FontWeight::SEMIBOLD)
+                .child(
+                    icons::icon(if open {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .xsmall()
+                    .text_color(secondary),
+                )
                 .child(icons::icon(IconName::Sparkles).small())
-                .child("Describe it in words (optional)"),
+                .child("Describe in words\u{2026}")
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_open(cx))),
         );
+        if !open {
+            return panel;
+        }
         if configured {
             panel = panel
                 .child(Textarea::new(&self.prose))

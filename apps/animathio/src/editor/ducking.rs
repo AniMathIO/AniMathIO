@@ -398,31 +398,18 @@ impl Editor {
             return None;
         }
         let theme = cx.theme().clone();
+        // The body scrolls; the Analyse/Cancel/Apply footer is pinned below it so the primary
+        // action never sits under the fold.
         let mut panel = div()
-            .id("duck-review")
-            .debug_selector(|| "duck-review".into())
-            .absolute()
-            .left(px(12.))
-            .top(px(56.))
-            .w(px(400.))
-            .max_h(
-                // End above the timeline dock and the status line so its tools stay usable.
-                (window.viewport_size().height
-                    - px(56. + 32. + self.dock.bottom_height * style::ui_scale()))
-                .max(px(160.)),
-            )
+            .id("duck-scroll")
+            .flex_1()
+            .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.duck_scroll)
             .p_3()
             .flex()
             .flex_col()
             .gap_2()
-            .bg(theme.popover)
-            .text_color(theme.popover_foreground)
-            .border_1()
-            .border_color(theme.border)
-            .rounded(px(style::radius::PANEL))
-            .shadow_lg()
-            .occlude()
             .child(
                 div()
                     .flex()
@@ -729,39 +716,79 @@ impl Editor {
                 .proposal
                 .as_ref()
                 .is_some_and(|p| !p.clips.is_empty());
-        panel = panel.child(
+        let footer = div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .justify_end()
+            .px_3()
+            .py_2()
+            .border_t_1()
+            .border_color(theme.border)
+            .child(
+                Button::new("duck-analyse")
+                    .compact()
+                    .label("Analyse")
+                    .disabled(busy || !review.ready())
+                    .on_click(cx.listener(|this, _, _, cx| this.analyse_duck(cx))),
+            )
+            .child(
+                Button::new("duck-cancel")
+                    .debug_selector(|| "duck-cancel".into())
+                    .compact()
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.duck_review = None;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                style::primary_button("duck-apply", cx)
+                    .debug_selector(|| "duck-apply".into())
+                    .compact()
+                    .label("Apply")
+                    .disabled(!can_apply)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.apply_duck(cx);
+                    })),
+            );
+        Some(
             div()
+                .id("duck-review")
+                .debug_selector(|| "duck-review".into())
+                .absolute()
+                .left(px(12.))
+                .top(px(56.))
+                .w(px(400.))
+                .max_h(
+                    // End above the timeline dock and the status line so its tools stay usable.
+                    (window.viewport_size().height
+                        - px(56. + 32. + self.dock.bottom_height * style::ui_scale()))
+                    .max(px(160.)),
+                )
                 .flex()
-                .flex_wrap()
-                .gap_2()
+                .flex_col()
+                .bg(theme.popover)
+                .text_color(theme.popover_foreground)
+                .border_1()
+                .border_color(theme.border)
+                .rounded(px(style::radius::PANEL))
+                .shadow_lg()
+                .occlude()
                 .child(
-                    Button::new("duck-analyse")
-                        .compact()
-                        .label("Analyse")
-                        .disabled(busy || !review.ready())
-                        .on_click(cx.listener(|this, _, _, cx| this.analyse_duck(cx))),
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .child(panel)
+                        .child(gpui_component::scroll::Scrollbar::vertical(
+                            &self.duck_scroll,
+                        )),
                 )
-                .child(
-                    Button::new("duck-cancel")
-                        .debug_selector(|| "duck-cancel".into())
-                        .compact()
-                        .label("Cancel")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.duck_review = None;
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    style::primary_button("duck-apply", cx)
-                        .compact()
-                        .label("Apply")
-                        .disabled(!can_apply)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.apply_duck(cx);
-                        })),
-                ),
-        );
-        Some(panel)
+                .child(footer),
+        )
     }
 }
 

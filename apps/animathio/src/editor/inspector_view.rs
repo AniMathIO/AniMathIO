@@ -105,13 +105,25 @@ impl Editor {
         content: impl IntoElement,
         cx: &mut Context<Self>,
     ) -> Div {
+        self.section_with_icon(name, title, None, content, cx)
+    }
+
+    /// [`Self::section`] with an explicit header icon instead of the one implied by `name`.
+    pub(super) fn section_with_icon(
+        &self,
+        name: &'static str,
+        title: &str,
+        icon_override: Option<IconName>,
+        content: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let open = !self.closed_sections.contains(name);
         let chevron = if open {
             icons::icon(IconName::ChevronDown)
         } else {
             icons::icon(IconName::ChevronRight)
         };
-        let icon = match name {
+        let icon = icon_override.unwrap_or(match name {
             "transform" | "shared" => IconName::Move,
             "opacity" => IconName::Blend,
             "params" => IconName::Type,
@@ -120,7 +132,7 @@ impl Editor {
             "transition" => IconName::Waypoints,
             "animations" => IconName::WandSparkles,
             _ => IconName::SlidersHorizontal,
-        };
+        });
         let resettable = matches!(
             name,
             "transform" | "opacity" | "params" | "audio" | "effects" | "transition" | "shared"

@@ -627,7 +627,7 @@ rendered off-thread and cached in editor session state by project canvas size.
 
 ## AI-assisted LaTeX
 
-`crates/assist` backs the optional "Describe it in words" box of the Math dialog (user guide:
+`crates/assist` backs the optional "Describe in words…" section of the Math dialog (user guide:
 `docs/editor-guide.md`). It is an integration beside the core, not a plugin: plugins run in a
 sandbox without network access, and the core must stay free of provider behaviour.
 
