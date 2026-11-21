@@ -45,7 +45,7 @@ jobs:
       HAS_PAT: ${{ secrets.RELEASE_PLZ_TOKEN != '' }}
     steps:
       - name: Checkout the PR branch
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
