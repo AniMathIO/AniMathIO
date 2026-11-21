@@ -665,6 +665,7 @@ pub(crate) struct Editor {
     menu_signature: String,
     panel_focus: [FocusHandle; 4],
     timeline_scroll_handle: ScrollHandle,
+    launcher_scroll: ScrollHandle,
     pointer_down: bool,
     color_edit: Option<color_edit::ColorEdit>,
     notices: Vec<gpui_component::notification::Notification>,
@@ -708,7 +709,12 @@ pub(crate) struct Editor {
 
 impl Editor {
     /// Developer capture hook: use the same handlers as the editor menus.
-    pub(crate) fn open_screenshot_panel(&mut self, panel: &str, cx: &mut Context<Self>) {
+    pub(crate) fn open_screenshot_panel(
+        &mut self,
+        panel: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match panel {
             "markers" => self.open_marker_panel(cx),
             "autocut" => {
@@ -754,8 +760,41 @@ impl Editor {
                     self.browse_community(cx);
                 }
             }
+            // The Library's other tabs, for the documentation screenshots.
+            "media" | "titles" | "effects" => {
+                self.dock.left_open = true;
+                self.select_left_tab(
+                    match panel {
+                        "media" => LeftTab::Media,
+                        "titles" => LeftTab::Titles,
+                        _ => LeftTab::Effects,
+                    },
+                    cx,
+                );
+            }
+            // The Library's Elements tab, and the Add math object dialog (Elements > LaTeX).
+            // The dialog opens on the next turn, once the window's `Root` hosts the layers.
+            "elements" => {
+                self.dock.left_open = true;
+                self.select_left_tab(LeftTab::Elements, cx);
+            }
+            "math" => {
+                self.dock.left_open = true;
+                self.select_left_tab(LeftTab::Elements, cx);
+                let editor = cx.entity();
+                window.defer(cx, move |window, cx| {
+                    editor.update(cx, |editor, cx| {
+                        editor.open_math(
+                            animathio_control::MathObjectKind::Latex,
+                            None,
+                            window,
+                            cx,
+                        );
+                    });
+                });
+            }
             _ => eprintln!(
-                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins or plugins-browse"
+                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins, plugins-browse, media, titles, effects, elements or math"
             ),
         }
     }
@@ -921,6 +960,7 @@ impl Editor {
             menu_signature: String::new(),
             panel_focus: std::array::from_fn(|_| cx.focus_handle()),
             timeline_scroll_handle: ScrollHandle::new(),
+            launcher_scroll: ScrollHandle::new(),
             pointer_down: false,
             color_edit: None,
             notices: Vec::new(),

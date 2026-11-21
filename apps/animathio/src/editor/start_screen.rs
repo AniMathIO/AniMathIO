@@ -146,6 +146,45 @@ impl Editor {
                             .child(div().w(px(16.)))
                             .child(icons::icon(IconName::Clapperboard).small())
                             .child("Tell your story"),
+                    )
+                    .child(
+                        // Pinned in the hero so a 720p window never hides them below the fold.
+                        div()
+                            .id("start-actions")
+                            .debug_selector(|| "start-actions".into())
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .mt_1()
+                            .child(
+                                Button::new("start-open")
+                                    .debug_selector(|| "start-open".into())
+                                    .primary()
+                                    .icon(icons::icon(IconName::FolderOpen))
+                                    .label("Open project")
+                                    .on_click(cx.listener(|this, _, _, cx| this.open(cx))),
+                            )
+                            .child(
+                                Button::new("start-v1")
+                                    .debug_selector(|| "start-v1".into())
+                                    .outline()
+                                    .icon(icons::icon(IconName::Import))
+                                    .label("Import v1")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.import_legacy(cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("start-manim")
+                                    .debug_selector(|| "start-manim".into())
+                                    .outline()
+                                    .icon(icons::icon(IconName::Code))
+                                    .label("Import Manim")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_manim_import(window, cx);
+                                    })),
+                            ),
                     ),
             )
             .child(
@@ -465,7 +504,7 @@ impl Editor {
                     }),
             );
 
-        div().flex_1().min_h_0().w_full()
+        div().relative().flex_1().min_h_0().w_full()
             .child(canvas(|_, _, _| {}, move |_, (), window, _| {
                 if hover_progress < 1. { window.request_animation_frame(); }
             }).absolute().size_full())
@@ -474,6 +513,7 @@ impl Editor {
                 .id("launcher-scroll")
                 .size_full()
                 .overflow_y_scroll()
+                .track_scroll(&self.launcher_scroll)
                 .px_8()
                 .py_6()
                 .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _, cx| {
@@ -522,36 +562,6 @@ impl Editor {
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .child("Pick up where you left off"),
                                 )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap_2()
-                                        .child(
-                                            Button::new("start-open")
-                                                .outline()
-                                                .icon(icons::icon(IconName::FolderOpen))
-                                                .label("Open project")
-                                                .on_click(cx.listener(|this, _, _, cx| this.open(cx))),
-                                        )
-                                        .child(
-                                            Button::new("start-v1")
-                                                .outline()
-                                                .icon(icons::icon(IconName::Import))
-                                                .label("Import v1")
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.import_legacy(cx);
-                                                })),
-                                        )
-                                        .child(
-                                            Button::new("start-manim")
-                                                .outline()
-                                                .icon(icons::icon(IconName::Code))
-                                                .label("Import Manim")
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.open_manim_import(window, cx);
-                                                })),
-                                        ),
-                                ),
                         )
                         .child(recent)
                         .child(
@@ -598,6 +608,7 @@ impl Editor {
                         ),
                 ),
         )
+        .child(gpui_component::scroll::Scrollbar::vertical(&self.launcher_scroll))
     }
 }
 

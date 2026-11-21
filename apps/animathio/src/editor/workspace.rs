@@ -184,6 +184,9 @@ impl Editor {
     }
 }
 
+/// Dock width (logical px) from which the Library tabs show their labels next to the icons.
+pub(super) const LIBRARY_TABS_LABEL_WIDTH: f32 = 400.;
+
 impl Editor {
     /// Sliding pill only schedules frames for the 180ms after a tab change.
     pub(super) fn library_tabs(&self, cx: &mut Context<Self>) -> Div {
@@ -194,6 +197,9 @@ impl Editor {
             LeftTab::Titles => 2.,
             LeftTab::Elements => 1.,
         };
+        // Five labels only fit side by side in a wide dock; below that the tabs are icon-only
+        // (each has a tooltip), which covers the default dock width.
+        let labelled = self.dock.left_width >= LIBRARY_TABS_LABEL_WIDTH;
         let from = index(self.previous_left_tab);
         let to = index(self.left_tab);
         let elapsed = self.tab_changed.elapsed().as_secs_f32();
@@ -232,6 +238,7 @@ impl Editor {
                         let selected = self.left_tab == tab;
                         div()
                             .id(label)
+                            .debug_selector(move || format!("library-tab-{}", label.to_lowercase()))
                             .track_focus(&self.media_view.tab_focus[tab as usize])
                             .tab_index(0)
                             .focus_visible(|this| {
@@ -272,11 +279,8 @@ impl Editor {
                                 color::TEXT_SECONDARY
                             }))
                             .hover(|this| this.bg(style::hexa(color::HOVER, 0.7)))
-                            .when(
-                                self.dock.left_width < 240. || self.dock.left_width >= 360.,
-                                |tab| tab.child(icons::icon(icon).small()),
-                            )
-                            .when(self.dock.left_width >= 240., |tab| tab.child(label))
+                            .child(icons::icon(icon).small())
+                            .when(labelled, |tab| tab.child(label))
                             .tooltip(move |window, cx| {
                                 gpui_component::tooltip::Tooltip::new(label).build(window, cx)
                             })

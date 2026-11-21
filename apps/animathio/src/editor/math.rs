@@ -12,6 +12,7 @@ use gpui_component::input::{
     Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction, Textarea,
     TextareaState,
 };
+use gpui_component::scroll::Scrollbar;
 use gpui_component::switch::Switch;
 use gpui_component::{Disableable, WindowExt};
 
@@ -134,6 +135,15 @@ fn preview(
     Ok(Arc::new(RenderImage::new([image::Frame::new(rgba)])))
 }
 
+/// Cards per row in the Library's Elements tab for a dock width in logical pixels.
+pub(super) fn element_card_columns(dock_width: f32) -> usize {
+    match dock_width {
+        w if w >= 340. => 3,
+        w if w >= 240. => 2,
+        _ => 1,
+    }
+}
+
 pub(super) fn element_group(kind: MathObjectKind) -> &'static str {
     match kind {
         MathObjectKind::Latex | MathObjectKind::Text => "Text & formulas",
@@ -191,7 +201,12 @@ impl Editor {
         let size = project_size(&self.project);
         let panel = cx
             .new(|cx| MathEditor::new(draft, editor, session, range, edit, true, size, window, cx));
-        let width = (720. * style::ui_scale()).min(f32::from(window.viewport_size().width) - 32.);
+        // Wide enough for the two-column LaTeX layout when the window allows it.
+        let wide = kind == animathio_control::MathObjectKind::Latex
+            && f32::from(window.viewport_size().width)
+                >= MATH_TWO_COLUMN_MIN_WIDTH * style::ui_scale();
+        let width = ((if wide { 920. } else { 720. }) * style::ui_scale())
+            .min(f32::from(window.viewport_size().width) - 32.);
         super::dialogs::open_dialog(window, cx, move |dialog, _, _| {
             dialog
                 .title(if edit.is_some() {
@@ -261,15 +276,19 @@ impl Editor {
             })
             .detach();
         }
-        let mut cards = div().flex().flex_wrap().gap_2().p_2().child(
-            div()
-                .w_full()
-                .text_size(style::type_size::XS)
-                .text_color(hex(color::TEXT_SECONDARY))
-                .child(
-                    "Choose an object to configure. + adds defaults; drag a preview to the timeline.",
-                ),
-        );
+        // Cards use the dock's width: one column when it is very narrow, three when it is wide.
+        let columns = element_card_columns(self.dock.left_width);
+        let mut cards = div().flex().flex_wrap().gap_2().p_2();
+        // The hint costs a row of the short 720p panel; narrow docks get it as a card tooltip.
+        if columns >= 3 {
+            cards = cards.child(
+                div()
+                    .w_full()
+                    .text_size(style::type_size::XS)
+                    .text_color(hex(color::TEXT_SECONDARY))
+                    .child("Click to configure, + adds, drag to place."),
+            );
+        }
         let mut previous_group = "";
         for (i, kind) in self.element_kinds() {
             let group = element_group(kind);
@@ -286,7 +305,7 @@ impl Editor {
                 previous_group = group;
             }
             let mut thumbnail = div()
-                .h(px(76.))
+                .h(px(if columns > 2 { 72. } else { 50. }))
                 .w_full()
                 .bg(hex(color::BG))
                 .flex()
@@ -305,10 +324,10 @@ impl Editor {
                 div()
                     .id(("math-card", i))
                     .debug_selector(move || format!("element-card-{i}"))
-                    .w(relative(if self.dock.left_width >= 240. {
-                        0.48
-                    } else {
-                        1.
+                    .w(relative(match columns {
+                        3.. => 0.31,
+                        2 => 0.48,
+                        _ => 1.,
                     }))
                     .min_w_0()
                     .rounded(px(6.))
@@ -318,6 +337,12 @@ impl Editor {
                     .cursor_pointer()
                     .focusable()
                     .tab_index(0)
+                    .tooltip(|window, cx| {
+                        gpui_component::tooltip::Tooltip::new(
+                            "Click to configure, + adds defaults, drag to place",
+                        )
+                        .build(window, cx)
+                    })
                     .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
                     .focus_visible(|s| s.border_color(hex(color::ACCENT)))
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -412,6 +437,11 @@ impl Editor {
     }
 }
 
+/// Window width from which the Add math object dialog puts the LaTeX palette beside the form.
+pub(super) const MATH_TWO_COLUMN_MIN_WIDTH: f32 = 960.;
+/// Width of the palette column in that layout.
+const MATH_PALETTE_WIDTH: f32 = 330.;
+
 pub(super) struct MathEditor {
     draft: MathObjectDraft,
     dialog: bool,
@@ -431,6 +461,8 @@ pub(super) struct MathEditor {
     error: Option<String>,
     busy: bool,
     focused: bool,
+    form_scroll: ScrollHandle,
+    palette_scroll: ScrollHandle,
 }
 impl MathEditor {
     pub(super) fn new(
@@ -566,6 +598,8 @@ impl MathEditor {
             error: None,
             busy: false,
             focused: false,
+            form_scroll: ScrollHandle::new(),
+            palette_scroll: ScrollHandle::new(),
         };
         if this.draft.kind == MathObjectKind::Polygon {
             let vertices = this
@@ -781,17 +815,25 @@ impl Render for MathEditor {
                 window.focus(&handle, cx);
             }
         }
+        // The dialog keeps the LaTeX palette beside the form when the window is wide enough, so
+        // nothing sits below a scroll at 1280x720. Narrower windows and the inspector stack it.
+        let two_columns = self.dialog
+            && self.draft.kind == MathObjectKind::Latex
+            && f32::from(window.viewport_size().width)
+                >= MATH_TWO_COLUMN_MIN_WIDTH * style::ui_scale();
+        let form_max_height = if self.dialog {
+            // Leave room for the preview and footer.
+            (f32::from(window.viewport_size().height) - 380. * style::ui_scale())
+                .clamp(120., 440. * style::ui_scale())
+        } else {
+            360.
+        };
         let mut form = div()
             .id("math-editor-form")
-            .max_h(px(if self.dialog {
-                // Leave room for the preview and footer, while showing the complete
-                // LaTeX palette without scrolling on normal desktop windows.
-                (f32::from(window.viewport_size().height) - 380. * style::ui_scale())
-                    .clamp(120., 440. * style::ui_scale())
-            } else {
-                360.
-            }))
+            .debug_selector(|| "math-form".into())
+            .max_h(px(form_max_height))
             .overflow_y_scroll()
+            .track_scroll(&self.form_scroll)
             .flex()
             .flex_col()
             .gap_2()
@@ -867,18 +909,65 @@ impl Render for MathEditor {
                 };
             }
         }
+        // Colour and Write on come before the palette so they are never the part that scrolls
+        // out of view; one compact row keeps them discoverable.
+        form = form.child(
+            div()
+                .debug_selector(|| "math-colour-row".into())
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_x_4()
+                .gap_y_2()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().text_color(hex(color::TEXT_SECONDARY)).child("Colour"))
+                        .child(ColorPicker::new(&self.color))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(self.draft.color.clone()),
+                        ),
+                )
+                .when(
+                    self.edit.is_none() && self.draft.kind == MathObjectKind::Latex,
+                    |row| {
+                        row.child(
+                            div().debug_selector(|| "math-write-on".into()).child(
+                                Switch::new("math-write")
+                                    .label("Write on (1 second)")
+                                    .checked(self.draft.write_on)
+                                    .on_click(cx.listener(|this, checked, _, cx| {
+                                        this.draft.write_on = *checked;
+                                        cx.notify();
+                                    })),
+                            ),
+                        )
+                    },
+                ),
+        );
+        // The assist panel is tall, so it comes after Colour and Write on: it is what scrolls.
         if let Some(assist) = &self.assist {
             form = form.child(assist.clone());
         }
+        let mut palette = div()
+            .debug_selector(|| "math-palette".into())
+            .flex()
+            .flex_col()
+            .gap_2();
         if self.draft.kind == MathObjectKind::Latex {
             for (title, items, replace) in [
                 ("Snippets", LATEX_SNIPPETS, false),
                 ("Templates", LATEX_TEMPLATES, true),
             ] {
-                form = form.child(div().text_color(hex(color::TEXT_SECONDARY)).child(title));
-                let mut palette = div().flex().flex_wrap().gap_1();
+                palette = palette.child(div().text_color(hex(color::TEXT_SECONDARY)).child(title));
+                let mut buttons = div().flex().flex_wrap().gap_1();
                 for &(label, value) in items {
-                    palette = palette.child(
+                    buttons = buttons.child(
                         Button::new(SharedString::from(format!("{title}-{label}")))
                             .small()
                             .label(label)
@@ -887,34 +976,18 @@ impl Render for MathEditor {
                             })),
                     );
                 }
-                form = form.child(palette);
+                palette = palette.child(buttons);
             }
         }
-        form = form.child("Colour").child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .child(ColorPicker::new(&self.color))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(self.draft.color.clone()),
-                ),
-        );
-        if self.edit.is_none() && self.draft.kind == MathObjectKind::Latex {
-            form = form.child(
-                Switch::new("math-write")
-                    .label("Write on (1 second)")
-                    .checked(self.draft.write_on)
-                    .on_click(cx.listener(|this, checked, _, cx| {
-                        this.draft.write_on = *checked;
-                        cx.notify();
-                    })),
-            );
+        let has_palette = self.draft.kind == MathObjectKind::Latex;
+        if has_palette && !two_columns {
+            form = form.child(palette.into_any_element());
+            palette = div();
         }
+        let form = div()
+            .relative()
+            .child(form)
+            .child(Scrollbar::vertical(&self.form_scroll));
         let mut image = div()
             .w_full()
             .h(px(160.))
@@ -931,7 +1004,9 @@ impl Render for MathEditor {
                     .object_fit(ObjectFit::Contain),
             );
         }
-        let mut result = div()
+        let left = div()
+            .flex_1()
+            .min_w_0()
             .flex()
             .flex_col()
             .gap_2()
@@ -947,6 +1022,30 @@ impl Render for MathEditor {
                         "Live preview; ten units across the short edge, positive Y upward"
                     }),
             );
+        let mut result = div().flex().flex_col().gap_2().child(
+            div().flex().items_start().gap_3().child(left).when(
+                has_palette && two_columns,
+                |row| {
+                    row.child(
+                        div()
+                            .relative()
+                            .w(px(MATH_PALETTE_WIDTH * style::ui_scale()))
+                            .flex_shrink_0()
+                            .child(
+                                div()
+                                    .id("math-palette-scroll")
+                                    .max_h(px(form_max_height + 190.))
+                                    .overflow_y_scroll()
+                                    .track_scroll(&self.palette_scroll)
+                                    .p_2()
+                                    .text_size(style::type_size::SM)
+                                    .child(palette),
+                            )
+                            .child(Scrollbar::vertical(&self.palette_scroll)),
+                    )
+                },
+            ),
+        );
         if let Some(error) = &self.error {
             result = result.child(div().text_color(cx.theme().danger).child(error.clone()));
         }
