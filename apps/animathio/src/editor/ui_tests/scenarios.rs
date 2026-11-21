@@ -1321,6 +1321,212 @@ fn learn_noise_in_out_apply_and_undo(cx: &mut TestAppContext) {
     assert_eq!(ui.read(|e| e.project.clone()), before);
 }
 
+fn music_with_denoise() -> (Project, BTreeMap<animathio_core::AssetId, Vec<u8>>) {
+    let (mut project, assets) = voice_and_music();
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(MUSIC_CLIP),
+        index: 0,
+        effect: EffectInstance {
+            id: EffectId(777),
+            plugin: "org.animathio.audio-basic".into(),
+            effect: "denoise".into(),
+            params: BTreeMap::new(),
+            bypass: false,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    (project, assets)
+}
+
+fn denoise_params(editor: &Editor) -> BTreeMap<String, f64> {
+    editor
+        .project
+        .tracks()
+        .iter()
+        .flat_map(|t| t.clips().values())
+        .find(|c| c.id == MUSIC_CLIP)
+        .unwrap()
+        .audio_effects[0]
+        .params
+        .clone()
+}
+
+fn range_marker(id: u64, start_ms: i64, length_ms: i64) -> Command {
+    let mut marker = animathio_core::Marker::new(MarkerId(id), Time(start_ms * MS));
+    marker.duration = Some(Time(length_ms * MS));
+    Command::AddMarker { marker }
+}
+
+#[gpui::test]
+fn learn_noise_uses_a_selected_range_marker_trimmed_to_the_clip(cx: &mut TestAppContext) {
+    let (project, assets) = music_with_denoise();
+    let mut ui = Ui::open(cx, project, assets);
+    // The marker reaches 500 ms past the 3 s clip: only the part inside is analysed.
+    ui.update(|e, _, cx| {
+        e.execute(&range_marker(5, 2000, 1500), cx);
+        e.select_only(MUSIC_CLIP, cx);
+        e.marker_selection = BTreeSet::from([MarkerId(5)]);
+    });
+    let before = ui.read(|e| e.project.clone());
+    ui.dispatch(actions::LearnNoise);
+    let params = ui.read(denoise_params);
+    assert_eq!(params["noise_profile"], 1.0);
+    assert!((0..16).all(|i| params.contains_key(&format!("noise_{i}"))));
+    // One undo step restores the adaptive (profile-less) denoise.
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn learn_noise_prefers_in_out_over_a_marker_and_needs_a_clean_selection(cx: &mut TestAppContext) {
+    let (project, assets) = music_with_denoise();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.execute(&range_marker(5, 0, 1000), cx);
+        e.execute(&range_marker(6, 1000, 1000), cx);
+        e.select_only(MUSIC_CLIP, cx);
+        // Two range markers selected is ambiguous: nothing to learn from.
+        e.marker_selection = BTreeSet::from([MarkerId(5), MarkerId(6)]);
+    });
+    let before = ui.read(|e| e.project.clone());
+    ui.dispatch(actions::LearnNoise);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    assert!(ui.read(|e| {
+        e.last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("Set In and Out"))
+    }));
+    // In/Out wins over the marker selection.
+    ui.update(|e, _, _| {
+        e.marks.set_in(Time(0));
+        e.marks.set_out(Time(100 * MS));
+    });
+    ui.dispatch(actions::LearnNoise);
+    assert_eq!(ui.read(denoise_params)["noise_profile"], 1.0);
+}
+
+#[gpui::test]
+fn learn_noise_outside_the_clip_or_without_denoise_changes_nothing(cx: &mut TestAppContext) {
+    let (mut project, assets) = music_with_denoise();
+    // The music clip now spans 2 s..5 s; the selection below is in the project, not the clip.
+    Command::MoveClip {
+        id: MUSIC_CLIP,
+        track: MUSIC_TRACK,
+        start: Time(2000 * MS),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.select_only(VOICE_CLIP, cx);
+        e.marks.set_in(Time(0));
+        e.marks.set_out(Time(100 * MS));
+    });
+    let before = ui.read(|e| e.project.clone());
+    ui.dispatch(actions::LearnNoise);
+    assert_eq!(ui.read(|e| e.project.clone()), before, "no denoise effect");
+    assert!(ui.read(|e| e.last_error.as_deref() == Some("Add a denoise effect first")));
+    ui.update(|e, _, cx| {
+        e.select_only(MUSIC_CLIP, cx);
+        e.marks.set_in(Time(0));
+        e.marks.set_out(Time(1000 * MS));
+        e.last_error = None;
+    });
+    ui.dispatch(actions::LearnNoise);
+    assert_eq!(
+        ui.read(|e| e.project.clone()),
+        before,
+        "selection outside clip"
+    );
+    assert_eq!(
+        ui.read(|e| e.last_error.clone()).as_deref(),
+        Some("The selection is outside the clip")
+    );
+}
+
+#[gpui::test]
+fn denoise_card_learn_button_applies_the_in_out_selection(cx: &mut TestAppContext) {
+    let (project, assets) = music_with_denoise();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(2560.), gpui::px(1440.)));
+    ui.update(|e, _, cx| {
+        e.dock.right_open = true;
+        e.closed_sections.insert("speed".into());
+        e.select_only(MUSIC_CLIP, cx);
+        e.marks.set_in(Time(0));
+        e.marks.set_out(Time(200 * MS));
+        cx.notify();
+    });
+    let button = ui
+        .cx
+        .debug_bounds("audio-learn-777")
+        .expect("denoise card shows the learn button");
+    ui.click(button.center(), gpui::Modifiers::default());
+    assert_eq!(ui.read(denoise_params)["noise_profile"], 1.0);
+}
+
+#[gpui::test]
+fn auto_duck_suggests_the_other_audio_tracks_and_previews_before_applying(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.select_only(VOICE_CLIP, cx);
+        e.open_duck(cx);
+    });
+    ui.settle();
+    ui.read(|e| {
+        let review = e.duck_review.as_ref().unwrap();
+        // The voice clip's own track is never suggested as music.
+        assert_eq!(review.params.voice_clips, vec![VOICE_CLIP]);
+        assert_eq!(review.params.music_tracks, vec![MUSIC_TRACK]);
+        let proposal = review.proposal.as_ref().expect("analysed on open");
+        let summary = super::super::ducking::duck_summary(&review.params, proposal, &e.project);
+        assert!(
+            summary.contains("under 2 voice regions") && summary.contains("one undo step"),
+            "{summary}"
+        );
+    });
+    assert!(ui.cx.debug_bounds("duck-summary").is_some());
+    // Attack, release, gap and threshold sit behind one toggle so the preview stays in view.
+    assert!(!ui.read(|e| e.duck_review.as_ref().unwrap().timing_open));
+    let timing = ui.cx.debug_bounds("duck-timing").unwrap();
+    ui.click(timing.center(), gpui::Modifiers::default());
+    assert!(ui.read(|e| e.duck_review.as_ref().unwrap().timing_open));
+    // Nothing is written until Apply, and a single Undo reverts it.
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.update(|e, _, cx| e.apply_duck(cx));
+    assert_ne!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn auto_duck_does_not_suggest_locked_music_tracks(cx: &mut TestAppContext) {
+    let (mut project, assets) = voice_and_music();
+    Command::SetTrackLocked {
+        id: MUSIC_TRACK,
+        locked: true,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.select_only(VOICE_CLIP, cx);
+        e.open_duck(cx);
+    });
+    ui.read(|e| {
+        let review = e.duck_review.as_ref().unwrap();
+        assert_eq!(
+            review.params.music_tracks,
+            Vec::<animathio_core::TrackId>::new()
+        );
+        assert!(review.proposal.is_none());
+    });
+}
+
 #[gpui::test]
 fn scene_menu_requires_video_and_does_not_mutate(cx: &mut TestAppContext) {
     let (project, assets) = sample();
@@ -2268,6 +2474,19 @@ fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
         assert!(
             !proposal.cuts.is_empty(),
             "voice pause detected despite music bed"
+        );
+    });
+    ui.update(|editor, _, cx| editor.open_screenshot_panel("duck", cx));
+    ui.settle();
+    ui.read(|editor| {
+        assert_eq!(editor.selected, Some(VOICE_CLIP));
+        let review = editor.duck_review.as_ref().expect("duck panel");
+        assert_eq!(review.params.music_tracks, vec![MUSIC_TRACK]);
+        assert!(
+            review
+                .proposal
+                .as_ref()
+                .is_some_and(|p| !p.clips.is_empty())
         );
     });
 }

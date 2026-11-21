@@ -723,6 +723,25 @@ impl Editor {
                 }
                 self.open_autocut(cx);
             }
+            // Auto duck with the first audio clip as the voice; the panel suggests the other
+            // audio tracks as music and runs its normal analysis.
+            "duck" => {
+                let audio = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .flat_map(|track| track.clips().values())
+                    .find(|clip| matches!(clip.kind, animathio_core::ClipKind::Audio(_)))
+                    .map(|clip| clip.id);
+                if let Some(id) = audio {
+                    self.select_only(id, cx);
+                } else {
+                    self.clear_selection(cx);
+                }
+                self.open_duck(cx);
+                // Audio rows sit below the visual tracks: show them so the shaded spans are seen.
+                self.timeline_scroll_handle.scroll_to_bottom();
+            }
             // The Library's Plugins tab (Installed), optionally with Browse opened. Browse
             // fetches the index only when the Community plugins switch is already on.
             "plugins" | "plugins-browse" => {
@@ -733,7 +752,7 @@ impl Editor {
                 }
             }
             _ => eprintln!(
-                "unknown screenshot panel {panel:?}; expected markers, autocut, plugins or plugins-browse"
+                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins or plugins-browse"
             ),
         }
     }

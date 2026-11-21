@@ -216,7 +216,7 @@ impl Editor {
                 MenuItem::action("Split at scene changes…", SceneCuts),
                 MenuItem::action("Automatic cuts…", AutomaticCuts),
                 MenuItem::action("Auto duck…", AutoDuck),
-                MenuItem::action("Learn denoise from In/Out", LearnNoise),
+                MenuItem::action("Learn denoise from selection", LearnNoise),
                 MenuItem::action("Add marker at playhead", AddMarker),
                 MenuItem::action("Markers and beat sync…", ShowMarkers),
             ]),

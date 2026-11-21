@@ -359,6 +359,61 @@ impl Editor {
                         .child("Plugin not loaded"),
                 );
             }
+            if let AudioChain::Clip(clip_id) = chain
+                && instances[index].plugin == "org.animathio.audio-basic"
+                && instances[index].effect == "denoise"
+            {
+                let learned = instances[index].params.get("noise_profile").copied() == Some(1.0);
+                let locked = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .any(|t| t.is_locked() && t.clips().contains_key(&clip_id));
+                let learn_blocked: Option<&'static str> = if locked {
+                    Some("This track is locked")
+                } else if self.noise_selection().is_none() {
+                    Some(
+                        "Set In and Out (or select a range marker) around noise only, \
+                         32 ms to 30 s inside this clip, then learn",
+                    )
+                } else {
+                    None
+                };
+                card = card.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            Button::new(SharedString::from(format!("{key}-learn")))
+                                .debug_selector(move || format!("audio-learn-{}", effect.0))
+                                .compact()
+                                .icon(icons::icon(IconName::AudioWaveform).xsmall())
+                                .label("Learn noise from selection")
+                                .disabled(learn_blocked.is_some())
+                                .tooltip(learn_blocked.unwrap_or(
+                                    "Learn the noise profile from the In/Out range (or selected range marker)",
+                                ))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.learn_noise_for(clip_id, effect, cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .text_size(crate::style::type_size::XS)
+                                .text_color(hex(color::TEXT_MUTED))
+                                .child(if learned {
+                                    "Using the learned noise profile. Learn again after changing \
+                                     clip gain."
+                                } else {
+                                    "Adaptive: follows the quietest moments. Learn from a noise-only \
+                                     selection for a fixed profile."
+                                }),
+                        ),
+                );
+            }
             let mut advanced_rows = div().flex().flex_col();
             let mut has_advanced = false;
             for ParamRow {
@@ -479,7 +534,75 @@ impl Editor {
     }
 }
 
+/// The part of a noise selection that lies inside the clip, if any.
+fn clamp_noise_range(selection: TimeRange, clip: TimeRange) -> Option<TimeRange> {
+    let start = selection.start.max(clip.start);
+    let end = selection.end.min(clip.end);
+    (end > start).then_some(TimeRange { start, end })
+}
+
 impl Editor {
+    /// The timeline range to learn noise from: In/Out, else the one selected range marker.
+    fn noise_selection(&self) -> Option<TimeRange> {
+        if self.marks.marked() {
+            return self
+                .marks
+                .range(animathio_export::duration(&self.project).0);
+        }
+        let mut ranges = self.marker_selection.iter().filter_map(|id| {
+            let marker = self.project.marker(*id)?;
+            marker.duration.filter(|d| d.0 > 0).map(|d| TimeRange {
+                start: marker.time,
+                end: Time(marker.time.0.saturating_add(d.0)),
+            })
+        });
+        let first = ranges.next()?;
+        ranges.next().is_none().then_some(first)
+    }
+
+    /// Learn a denoise profile for the denoise instance `effect` of audio clip `id` from the
+    /// noise-only selection (In/Out or a selected range marker, trimmed to the clip).
+    pub(super) fn learn_noise_for(&mut self, id: ClipId, effect: EffectId, cx: &mut Context<Self>) {
+        let result = (|| {
+            let clip = self
+                .find_clip(id)
+                .ok_or_else(|| "Clip missing".to_owned())?;
+            let selection = self.noise_selection().ok_or_else(|| {
+                "Set In and Out (or select a range marker) around noise only, at most 30 seconds"
+                    .to_owned()
+            })?;
+            let range = clamp_noise_range(selection, clip.range)
+                .ok_or_else(|| "The selection is outside the clip".to_owned())?;
+            let command = animathio_control::learn_noise_command(
+                &self.project,
+                &self.assets,
+                id,
+                effect,
+                range,
+            )
+            .map_err(|e| e.to_string())?;
+            Ok((command, range))
+        })();
+        match result {
+            Ok((command, range)) => {
+                if self.try_execute(&command, cx) {
+                    let rate = self.project.frame_rate();
+                    self.notices.push(crate::style::Toast::info(format!(
+                        "Learned noise profile from {} to {}. Undo restores the previous profile.",
+                        crate::timecode::format_timecode(range.start, rate),
+                        crate::timecode::format_timecode(range.end, rate),
+                    )));
+                    cx.notify();
+                }
+            }
+            Err(error) => {
+                self.error = Some(error);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Clip > Learn denoise from selection: the selected clip's first denoise instance.
     pub(super) fn learn_noise(&mut self, cx: &mut Context<Self>) {
         let result = (|| {
             let id = self
@@ -494,19 +617,10 @@ impl Editor {
                 .find(|e| e.plugin == "org.animathio.audio-basic" && e.effect == "denoise")
                 .ok_or_else(|| "Add a denoise effect first".to_owned())?
                 .id;
-            let range = self
-                .marks
-                .range(animathio_export::duration(&self.project).0)
-                .ok_or_else(|| {
-                    "Set In and Out around noise only (at most 30 seconds)".to_owned()
-                })?;
-            animathio_control::learn_noise_command(&self.project, &self.assets, id, effect, range)
-                .map_err(|e| e.to_string())
+            Ok((id, effect))
         })();
         match result {
-            Ok(command) => {
-                self.execute(&command, cx);
-            }
+            Ok((id, effect)) => self.learn_noise_for(id, effect, cx),
             Err(error) => {
                 self.error = Some(error);
                 cx.notify();
@@ -521,6 +635,26 @@ mod tests {
     use animathio_core::{EffectInstance, Project, Track, TrackId};
     use animathio_plugin_host::{EffectDescriptor, EffectParam};
     use std::collections::BTreeMap;
+
+    #[core::prelude::v1::test]
+    fn noise_selection_is_trimmed_to_the_clip() {
+        let range = |a: i64, b: i64| TimeRange {
+            start: Time(a),
+            end: Time(b),
+        };
+        let clip = range(100, 300);
+        assert_eq!(
+            clamp_noise_range(range(0, 200), clip),
+            Some(range(100, 200))
+        );
+        assert_eq!(
+            clamp_noise_range(range(150, 400), clip),
+            Some(range(150, 300))
+        );
+        assert_eq!(clamp_noise_range(range(0, 1000), clip), Some(clip));
+        assert_eq!(clamp_noise_range(range(300, 400), clip), None);
+        assert_eq!(clamp_noise_range(range(0, 100), clip), None);
+    }
 
     fn gain_descriptor() -> EffectDescriptor {
         EffectDescriptor {
