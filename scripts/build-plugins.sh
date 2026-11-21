@@ -46,6 +46,8 @@ out = f"target/plugins/{name}.amplugin"
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     z.write(f"plugins/{name}/plugin.toml", "plugin.toml")
     z.write(wasm, "plugin.wasm")
+    if name == "text":
+        z.write("apps/animathio/assets/fonts/Inter-OFL.txt", "LICENSE-Inter.txt")
 print(f"   wrote {out}")
 PY
 }

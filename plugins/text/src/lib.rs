@@ -95,8 +95,11 @@ fn offset_verb(v: &PathVerb, ox: f32, oy: f32) -> PathVerb {
 
 /// Preserve contour winding and subpath boundaries in one non-zero fill. Filling
 /// contours separately paints over counters; this also serves captions and titles.
-fn fill_contours(contours: impl IntoIterator<Item = Vec<PathVerb>>, color: Color) -> DrawCommand {
-    DrawCommand::FillPath((contours.into_iter().flatten().collect(), color))
+fn fill_contours(
+    contours: impl IntoIterator<Item = Vec<PathVerb>>,
+    color: Color,
+) -> Vec<DrawCommand> {
+    fill_chunks(contours.into_iter().collect(), color)
 }
 
 // Fitted titles use a real clip-local box, so the editor's transform handles and
@@ -105,6 +108,7 @@ fn fill_contours(contours: impl IntoIterator<Item = Vec<PathVerb>>, color: Color
 fn fitted_text(
     text: &str,
     font_size: f32,
+    face: Typeface,
     width: f32,
     height: f32,
     color: Color,
@@ -133,7 +137,7 @@ fn fitted_text(
         glyphs: Vec::new(),
     };
     for (line, text) in lines.iter().enumerate() {
-        let contours = host::shape_text(text, font)?;
+        let contours = shape_text(text, font, face)?;
         let band_top = top + line as f32 * line_height;
         layout.lines.push(glyph_slide::Band {
             top: band_top,
@@ -192,7 +196,7 @@ fn fitted_text(
                 })
                 .collect()
         });
-        elements.push(fill_contours(paths, color));
+        elements.extend(fill_contours(paths, color));
     }
     if let Some(slide) = slide {
         let point = |p: Point| Point {
@@ -330,8 +334,8 @@ struct ShapedWord {
     width: f32,
 }
 
-fn shape_word(text: &str, font: f32) -> Result<ShapedWord, Diagnostic> {
-    let contours = host::shape_text(text, font)?;
+fn shape_word(text: &str, font: f32, face: Typeface) -> Result<ShapedWord, Diagnostic> {
+    let contours = shape_text(text, font, face)?;
     let min_x = contours
         .iter()
         .flatten()
@@ -428,7 +432,7 @@ impl Canvas {
             })
             .collect();
         if !path.is_empty() {
-            self.elements.push(fill_contours([path], color));
+            self.elements.extend(fill_contours([path], color));
         }
     }
 
@@ -562,6 +566,7 @@ fn caption_scene(
     params: &[ParamEntry],
     text: &str,
     font_size: f32,
+    face: Typeface,
     width: f32,
     height: f32,
     color: Color,
@@ -643,12 +648,12 @@ fn caption_scene(
                 width: 0.0,
             })
             .collect();
-        all[index] = shape_word(&words[index], base_font)?;
+        all[index] = shape_word(&words[index], base_font, face)?;
         all
     } else {
         words
             .iter()
-            .map(|word| shape_word(word, base_font))
+            .map(|word| shape_word(word, base_font, face))
             .collect::<Result<_, _>>()?
     };
     let gap = base_font * 0.28;
@@ -807,6 +812,24 @@ impl Guest for TextPlugin {
                     label: "Text".to_string(),
                     kind: ParamKind::String(StringParam {
                         default: "AniMathIO".to_string(),
+                    }),
+                },
+                ParamSpec {
+                    id: "font_weight".into(),
+                    label: "Font weight".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 100.0,
+                        max: 900.0,
+                        default: 400.0,
+                        step: 100.0,
+                    }),
+                },
+                ParamSpec {
+                    id: "font".into(),
+                    label: "Font".into(),
+                    kind: ParamKind::EnumChoice(EnumParam {
+                        options: vec!["dejavu".into(), "inter".into()],
+                        default: "dejavu".into(),
                     }),
                 },
                 ParamSpec {
@@ -984,6 +1007,7 @@ impl Guest for TextPlugin {
             get_number(&params, "reveal", 1.0),
         );
         let font_size = get_number(&params, "font_size", 48.0) as f32;
+        let face = Typeface::from_params(&params);
         let color = get_color(
             &params,
             "color",
@@ -1014,13 +1038,14 @@ impl Guest for TextPlugin {
                 let style = CaptionStyle::parse(&get_string(&params, "caption_style", "off"));
                 if let Some(style) = style.filter(|s| *s != CaptionStyle::Classic) {
                     return caption_scene(
-                        style, &params, &text, font_size, fit_width, fit_height, color, time_ticks,
-                        size,
+                        style, &params, &text, font_size, face, fit_width, fit_height, color,
+                        time_ticks, size,
                     );
                 }
                 return fitted_text(
                     &text,
                     font_size,
+                    face,
                     fit_width,
                     fit_height,
                     color,
@@ -1030,6 +1055,9 @@ impl Guest for TextPlugin {
             }
             if let Some(slide) = &slide {
                 return wrapped_slide(&text, font_size, &align, color, size, slide);
+            }
+            if face.outlined() {
+                return weighted_text_run(&text, font_size, face, &align, color, size);
             }
             // Generic TextRun uses the host's wrapped, embedded-font layout.
             // Keep coordinates and font size relative to the unscaled canvas.
@@ -1050,7 +1078,7 @@ impl Guest for TextPlugin {
             });
         }
 
-        let contours = host::shape_text(&text, font_size)?;
+        let contours = shape_text(&text, font_size, face)?;
 
         let mut min_x = f32::MAX;
         let mut max_x = f32::MIN;
@@ -1088,7 +1116,7 @@ impl Guest for TextPlugin {
                 .map(|v| offset_verb(v, x_offset, y_offset))
                 .collect()
         });
-        let elements = vec![fill_contours(paths, color)];
+        let elements = fill_contours(paths, color);
 
         Ok(Scene {
             coordinate_space: CoordinateSpace::Canvas,
@@ -1202,3 +1230,664 @@ fn revealed(text: &str, reveal: f64) -> String {
 }
 
 export!(TextPlugin);
+
+/// Bundled Inter variable font: outlines every weight other than regular, and regular too
+/// when the clip's `font` is `inter`.
+const INTER: &[u8] = include_bytes!("../../../apps/animathio/assets/fonts/InterVariable.ttf");
+/// Bundled DejaVu Sans (the host's own face): fallback for characters Inter lacks
+/// (maths operators such as `∀ ∈ ℝ`, Hebrew, ...), so weighted text never shows `.notdef` boxes.
+const DEJAVU: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
+
+/// Same limits as the host `shape-text` import and renderer, so weighted text is no looser.
+const MAX_TEXT_CHARS: usize = 10_000;
+const MAX_TEXT_VERBS: usize = 200_000;
+const MAX_FONT_PX: f32 = 1_048_560.0;
+/// The core caps one path at 100,000 verbs; stay well below it by splitting into elements.
+const MAX_VERBS_PER_ELEMENT: usize = 40_000;
+/// A tab advances 0.6 em: what the host's regular text measures (its tab maps to DejaVu's
+/// `.notdef`, 0.6 em wide). The host also draws that box; weighted text only advances.
+const TAB_ADVANCE_EM: f32 = 0.6;
+
+/// Typeface selection of one text clip: the `font_weight` and `font` parameters.
+///
+/// `font = dejavu` (the default, and what every project saved before the parameter existed
+/// uses) keeps the host's DejaVu Sans `TextRun`/`shape-text` at weight 400 and outlines Inter
+/// at any other weight. `font = inter` outlines every weight, 400 included, from Inter, so
+/// keyframing the weight never switches typeface.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Typeface {
+    weight: f32,
+    inter: bool,
+}
+
+impl Typeface {
+    fn from_params(params: &[ParamEntry]) -> Self {
+        Self {
+            weight: get_number(params, "font_weight", 400.0).clamp(100.0, 900.0) as f32,
+            inter: get_string(params, "font", "dejavu") == "inter",
+        }
+    }
+
+    /// True when the plugin outlines the text itself instead of using the host's shaping.
+    fn outlined(self) -> bool {
+        self.inter || self.weight != 400.0
+    }
+}
+
+fn invalid(message: &str) -> Diagnostic {
+    Diagnostic {
+        code: "text.invalid".into(),
+        message: message.into(),
+        metadata: vec![],
+    }
+}
+
+fn check_size(px: f32) -> Result<(), Diagnostic> {
+    if px.is_finite() && px > 0.0 && px <= MAX_FONT_PX {
+        Ok(())
+    } else {
+        Err(invalid("invalid font size"))
+    }
+}
+
+fn check_text(text: &str) -> Result<(), Diagnostic> {
+    // Counting stops early: a longer string is rejected the same way as the host does.
+    if text.chars().nth(MAX_TEXT_CHARS).is_some() {
+        Err(invalid("text is too long (max 10000 characters)"))
+    } else {
+        Ok(())
+    }
+}
+
+fn check_verbs(contours: &[Vec<PathVerb>]) -> Result<(), Diagnostic> {
+    if contours.iter().map(Vec::len).sum::<usize>() > MAX_TEXT_VERBS {
+        Err(invalid("text has too many path verbs"))
+    } else {
+        Ok(())
+    }
+}
+
+fn shape_text(text: &str, size: f32, face: Typeface) -> Result<Vec<Vec<PathVerb>>, Diagnostic> {
+    if !face.outlined() {
+        return host::shape_text(text, size);
+    }
+    check_size(size)?;
+    check_text(text)?;
+    let contours = Shaper::get(face.weight)?.outline(text, size);
+    check_verbs(&contours)?;
+    Ok(contours)
+}
+
+/// Glyph data in em units (size 1, y down, baseline at 0), cached per character.
+struct CachedGlyph {
+    advance: f32,
+    contours: Vec<Vec<PathVerb>>,
+    /// True when the glyph comes from the DejaVu fallback face.
+    fallback: bool,
+}
+
+/// Inter instanced at one `wght` value with DejaVu Sans as per-character fallback. Glyphs are
+/// laid out left to right by their advances (no kerning or ligatures), which is deterministic
+/// and needs no host import. Outlines and advances are cached per character, so a long
+/// paragraph pays for each distinct letter once, which keeps it inside the fuel budget.
+///
+/// The DejaVu fallback is the regular face at every weight (no synthetic emboldening): the
+/// characters that need it (maths operators, Hebrew, ...) keep the host's look.
+struct Shaper {
+    inter: skrifa::FontRef<'static>,
+    dejavu: skrifa::FontRef<'static>,
+    location: skrifa::instance::Location,
+    glyphs: std::cell::RefCell<std::collections::HashMap<char, std::rc::Rc<CachedGlyph>>>,
+}
+
+struct LineMetrics {
+    ascent: f32,
+    line_height: f32,
+}
+
+thread_local! {
+    /// Shapers by weight bits; one render call usually needs a single weight.
+    static SHAPERS: std::cell::RefCell<Vec<(u32, std::rc::Rc<Shaper>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+impl Shaper {
+    fn new(weight: f32) -> Result<Self, Diagnostic> {
+        use skrifa::MetadataProvider;
+        let inter = skrifa::FontRef::new(INTER).map_err(|_| invalid("bundled font is invalid"))?;
+        let dejavu =
+            skrifa::FontRef::new(DEJAVU).map_err(|_| invalid("bundled font is invalid"))?;
+        let location = inter.axes().location([(skrifa::Tag::new(b"wght"), weight)]);
+        Ok(Self {
+            inter,
+            dejavu,
+            location,
+            glyphs: Default::default(),
+        })
+    }
+
+    fn get(weight: f32) -> Result<std::rc::Rc<Self>, Diagnostic> {
+        SHAPERS.with(|cell| {
+            let mut shapers = cell.borrow_mut();
+            if let Some((_, shaper)) = shapers.iter().find(|(bits, _)| *bits == weight.to_bits()) {
+                return Ok(shaper.clone());
+            }
+            let shaper = std::rc::Rc::new(Self::new(weight)?);
+            shapers.push((weight.to_bits(), shaper.clone()));
+            Ok(shaper)
+        })
+    }
+
+    fn glyph(&self, ch: char) -> std::rc::Rc<CachedGlyph> {
+        if let Some(glyph) = self.glyphs.borrow().get(&ch) {
+            return glyph.clone();
+        }
+        let glyph = std::rc::Rc::new(self.build(ch));
+        self.glyphs.borrow_mut().insert(ch, glyph.clone());
+        glyph
+    }
+
+    fn build(&self, ch: char) -> CachedGlyph {
+        use skrifa::MetadataProvider;
+        let inter_id = self
+            .inter
+            .charmap()
+            .map(ch)
+            .filter(|id| *id != skrifa::GlyphId::NOTDEF);
+        // Inter when it has the character; otherwise DejaVu (its own `.notdef` box when
+        // neither face has it, like the host's regular text).
+        let (font, location, id, fallback) = match inter_id {
+            Some(id) => (
+                &self.inter,
+                skrifa::instance::LocationRef::from(&self.location),
+                id,
+                false,
+            ),
+            None => (
+                &self.dejavu,
+                skrifa::instance::LocationRef::default(),
+                self.dejavu.charmap().map(ch).unwrap_or_default(),
+                true,
+            ),
+        };
+        let unscaled = skrifa::instance::Size::unscaled();
+        let per_em = f32::from(font.metrics(unscaled, location).units_per_em)
+            .max(1.0)
+            .recip();
+        let advance = font
+            .glyph_metrics(unscaled, location)
+            .advance_width(id)
+            .map_or(0.6, |units| units * per_em);
+        let mut pen = OutlinePen {
+            per_em,
+            ..OutlinePen::default()
+        };
+        if let Some(glyph) = font.outline_glyphs().get(id) {
+            let _ = glyph.draw(
+                skrifa::outline::DrawSettings::unhinted(unscaled, location),
+                &mut pen,
+            );
+        }
+        CachedGlyph {
+            advance,
+            contours: pen.finish(),
+            fallback,
+        }
+    }
+
+    /// Whether `ch` is drawn from the fallback face (or is `.notdef` in both).
+    #[cfg(test)]
+    fn uses_fallback(&self, ch: char) -> bool {
+        self.glyph(ch).fallback
+    }
+
+    fn advance(&self, ch: char, size: f32) -> f32 {
+        match ch {
+            '\t' => TAB_ADVANCE_EM * size,
+            c if c.is_control() => 0.0,
+            c => self.glyph(c).advance * size,
+        }
+    }
+
+    fn width(&self, text: &str, size: f32) -> f32 {
+        text.chars().map(|ch| self.advance(ch, size)).sum()
+    }
+
+    fn line_metrics(&self, size: f32) -> LineMetrics {
+        use skrifa::MetadataProvider;
+        let metrics = self
+            .inter
+            .metrics(skrifa::instance::Size::new(size), &self.location);
+        LineMetrics {
+            ascent: metrics.ascent,
+            line_height: metrics.ascent - metrics.descent + metrics.leading,
+        }
+    }
+
+    /// Outlines for one line with the baseline at y = 0 and the pen at x = 0
+    /// (y grows downwards, like the host's `shape-text`), one path per glyph. Control
+    /// characters draw nothing.
+    fn outline(&self, text: &str, size: f32) -> Vec<Vec<PathVerb>> {
+        let mut paths = Vec::new();
+        let mut cursor = 0.0;
+        for ch in text.chars() {
+            if !ch.is_control() {
+                let glyph = self.glyph(ch);
+                // One path per glyph: its contours (outer shape and counters) stay together
+                // when the scene is split into several fills, so a counter is never filled.
+                let path: Vec<PathVerb> = glyph
+                    .contours
+                    .iter()
+                    .flatten()
+                    .map(|verb| {
+                        map_verb(verb, |p| Point {
+                            x: cursor + p.x * size,
+                            y: p.y * size,
+                        })
+                    })
+                    .collect();
+                if !path.is_empty() {
+                    paths.push(path);
+                }
+            }
+            cursor += self.advance(ch, size);
+        }
+        paths
+    }
+}
+
+fn map_verb(verb: &PathVerb, f: impl Fn(Point) -> Point) -> PathVerb {
+    match verb {
+        PathVerb::MoveTo(p) => PathVerb::MoveTo(f(*p)),
+        PathVerb::LineTo(p) => PathVerb::LineTo(f(*p)),
+        PathVerb::QuadTo((c, p)) => PathVerb::QuadTo((f(*c), f(*p))),
+        PathVerb::CubicTo((a, b, p)) => PathVerb::CubicTo((f(*a), f(*b), f(*p))),
+        PathVerb::Close => PathVerb::Close,
+    }
+}
+
+/// Collects contours in em units (`per_em` = 1 / units-per-em), y flipped to point down.
+#[derive(Default)]
+struct OutlinePen {
+    paths: Vec<Vec<PathVerb>>,
+    current: Vec<PathVerb>,
+    per_em: f32,
+}
+
+impl OutlinePen {
+    fn point(&self, x: f32, y: f32) -> Point {
+        Point {
+            x: x * self.per_em,
+            y: -y * self.per_em,
+        }
+    }
+
+    fn flush(&mut self) {
+        if !self.current.is_empty() {
+            self.paths.push(std::mem::take(&mut self.current));
+        }
+    }
+
+    fn finish(mut self) -> Vec<Vec<PathVerb>> {
+        self.flush();
+        self.paths
+    }
+}
+
+impl skrifa::outline::OutlinePen for OutlinePen {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.flush();
+        let p = self.point(x, y);
+        self.current.push(PathVerb::MoveTo(p));
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        let p = self.point(x, y);
+        self.current.push(PathVerb::LineTo(p));
+    }
+
+    fn quad_to(&mut self, cx0: f32, cy0: f32, x: f32, y: f32) {
+        let (c, p) = (self.point(cx0, cy0), self.point(x, y));
+        self.current.push(PathVerb::QuadTo((c, p)));
+    }
+
+    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+        let (a, b, p) = (self.point(cx0, cy0), self.point(cx1, cy1), self.point(x, y));
+        self.current.push(PathVerb::CubicTo((a, b, p)));
+    }
+
+    fn close(&mut self) {
+        self.current.push(PathVerb::Close);
+        self.flush();
+    }
+}
+
+fn is_blank(ch: char) -> bool {
+    ch == ' ' || ch == '\t'
+}
+
+/// Greedy line breaking like the host's layout: breaks happen after blanks, runs of
+/// blanks (including leading ones) and tabs keep their width, blanks that end a wrapped
+/// line hang past the edge instead of forcing a break, an over-long word overflows
+/// rather than splitting, and every `\n` (also a trailing one) starts a new line.
+fn wrap_lines(shaper: &Shaper, text: &str, px: f32, max_width: f32) -> Vec<Line> {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let mut lines = Vec::new();
+    for paragraph in normalized.split('\n') {
+        let mut line = String::new();
+        let mut line_width = 0.0_f32;
+        let mut rest = paragraph;
+        while !rest.is_empty() {
+            let word_end = rest.find(is_blank).unwrap_or(rest.len());
+            let (word, after) = rest.split_at(word_end);
+            let blank_end = after.find(|ch| !is_blank(ch)).unwrap_or(after.len());
+            let (blanks, next) = after.split_at(blank_end);
+            let word_width = shaper.width(word, px);
+            if !line.is_empty() && !word.is_empty() && line_width + word_width > max_width {
+                lines.push(Line {
+                    text: std::mem::take(&mut line),
+                    soft_wrapped: true,
+                });
+                line_width = 0.0;
+            }
+            line.push_str(word);
+            line.push_str(blanks);
+            line_width += word_width + shaper.width(blanks, px);
+            rest = next;
+        }
+        lines.push(Line {
+            text: line,
+            soft_wrapped: false,
+        });
+    }
+    lines
+}
+
+/// One laid-out line. Blanks that end a soft-wrapped line hang past the edge and do not
+/// count towards alignment; blanks that end a line at a newline or the end of the text do,
+/// as in the host (so `"ab  "` centres including its trailing blanks).
+struct Line {
+    text: String,
+    soft_wrapped: bool,
+}
+
+impl Line {
+    fn aligned_width(&self, shaper: &Shaper, px: f32) -> f32 {
+        if self.soft_wrapped {
+            shaper.width(self.text.trim_end_matches(is_blank), px)
+        } else {
+            shaper.width(&self.text, px)
+        }
+    }
+}
+
+/// Fill commands for `contours`, split so no single path nears the core's verb cap.
+fn fill_chunks(contours: Vec<Vec<PathVerb>>, color: Color) -> Vec<DrawCommand> {
+    let mut commands = Vec::new();
+    let mut chunk: Vec<PathVerb> = Vec::new();
+    for contour in contours {
+        if !chunk.is_empty() && chunk.len() + contour.len() > MAX_VERBS_PER_ELEMENT {
+            commands.push(DrawCommand::FillPath((std::mem::take(&mut chunk), color)));
+        }
+        chunk.extend(contour);
+    }
+    if !chunk.is_empty() {
+        commands.push(DrawCommand::FillPath((chunk, color)));
+    }
+    commands
+}
+
+/// Weighted counterpart of the host's normalized `TextRun`: wrapped at the canvas
+/// width, lines aligned inside the block and the block centred in the clip box, so
+/// switching weight does not move the text.
+fn weighted_text_run(
+    text: &str,
+    font_size: f32,
+    face: Typeface,
+    align: &str,
+    color: Color,
+    size: Size,
+) -> Result<Scene, Diagnostic> {
+    let px = font_size * size.height as f32;
+    check_size(px)?;
+    check_text(text)?;
+    let (width, height) = (size.width as f32, size.height as f32);
+    let shaper = Shaper::get(face.weight)?;
+    let metrics = shaper.line_metrics(px);
+    let lines = wrap_lines(&shaper, text, px, width);
+    let widths: Vec<f32> = lines
+        .iter()
+        .map(|line| line.aligned_width(&shaper, px))
+        .collect();
+    let block_width = widths.iter().copied().fold(0.0, f32::max);
+    let top = (height - metrics.line_height * lines.len() as f32) / 2.0;
+    let left = (width - block_width) / 2.0;
+    let mut contours = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let remaining = block_width - widths[index];
+        let x = left
+            + match align {
+                "left" => 0.0,
+                "right" => remaining,
+                _ => remaining / 2.0,
+            };
+        let y = top + index as f32 * metrics.line_height + metrics.ascent;
+        let scale = |p: Point| Point {
+            x: (p.x + x) / width,
+            y: (p.y + y) / height,
+        };
+        for contour in shaper.outline(&line.text, px) {
+            contours.push(contour.iter().map(|verb| map_verb(verb, scale)).collect());
+        }
+    }
+    check_verbs(&contours)?;
+    Ok(Scene {
+        coordinate_space: CoordinateSpace::Normalized,
+        elements: fill_chunks(contours, color),
+    })
+}
+
+#[cfg(test)]
+mod weight_tests {
+    use super::*;
+
+    fn outline(weight: f32, text: &str) -> Vec<Vec<PathVerb>> {
+        Shaper::get(weight).unwrap().outline(text, 48.0)
+    }
+
+    fn width(contours: &[Vec<PathVerb>]) -> f32 {
+        let xs = contours.iter().flatten().map(verb_x);
+        xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+    }
+
+    #[test]
+    fn weight_schema_keeps_regular_as_default() {
+        let manifest = TextPlugin::describe();
+        assert_eq!(manifest.version, "1.3.0");
+        let param = manifest
+            .params
+            .iter()
+            .find(|param| param.id == "font_weight")
+            .unwrap();
+        let ParamKind::Number(range) = &param.kind else {
+            panic!("numeric weight required")
+        };
+        assert_eq!(
+            (range.min, range.max, range.default, range.step),
+            (100.0, 900.0, 400.0, 100.0)
+        );
+    }
+
+    #[test]
+    fn font_is_an_enum_that_defaults_to_dejavu() {
+        let manifest = TextPlugin::describe();
+        let param = manifest.params.iter().find(|p| p.id == "font").unwrap();
+        let ParamKind::EnumChoice(choice) = &param.kind else {
+            panic!("enum font required")
+        };
+        assert_eq!(choice.options, ["dejavu", "inter"]);
+        assert_eq!(choice.default, "dejavu");
+        let params = |font: Option<&str>, weight: f64| {
+            let mut entries = vec![ParamEntry {
+                id: "font_weight".into(),
+                value: ParamValue::Number(weight),
+            }];
+            if let Some(font) = font {
+                entries.push(ParamEntry {
+                    id: "font".into(),
+                    value: ParamValue::String(font.into()),
+                });
+            }
+            Typeface::from_params(&entries)
+        };
+        // Absent `font` is DejaVu: regular is host text, anything else is outlined Inter.
+        assert!(!params(None, 400.0).outlined());
+        assert!(params(None, 700.0).outlined());
+        // Inter outlines regular too, so weight never decides the typeface.
+        assert!(params(Some("inter"), 400.0).outlined());
+        assert!(!params(Some("dejavu"), 400.0).outlined());
+    }
+
+    #[test]
+    fn variable_font_has_distinct_semibold_bold_and_heavy_outlines() {
+        let outlines: Vec<_> = [300.0, 600.0, 700.0, 800.0]
+            .into_iter()
+            .map(|weight| format!("{:?}", outline(weight, "Heading")))
+            .collect();
+        assert!(outlines.iter().all(|outline| outline.len() > 100));
+        for pair in outlines.windows(2) {
+            assert_ne!(pair[0], pair[1]);
+        }
+        // Heavier faces are wider, so text never overlaps its neighbours.
+        let widths: Vec<_> = [300.0, 600.0, 800.0]
+            .into_iter()
+            .map(|weight| width(&outline(weight, "Heading")))
+            .collect();
+        assert!(
+            widths.windows(2).all(|pair| pair[0] < pair[1]),
+            "{widths:?}"
+        );
+    }
+
+    #[test]
+    fn outlines_sit_on_the_baseline_and_ignore_control_characters() {
+        let a = outline(700.0, "Hi");
+        let b = outline(700.0, "H\ni\t");
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        let ys = a.iter().flatten().filter_map(|verb| match verb {
+            PathVerb::MoveTo(p) | PathVerb::LineTo(p) => Some(p.y),
+            _ => None,
+        });
+        // y grows downwards: ink is above the baseline (negative), never far below it.
+        assert!(ys.clone().fold(f32::MAX, f32::min) < -20.0);
+        assert!(ys.fold(f32::MIN, f32::max) < 1.0);
+    }
+
+    #[test]
+    fn characters_missing_from_inter_fall_back_to_dejavu_instead_of_notdef() {
+        let shaper = Shaper::get(700.0).unwrap();
+        for ch in "∀∃∈∉⊂⊆∪∩∇∮ℝℕℤℚא".chars() {
+            assert!(shaper.uses_fallback(ch), "{ch} should come from DejaVu");
+            let glyph = shaper.glyph(ch);
+            assert!(!glyph.contours.is_empty(), "{ch} has an outline");
+            let notdef = shaper.glyph('\u{10FFFE}');
+            assert_ne!(
+                format!("{:?}", glyph.contours),
+                format!("{:?}", notdef.contours),
+                "{ch} must not be the .notdef box"
+            );
+        }
+        // Latin stays Inter.
+        assert!(!shaper.uses_fallback('x'));
+        assert!(!outline(700.0, "∀x ∈ ℝ").is_empty());
+    }
+
+    #[test]
+    fn wrapping_keeps_blanks_and_trailing_newlines_like_the_host() {
+        let shaper = Shaper::get(400.0).unwrap();
+        let lines = |text: &str, width: f32| -> Vec<String> {
+            wrap_lines(&shaper, text, 20.0, width)
+                .into_iter()
+                .map(|line| line.text)
+                .collect()
+        };
+        // Repeated and leading blanks are preserved.
+        assert_eq!(lines("a  b", 1e6), ["a  b"]);
+        assert_eq!(lines("  lead", 1e6), ["  lead"]);
+        // A tab is whitespace with width, not dropped.
+        assert_eq!(lines("a\tb", 1e6), ["a\tb"]);
+        assert!(shaper.width("a\tb", 20.0) > shaper.width("ab", 20.0));
+        // Every newline starts a line, including a trailing one; CRLF is one break.
+        assert_eq!(lines("a\n", 1e6), ["a", ""]);
+        assert_eq!(lines("a\r\nb", 1e6), ["a", "b"]);
+        // Blanks at a wrap point hang on the earlier line; an over-long word overflows.
+        let narrow = shaper.width("aa", 20.0) * 1.5;
+        assert_eq!(lines("aa  aa", narrow), ["aa  ", "aa"]);
+        assert_eq!(lines("aaaaaaaaaa", narrow), ["aaaaaaaaaa"]);
+        let wrapped = wrap_lines(&shaper, "aa  aa  ", 20.0, 1e6);
+        assert!(!wrapped[0].soft_wrapped);
+        let wrapped = wrap_lines(&shaper, "aa  aa  ", 20.0, narrow);
+        assert!(wrapped[0].soft_wrapped && !wrapped[1].soft_wrapped);
+        // Hanging blanks stay out of the alignment width; a final line keeps them.
+        assert_eq!(
+            wrapped[0].aligned_width(&shaper, 20.0),
+            shaper.width("aa", 20.0)
+        );
+        assert_eq!(
+            wrapped[1].aligned_width(&shaper, 20.0),
+            shaper.width("aa  ", 20.0)
+        );
+        assert_eq!(shaper.advance('\t', 20.0), 12.0);
+    }
+
+    #[test]
+    fn invalid_sizes_and_long_text_are_rejected_like_the_host() {
+        let face = Typeface {
+            weight: 700.0,
+            inter: false,
+        };
+        for size in [0.0, -4.0, f32::NAN, f32::INFINITY, 2.0e6] {
+            assert!(shape_text("x", size, face).is_err(), "size {size}");
+        }
+        assert!(shape_text(&".".repeat(MAX_TEXT_CHARS), 12.0, face).is_ok());
+        assert!(shape_text(&".".repeat(MAX_TEXT_CHARS + 1), 12.0, face).is_err());
+    }
+
+    #[test]
+    fn a_long_paragraph_is_split_into_paths_below_the_core_verb_cap() {
+        let text = "The quick brown fox jumps over the lazy dog. ".repeat(46);
+        assert!(text.chars().count() > 2000);
+        let face = Typeface {
+            weight: 700.0,
+            inter: true,
+        };
+        let scene = weighted_text_run(
+            &text,
+            0.03,
+            face,
+            "left",
+            Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+            Size {
+                width: 1920,
+                height: 1080,
+            },
+        )
+        .unwrap();
+        assert!(scene.elements.len() > 1, "split across several paths");
+        for element in &scene.elements {
+            let DrawCommand::FillPath((verbs, _)) = element else {
+                panic!("paths expected")
+            };
+            assert!(
+                verbs.len() <= MAX_VERBS_PER_ELEMENT + 200,
+                "{}",
+                verbs.len()
+            );
+        }
+    }
+}
