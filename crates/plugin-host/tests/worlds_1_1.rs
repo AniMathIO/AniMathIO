@@ -613,6 +613,40 @@ fn character_slide_options_reach_the_text_parameters() {
 }
 
 #[test]
+fn character_slide_is_refused_on_a_clip_with_a_caption_style() {
+    let host = test_support::host();
+    let captioned = |style: &str| {
+        let mut kind = animathio_plugin_api::sources::text("Hello".into(), 0.1, [255; 4]);
+        let ClipKind::Plugin { params, .. } = &mut kind else {
+            unreachable!("the text source is a plugin clip");
+        };
+        params["caption_style"] = style.into();
+        project_with(kind)
+    };
+    let apply = |project: &Project, preset: &str| {
+        host.animation_preset_command(
+            project,
+            ClipId(1),
+            ANIMATIONS,
+            preset,
+            None,
+            &BTreeMap::new(),
+        )
+    };
+    for style in ["classic", "karaoke", "bold-outline"] {
+        let project = captioned(style);
+        let error = apply(&project, "character-slide-in")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("caption style"), "{style}: {error}");
+        // The other presets still apply to a styled caption.
+        apply(&project, "clipped-slide-in").unwrap();
+    }
+    // `off` is the plain text: the preset applies.
+    apply(&captioned("off"), "character-slide-in").unwrap();
+}
+
+#[test]
 fn clipped_slide_applies_to_media_and_character_slide_to_text_only() {
     let host = test_support::host();
     let image = project_with(ClipKind::Image(AssetId::of(b"img")));

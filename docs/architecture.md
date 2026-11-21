@@ -18,6 +18,7 @@ the render/audio/export data flow. The authority for these rules is
 | `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
 | `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema, guest SDK and first-party clip authoring helpers (`sources`). |
 | `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, typeset-math-colored, limits, log, and `read-sibling` for importers), ABI 1.2.0 (1.0.0 and 1.1.0 components load unchanged; the opt-in `colored-source-plugin` world adds per-path math colours) plus an explicit 0.2.x adapter, plugin scene resolution, pixel-effect plugins (`PluginHost::effects`, `effect_processor`: instance-pre cached components, a fresh fuel/memory/epoch-limited store per call, frame-size caps), animation presets (`PluginHost::animation_presets`, `animation_preset_command`) and importers (`PluginHost::importers`, `PluginHost::import`), and the community plugin trust model (`CommunityStore`: per-user plugin folder, global switch + per-plugin enabled set in `community-plugins.json`, verified install/uninstall, and `PluginHost::sync_community_plugins` / `unload_plugin` for hot load and unload). |
+| `text-layout` | The one text layout (embedded DejaVu Sans via parley: wrapping to the canvas width, line alignment, block centring on the canvas). `render` shapes every normalized `text-run` through it and the plugin host's ABI 1.3 `text-layout` import runs the same calls, so a plugin that redraws glyph clusters puts them where the renderer would. |
 | `typeset` | Host-side math typesetting: Typst as a library plus MiTeX for LaTeX→Typst conversion, turned into vector path outlines plus a tight bbox. |
 | `import-v1` | One-way importer for v1 `.animathio` projects (deflated JSON + base64 media). Still native (see "Importers" below). |
 | `import-manim` | One-way importer for Manim Community scene scripts (`.py`), parsed with a small pure-Rust Python parser (`pyparse`) whose node vocabulary follows tree-sitter-python. The app runs it only inside the `org.animathio.import-manim` importer plugin. |
@@ -59,6 +60,8 @@ flowchart TD
     CTL --> HOST[plugin-host]
     HOST --> API[plugin-api · WIT/SDK]
     HOST --> TYPESET[typeset]
+    HOST --> TEXTLAYOUT[text-layout]
+    RENDER --> TEXTLAYOUT
     HOST --> CORE
     TYPESET --> CORE
 ```
@@ -500,7 +503,8 @@ names an effect parameter, and when the clip's chain has no such effect the host
 and the effect together (a bypassed instance is re-enabled in the batch instead of
 animated silently). The character slide keyframes the text plugin's `char_slide*`
 parameters, because only the text plugin knows the shaped glyphs (ABI 1.3 `layout-text`
-host import). `EffectProcessor::is_identity` lets a resting effect skip the layer path
+host import, which runs the same `text-layout` crate layout as the renderer). A clip with a
+caption style owns its own motion, so the preset refuses it. `EffectProcessor::is_identity` lets a resting effect skip the layer path
 (plugins declare it in manifest metadata `effect.<id>.identity`). The control
 methods `animations.list`/`animations.apply`, the MCP tool `apply_animation_preset`,
 the CLI `animations` subcommand and the editor's inspector section all go through

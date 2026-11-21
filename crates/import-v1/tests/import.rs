@@ -563,28 +563,26 @@ fn slide_effect_keys(clip: &animathio_core::Clip, param: &str) -> Vec<(i64, f64)
                     param: param.into(),
                 }
         })
-        .map(|a| {
+        .map_or_default(|a| {
             a.keys
                 .keys()
                 .iter()
                 .map(|(t, k)| (t.0, k.value.as_number().unwrap()))
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn param_keys(clip: &animathio_core::Clip, param: &str) -> Vec<(i64, f64)> {
     clip.animations
         .iter()
         .find(|a| a.target == animathio_core::Target::Param(param.into()))
-        .map(|a| {
+        .map_or_default(|a| {
             a.keys
                 .keys()
                 .iter()
                 .map(|(t, k)| (t.0, k.value.as_number().unwrap()))
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 fn moves_position(clip: &animathio_core::Clip) -> bool {

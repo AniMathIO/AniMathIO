@@ -159,6 +159,8 @@ fn fitted_text(
             y: (p.y + oy) / box_height,
         };
         if slide.is_some() {
+            // One `shape-text` call per character of this line: bounded by MAX_GLYPHS in total
+            // (the slide is dropped above that many characters), and only mid-animation.
             let units = glyph_slide::split_contours(text, &contours, |s| host::shape_text(s, font));
             let units = units.unwrap_or_else(|| vec![contours.clone()]);
             for unit in units {
@@ -993,6 +995,9 @@ impl Guest for TextPlugin {
             },
         );
         let align = get_string(&params, "align", "center");
+        // A caption style (Classic included) owns the clip's motion, so the character
+        // slide parameters are ignored whenever one is set.
+        let styled = CaptionStyle::parse(&get_string(&params, "caption_style", "off")).is_some();
         let slide = glyph_slide::Slide::from_params(
             get_number(&params, "char_slide", 1.0),
             get_number(&params, "char_slide_direction", 1.0),
@@ -1000,7 +1005,7 @@ impl Guest for TextPlugin {
             get_number(&params, "char_slide_clip", 1.0),
             get_number(&params, "char_slide_fade", 0.0),
         )
-        .filter(|_| text.chars().count() <= glyph_slide::MAX_GLYPHS);
+        .filter(|_| !styled && text.chars().count() <= glyph_slide::MAX_GLYPHS);
 
         if get_string(&params, "units", "pixels") == "normalized" {
             let fit_width = get_number(&params, "fit_width", 0.0) as f32;

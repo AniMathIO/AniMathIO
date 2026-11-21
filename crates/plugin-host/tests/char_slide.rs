@@ -45,6 +45,7 @@ fn scene(text: &str, layout: Layout, slide: &[(&str, f64)]) -> Scene {
                 params,
             },
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit: animathio_core::Fit::Stretch,
             transform: Transform::default(),
             params: slide
@@ -162,6 +163,9 @@ fn accents_and_combining_marks_stay_with_their_base_letter() {
 
 #[test]
 fn each_cjk_character_is_its_own_unit() {
+    // The embedded DejaVu Sans has no CJK glyphs, so every character here is shaped as the
+    // font's `.notdef` box. That still pins the unit rule (one cluster per character, each
+    // with an outline); it does not exercise real CJK shaping.
     for layout in [Layout::Wrapped, Layout::Fitted, Layout::Pixels] {
         let units = units("日本語", layout, &SLIDING, HD);
         assert_eq!(units.len(), 3, "{layout:?}");

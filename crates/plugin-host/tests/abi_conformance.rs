@@ -100,12 +100,9 @@ fn hello_1_0_preserves_geometry_and_exercises_host_limits() {
     let mut new = test_support::host();
     let id = "com.example.hello";
     let plugin = new.get_plugin(id).unwrap();
-    // The example is rebuilt from current WIT; the frozen 1.0 binary is covered by
-    // `compatibility.rs`.
-    assert_eq!(
-        plugin.manifest.api_version,
-        animathio_plugin_api::API_VERSION
-    );
+    // The example is rebuilt from current WIT (1.3) but a plain source plugin only needs
+    // the 1.2 minimum it declares; the frozen 1.0 binary is covered by `compatibility.rs`.
+    assert_eq!(plugin.manifest.api_version, "1.2.0");
     assert!(
         plugin
             .wit_manifest

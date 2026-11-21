@@ -197,9 +197,7 @@ interface types {
     /// Keys are unique; values are UTF-8, never executable content. Reserved
     /// conventions: label-key, description-key, param.<id>.unit,
     /// param.<id>.label-key and param.<id>.option.<value>.label-key;
-    /// prefix with effect.<id>. for effect descriptors; effect.<id>.identity
-    /// lists parameter values (`param>=1;other==0`) at which the effect leaves its input
-    /// untouched, so the host may skip it. No localization service
+    /// prefix with effect.<id>. for effect descriptors. No localization service
     /// is implied: plain labels/messages remain mandatory fallbacks.
     type metadata = list<tuple<string, string>>;
 

@@ -35,6 +35,7 @@ fn clip(kind: ClipKind, fit: Fit, effects: Vec<EffectInstance>) -> Scene {
             id: ClipId(0),
             kind,
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit,
             transform: Transform::default(),
             params: BTreeMap::new(),

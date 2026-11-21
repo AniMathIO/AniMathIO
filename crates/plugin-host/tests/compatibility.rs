@@ -145,3 +145,52 @@ fn frozen_1_0_source_contract_still_loads_with_advisory_kind_and_limits() {
         .unwrap();
     assert_eq!(scene.elements.len(), 1);
 }
+
+#[test]
+fn frozen_1_1_animation_preset_world_still_loads_and_exports_its_presets() {
+    let (_cache, host, id) = host(include_bytes!("fixtures/animations-1.0.0.amplugin"));
+    assert_eq!(id, "org.animathio.animations");
+    let presets = host.animation_presets();
+    assert!(
+        presets.iter().any(|preset| preset.preset_id == "fade-in"),
+        "the 1.1 animation-preset-plugin world exports its presets on the 1.3 host"
+    );
+    // The 1.1 binary predates the slide-direction and character-slide presets.
+    assert!(
+        !presets
+            .iter()
+            .any(|preset| preset.preset_id.starts_with("character-slide"))
+    );
+}
+
+#[test]
+fn frozen_1_2_colored_source_world_still_loads_and_renders_inline_colour() {
+    let (_cache, mut host, id) = host(include_bytes!("fixtures/latex-1.3.0.amplugin"));
+    assert_eq!(id, "org.animathio.latex");
+    assert_eq!(
+        host.get_plugin(&id).unwrap().wit_manifest.kinds,
+        ["clip-source"]
+    );
+    let scene = host
+        .render_clip(
+            &id,
+            &BTreeMap::new(),
+            &serde_json::json!({ "source": r"\textcolor{red}{x} + y", "mode": "latex", "size": 48.0 }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    assert!(!scene.elements.is_empty());
+    let mut colours: Vec<animathio_core::Color> = Vec::new();
+    for element in &scene.elements {
+        if let animathio_core::VectorElement::FillPath { color, .. } = element
+            && !colours.contains(color)
+        {
+            colours.push(*color);
+        }
+    }
+    assert!(
+        colours.len() >= 2,
+        "the 1.2 per-path colours reach the scene: {colours:?}"
+    );
+}

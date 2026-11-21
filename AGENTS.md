@@ -182,7 +182,7 @@ runtime cannot target `wasm32-wasip2` here) and is linked only into that plugin;
 `import-v1` stays native. Plugin ABI 1.2.0 adds the opt-in `colored-source-plugin` world (`math-colors`:
 `typeset-math-colored`, per-path optional solid paint from `TypesetResult::colors`) used by
 `org.animathio.latex` for inline `\color`/`\textcolor`. Keep 1.0 and 1.1 components loading
-unchanged (`hello-1.0.0` fixture); never edit frozen WIT records, add a new world/interface instead.
+unchanged (`hello-1.0.0`, `animations-1.0.0` (ABI 1.1) and `latex-1.3.0` (ABI 1.2) fixtures); never edit frozen WIT records, add a new world/interface instead.
 
 Clipped slides are the `org.animathio.effects-basic` 1.1.0 `slide` pixel effect (block only: bounds = alpha
 bounding box of the clip's layer, no glyph splitting from pixels) and the presets `clipped-slide-*` animate
@@ -193,7 +193,10 @@ is an identity, `EffectProcessor::is_identity` reads that, and the renderer then
 layer path. Per-character slides live in the text plugin (1.3.0, ABI 1.3): the `char_slide*` parameters,
 keyframed by the `character-slide-*` presets, use exact glyph units (the `text-layout` host import for wrapped
 text, per-character `shape-text` for fitted/pixel text), stagger by normalized position and are drawn as
-filled paths only mid-animation. `import-v1` maps `useClipPath` to the effect and `textType: "character"` on
+filled paths only mid-animation; any `caption_style` (Classic included) ignores `char_slide*` and the presets refuse such a clip.
+The renderer and the host's `layout-text` import share one layout, the `animathio-text-layout` crate (parley setup, wrapping,
+alignment, block centring); never copy it, the exactness test in `crates/plugin-host/src/text_layout.rs` compares glyph ids and
+positions against `CpuBackend::text_glyphs`. `import-v1` maps `useClipPath` to the effect and `textType: "character"` on
 text to those parameters.
 
 Community plugins (`crates/plugin-host/src/community.rs`) are the third-party `.amplugin` files in the

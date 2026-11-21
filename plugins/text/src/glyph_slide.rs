@@ -1,5 +1,5 @@
 //! Per-glyph slide ("character slide"): every glyph travels a short distance into place,
-//! staggered in reading order and optionally masked to its own cell.
+//! staggered in visual order and optionally masked to its own cell.
 //!
 //! The text plugin sees the shaped glyphs, so the units are exact (no pixel splitting):
 //! a glyph with its dot or accent is one unit, a ligature is one unit, each CJK character
@@ -41,7 +41,7 @@ pub struct Band {
     pub bottom: f32,
 }
 
-/// Glyph units of a whole text in reading order, plus the line bands.
+/// Glyph units of a whole text in visual (left to right) order, plus the line bands.
 pub struct Layout {
     pub lines: Vec<Band>,
     pub glyphs: Vec<Glyph>,
@@ -314,7 +314,11 @@ fn flatten(contour: &[PathVerb]) -> Vec<(f32, f32)> {
 }
 
 /// Group the contours of `text` shaped by `shape` (one call per character, then once for
-/// the whole text) into glyph units: the contours of consecutive characters, merging a
+/// the whole text) into glyph units. The host call count is bounded: `shape` runs once per
+/// `char` of `text`, and the callers only get here when the whole text has at most
+/// [`MAX_GLYPHS`] characters (4000), so one
+/// frame makes at most that many extra `shape-text` calls, and none while the clip is at rest.
+/// The grouping is: the contours of consecutive characters, merging a
 /// combining mark into the character before it. `None` when the per-character contour
 /// counts do not add up to the whole text (the host merged glyphs), so the caller can fall
 /// back to the plain text.

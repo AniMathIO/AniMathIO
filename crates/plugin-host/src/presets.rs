@@ -675,6 +675,35 @@ fn curves_to_command(
     Ok(batch(commands))
 }
 
+/// Curve targets of the text plugin's per-character slide.
+const CHAR_SLIDE_PREFIX: &str = "param:char_slide";
+
+/// A text clip with a caption style set (`caption_style` other than `off`, Classic
+/// included) draws its own motion and ignores the `char_slide*` parameters, so keyframing
+/// them would silently do nothing. Refuse that instead.
+fn refuse_styled_caption(clip: &Clip, curves: &[wit::Curve]) -> Result<(), String> {
+    let styled = matches!(
+        &clip.kind,
+        ClipKind::Plugin { params, .. }
+            if params
+                .get("caption_style")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|style| style != "off")
+    );
+    if styled
+        && curves
+            .iter()
+            .any(|curve| curve.target.starts_with(CHAR_SLIDE_PREFIX))
+    {
+        return Err(
+            "a caption with a caption style animates itself: the character slide is \
+            ignored there; set the caption style to off first"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 impl crate::PluginHost {
     /// Presets offered by every loaded animation-preset plugin, in plugin-id then
     /// listing order.
@@ -768,6 +797,7 @@ impl crate::PluginHost {
             .map_err(|e| HostError::Trapped(e.to_string()))?;
         let curves =
             result.map_err(|e| HostError::InvalidOutput(format!("{}: {}", e.code, e.message)))?;
+        refuse_styled_caption(clip, &curves).map_err(invalid)?;
         curves_to_command(
             clip,
             window,

@@ -217,7 +217,8 @@ worlds (`animation-preset-plugin`, `importer-plugin`) and one new interface that
 the importer world imports (`import-files`). 1.1 changes no existing record, enum,
 variant, function or world, so every 1.0 component loads and runs unchanged (the
 checked-in frozen `hello-1.0.0` fixture and the 0.2.x fixtures are tested against this
-host). ABI semver is independent of the
+host, as are frozen 1.1 (`animations-1.0.0`) and 1.2 (`latex-1.3.0`) components built from the
+revisions before ABI 1.1 and 1.3; see `crates/plugin-host/tests/fixtures/README.md`). ABI semver is independent of the
 application's version and each plugin's own version. The Rust SDK crate keeps
 its workspace version; `API_VERSION` identifies the component ABI. Its
 host-side kind and error enums are non-exhaustive so SDK callers handle future
@@ -916,7 +917,7 @@ wit-bindgen = "0.40.0"
 **`plugins/examples/hello/plugin.toml`**
 
 ```toml
-api_version = "1.3.0"
+api_version = "1.2.0"
 id = "com.example.hello"
 name = "Hello"
 version = "1.0.0"
@@ -1143,12 +1144,16 @@ axis, its line band for top/bottom and its advance box for left/right, so it eme
 stacking on its neighbours) and `char_slide_fade` (0 to 1, how much alpha ramps with each
 glyph's own progress). The units are the shaped glyphs themselves, not pixels: a letter keeps
 its dot or accent (combining marks belong to the letter before them), a ligature is one unit,
-each CJK character is one unit and lines are separate; units run in reading order (the visual
-order of the line for right-to-left text). Wrapped normalized text takes its units from the
+each CJK character is one unit and lines are separate; units run in the visual order of the
+line, left to right, so right-to-left text staggers from its leftmost glyph (the last letter it
+reads) to its rightmost. Wrapped normalized text takes its units from the
 host `layout-text` import (the renderer's own layout, so glyphs sit where the plain text puts
 them); fitted titles and single-line pixel text split the host's `shape-text` contours per
-character. Captions (`caption_style`) ignore the parameters. A glyph starts after
-`|stagger| * u` of the progress, with `u` its index over the glyph count, and then takes the rest;
+character. Captions ignore `char_slide*`: any `caption_style` other than `off` (Classic
+included) owns the clip's motion, and the character-slide presets refuse a clip that has one. A
+glyph starts after `|stagger| * u` of the progress, with `u` its index over the glyph count (the
+stagger is capped at 0.95 in both the plugin and the presets, so the last glyph always keeps
+5% of the progress to travel), and then takes the rest;
 it travels one line height, so timing and geometry follow normalized positions and agree at
 every resolution. Only the frames that are mid-animation are redrawn as filled glyph paths; at
 rest the plain text is drawn, so a resting clip costs nothing extra.
@@ -1188,12 +1193,15 @@ scale with it. Normalized shapes remain static unless their parameters are keyfr
 `CurveTo` carries three points (two controls and endpoint).
 
 All first-party components and the example are built against ABI 1.3.0 and declare
-`api_version = "1.2.0"` except the text plugin and the example, which declare `"1.3.0"` (the text plugin for the glyph layout import).
-LaTeX selects `colored-source-plugin` and text `text-layout-source-plugin`; other source
-plugins retain `source-plugin`. Effects-basic is 1.1.0 (the clipped slide), import-manim and the example are version
-1.0.0; text is 1.3.0 (per-character slide), shapes and audio-basic are 1.1.0, animations 1.2.0. LaTeX is 1.3.0
-(per-path inline color, normalized sizing, strict validation and preserved glyph holes), and graph is
-1.3.0 (parametric curves, styling and explicit axis scaling). The frozen 1.0
+`api_version = "1.2.0"` except the text plugin, which declares `"1.3.0"` (it imports the glyph
+layout). A package only needs the ABI of the newest world it uses: the host resolves a 1.x
+component's imports on the major version, so a plain source plugin built with the 1.3 WIT
+still declares the older minor and keeps loading on a 1.2 host. LaTeX selects
+`colored-source-plugin` and text `text-layout-source-plugin`; other source plugins retain
+`source-plugin`. Plugin versions: animations 1.2.0, audio-basic 1.2.0, effects-basic 1.1.0
+(the clipped slide), graph 1.4.0, import-manim 1.0.0, latex 1.3.0 (per-path inline color,
+normalized sizing, strict validation and preserved glyph holes), shapes 1.1.0, text 1.3.0
+(per-character slide), trap 1.0.0 and the example 1.0.0. The frozen 1.0
 fixture and the explicit 0.2.x adapter retain older binaries; 0.1 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.

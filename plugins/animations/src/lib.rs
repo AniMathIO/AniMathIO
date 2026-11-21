@@ -162,7 +162,9 @@ fn catalog() -> Vec<PresetDescriptor> {
             preset(
                 &format!("character-slide-{verb}"),
                 &format!("Character slide {suffix}"),
-                &format!("Slide text {into} view one character at a time"),
+                &format!(
+                    "Slide text {into} view one character at a time (not on captions with a caption style)"
+                ),
                 role,
                 &[TEXT],
                 vec![
