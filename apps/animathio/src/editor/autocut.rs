@@ -420,7 +420,7 @@ impl Editor {
             panel = panel.child(
                 div()
                     .text_size(crate::style::type_size::XS)
-                    .child("This build has no speech engine. Rebuild with the whisper feature."),
+                    .child("This build has no speech engine, so filler words cannot be found. Release installers include one; from source, build with the whisper feature."),
             );
         }
         if let Some(error) = &review.error {

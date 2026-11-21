@@ -142,7 +142,7 @@ impl Editor {
     ) {
         let ids = self.selected_ids();
         if ids.is_empty() {
-            self.error = Some("select a clip to animate".into());
+            self.error = Some("Select a clip first, then choose an animation to apply.".into());
             cx.notify();
             return;
         }

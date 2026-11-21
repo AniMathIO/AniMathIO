@@ -769,7 +769,7 @@ impl Editor {
             .child(
                 div()
                     .text_size(crate::style::type_size::XS)
-                    .child(format!("{} markers", self.project.markers().len())),
+                    .child(count_label(self.project.markers().len(), "marker")),
             )
             .child(list)
             .child(

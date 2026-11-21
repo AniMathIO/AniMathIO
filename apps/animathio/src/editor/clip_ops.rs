@@ -175,6 +175,8 @@ impl Editor {
             return;
         }
         let Some(board) = self.clipboard_contents(cx) else {
+            self.error = Some("Nothing to paste. Copy or cut a clip first.".into());
+            cx.notify();
             return;
         };
         let at = self.position;
@@ -184,6 +186,8 @@ impl Editor {
     /// Duplicate the selection right after itself.
     pub(super) fn duplicate_selection(&mut self, cx: &mut Context<Self>) {
         let Some(board) = Clipboard::copy_linked(&self.project, &self.selected_ids()) else {
+            self.error = Some("Select a clip to duplicate first.".into());
+            cx.notify();
             return;
         };
         self.apply_placement(|project, next| board.duplicate(project, next), cx);

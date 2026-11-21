@@ -157,8 +157,14 @@ pub(super) fn paint_timeline(
     }
     for row in 0..rows {
         if !snapshot.overview.iter().any(|(r, _, _)| *r == row) {
+            // The very first empty row of an empty project says what else can go here.
+            let label = if snapshot.overview.is_empty() && row == 0 {
+                "Drop media here, or add text, shapes and formulas from Elements"
+            } else {
+                "Drop media here"
+            };
             paint_clip_label(
-                "Drop media here".into(),
+                label.into(),
                 point(
                     bounds.left() + px(20.),
                     bounds.top() + px(ruler_height() + row as f32 * snapshot.row_height + 16.),
@@ -1478,6 +1484,39 @@ pub(super) fn media_type_for(path: &Path) -> &'static str {
         Some("mkv") => "video/x-matroska",
         Some("webm") => "video/webm",
         _ => "application/octet-stream",
+    }
+}
+
+/// "1 media file", "3 media files".
+pub(super) fn count_label(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
+}
+
+/// Why a file was refused on import, naming the file and what would have worked.
+pub(super) fn unsupported_media_message(path: &Path) -> String {
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    format!(
+        "{name} is not a supported media file. Use PNG, JPEG, WebP or BMP images, WAV, MP3, \
+         FLAC, AAC, M4A or OGG audio, or MP4, MOV, MKV or WebM video."
+    )
+}
+
+/// One message for every file an import refused: the single reason, or a count plus the first.
+pub(super) fn import_error_summary(errors: &[String]) -> Option<String> {
+    match errors {
+        [] => None,
+        [only] => Some(only.clone()),
+        [first, rest @ ..] => Some(format!(
+            "{} could not be imported. {first}",
+            count_label(rest.len() + 1, "file")
+        )),
     }
 }
 

@@ -140,7 +140,7 @@ impl Editor {
                                     .gap_3()
                                     .text_size(crate::style::type_size::XS)
                                     .text_color(style::hex(color::TEXT_SECONDARY))
-                                    .child(format!("{} tracks", self.project.tracks().len()))
+                                    .child(count_label(self.project.tracks().len(), "track"))
                                     .child(
                                         Button::new("timeline-add-track")
                                             .debug_selector(|| "timeline-add-track".into())

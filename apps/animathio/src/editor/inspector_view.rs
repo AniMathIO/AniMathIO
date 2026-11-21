@@ -143,6 +143,7 @@ impl Editor {
                     .child(
                         div()
                             .id(SharedString::from(format!("section-{name}")))
+                            .debug_selector(move || format!("section-{name}"))
                             .flex_1()
                             .h_full()
                             .flex()

@@ -260,8 +260,8 @@ impl Editor {
             paths,
             placement,
         );
-        if let Some(error) = errors.last() {
-            self.error = Some(error.clone());
+        if let Some(summary) = import_error_summary(&errors) {
+            self.error = Some(summary);
         }
         if !imported.is_empty() {
             let imported_count = imported.len();
@@ -277,7 +277,8 @@ impl Editor {
                     self.after_edit(cx);
                     if placement.is_none() {
                         self.notices.push(crate::style::Toast::info(format!(
-                            "Imported {imported_count} media files. Drag them to the timeline."
+                            "Imported {} to the library. Click it or drag it to the timeline.",
+                            count_label(imported_count, "media file")
                         )));
                     }
                 }
@@ -354,7 +355,7 @@ impl Editor {
         placement: Option<(TrackId, Time)>,
     ) -> Result<(Time, Command, AssetId, Vec<u8>), String> {
         if media_type_for(path) == "application/octet-stream" {
-            return Err(format!("Unsupported media: {}", path.display()));
+            return Err(unsupported_media_message(path));
         }
         let bytes = read_bounded(path, animathio_format::Limits::default().asset_bytes)
             .map_err(|e| e.to_string())?;

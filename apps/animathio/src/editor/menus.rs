@@ -3,6 +3,7 @@
 use super::actions::*;
 use super::*;
 use crate::style::{self, color};
+use gpui_component::Disableable as _;
 use gpui_component::{
     TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar, status_bar::StatusBar,
 };
@@ -221,7 +222,9 @@ impl Editor {
                 MenuItem::action("Markers and beat sync…", ShowMarkers),
             ]),
             Menu::new("Help").items([
+                MenuItem::action("Editor guide", OpenEditorGuide),
                 MenuItem::action("Keyboard shortcuts…", KeyboardShortcuts),
+                MenuItem::action("Report an issue", ReportIssue),
                 MenuItem::separator(),
                 MenuItem::action("About AniMathIO", About),
             ]),
@@ -338,6 +341,7 @@ impl Editor {
                             .mr_2()
                             .icon(icons::icon(IconName::Upload))
                             .label("Export")
+                            .disabled(self.is_start_screen())
                             .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_export_dialog(window, cx);

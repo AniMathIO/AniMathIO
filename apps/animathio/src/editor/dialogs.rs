@@ -200,7 +200,7 @@ impl Editor {
     pub(super) fn open_export_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let duration = animathio_export::duration(&self.project).0;
         if duration <= 0 {
-            self.error = Some("Add content before exporting".into());
+            self.error = Some("Nothing to export yet. Add a clip to the timeline first.".into());
             cx.notify();
             return;
         }
@@ -391,7 +391,15 @@ impl Editor {
             _ => TimeRange::new(Time(0), Time(duration)).ok(),
         };
         let Some(range) = range else {
-            self.error = Some("Choose a nonempty range within the project".into());
+            self.error = Some(match choice {
+                "In/out" => "The in/out range is empty or outside the project. Move the I and O \
+                                 marks in the timeline, or choose Whole project."
+                    .to_owned(),
+                "Custom" => "Enter a start before the end, both inside the project, as \
+                                 HH:MM:SS:FF."
+                    .to_owned(),
+                _ => "The project has nothing to export.".to_owned(),
+            });
             cx.notify();
             return Submitted::Invalid;
         };

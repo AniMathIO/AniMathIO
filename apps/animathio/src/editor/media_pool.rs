@@ -7,6 +7,9 @@ use gpui_component::input::{Input, InputEvent, InputState};
 /// Search text for the Effects tab's built-in Write on button.
 const WRITE_ON_SEARCH: &str = "Animations Write on LaTeX";
 
+/// Shown at the top of the Effects tab while no clip is selected.
+pub(super) const EFFECTS_HINT: &str = "Select a clip, then click an effect, animation or fade to apply it. You can also drag an effect onto a clip.";
+
 #[derive(Default)]
 pub(super) struct MediaView {
     list: bool,
@@ -110,7 +113,10 @@ impl Editor {
         } else if asset.media_type.starts_with("audio/") {
             ClipKind::Audio(asset_id.clone())
         } else {
-            self.error = Some(format!("cannot place {}", asset.media_type));
+            self.error = Some(format!(
+                "AniMathIO cannot place {} media on the timeline.",
+                asset.media_type
+            ));
             cx.notify();
             return;
         };
@@ -118,7 +124,9 @@ impl Editor {
             .first()
             .map(|track| track.id())
         else {
-            self.error = Some("no track to place the clip".into());
+            self.error = Some(
+                "There is no track to place the clip on. Use Add track in the timeline.".into(),
+            );
             cx.notify();
             return;
         };
@@ -174,7 +182,9 @@ impl Editor {
             return;
         }
         let Some(track) = track else {
-            self.error = Some("no track to place the clip".into());
+            self.error = Some(
+                "There is no track to place the clip on. Use Add track in the timeline.".into(),
+            );
             cx.notify();
             return;
         };
@@ -188,7 +198,7 @@ impl Editor {
                 if let Some(clip) = hit.map(|hit| hit.clip).or(self.selected) {
                     self.add_effect_to_clip(clip, &plugin, &effect, cx);
                 } else {
-                    self.error = Some("drop an effect on a clip".into());
+                    self.error = Some("Drop the effect on a clip to apply it.".into());
                     cx.notify();
                 }
             }
@@ -213,7 +223,10 @@ impl Editor {
         } else if asset.media_type.starts_with("audio/") {
             ClipKind::Audio(asset_id.clone())
         } else {
-            self.error = Some(format!("cannot place {}", asset.media_type));
+            self.error = Some(format!(
+                "AniMathIO cannot place {} media on the timeline.",
+                asset.media_type
+            ));
             cx.notify();
             return;
         };
@@ -254,18 +267,76 @@ impl Editor {
         {
             clip.range = range;
         }
+        // Never fail on an occupied slot: use the chosen row when it is free over the clip,
+        // else a free layer, creating a track when none is. New ids are reserved in order.
+        let mut next_track = self
+            .project
+            .tracks()
+            .iter()
+            .map(|t| t.id().0)
+            .max()
+            .map_or(1, |max| max.saturating_add(1));
+        let mut added_tracks = 0;
+        let range = clip.range;
+        let free_on = |t: &Track| {
+            !t.is_locked()
+                && !t
+                    .clips()
+                    .values()
+                    .any(|c| c.range.start < range.end && range.start < c.range.end)
+        };
+        let target = match &clip.kind {
+            ClipKind::Audio(_) => {
+                if self
+                    .project
+                    .tracks()
+                    .iter()
+                    .any(|t| t.id() == track && free_on(t))
+                {
+                    track
+                } else if let Some(free) = self.project.tracks().iter().find(|t| {
+                    free_on(t)
+                        && !t.clips().is_empty()
+                        && t.clips()
+                            .values()
+                            .all(|c| matches!(c.kind, ClipKind::Audio(_)))
+                }) {
+                    free.id()
+                } else {
+                    let id = TrackId(next_track);
+                    next_track = next_track.saturating_add(1);
+                    commands.push(Command::AddTrack {
+                        track: Track::new(id, "Audio"),
+                        index: self.project.tracks().len(),
+                    });
+                    added_tracks += 1;
+                    id
+                }
+            }
+            kind => {
+                let label = if matches!(kind, ClipKind::Image(_)) {
+                    "Image"
+                } else {
+                    "Video"
+                };
+                match animathio_control::visual_slot(&self.project, range, Some(track)) {
+                    animathio_control::Slot::Existing(id) => id,
+                    animathio_control::Slot::New(id) => {
+                        next_track = next_track.max(id.0.saturating_add(1));
+                        commands.push(Command::AddTrack {
+                            track: Track::new(id, label),
+                            index: self.project.tracks().len(),
+                        });
+                        added_tracks += 1;
+                        id
+                    }
+                }
+            }
+        };
         if let ClipKind::Video(id) = &clip.kind
             && info.as_ref().is_some_and(|info| !info.audio.is_empty())
         {
-            let audio_track = TrackId(
-                self.project
-                    .tracks()
-                    .iter()
-                    .map(|t| t.id().0)
-                    .max()
-                    .unwrap_or(0)
-                    + 1,
-            );
+            let audio_track = TrackId(next_track);
             clip.link_group = Some(clip.id);
             let mut audio = Clip::new(
                 ClipId(clip.id.0 + 1),
@@ -277,14 +348,17 @@ impl Editor {
             audio.params.insert("muted".into(), 0.0.into());
             commands.push(Command::AddTrack {
                 track: Track::new(audio_track, "Audio"),
-                index: self.project.tracks().len(),
+                index: self.project.tracks().len() + added_tracks,
             });
             commands.push(Command::AddClip {
                 track: audio_track,
                 clip: audio,
             });
         }
-        commands.push(Command::AddClip { track, clip });
+        commands.push(Command::AddClip {
+            track: target,
+            clip,
+        });
         self.execute(&Command::Batch { commands }, cx);
     }
 
@@ -370,7 +444,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         let Some(id) = self.selected else {
-            self.error = Some("select a clip to add an effect".into());
+            self.error = Some("Select a clip first, then click an effect to apply it.".into());
             cx.notify();
             return;
         };
@@ -546,15 +620,23 @@ impl Editor {
                                 div()
                                     .text_size(crate::style::type_size::XS)
                                     .text_color(hex(color::TEXT_SECONDARY))
-                                    .child("Drop video, images or audio here"),
+                                    .child(if self.project.assets().is_empty() {
+                                        "Drop video, images or audio here"
+                                    } else {
+                                        "Clear the search box or pick All to see your media again."
+                                    }),
                             )
-                            .child(
-                                Button::new("pool-import")
-                                    .primary()
-                                    .icon(icons::icon(IconName::Import))
-                                    .label("Import media")
-                                    .on_click(cx.listener(|this, _, _, cx| this.import_media(cx))),
-                            ),
+                            .when(self.project.assets().is_empty(), |panel| {
+                                panel.child(
+                                    Button::new("pool-import")
+                                        .primary()
+                                        .icon(icons::icon(IconName::Import))
+                                        .label("Import media")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.import_media(cx)),
+                                        ),
+                                )
+                            }),
                     );
                 }
                 let mut cards = div().flex().flex_wrap().gap_2().w_full();
@@ -786,6 +868,18 @@ impl Editor {
                     body = body.child(
                         empty_state("No effect plugins loaded", cx)
                             .debug_selector(|| "effects-empty".into()),
+                    );
+                }
+                if self.selected_ids().is_empty() {
+                    body = body.child(
+                        div()
+                            .id("effects-hint")
+                            .debug_selector(|| "effects-hint".into())
+                            .px_2()
+                            .py_1()
+                            .text_size(crate::style::type_size::XS)
+                            .text_color(hex(color::TEXT_SECONDARY))
+                            .child(EFFECTS_HINT),
                     );
                 }
                 let group = |label: &'static str| {
