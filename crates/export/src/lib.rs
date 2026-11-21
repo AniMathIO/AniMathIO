@@ -85,6 +85,9 @@ pub enum Error {
         /// Why it could not be resolved.
         message: String,
     },
+    /// MP4 box layout error (corrupt chunk offsets, malformed container, …).
+    #[error("MP4 error: {0}")]
+    Mp4(String),
 }
 
 /// Serializable output choices. Resolution comes from the project.
@@ -299,6 +302,7 @@ impl Exporter {
             // option is enabled and the project has markers in the range.
             let bytes = if settings.embed_chapters {
                 chapters::embed_chapters(bytes, project.markers(), range.start, range.end)
+                    .map_err(Error::Mp4)?
             } else {
                 bytes
             };
