@@ -1105,7 +1105,8 @@ fn stretch_cache_is_keyed_by_the_source_end_a_tail_trim_moves() {
 fn stretching_follows_trim_and_merge() {
     let rate = 48_000;
     let tick = TICKS_PER_SECOND / i64::from(rate);
-    let (mut p, pool) = project(&tone(rate, 2, 500.0), 0, 2 * TICKS_PER_SECOND);
+    // Long enough that two 64-hop segments (30720 frames each) fit after the head cut.
+    let (mut p, pool) = project(&tone(rate, 4, 500.0), 0, 4 * TICKS_PER_SECOND);
     set_speed(&mut p, 0, 3, 2, false);
     let end = p.tracks()[0].clips()[&ClipId(0)].range.end.0;
     let mixer = pool.prepare(rate, 1).unwrap();
@@ -1127,9 +1128,10 @@ fn stretching_follows_trim_and_merge() {
         whole[..(cut / tick) as usize]
     );
 
-    // Trimming the head moves the clock phase, not the sound: from one segment after the
-    // new start (the first hop of the new first segment has no predecessor to blend with)
-    // the samples are those of the untrimmed clip.
+    // Trimming the head moves the clock phase, not the sound. The segment lattice is
+    // anchored to the clip start, so the first new segment ends at an arbitrary hop and the
+    // join after it blends against a differently aligned neighbour: from two segments after
+    // the new start the samples are those of the untrimmed clip.
     let mut head = p.clone();
     let head_ticks = 12_345 * tick;
     Command::TrimClip {
@@ -1140,7 +1142,11 @@ fn stretching_follows_trim_and_merge() {
     .apply(&mut head)
     .unwrap();
     let trimmed = mixer.mix(&head, range(head_ticks, end)).unwrap();
-    let skip = 48_000 / 100 * 64 + 2_000;
+    let skip = 2 * 48_000 / 100 * 64;
+    assert!(
+        trimmed.len() > skip + 1_000,
+        "the clip outlasts the skipped segments"
+    );
     assert_eq!(trimmed[skip..], whole[12_345 + skip..]);
 
     // Split then merge restores the clip, bit for bit.

@@ -808,7 +808,7 @@ fn paint_speed_ramp(
     let Some(lane) = crate::speed_ramp::lane(f32::from(y0), f32::from(y1)) else {
         return;
     };
-    if !clip.ramp_lane || x1 - x0 < px(24.) {
+    if !clip.ramp_lane || x1 - x0 < px(super::retime::RAMP_LANE_MIN_WIDTH) {
         return;
     }
     let guide_y = px(lane.y(animathio_core::ClipSpeed::default()));
