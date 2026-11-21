@@ -19,6 +19,7 @@ use crate::editor::actions::{
     AddMarker, AutomaticCuts, DeleteSelection, NewProject, NextMarker, PreviousMarker, Redo,
     ShowEffects, ShowMarkers, SplitClip, ToggleInspector, Undo,
 };
+use crate::editor::assist::AssistPanel;
 use crate::editor::caption_styles::LookChange;
 use crate::editor::math::MathEditor;
 use crate::editor::retime;
@@ -3129,11 +3130,7 @@ fn local_assist_settings() -> animathio_assist::AssistSettings {
 fn assist_ui(
     cx: &mut TestAppContext,
     mock: &std::sync::Arc<MockAssist>,
-) -> (
-    Ui,
-    Entity<MathEditor>,
-    Entity<crate::editor::assist::AssistPanel>,
-) {
+) -> (Ui, Entity<MathEditor>, Entity<AssistPanel>) {
     let (project, assets) = sample();
     let mut env = super::test_env();
     env.assist = mock.clone();
@@ -3155,7 +3152,7 @@ fn assist_ui(
     (ui, panel, assist)
 }
 
-fn type_prose(ui: &mut Ui, assist: &Entity<crate::editor::assist::AssistPanel>, text: &str) {
+fn type_prose(ui: &mut Ui, assist: &Entity<AssistPanel>, text: &str) {
     ui.cx.update(|window, cx| {
         assist.update(cx, |assist, cx| assist.set_prose(text, window, cx));
     });
@@ -3179,7 +3176,7 @@ fn assist_convert_preview_insert_undo(cx: &mut TestAppContext) {
 
     // Convert sends exactly the prose to the configured host and shows editable LaTeX.
     ui.cx
-        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+        .update(|_, cx| assist.update(cx, AssistPanel::convert));
     ui.settle();
     assert_eq!(
         mock.seen(),
@@ -3208,10 +3205,9 @@ fn assist_convert_preview_insert_undo(cx: &mut TestAppContext) {
             &clip.kind,
             animathio_core::ClipKind::Plugin { plugin_id, .. } if plugin_id == "org.animathio.latex"
         ));
-        let animathio_core::ParamValue::String(source) = clip.params.get("source").unwrap() else {
-            panic!("source param");
-        };
-        assert_eq!(source, "\\frac{1}{2} + x^2");
+        let draft = animathio_control::math_object_draft(clip, project_size(&e.project))
+            .expect("math object draft");
+        assert_eq!(draft.fields["source"], "\\frac{1}{2} + x^2");
     });
     // One undo removes it.
     ui.dispatch(Undo);
@@ -3249,16 +3245,16 @@ fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) 
 
     // Empty description: no request at all.
     ui.cx
-        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+        .update(|_, cx| assist.update(cx, AssistPanel::convert));
     ui.settle();
-    assert!(mock.seen().is_empty());
+    assert_eq!(mock.seen(), Vec::<(String, String)>::new());
     let message = ui.cx.update(|_, cx| assist.read(cx).message().cloned());
     assert!(matches!(message, Some(Message::Error(_))), "{message:?}");
 
     // An authentication failure is reported with its status.
     type_prose(&mut ui, &assist, "x squared");
     ui.cx
-        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+        .update(|_, cx| assist.update(cx, AssistPanel::convert));
     ui.settle();
     let Some(Message::Error(text)) = ui.cx.update(|_, cx| assist.read(cx).message().cloned())
     else {
@@ -3270,7 +3266,7 @@ fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) 
     // A reply that is not LaTeX is rejected before it reaches the formula field.
     *mock.reply.lock().unwrap() = Ok("Sorry, I cannot help with that request today.".into());
     ui.cx
-        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+        .update(|_, cx| assist.update(cx, AssistPanel::convert));
     ui.settle();
     let Some(Message::Error(text)) = ui.cx.update(|_, cx| assist.read(cx).message().cloned())
     else {

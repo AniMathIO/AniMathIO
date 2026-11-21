@@ -49,7 +49,7 @@ pub struct Preset {
     pub needs_key: bool,
 }
 
-/// OpenAI, Gemini's OpenAI-compatible endpoint and two local servers.
+/// `OpenAI`, Gemini's OpenAI-compatible endpoint and two local servers.
 pub const PRESETS: &[Preset] = &[
     Preset {
         name: "OpenAI",
@@ -224,7 +224,11 @@ impl Endpoint {
 /// reachable without the internet, where plain `http://` is acceptable.
 fn is_local_host(host: &str) -> bool {
     let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
-    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+    if host == "localhost"
+        || host
+            .rsplit_once('.')
+            .is_some_and(|(_, tld)| tld == "localhost" || tld == "local")
+    {
         return true;
     }
     match host.parse::<IpAddr>() {

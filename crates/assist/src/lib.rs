@@ -3,7 +3,7 @@
 //! This crate is an integration, deliberately outside `core` and outside the plugin sandbox
 //! (plugins have no network): the editor calls it only when the user presses **Convert** in the
 //! Math dialog, with the text they typed. It speaks one protocol, the OpenAI-compatible
-//! `chat/completions` request, which covers OpenAI, Gemini's OpenAI-compatible endpoint and
+//! `chat/completions` request, which covers `OpenAI`, Gemini's OpenAI-compatible endpoint and
 //! local servers such as Ollama or llama.cpp (a fully offline option). Nothing here knows about
 //! any provider.
 //!

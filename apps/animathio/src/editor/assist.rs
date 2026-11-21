@@ -205,21 +205,21 @@ impl AssistPanel {
             base_url: self.base_url.read(cx).value().trim().to_owned(),
             model: self.model.read(cx).value().trim().to_owned(),
         };
-        if settings.is_configured() {
-            if let Err(error) = settings.host() {
-                self.message = Some(Message::Error(error.to_string()));
-                cx.notify();
-                return;
-            }
+        if settings.is_configured()
+            && let Err(error) = settings.host()
+        {
+            self.message = Some(Message::Error(error.to_string()));
+            cx.notify();
+            return;
         }
-        if let Some(path) = settings_path() {
-            if let Err(error) = settings.save(&path) {
-                self.message = Some(Message::Error(format!(
-                    "Could not save the settings: {error}"
-                )));
-                cx.notify();
-                return;
-            }
+        if let Some(path) = settings_path()
+            && let Err(error) = settings.save(&path)
+        {
+            self.message = Some(Message::Error(format!(
+                "Could not save the settings: {error}"
+            )));
+            cx.notify();
+            return;
         }
         self.settings = settings;
         let typed = self.api_key.read(cx).value().to_string();
@@ -550,7 +550,7 @@ impl Render for AssistPanel {
                                     .primary()
                                     .label("Save")
                                     .on_click(cx.listener(|this, _, window, cx| {
-                                        this.save_setup(window, cx)
+                                        this.save_setup(window, cx);
                                     })),
                             )
                             .child(
