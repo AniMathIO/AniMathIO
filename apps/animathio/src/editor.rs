@@ -59,6 +59,7 @@ mod media_pool;
 mod menus;
 mod playback_glue;
 mod project_io;
+mod recording;
 mod reframe;
 mod retime;
 mod scenes;
@@ -645,6 +646,8 @@ pub(crate) struct Editor {
     caption_presets_loaded: bool,
     subtitle_panel_open: bool,
     autocut_review: Option<autocut::Review>,
+    /// The "Record audio" card in the Media library, while open.
+    record_panel: Option<recording::RecordPanel>,
     duck_review: Option<ducking::DuckReview>,
     /// The markers and beat-sync panel (see `editor/markers.rs`).
     marker_panel: Option<markers::Panel>,
@@ -806,6 +809,16 @@ impl Editor {
                 self.dock.left_open = true;
                 self.select_left_tab(LeftTab::Elements, cx);
             }
+            // The Media tab's recorder mid-take. It records a scripted tone, never a real input.
+            "record" => {
+                use animathio_audio::{SyntheticCapture, SyntheticDevice};
+                self.env.capture = Arc::new(SyntheticCapture::new(vec![
+                    SyntheticDevice::tone("Built-in microphone", 48_000, 1, 600.0, 0.35, 1200),
+                    SyntheticDevice::tone("USB microphone", 44_100, 2, 600.0, 0.35, 1100),
+                ]));
+                self.open_recorder(window, cx);
+                self.start_recording(cx);
+            }
             "math" => {
                 self.dock.left_open = true;
                 self.select_left_tab(LeftTab::Elements, cx);
@@ -822,7 +835,7 @@ impl Editor {
                 });
             }
             _ => eprintln!(
-                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins, plugins-browse, media, titles, effects, elements or math"
+                "unknown screenshot panel {panel:?}; expected markers, autocut, duck, plugins, plugins-browse, media, record, titles, effects, elements or math"
             ),
         }
     }
@@ -955,6 +968,7 @@ impl Editor {
             caption_presets_loaded: false,
             subtitle_panel_open: false,
             autocut_review: None,
+            record_panel: None,
             duck_review: None,
             marker_panel: None,
             scene_panel: None,
@@ -1116,6 +1130,9 @@ impl Editor {
                         }
                         this.drain_control(cx);
                         this.pump_subtitle_job(cx);
+                        if this.pump_recording(cx) {
+                            cx.notify();
+                        }
                         if this.clock.has_error() {
                             this.error =
                                 Some("Audio playback failed; pause and play to retry".into());

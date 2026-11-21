@@ -16,6 +16,8 @@ impl Editor {
         self.marks = InOut::default();
         self.shuttle = Shuttle::default();
         self.autocut_review = None;
+        // A take belongs to the project it started in: close the device and drop the audio.
+        self.record_panel = None;
         self.duck_review = None;
         self.marker_panel = None;
         self.reframe_panel = None;

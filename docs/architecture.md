@@ -11,7 +11,7 @@ the render/audio/export data flow. The authority for these rules is
 | `core` | Plain project data (`Project`, `Track`, `Clip`, `ClipKind`, `Transform`, `Animation`), exact timeline arithmetic (`Time`, `FrameRate`), the `Command` mutation API with undo/redo, and pure `evaluate(&Project, Time) -> Scene`. Effects are plain data (`EffectInstance`: plugin id + effect id + numeric params); the `EffectProcessor` port is how the renderer asks a plugin host to run one. **No IO, GPU, decoder or UI dependencies.** |
 | `format` | Versioned `project.json` (schema version 8) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
-| `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, and cpal/rtrb device playback. No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
+| `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, cpal/rtrb device playback and microphone capture (`CaptureSource`/`Recorder`: an injectable source, so tests and `ANIMATHIO_AUDIO=none` never open an input device). No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
 | `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
@@ -95,7 +95,7 @@ shared panel handlers, asserting project and view state without devices or pixel
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `animations` (the inspector
-Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `inspector_units` (how the inspector shows numbers and colors: one hex format, degrees, font size as a percentage of the short edge, framed swatches), `media_pool`, `math` (Elements cards, typed object dialog and inspector), `titles` (Titles tab), `dialogs`, `export_panel`
+Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `inspector_units` (how the inspector shows numbers and colors: one hex format, degrees, font size as a percentage of the short edge, framed swatches), `media_pool`, `recording` (the Media tab's "Record audio" card), `math` (Elements cards, typed object dialog and inspector), `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails`, `actions` and `update_check`
 (at most one GitHub releases lookup per 24 h, a dismissable newer-release notice,
@@ -116,6 +116,22 @@ in view state. Ripple trim uses one `Command::Batch` on the source track;
 Shift+Delete uses `RippleDelete`. The ruler and export range share half-open bounds.
 The audio device clock stays master at every shuttle speed; with no output device a signed
 monotonic clock stands in.
+
+Microphone recording keeps capture outside the project model. `animathio_audio::CaptureSource`
+lists input devices and opens one as a polled `CaptureStream`; `Recorder` owns the open stream,
+keeps the take as 16-bit PCM (at most two channels, capped at `MAX_RECORDING_BYTES`) and
+measures a live `Level` (peak and RMS) at every poll. `CpalCapture` is the real device source;
+`NullCapture` never opens anything and explains why; `SyntheticCapture` replays scripted
+samples for tests. `EditorEnv::capture` chooses the source: production uses `CpalCapture`
+unless `ANIMATHIO_AUDIO` is `none`/`off`/`0`, and the headless test environment uses
+`NullCapture`. The editor opens the device on Record, polls it from its 25 ms tick (meter and
+elapsed time), and on Stop encodes a WAV (`encode_wav`), stores the bytes in the asset store
+exactly like an imported file and executes one undoable `Command::Batch` (`AddAsset`, plus
+`AddTrack` and `AddClip` at the playhead when "Add to timeline at playhead" is on). Cancel, a
+new or opened project, or closing the editor drops the take and closes the device; the
+project is untouched until Stop. A device error mid-take ends the take and keeps the audio
+delivered so far. There is no control or MCP method for recording: it needs a person at a
+microphone.
 
 Audible shuttle lives in `crates/audio` (`Speed`, `BlockGenerator`, `varispeed`).
 `Player::set_speed` restarts the session at the latency-corrected position like a seek.

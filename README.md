@@ -27,6 +27,8 @@ right-click → Open. Verify installation with `animathio --version` and
 - Edit with multiple tracks, keyframes, undo/redo, linked audio and video, and
   familiar keyboard shortcuts.
 - Typeset LaTeX and animate graphs and geometric shapes with bundled plugins.
+- Record narration from a microphone straight into the Media library (opt-in per take;
+  the audio is a normal WAV asset, and adding it to the timeline is one undo step).
 - Add titles and captions, review automatic cuts, and reframe video for social formats.
 - Render and export through the same engine used by the editor.
 - Once a day the editor checks GitHub for a newer release and shows a notice with a link

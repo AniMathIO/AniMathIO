@@ -2,6 +2,7 @@
 //! No decoder or stream is stored in the serializable project. Assets stream: decoding,
 //! resampling and channel mapping run lazily in bounded blocks (see `AudioPool::prepare`).
 mod beats;
+mod capture;
 mod layout;
 mod mixer;
 mod player;
@@ -12,6 +13,7 @@ mod stretch;
 mod waveform;
 
 pub use beats::*;
+pub use capture::*;
 pub use layout::*;
 pub use mixer::*;
 pub use player::*;
@@ -38,6 +40,9 @@ pub enum Error {
     /// Device or worker failure.
     #[error("audio playback: {0}")]
     Playback(String),
+    /// A microphone could not be listed, opened or read; the text is meant for a person.
+    #[error("{0}")]
+    Capture(String),
     /// Filesystem failure.
     #[error(transparent)]
     Io(#[from] std::io::Error),
