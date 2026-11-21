@@ -88,7 +88,7 @@ surfaced by `animathio-cli mcp` without protocol changes.
 | `command.apply` | `{ command }` | — (applied through the shared history) |
 | `history.undo` / `history.redo` | — | whether an edit was undone/redone |
 | `render.frame` | `{ params: { time, width, height, output? } }` | `{ size, base64?, path? }` |
-| `export` | `{ params: { output, from?, to?, settings?, overwrite? } }` | destination path (after completion) |
+| `export` | `{ params: { output, from?, to?, settings?, overwrite? } }` | destination path (after completion); `settings` is `{ frame_rate?, crf, embed_chapters? }` and `embed_chapters` (default `true`) embeds the markers in the range as MP4 chapters |
 | `playback.seek` | `{ time }` | — |
 | `playback.play` / `playback.pause` | — | — |
 | `media.add` | `{ path }` | track_id, clip_id; bounded import and placement in one undo step, with a single video/audio probe before retaining bytes. The clip takes the probed media length (images: the project duration, else three seconds); placing a file that is already in the project reuses its asset |
@@ -115,7 +115,7 @@ surfaced by `animathio-cli mcp` without protocol changes.
 | `markers.list` | — | `[Marker]` sorted by time: `{ id, time, duration?, name, color, note }` (ticks) |
 | `markers.add` | `{ params: { time, duration?, name?, color?, note? } }` | `{ id }`; one undo step; `color` is `red`, `orange`, `yellow`, `green`, `cyan`, `blue` (default), `purple` or `pink` |
 | `markers.remove` | `{ id }` | — (one undo step) |
-| `chapters.export` | `{ params: { format?, output?, overwrite?, intro_title?, min_length?, start?, end? } }` | `{ format, chapters, text?, path? }`; markers as chapters (`format` is `youtube` (default), `vtt` or `ffmetadata`; a `.vtt`/`.ffmeta` extension on `output` picks it); `min_length` (ticks, default 10 s) merges close markers; an `intro_title` chapter is added at 0 when the first marker is later |
+| `chapters.export` | `{ params: { format?, output?, overwrite?, intro_title?, min_length?, start?, end? } }` | `{ format, chapters, text?, path? }`; markers as chapters (`format` is `youtube` (default), `vtt` or `ffmetadata`; a `.vtt`/`.ffmeta` extension on `output` picks it); `min_length` (ticks, default 10 s) merges close markers; an `intro_title` chapter is added at 0 when the first marker is later. |
 | `beats.detect` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar? } }` | `{ bpm, confidence, beats: [{ time, strength }], downbeats }` in timeline ticks; no mutation; silent or very short audio is an error |
 | `beats.add_markers` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar?, every?, downbeats_only?, color?, name_prefix? } }` | `{ added, bpm, confidence }`; one batch adding a marker at each selected beat; beats that already carry a marker are skipped |
 | `timeline.sync_cuts_to_beats` | `{ params: { clips, source?, mode?, max_shift?, min_segment?, frame_align?, every?, downbeats_only?, detect? } }` | `{ shifted, splits, unchanged, skipped, bpm? }`; one batch, see [Markers and beat sync](#markers-and-beat-sync) |
@@ -194,7 +194,7 @@ clears its undo history.
 | `set_playing` | Start / pause playback | |
 | `save_project` | Save to a path, or overwrite the current file | |
 | `render_frame` | Render one frame to PNG | base64 return, or written to a path |
-| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; creates missing parent directories; requires `overwrite: true` to replace an existing file; refuses an output that is the open project file; returns the written path |
+| `export_video` | Export an offline H.264 + AAC MP4 | `format` defaults to `mp4` and is the only supported value; `embed_chapters` (default `true`) embeds the markers as MP4 chapters; creates missing parent directories; requires `overwrite: true` to replace an existing file; refuses an output that is the open project file; returns the written path |
 | `import_v1` | Import a v1 `.animathio` project, replacing the current one | |
 | `add_transition` | Add a transition on the cut between two adjacent clips | `kind`: `cross_dissolve` (default), `dip_to_black`, `dip_to_white`, `wipe` (+ `direction`: `left_to_right`/`right_to_left`/`top_to_bottom`/`bottom_to_top`); edit point by `between_clip_a` + `clip_b`, or by the nearest cut to `at_time_ms` (optionally on `track`); `duration_ms` is centred on the cut |
 | `list_transitions` | List transitions | id, track, clips, kind, `cut_ms`, `duration_ms` |
@@ -435,8 +435,16 @@ past the end of its media.
 
 `export_chapters` writes the markers as a chapter list: `youtube` (`0:00 Intro` lines, first
 chapter at 0:00, markers closer than `min_length_ms` merged), `vtt` (WebVTT chapters) or
-`ffmetadata` (embed with `ffmpeg -i v.mp4 -i chapters.ffmeta -map_metadata 1 -codec copy
-out.mp4`; the built-in MP4 muxer has no chapter atom).
+`ffmetadata` (for FFmpeg, or to embed in another container: `ffmpeg -i v.mp4 -i
+chapters.ffmeta -map_metadata 1 -codec copy out.mp4`).
+
+`export` and `export_video` also embed the markers inside the exported range in the MP4
+itself, as a Nero `chpl` chapter list in `moov/udta` (read by VLC, mpv and FFmpeg), unless
+`settings.embed_chapters` / `embed_chapters` is `false`. Chapter times are relative to the
+start of the exported range; an unnamed marker becomes `Chapter N`; the list holds at most
+255 chapters (the `chpl` count is one byte) and keeps the first ones. Nothing is written
+when no marker is in range. If the chapter list cannot be added, the export fails with a
+`cannot embed chapters` error and no file is written.
 
 `detect_beats` decodes the project mix (or one clip, track or range) to 16 kHz mono, so
 clip and track gain apply and effect chains are ignored, then estimates the tempo and
