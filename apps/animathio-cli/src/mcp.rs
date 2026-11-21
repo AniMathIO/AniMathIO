@@ -398,6 +398,8 @@ pub(crate) struct ExportVideo {
     pub(crate) format: Option<String>,
     #[serde(default)]
     pub(crate) overwrite: bool,
+    /// Embed the markers as MP4 chapters (default true).
+    pub(crate) embed_chapters: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -2737,7 +2739,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Export an offline H.264 + AAC MP4 snapshot of the project. Missing parent directories are created; an existing file is only replaced when overwrite is true."
+        description = "Export an offline H.264 + AAC MP4 snapshot of the project. Missing parent directories are created; an existing file is only replaced when overwrite is true. Timeline markers are embedded as MP4 chapters (Nero chpl) unless embed_chapters is false."
     )]
     async fn export_video(
         &self,
@@ -2747,17 +2749,21 @@ impl McpServer {
             return Err(unsupported("only mp4 export is available"));
         }
         let mut backend = self.backend.lock().await;
+        let mut settings = self
+            .export_preset
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .map(ExportPreset::export_settings)
+            .unwrap_or_default();
+        if let Some(embed) = p.embed_chapters {
+            settings.embed_chapters = embed;
+        }
         let path = backend
             .export_video(animathio_control::ExportParams {
                 output: PathBuf::from(p.path),
                 from: Time(0),
                 to: None,
-                settings: self
-                    .export_preset
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .map(ExportPreset::export_settings)
-                    .unwrap_or_default(),
+                settings,
                 overwrite: p.overwrite,
             })
             .map_err(mcp_error)?;

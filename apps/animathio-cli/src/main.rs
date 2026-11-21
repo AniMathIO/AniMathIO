@@ -115,10 +115,13 @@ enum Action {
         #[arg(long)]
         overwrite: bool,
         /// Also write the project's markers as chapters to this sidecar file (`.txt` `YouTube`
-        /// list, `.vtt` `WebVTT`, `.ffmeta` `FFmpeg` metadata). The MP4 muxer has no chapter
-        /// atom, so chapters ship beside the video.
+        /// list, `.vtt` `WebVTT`, `.ffmeta` `FFmpeg` metadata).
         #[arg(long)]
         chapters: Option<PathBuf>,
+        /// Do not embed a Nero chapter atom (`chpl`) in the MP4. By default chapters are
+        /// embedded when the project has markers in the exported range.
+        #[arg(long)]
+        no_embed_chapters: bool,
         /// Report wall time, fps and opt-in stage timings.
         #[arg(long)]
         bench: bool,
@@ -434,6 +437,7 @@ fn run(cli: Cli) -> Result<()> {
             crf,
             overwrite,
             chapters,
+            no_embed_chapters,
             bench,
         } => {
             let mut bundle = load(&project)?;
@@ -489,6 +493,7 @@ fn run(cli: Cli) -> Result<()> {
                 animathio_export::Settings {
                     frame_rate: fps,
                     crf: crf.unwrap_or(defaults.crf),
+                    embed_chapters: !no_embed_chapters,
                 },
                 &destination,
                 |progress| {

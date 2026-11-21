@@ -79,6 +79,7 @@ impl ExportPreset {
         animathio_export::Settings {
             frame_rate: None,
             crf: 18.0,
+            embed_chapters: true,
         }
     }
 

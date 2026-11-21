@@ -712,9 +712,17 @@ rendered off-thread and cached in editor session state by project canvas size.
 - **Chapters.** The control layer's `chapters` helper turns the markers into a chapter list
   (a YouTube-style `M:SS Title` block, `WebVTT` chapters or FFmpeg `;FFMETADATA1`), shared by
   the CLI (`markers chapters`, `export --chapters`), the control method `chapters.export` and
-  MCP `export_chapters`. The MP4 muxer (the media backend) has no chapter atom and patching
-  `moov` would shift every chunk offset, so chapters ship as sidecars; `ffmpeg -i v.mp4 -i
-  chapters.ffmeta -map_metadata 1 -codec copy out.mp4` embeds them without re-encoding.
+  MCP `export_chapters`. The sidecars stay (`--chapters`,
+  `chapters.export`); the MP4 export also embeds the markers inside the exported range as a
+  Nero `chpl` list in `moov/udta` by default (`Settings::embed_chapters`, `--no-embed-chapters`,
+  the `export_video` tool's chapter option). The media backend's MP4 writer cannot add a user box, so
+  `export::chapters` patches the finished file: it rebuilds `moov` (replacing an older
+  `chpl`), shifts every `stco`/`co64` entry that pointed behind the old `moov` by exactly
+  its size change (faststart puts `mdat` behind it; a plain layout is untouched), walks
+  64-bit and to-end box sizes, and fails the export with `Error::Chapters` instead of
+  writing a damaged file (fragmented MP4, malformed boxes, or an `stco` entry that would
+  overflow 32 bits). Tests decode the export with and without chapters and compare every
+  frame and sample.
 - **Editor.** The `markers` editor module owns the panel, the marker dialog and the ruler
   flags (painted by `support`); `timeline` makes markers snap targets and hit-tests them.
   Markers are selected on the ruler (click, Shift/Ctrl-click toggles, drag moves the whole

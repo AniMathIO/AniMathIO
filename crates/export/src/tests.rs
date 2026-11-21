@@ -542,3 +542,114 @@ fn light_project_background_survives_mp4_export() {
         &frame.pixels[..4]
     );
 }
+
+// Chapter embedding through the real exporter (faststart layout).
+
+fn add_marker(project: &mut Project, id: u64, millis: i64, name: &str) {
+    let ticks = millis * TICKS_PER_SECOND / 1000;
+    let mut marker = animathio_core::Marker::new(animathio_core::MarkerId(id), Time(ticks));
+    marker.name = name.into();
+    Command::AddMarker { marker }.apply(project).unwrap();
+}
+
+fn chapter_settings(embed_chapters: bool) -> Settings {
+    Settings {
+        embed_chapters,
+        ..Settings::default()
+    }
+}
+
+fn decode_all(mp4: &[u8]) -> (Vec<Vec<u8>>, Vec<f32>) {
+    let backend = FilmCraftBackend::new();
+    let bytes: Arc<[u8]> = Arc::from(mp4);
+    let video = backend
+        .open_video_bytes("export.mp4", bytes.clone())
+        .unwrap();
+    let frames = (0..60)
+        .map(|i| {
+            let time = Time(i * TICKS_PER_SECOND / 30);
+            video.frame_at(time).unwrap().pixels.to_vec()
+        })
+        .collect();
+    let audio = backend.open_audio_bytes("export.mp4", bytes).unwrap();
+    let samples = audio.samples(Time(0), 48_000).unwrap().to_vec();
+    (frames, samples)
+}
+
+#[test]
+fn chapters_embed_into_a_faststart_export_without_changing_decoded_media() {
+    let (mut project, assets) = project();
+    add_marker(&mut project, 1, 1500, "Outro");
+    add_marker(&mut project, 2, 200, "Intro");
+    add_marker(&mut project, 3, 800, "");
+    let range = TimeRange::new(Time(0), duration(&project)).unwrap();
+    let with =
+        export_with_plugins(&project, &assets, range, chapter_settings(true), |_| true).unwrap();
+    let without =
+        export_with_plugins(&project, &assets, range, chapter_settings(false), |_| true).unwrap();
+
+    // The file stays faststart and its tables point at the shifted mdat.
+    assert!(with.len() > without.len());
+    assert_eq!(
+        chapters::read_chpl(&with).unwrap(),
+        vec![
+            (2_000_000, "Intro".to_string()),
+            (8_000_000, "Chapter 2".to_string()),
+            (15_000_000, "Outro".to_string()),
+        ]
+    );
+    assert!(chapters::read_chpl(&without).is_none());
+
+    // Decoding both files yields identical frames and samples: every chunk offset still
+    // lands on its sample.
+    let (frames_with, audio_with) = decode_all(&with);
+    let (frames_without, audio_without) = decode_all(&without);
+    assert_eq!(frames_with.len(), 60);
+    assert!(frames_with.iter().any(|f| f.iter().any(|&b| b != 0)));
+    assert!(frames_with == frames_without, "decoded video frames differ");
+    assert_eq!(audio_with.len(), 96_000);
+    assert!(audio_with.iter().any(|s| s.abs() > 1e-3), "audio is silent");
+    assert!(audio_with == audio_without, "decoded audio samples differ");
+}
+
+#[test]
+fn chapter_times_are_relative_to_the_export_range() {
+    let (mut project, assets) = project();
+    add_marker(&mut project, 1, 100, "before the range");
+    add_marker(&mut project, 2, 500, "First");
+    add_marker(&mut project, 3, 1000, "Second");
+    add_marker(&mut project, 4, 1900, "after the range");
+    let range = TimeRange::new(Time(TICKS_PER_SECOND / 2), Time(TICKS_PER_SECOND * 3 / 2)).unwrap();
+    let bytes =
+        export_with_plugins(&project, &assets, range, Settings::default(), |_| true).unwrap();
+    assert_eq!(
+        chapters::read_chpl(&bytes).unwrap(),
+        vec![(0, "First".to_string()), (5_000_000, "Second".to_string())]
+    );
+}
+
+#[test]
+fn no_chapters_without_markers_in_range_and_none_when_disabled() {
+    let (mut project, assets) = project();
+    let range = TimeRange::new(Time(0), Time(TICKS_PER_SECOND / 2)).unwrap();
+    let none =
+        export_with_plugins(&project, &assets, range, Settings::default(), |_| true).unwrap();
+    assert!(chapters::read_chpl(&none).is_none());
+    add_marker(&mut project, 1, 1000, "outside");
+    let outside =
+        export_with_plugins(&project, &assets, range, Settings::default(), |_| true).unwrap();
+    assert_eq!(outside, none);
+    add_marker(&mut project, 2, 100, "inside");
+    let off =
+        export_with_plugins(&project, &assets, range, chapter_settings(false), |_| true).unwrap();
+    assert_eq!(off, none);
+}
+
+#[test]
+fn settings_without_the_chapter_field_default_to_embedding() {
+    let settings: Settings = serde_json::from_str(r#"{"frame_rate":null,"crf":20.0}"#).unwrap();
+    assert!(settings.embed_chapters);
+    let off: Settings =
+        serde_json::from_str(r#"{"frame_rate":null,"crf":20.0,"embed_chapters":false}"#).unwrap();
+    assert!(!off.embed_chapters);
+}

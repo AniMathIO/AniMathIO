@@ -15,8 +15,11 @@ use animathio_render::{Frame, RenderCtx, render};
 use serde::{Deserialize, Serialize};
 
 mod audio_source;
+mod chapters;
 mod output;
 mod plugin_check;
+
+pub use chapters::{ChapterError, MAX_CHAPTERS, embed_chapters};
 
 pub use output::AtomicOutput;
 
@@ -82,6 +85,9 @@ pub enum Error {
         /// Why it could not be resolved.
         message: String,
     },
+    /// The finished MP4 could not take the chapter list.
+    #[error("cannot embed chapters: {0}")]
+    Chapters(#[from] ChapterError),
 }
 
 /// Serializable output choices. Resolution comes from the project.
@@ -91,12 +97,22 @@ pub struct Settings {
     pub frame_rate: Option<FrameRate>,
     /// Constant quality, 0..=51 (lower is better).
     pub crf: f32,
+    /// Embed the timeline markers inside the exported range as a Nero `chpl` chapter list
+    /// (at most [`MAX_CHAPTERS`]). Nothing is written when no marker is in range.
+    #[serde(default = "default_embed_chapters")]
+    pub embed_chapters: bool,
 }
+
+fn default_embed_chapters() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             frame_rate: None,
             crf: 23.0,
+            embed_chapters: true,
         }
     }
 }
@@ -279,7 +295,11 @@ impl Exporter {
             }) {
                 return Err(Error::Cancelled);
             }
-            Ok(bytes)
+            if settings.embed_chapters {
+                Ok(embed_chapters(bytes, project.markers(), range)?)
+            } else {
+                Ok(bytes)
+            }
         })
     }
 
