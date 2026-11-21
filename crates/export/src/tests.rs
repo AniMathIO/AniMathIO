@@ -1076,7 +1076,13 @@ fn webm_export_decodes_cleanly_with_libvpx_and_libopus_when_ffmpeg_is_installed(
     let seconds = |v: &serde_json::Value| v.as_str().unwrap().parse::<f64>().unwrap();
     assert!((seconds(&probe["format"]["duration"]) - 2.0).abs() <= 0.02);
     assert!(seconds(&video["start_time"]).abs() <= 0.001);
-    assert!(seconds(&audio["start_time"]).abs() <= 0.001);
+    // Newer ffmpeg applies the Opus CodecDelay to the start time (0); older releases report the
+    // first packet's timestamp, one pre-skip (2.5 ms) before zero. Either way it is not later.
+    let audio_start = seconds(&audio["start_time"]);
+    assert!(
+        (-0.0026..=0.001).contains(&audio_start),
+        "audio start_time {audio_start}"
+    );
     // Both streams decode end to end without a single warning.
     let decode = Process::new("ffmpeg")
         .args(["-v", "error", "-i"])
