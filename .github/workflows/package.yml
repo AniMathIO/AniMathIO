@@ -260,7 +260,7 @@ jobs:
             Save-Screen (Join-Path $smoke "$Label.png")
             $Proc.CloseMainWindow() | Out-Null
             if (-not $Proc.WaitForExit(10000)) { $Proc.Kill(); $Proc.WaitForExit() }
-            Write-Host "$Label: still running after $Seconds s, screenshot saved to smoke/$Label.png, stopped"
+            Write-Host "${Label}: still running after $Seconds s, screenshot saved to smoke/$Label.png, stopped"
           }
 
           # 1. Editor with a real project: build the sample with the packaged
