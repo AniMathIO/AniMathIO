@@ -364,6 +364,21 @@ impl Editor {
                 && instances[index].effect == "denoise"
             {
                 let learned = instances[index].params.get("noise_profile").copied() == Some(1.0);
+                let locked = self
+                    .project
+                    .tracks()
+                    .iter()
+                    .any(|t| t.is_locked() && t.clips().contains_key(&clip_id));
+                let learn_blocked: Option<&'static str> = if locked {
+                    Some("This track is locked")
+                } else if self.noise_selection().is_none() {
+                    Some(
+                        "Set In and Out (or select a range marker) around noise only, \
+                         32 ms to 30 s inside this clip, then learn",
+                    )
+                } else {
+                    None
+                };
                 card = card.child(
                     div()
                         .px_2()
@@ -377,10 +392,10 @@ impl Editor {
                                 .compact()
                                 .icon(icons::icon(IconName::AudioWaveform).xsmall())
                                 .label("Learn noise from selection")
-                                .tooltip(
-                                    "Set In and Out (or select a range marker) around noise only, \
-                                     32 ms to 30 s inside this clip, then learn",
-                                )
+                                .disabled(learn_blocked.is_some())
+                                .tooltip(learn_blocked.unwrap_or(
+                                    "Learn the noise profile from the In/Out range (or selected range marker)",
+                                ))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.learn_noise_for(clip_id, effect, cx);
                                 })),
@@ -391,7 +406,7 @@ impl Editor {
                                 .text_color(hex(color::TEXT_MUTED))
                                 .child(if learned {
                                     "Using the learned noise profile. Learn again after changing \
-                                     clip gain or earlier effects."
+                                     clip gain."
                                 } else {
                                     "Adaptive: follows the quietest moments. Learn from a noise-only \
                                      selection for a fixed profile."
@@ -536,7 +551,7 @@ impl Editor {
         }
         let mut ranges = self.marker_selection.iter().filter_map(|id| {
             let marker = self.project.marker(*id)?;
-            marker.duration.map(|d| TimeRange {
+            marker.duration.filter(|d| d.0 > 0).map(|d| TimeRange {
                 start: marker.time,
                 end: Time(marker.time.0.saturating_add(d.0)),
             })

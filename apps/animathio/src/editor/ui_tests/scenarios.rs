@@ -1408,7 +1408,15 @@ fn learn_noise_prefers_in_out_over_a_marker_and_needs_a_clean_selection(cx: &mut
 
 #[gpui::test]
 fn learn_noise_outside_the_clip_or_without_denoise_changes_nothing(cx: &mut TestAppContext) {
-    let (project, assets) = music_with_denoise();
+    let (mut project, assets) = music_with_denoise();
+    // The music clip now spans 2 s..5 s; the selection below is in the project, not the clip.
+    Command::MoveClip {
+        id: MUSIC_CLIP,
+        track: MUSIC_TRACK,
+        start: Time(2000 * MS),
+    }
+    .apply(&mut project)
+    .unwrap();
     let mut ui = Ui::open(cx, project, assets);
     ui.update(|e, _, cx| {
         e.select_only(VOICE_CLIP, cx);
@@ -1421,14 +1429,19 @@ fn learn_noise_outside_the_clip_or_without_denoise_changes_nothing(cx: &mut Test
     assert!(ui.read(|e| e.last_error.as_deref() == Some("Add a denoise effect first")));
     ui.update(|e, _, cx| {
         e.select_only(MUSIC_CLIP, cx);
-        e.marks.set_in(Time(3500 * MS));
-        e.marks.set_out(Time(4000 * MS));
+        e.marks.set_in(Time(0));
+        e.marks.set_out(Time(1000 * MS));
+        e.last_error = None;
     });
     ui.dispatch(actions::LearnNoise);
     assert_eq!(
         ui.read(|e| e.project.clone()),
         before,
-        "selection past clip"
+        "selection outside clip"
+    );
+    assert_eq!(
+        ui.read(|e| e.last_error.clone()).as_deref(),
+        Some("The selection is outside the clip")
     );
 }
 
@@ -1470,7 +1483,7 @@ fn auto_duck_suggests_the_other_audio_tracks_and_previews_before_applying(cx: &m
         assert_eq!(review.params.voice_clips, vec![VOICE_CLIP]);
         assert_eq!(review.params.music_tracks, vec![MUSIC_TRACK]);
         let proposal = review.proposal.as_ref().expect("analysed on open");
-        let summary = super::super::ducking::duck_summary(&review.params, proposal);
+        let summary = super::super::ducking::duck_summary(&review.params, proposal, &e.project);
         assert!(
             summary.contains("under 2 voice regions") && summary.contains("one undo step"),
             "{summary}"
