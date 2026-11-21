@@ -3556,8 +3556,25 @@ fn library_tabs_are_icon_only_at_the_default_dock_width_and_fit(cx: &mut TestApp
     ui.cx
         .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
     ui.settle();
+    let names = ["media", "elements", "titles", "effects", "plugins"];
+    let missing: Vec<&str> = names
+        .into_iter()
+        .filter(|name| bounds_of(&mut ui, format!("library-tab-{name}")).is_none())
+        .collect();
+    let (start, left_width, left_tab, dock) = ui.read(|e| {
+        (
+            e.is_start_screen(),
+            e.dock.left_width,
+            e.left_tab as usize,
+            format!("{:?}", e.dock),
+        )
+    });
+    assert!(
+        missing.is_empty(),
+        "library tabs not rendered: {missing:?} (start screen: {start}, left width: {left_width}, tab index: {left_tab}, dock: {dock})"
+    );
     let mut previous_right = gpui::px(0.);
-    for name in ["media", "elements", "titles", "effects", "plugins"] {
+    for name in names {
         let bounds = bounds_of(&mut ui, format!("library-tab-{name}")).expect("tab rendered");
         assert!(bounds.size.width >= gpui::px(30.), "{name}: {bounds:?}");
         assert!(
