@@ -117,8 +117,8 @@ impl Editor {
                  not installed yet is downloaded once from Hugging Face and checked with \
                  SHA-256 when you press Generate."
             } else {
-                "This build of AniMathIO has no speech engine. Rebuild it with the `whisper` \
-                 cargo feature to enable automatic subtitles."
+                "This build of AniMathIO has no speech engine. The installers from the release \
+                 page include one; when building from source, add the `whisper` cargo feature."
             };
             let color_pickers = editor.update(cx, |this, cx| {
                 [

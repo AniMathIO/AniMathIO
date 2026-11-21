@@ -3,6 +3,32 @@
 Desktop workflows, controls and examples for AniMathIO 2. See also the
 [keyboard shortcuts](keyboard-shortcuts.md) and [architecture](architecture.md).
 
+## First steps
+
+1. **Start a project.** On the launcher press Enter for a 1080p 16:9 canvas, pick another
+   format tile, or open a template. Dropping media files on the launcher creates a project
+   around them.
+2. **Add something.** In **Library → Media** click **Import media** (Ctrl/Cmd+I) and click or
+   drag a card onto the timeline. In **Elements** pick Text, LaTeX, a shape or a graph and press
+   **Add**; new elements land on a free layer above the media at the playhead. An empty
+   timeline row says what can be dropped there.
+3. **Edit on the timeline.** Drag a clip to move it, drag an edge to trim, move the playhead and
+   press Ctrl/Cmd+K to split. Splitting with the playhead outside every clip shows a hint instead
+   of doing nothing. Ctrl/Cmd+Z undoes any of it.
+4. **Animate and polish.** Select a clip, then use **Effects** for effects, animation presets and
+   fades (the tab reminds you to select a clip first), or the inspector's keyframe diamonds.
+5. **Export.** **Export** in the title bar (Ctrl/Cmd+M) opens the export form. An empty project
+   says there is nothing to export yet; an in/out or custom range that is empty or outside the
+   project is explained in the dialog.
+
+![A new empty project with the viewer and timeline hints](../docs/screenshots/editor-empty-project.png)
+
+In the inspector, Enter commits a value and returns the keyboard to the timeline (Space plays,
+Delete removes clips again); Escape drops an unsaved edit and returns too. In multi-line fields (text content, LaTeX source)
+Enter inserts a newline and Escape returns to the timeline; those edits apply as you type. **Help → Editor guide**
+opens this page in the browser, **Help → Report an issue** the issue tracker, and **Help → About**
+shows the running version.
+
 ## Library
 
 The left dock has five distinct tabs. **View → Media / Elements / Titles / Effects /
@@ -16,7 +42,7 @@ search, cards and buttons. Every tab retains its own search when switching away.
 | **Media** | Imported assets only. Search names, filter All/Video/Images/Audio, switch grid/list, import using the Library + button, click to place or drag to the timeline. |
 | **Elements** | Text & formulas (LaTeX, Text), Shapes & geometry (points, lines, vectors, polygons, circles, ellipses), Graphs & grids (plots, Cartesian and polar grids). Click a card or press Enter/Space to configure; + adds defaults; drag its preview to the timeline. More shapes retains the generic Shapes source for rectangles, stars and arrows. Third-party clip sources appear under Plugins in this tab. |
 | **Titles** | Title compositions and caption presets. Double-click or Enter/Space adds at the playhead; drag to place on the timeline. Linked text fields remain editable in the inspector. |
-| **Effects** | Video effects (including Clipped slide), audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
+| **Effects** | While no clip is selected a hint says to select one first. Video effects (including Clipped slide), audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
 | **Plugins** | Installed first-party and community plugins, the Community plugins switch, live Enable/Remove controls, Install from file, and Browse with search, verified installs and explicit updates. First-party plugins stay enabled. Load failures are listed here too. |
 
 Animation presets read the **Preset options** row above their buttons (inspector →
@@ -217,7 +243,8 @@ no AI requests; they keep taking LaTeX directly.
 
 The editor shell (dark theme, Media library, viewer
 with transport controls, resizable inspector and vertically scrolling timeline;
-some gallery images below predate the Library reorganization and still show the
+the screenshots of this view and of the timeline are current, while some other
+gallery images below predate the Library reorganization and still show the
 2.1.0 tab names):
 
 ![AniMathIO 2 editor](../docs/screenshots/editor-main.png)
@@ -289,7 +316,9 @@ shortcuts), for example Cut, Copy, Duplicate, Split, Delete, Ripple delete and U
 it onto the timeline) are overlays: they land on the dropped row or the first free track above
 everything they overlap, and a new track is created when none is free, so you never have to
 move the playhead past existing media. Track and clip are one undo step. MCP `add_math` and
-`add_graph` do the same. A new formula starts at 14 % of the shorter frame edge, centred, so it reads
+`add_graph` do the same. Media clicked or dropped from the Media tab follows the same rule: when
+the chosen track is busy (or locked) over that time, the clip goes to a free layer (or a new track)
+instead of failing, as one undo step. A new formula starts at 14 % of the shorter frame edge, centred, so it reads
 the same on 16:9 and 9:16.
 
 **Viewer, inspector and Media library.** The selected visual clip shows an on-canvas
@@ -301,7 +330,8 @@ one undo step on release. The viewer header has the zoom menu, safe-area, rule-o
 and checkerboard toggles. The transport shows a large timecode (click it to type one),
 prev/next edit, frame step, the circular play button, loop, the shuttle-speed badge,
 the duration and a monitor-only volume (it never changes export). Inspector sections are
-collapsible cards with a reset button each. Drag a field label (Shift = fine, Ctrl =
+collapsible cards with a reset button each; text, formulas, shapes and graphs show their own
+content first, while video and audio lead with Speed. Drag a field label (Shift = fine, Ctrl =
 coarse) or the grip beside a value to scrub it as one undo step; 0 to 1 parameters also get a slider;
 every animatable property has a keyframe diamond with previous/next-key arrows. The
 Media tab of the Library offers a grid or list, a search field, kind filter chips, per-card type
@@ -357,7 +387,9 @@ keep the form open and show an error inside it. Math source fields accept
 Shift+Enter for a new line.
 
 **Import media** (Ctrl/Cmd+I or the library's plus button) adds files to the library
-without inserting clips or changing the playhead. Drag a library card onto a timeline
+without inserting clips or changing the playhead. Files that cannot be imported are named in
+the error message together with the accepted formats (PNG, JPEG, WebP, BMP; WAV, MP3, FLAC, AAC,
+M4A, OGG; MP4, MOV, MKV, WebM); the other files in the same selection still import. Drag a library card onto a timeline
 track to place it, or click it to add at the playhead. Use **Add track** in the timeline
 header to create an empty foreground layer at the top; adding a track is undoable.
 Foreground visual tracks appear above background tracks, with audio-only tracks below.

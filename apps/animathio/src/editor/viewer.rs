@@ -353,6 +353,10 @@ fn dragged_transform(
     (t, guides)
 }
 
+/// Shown over the viewer while the project has no clips.
+pub(super) const EMPTY_CANVAS_HINT: &str =
+    "This project is empty. Import media, or add text, a formula or a shape from the Library.";
+
 impl Editor {
     fn selected_visual(&mut self) -> Option<(ClipId, Transform, Transform)> {
         let id = self.selected?;
@@ -697,6 +701,32 @@ impl Editor {
                         t.scale_y,
                         t.rotation.to_degrees()
                     )),
+            );
+        }
+        if self
+            .project
+            .tracks()
+            .iter()
+            .all(|track| track.clips().is_empty())
+        {
+            // A blank canvas gives no hint what to do next.
+            root = root.child(
+                div()
+                    .id("viewer-empty-hint")
+                    .debug_selector(|| "viewer-empty-hint".into())
+                    .absolute()
+                    .top(gpui::rems(2.8))
+                    .bottom(px(96.))
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .px_4()
+                    .text_center()
+                    .text_size(crate::style::type_size::SM)
+                    .text_color(hexa(color::TEXT, 0.55))
+                    .child(div().max_w(px(180.)).child(EMPTY_CANVAS_HINT)),
             );
         }
         if self.viewer_menu_open {

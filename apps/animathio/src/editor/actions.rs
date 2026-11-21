@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// The editor guide on the project site, opened by Help > Editor guide.
+const EDITOR_GUIDE_URL: &str = "https://docs.animathio.com/docs/editor";
+/// Where bug reports and feature requests go, opened by Help > Report an issue.
+const ISSUES_URL: &str = "https://github.com/AniMathIO/AniMathIO/issues/new/choose";
+
+/// The Help > About toast: the running version, not a hard-coded release.
+pub(super) fn about_text() -> String {
+    format!(
+        "AniMathIO {}. A video editor for math animations.",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
 actions!(
     editor,
     [
@@ -100,6 +113,8 @@ actions!(
         FitViewer,
         ToggleSafeAreas,
         KeyboardShortcuts,
+        OpenEditorGuide,
+        ReportIssue,
         About
     ]
 );
@@ -322,6 +337,9 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
         this.next_id = next;
         if let Some(command) = selection::batch(commands) {
             this.execute(&command, cx);
+        } else {
+            this.error = Some(super::commands::SPLIT_HINT.into());
+            cx.notify();
         }
     }))
     .on_action(cx.listener(|this, _: &SplitClip, window, cx| {
@@ -554,9 +572,21 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     .on_action(cx.listener(|_this, _: &KeyboardShortcuts, window, cx| {
         Editor::show_shortcuts(window, cx);
     }))
+    // Escape in an inspector field drops the unsaved edit and returns to the timeline. The
+    // timeline's own Escape binding only applies once focus is there.
+    .on_action(
+        cx.listener(|this, _: &gpui_component::input::Escape, window, cx| {
+            if this.fields.revert_focused_input(window, cx) {
+                window.focus(&this.panel_focus[0], cx);
+            } else {
+                cx.propagate();
+            }
+        }),
+    )
+    .on_action(cx.listener(|_this, _: &OpenEditorGuide, _, cx| cx.open_url(EDITOR_GUIDE_URL)))
+    .on_action(cx.listener(|_this, _: &ReportIssue, _, cx| cx.open_url(ISSUES_URL)))
     .on_action(cx.listener(|this, _: &About, _window, cx| {
-        this.notices
-            .push(crate::style::Toast::info("AniMathIO 2.0"));
+        this.notices.push(crate::style::Toast::info(about_text()));
         cx.notify();
     }))
     .on_action(cx.listener(|this, _: &ShuttleReverse, window, cx| {

@@ -1260,7 +1260,7 @@ impl Editor {
                             ),
                             (
                                 Tool::Rolling,
-                                IconName::FoldHorizontal,
+                                IconName::ChevronsLeftRight,
                                 "Rolling Edit (N)",
                                 "tool-rolling",
                             ),
@@ -1300,7 +1300,7 @@ impl Editor {
                     ))
                     .child(icon_button(
                         "zoom-fit",
-                        icons::icon(IconName::FoldHorizontal),
+                        icons::icon(IconName::Maximize),
                         "Zoom to fit",
                         cx.listener(|this, _, _, cx| {
                             this.animate_timeline_zoom(1.0, 0.0, cx);

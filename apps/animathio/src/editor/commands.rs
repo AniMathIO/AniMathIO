@@ -83,7 +83,7 @@ impl Editor {
                 true
             }
             Err(error) => {
-                self.error = Some(error.0);
+                self.error = Some(friendly_edit_error(&self.project, &error.0));
                 cx.notify();
                 false
             }
@@ -183,11 +183,11 @@ impl Editor {
             }
             InputTarget::Field { id, field } => match buffer.trim().parse::<f64>() {
                 Ok(value) => self.commit_field(id, &field, value, cx),
-                Err(_) => self.error = Some("invalid number".into()),
+                Err(_) => self.error = Some(NOT_A_NUMBER.into()),
             },
             InputTarget::SelectionField { field, ids } => match buffer.trim().parse::<f64>() {
                 Ok(value) => self.commit_selection_field(&field, &ids, value, cx),
-                Err(_) => self.error = Some("invalid number".into()),
+                Err(_) => self.error = Some(NOT_A_NUMBER.into()),
             },
             InputTarget::AudioEffectParam {
                 chain,
@@ -201,7 +201,7 @@ impl Editor {
                         self.execute(&command, cx);
                     }
                 }
-                Err(_) => self.error = Some("invalid number".into()),
+                Err(_) => self.error = Some(NOT_A_NUMBER.into()),
             },
             InputTarget::VideoEffectParam { id, effect, name } => {
                 match buffer.trim().parse::<f64>() {
@@ -212,17 +212,17 @@ impl Editor {
                             self.execute(&command, cx);
                         }
                     }
-                    Err(_) => self.error = Some("invalid number".into()),
+                    Err(_) => self.error = Some(NOT_A_NUMBER.into()),
                 }
             }
             InputTarget::PluginNumber { id, name } => {
                 let Ok(value) = buffer.trim().parse::<f64>() else {
-                    self.error = Some("invalid number".into());
+                    self.error = Some(NOT_A_NUMBER.into());
                     cx.notify();
                     return;
                 };
                 if !value.is_finite() {
-                    self.error = Some("non-finite value".into());
+                    self.error = Some(NOT_A_NUMBER.into());
                     cx.notify();
                     return;
                 }
@@ -243,7 +243,7 @@ impl Editor {
             }
             InputTarget::PluginPoint { id, name, axis } => {
                 let Ok(value) = buffer.trim().parse::<f64>() else {
-                    self.error = Some("invalid number".into());
+                    self.error = Some(NOT_A_NUMBER.into());
                     cx.notify();
                     return;
                 };
@@ -379,7 +379,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         if !value.is_finite() {
-            self.error = Some("non-finite value".into());
+            self.error = Some(NOT_A_NUMBER.into());
             return;
         }
         let value = match field {
@@ -401,7 +401,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         if !value.is_finite() {
-            self.error = Some("non-finite value".into());
+            self.error = Some(NOT_A_NUMBER.into());
             return;
         }
         let value = match field {
@@ -457,7 +457,7 @@ impl Editor {
         };
         let position = self.position;
         if position <= clip.range.start || position >= clip.range.end {
-            self.error = Some("playhead is outside the clip".into());
+            self.error = Some(SPLIT_HINT.into());
             cx.notify();
             return;
         }
@@ -605,9 +605,45 @@ impl Editor {
         self.next_id = next;
         if let Some(command) = selection::batch(commands) {
             self.execute(&command, cx);
+        } else {
+            self.error = Some(SPLIT_HINT.into());
+            cx.notify();
         }
     }
 }
+
+/// Rewrite the core's terse refusals into something a first-time user can act on. Anything
+/// that is not recognised passes through unchanged.
+pub(super) fn friendly_edit_error(project: &Project, raw: &str) -> String {
+    if raw.contains("overlapping clips") {
+        return "That would overlap another clip on the same track. Move the playhead, or place \
+                it on another track."
+            .to_owned();
+    }
+    if let Some(id) = raw
+        .strip_prefix("track ")
+        .and_then(|rest| rest.strip_suffix(" is locked"))
+        .and_then(|id| id.parse::<u64>().ok())
+    {
+        let name = project
+            .tracks()
+            .iter()
+            .find(|track| track.id().0 == id)
+            .map_or_else(|| format!("{id}"), |track| track.name().to_owned());
+        return format!(
+            "Track \"{name}\" is locked. Click the lock in its track header to unlock it."
+        );
+    }
+    raw.to_owned()
+}
+
+/// Shown when a numeric field is left holding something that is not a finite number.
+pub(super) const NOT_A_NUMBER: &str =
+    "That is not a number. Type digits such as 1.5; the value was left unchanged.";
+
+/// Shown when a split has nothing to cut, so the shortcut never looks dead.
+pub(super) const SPLIT_HINT: &str =
+    "Nothing to split here. Move the playhead inside a clip (not on its edge), then split.";
 
 impl Editor {
     pub(super) fn unlink_clip(&mut self, id: ClipId, cx: &mut Context<Self>) {

@@ -3,7 +3,7 @@
 use crate::editing;
 use crate::editor::{TimelineGesture, TrimDrag};
 use crate::timeline::TrimEdge;
-use gpui::{AppContext, AsKeystroke, Entity, MouseUpEvent};
+use gpui::{AppContext, AsKeystroke, Entity, Focusable as _, MouseUpEvent};
 
 use animathio_control::{
     MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style, math_object_range,
@@ -3526,4 +3526,472 @@ fn dropping_the_assist_panel_cancels_the_request(cx: &mut TestAppContext) {
         ui.settle();
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
+}
+
+// ---- first-time-user pass (#286) ----------------------------------------------------
+
+fn clear_error(ui: &mut Ui) {
+    ui.update(|editor, _, _| editor.last_error = None);
+}
+
+fn last_error(ui: &Ui) -> String {
+    ui.read(|editor| editor.last_error.clone().unwrap_or_default())
+}
+
+#[test]
+fn counts_are_pluralised_and_import_errors_summarised() {
+    use crate::editor::support::{count_label, import_error_summary, unsupported_media_message};
+    assert_eq!(count_label(1, "media file"), "1 media file");
+    assert_eq!(count_label(3, "media file"), "3 media files");
+    assert_eq!(import_error_summary(&[]), None);
+    assert_eq!(import_error_summary(&["a".into()]).as_deref(), Some("a"));
+    assert_eq!(
+        import_error_summary(&["first".into(), "second".into(), "third".into()]).as_deref(),
+        Some("3 files could not be imported. first")
+    );
+    let message = unsupported_media_message(std::path::Path::new("/some/dir/clip.gif"));
+    assert!(message.starts_with("clip.gif is not a supported media file"));
+    assert!(message.contains("MP4") && message.contains("WAV") && message.contains("PNG"));
+    assert!(
+        !message.contains("/some/dir"),
+        "names the file, not the path"
+    );
+}
+
+#[gpui::test]
+fn import_names_every_refused_file_and_still_imports_the_rest(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    let dir = super::config_dir();
+    let good = dir.join("usability-good.wav");
+    let bad_one = dir.join("usability-notes.txt");
+    let bad_two = dir.join("usability-clip.gif");
+    std::fs::write(&good, wav(&[(0.25, 800)])).unwrap();
+    std::fs::write(&bad_one, b"hello").unwrap();
+    std::fs::write(&bad_two, b"GIF89a").unwrap();
+    ui.update(|editor, _, cx| {
+        editor.import_paths(&[good, bad_one.clone(), bad_two], None, cx);
+    });
+    let error = last_error(&ui);
+    assert!(
+        error.starts_with("2 files could not be imported."),
+        "{error}"
+    );
+    assert!(error.contains("usability-notes.txt"), "{error}");
+    assert_eq!(ui.read(|e| e.project.assets().len()), 1, "the wav imported");
+    clear_error(&mut ui);
+    ui.update(|editor, _, cx| editor.import_paths(&[bad_one], None, cx));
+    let error = last_error(&ui);
+    assert!(
+        error.starts_with("usability-notes.txt is not a supported"),
+        "{error}"
+    );
+}
+
+#[gpui::test]
+fn split_with_nothing_under_the_playhead_explains_itself(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let before = ui.read(|e| e.project.clone());
+    seek(&mut ui, 60_000);
+    ui.dispatch(SplitClip);
+    assert!(
+        last_error(&ui).starts_with("Nothing to split"),
+        "split hint"
+    );
+    assert_eq!(ui.read(|e| e.project.clone()), before, "nothing changed");
+    clear_error(&mut ui);
+    ui.dispatch(crate::editor::actions::SplitAllTracks);
+    assert!(
+        last_error(&ui).starts_with("Nothing to split"),
+        "split all hint"
+    );
+}
+
+#[gpui::test]
+fn export_explains_an_empty_project_and_a_bad_range(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    ui.update(Editor::open_export_dialog);
+    assert!(last_error(&ui).starts_with("Nothing to export yet"));
+
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let out = super::config_dir().join("usability-export.mp4");
+    let outcome = ui.update(|editor, _, cx| {
+        editor.submit_export(
+            None,
+            "Custom",
+            Some(Time(10)),
+            Some(Time(5)),
+            out.clone(),
+            false,
+            cx,
+        )
+    });
+    assert!(matches!(
+        outcome,
+        crate::editor::dialogs::Submitted::Invalid
+    ));
+    let error = last_error(&ui);
+    assert!(error.contains("HH:MM:SS:FF"), "custom range hint: {error}");
+}
+
+#[gpui::test]
+fn numbers_that_are_not_numbers_say_what_to_type(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| {
+        editor.commit_input_value(
+            crate::editor::InputTarget::PluginNumber {
+                id: ClipId(1),
+                name: "size".into(),
+            },
+            "-".into(),
+            cx,
+        );
+    });
+    let error = last_error(&ui);
+    assert!(error.starts_with("That is not a number"), "{error}");
+    assert!(error.contains("unchanged"), "{error}");
+}
+
+#[gpui::test]
+fn paste_and_duplicate_with_nothing_to_work_on_say_so(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|editor, _, cx| editor.clear_selection(cx));
+    ui.dispatch(crate::editor::actions::DuplicateClips);
+    assert!(last_error(&ui).starts_with("Select a clip to duplicate"));
+    clear_error(&mut ui);
+    ui.update(|editor, _, cx| {
+        editor.clipboard = None;
+        editor.marker_clipboard = None;
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("not clips".into()));
+    });
+    ui.dispatch(crate::editor::actions::PasteClips);
+    assert!(last_error(&ui).starts_with("Nothing to paste"));
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn effects_tab_hints_at_selecting_a_clip_first(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.dispatch(ShowEffects);
+    ui.update(|editor, _, cx| editor.clear_selection(cx));
+    assert!(
+        ui.cx.debug_bounds("effects-hint").is_some(),
+        "hint while nothing is selected"
+    );
+    let id = ui.read(|e| e.project.tracks()[0].clips().values().next().unwrap().id);
+    ui.update(|editor, _, cx| editor.select_only(id, cx));
+    ui.update(|_, window, _| window.refresh());
+    assert!(
+        ui.cx.debug_bounds("effects-hint").is_none(),
+        "hint disappears once a clip is selected"
+    );
+    // Clicking an effect with nothing selected explains what to do instead of doing nothing.
+    ui.update(|editor, _, cx| {
+        editor.clear_selection(cx);
+        editor.add_effect_to_selected("org.animathio.effects-basic", "blur", cx);
+    });
+    assert!(last_error(&ui).starts_with("Select a clip first"));
+}
+
+#[test]
+fn about_reports_the_running_version() {
+    let text = crate::editor::actions::about_text();
+    assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+}
+
+#[gpui::test]
+fn enter_and_escape_in_an_inspector_field_return_the_keyboard_to_the_timeline(
+    cx: &mut TestAppContext,
+) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let id = ui.read(|e| e.project.tracks()[0].clips().values().next().unwrap().id);
+    ui.update(|editor, _, cx| editor.select_only(id, cx));
+    ui.update(|_, window, _| window.refresh());
+    let state = ui
+        .read(|editor| editor.fields.first_input())
+        .expect("the inspector has an input for the selected clip");
+    let focus_field = |ui: &mut Ui| {
+        let state = state.clone();
+        ui.update(move |_, window, cx| {
+            let handle = state.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        });
+    };
+    let field_focused =
+        |ui: &mut Ui| ui.update(|editor, window, cx| editor.fields.any_focused(window, cx));
+    let timeline_focused =
+        |ui: &mut Ui| ui.update(|editor, window, _| editor.panel_focus[0].is_focused(window));
+
+    // Escape drops the typed-but-uncommitted text and leaves the field.
+    focus_field(&mut ui);
+    assert!(field_focused(&mut ui), "the field took focus");
+    let original = state.read_with(ui.cx, |s, _| s.value().to_string());
+    ui.update(|_, window, cx| {
+        state.update(cx, |s, cx| s.set_value("999", window, cx));
+    });
+    ui.press("escape");
+    assert!(!field_focused(&mut ui), "escape leaves the field");
+    assert!(timeline_focused(&mut ui), "focus returns to the timeline");
+    assert_eq!(
+        state.read_with(ui.cx, |s, _| s.value().to_string()),
+        original,
+        "the unsaved edit was dropped"
+    );
+
+    // Enter commits and leaves the field too, so Space and Delete work again.
+    focus_field(&mut ui);
+    let before = ui.read(|e| e.project.clone());
+    let typed = original.parse::<f64>().expect("a numeric field") + 7.0;
+    ui.update(|_, window, cx| {
+        state.update(cx, |s, cx| s.set_value(typed.to_string(), window, cx));
+    });
+    ui.press("enter");
+    assert!(!field_focused(&mut ui), "enter leaves the field");
+    assert!(timeline_focused(&mut ui));
+    let after = ui.read(|e| e.project.clone());
+    assert_ne!(
+        after, before,
+        "enter committed the typed value to the model"
+    );
+    ui.dispatch(Undo);
+    assert_eq!(
+        ui.read(|e| e.project.clone()),
+        before,
+        "one undo reverts it"
+    );
+}
+
+#[gpui::test]
+fn escape_in_a_multiline_inspector_field_returns_the_keyboard_to_the_timeline(
+    cx: &mut TestAppContext,
+) {
+    if !require_plugins("escape_in_a_multiline_inspector_field") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_plugin_clip_by_id("org.animathio.text", cx));
+    let latex = ui.read(|e| {
+        e.selected.or_else(|| {
+            e.project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .find(|c| matches!(c.kind, animathio_core::ClipKind::Plugin { .. }))
+                .map(|c| c.id)
+        })
+    });
+    let latex = latex.expect("the text clip was added");
+    ui.update(|editor, _, cx| editor.select_only(latex, cx));
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+    ui.update(|_, window, _| window.refresh());
+    let state = ui
+        .read(|editor| editor.fields.first_textarea())
+        .expect("the text clip has a multi-line content field");
+    {
+        let state = state.clone();
+        ui.update(move |_, window, cx| {
+            let handle = state.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        });
+    }
+    assert!(ui.update(|editor, window, cx| editor.fields.any_focused(window, cx)));
+
+    // Enter still inserts a newline in a multi-line field.
+    let lines = |ui: &Ui| state.read_with(ui.cx, |s, _| s.value().matches('\n').count());
+    let before = lines(&ui);
+    ui.press("enter");
+    assert_eq!(lines(&ui), before + 1, "enter inserts a newline");
+    assert!(ui.update(|editor, window, cx| editor.fields.any_focused(window, cx)));
+
+    // Escape hands the keyboard back to the timeline.
+    ui.press("escape");
+    assert!(!ui.update(|editor, window, cx| editor.fields.any_focused(window, cx)));
+    assert!(ui.update(|editor, window, _| editor.panel_focus[0].is_focused(window)));
+}
+
+#[gpui::test]
+fn clicking_media_over_an_occupied_playhead_lands_on_a_free_layer(cx: &mut TestAppContext) {
+    // The sample has an image clip at 0..3 s; clicking its library card again must not fail
+    // with a bare "overlapping clips".
+    let (project, assets) = sample();
+    let before = project.clone();
+    let image = project
+        .assets()
+        .iter()
+        .find(|(_, asset)| asset.media_type.starts_with("image/"))
+        .map(|(id, _)| id.clone())
+        .expect("the sample has an image");
+    let mut ui = Ui::open(cx, project, assets);
+    let clips = ui.read(clip_count);
+    ui.update(|editor, _, cx| editor.add_asset_at_playhead(image.clone(), cx));
+    assert_eq!(last_error(&ui), "", "no error");
+    assert_eq!(ui.read(clip_count), clips + 1);
+    ui.read(|editor| editor.project.validate().expect("the project stays valid"));
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before, "one undo step");
+
+    // The same for audio: an occupied voice track gets a new audio track instead of an error.
+    let (project, assets) = voice_and_music();
+    let voice = project
+        .assets()
+        .keys()
+        .next()
+        .cloned()
+        .expect("an audio asset");
+    let mut ui = Ui::open(cx, project, assets);
+    let tracks = ui.read(|e| e.project.tracks().len());
+    ui.update(|editor, _, cx| editor.add_asset_at_playhead(voice, cx));
+    assert_eq!(last_error(&ui), "", "no error");
+    assert_eq!(ui.read(|e| e.project.tracks().len()), tracks + 1);
+    ui.read(|editor| editor.project.validate().expect("the project stays valid"));
+}
+
+#[gpui::test]
+fn repeated_audio_clicks_reuse_a_free_audio_track(cx: &mut TestAppContext) {
+    use super::fixtures::{MUSIC_CLIP, MUSIC_TRACK};
+    // Voice is busy at the playhead; the music track is free there (its clip starts at 10 s).
+    let (mut project, assets) = voice_and_music();
+    Command::MoveClip {
+        id: MUSIC_CLIP,
+        track: MUSIC_TRACK,
+        start: Time(10_000 * 1_000_000),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let voice = project.assets().keys().next().cloned().unwrap();
+    let mut ui = Ui::open(cx, project, assets);
+    let tracks = ui.read(|e| e.project.tracks().len());
+    let clips = ui.read(clip_count);
+    ui.update(|editor, _, cx| editor.add_asset_at_playhead(voice.clone(), cx));
+    assert_eq!(last_error(&ui), "", "no error");
+    assert_eq!(ui.read(clip_count), clips + 1);
+    assert_eq!(
+        ui.read(|e| e.project.tracks().len()),
+        tracks,
+        "no new track"
+    );
+    // Voice and the new clip occupy 0..3 s now; a second click must still not pile up tracks
+    // beyond the one it needs, and a third click at a later free spot adds none.
+    ui.update(|editor, _, cx| {
+        editor.position = Time(5_000 * 1_000_000);
+        editor.add_asset_at_playhead(voice.clone(), cx);
+    });
+    assert_eq!(ui.read(|e| e.project.tracks().len()), tracks);
+    ui.read(|editor| editor.project.validate().expect("the project stays valid"));
+}
+
+#[test]
+fn edit_refusals_are_rewritten_into_instructions() {
+    use crate::editor::commands::friendly_edit_error;
+    let mut project = Project::default();
+    Command::AddTrack {
+        track: Track::new(animathio_core::TrackId(7), "Titles"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    assert!(friendly_edit_error(&project, "overlapping clips").contains("overlap another clip"));
+    let locked = friendly_edit_error(&project, "track 7 is locked");
+    assert!(
+        locked.contains("\"Titles\"") && locked.contains("lock"),
+        "{locked}"
+    );
+    assert_eq!(
+        friendly_edit_error(&project, "something else"),
+        "something else"
+    );
+}
+
+#[gpui::test]
+fn an_empty_project_says_what_to_do_and_an_edited_one_does_not(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    ui.dispatch(NewProject);
+    ui.press("enter");
+    assert_eq!(ui.read(clip_count), 0);
+    assert!(
+        ui.cx.debug_bounds("viewer-empty-hint").is_some(),
+        "a blank canvas explains how to start"
+    );
+    let path = super::config_dir().join("empty-hint.wav");
+    std::fs::write(&path, wav(&[(0.25, 800)])).unwrap();
+    let track = ui.read(|e| e.project.tracks()[0].id());
+    ui.update(|editor, _, cx| editor.import_paths(&[path], Some((track, Time(0))), cx));
+    assert!(ui.read(clip_count) > 0);
+    assert!(
+        ui.cx.debug_bounds("viewer-empty-hint").is_none(),
+        "the hint goes away once something is on the timeline"
+    );
+}
+
+#[test]
+fn plugin_errors_lose_their_transport_prefixes() {
+    use crate::editor::math::plain_plugin_error;
+    assert_eq!(
+        plain_plugin_error(
+            "plugin produced an invalid scene: service-failed: invalid LaTeX: unbalanced opening brace"
+        ),
+        "Invalid LaTeX: unbalanced opening brace"
+    );
+    assert_eq!(plain_plugin_error("boom"), "Boom");
+    assert_eq!(plain_plugin_error(""), "");
+}
+
+#[gpui::test]
+fn inspector_leads_with_content_for_generated_clips_and_speed_for_media(cx: &mut TestAppContext) {
+    if !require_plugins("inspector_leads_with_content_for_generated_clips_and_speed_for_media") {
+        return;
+    }
+    let top = |ui: &mut Ui, section: &str| {
+        ui.cx
+            .debug_bounds(Box::leak(format!("section-{section}").into_boxed_str()))
+            .map(|bounds| f32::from(bounds.origin.y))
+    };
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let text = ui.read(|editor| {
+        editor
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|track| track.clips().values())
+            .find(|clip| {
+                matches!(&clip.kind, animathio_core::ClipKind::Plugin { plugin_id, .. }
+                    if plugin_id == "org.animathio.text")
+            })
+            .map(|clip| clip.id)
+            .expect("the sample has a text clip")
+    });
+    ui.update(|editor, _, cx| editor.select_only(text, cx));
+    ui.update(|_, window, _| window.refresh());
+    let (params, transform) = (top(&mut ui, "params"), top(&mut ui, "transform"));
+    assert!(
+        params.is_some() && transform.is_some(),
+        "content and transform sections render"
+    );
+    assert!(
+        params < transform,
+        "a text clip leads with its text, not Speed"
+    );
+    if let Some(speed) = top(&mut ui, "speed") {
+        assert!(
+            speed > transform.unwrap(),
+            "Speed follows for generated clips"
+        );
+    }
+
+    let (project, assets) = voice_and_music();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| editor.select_only(VOICE_CLIP, cx));
+    ui.update(|_, window, _| window.refresh());
+    let speed = top(&mut ui, "speed").expect("an audio clip shows Speed");
+    let audio = top(&mut ui, "audio").expect("and its Audio section");
+    assert!(speed < audio, "timed media still leads with Speed");
 }

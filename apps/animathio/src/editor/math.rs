@@ -40,6 +40,19 @@ fn render_preview(
     preview(draft, size, host, thumbnail)
 }
 
+/// Drop the host's transport prefixes ("plugin produced an invalid scene: service-failed: ...")
+/// so the dialog shows only what is wrong with the input, such as "Invalid LaTeX: ...".
+pub(super) fn plain_plugin_error(raw: &str) -> String {
+    let mut message = raw;
+    for prefix in ["plugin produced an invalid scene: ", "service-failed: "] {
+        message = message.strip_prefix(prefix).unwrap_or(message);
+    }
+    let mut chars = message.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
 fn preview(
     draft: &MathObjectDraft,
     size: (u32, u32),
@@ -55,7 +68,7 @@ fn preview(
             serde_json::json!(f64::from(size.0.min(size.1)) / f64::from(size.0) * 0.014);
     }
     host.render_clip(&plugin, &BTreeMap::new(), &params, 0, size)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| plain_plugin_error(&e.to_string()))?;
     let mut project = Project::default();
     Command::SetSettings {
         width: size.0,

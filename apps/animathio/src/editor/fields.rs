@@ -120,6 +120,46 @@ impl FieldPool {
                 .any(|field| field.state.read(cx).focus_handle(cx).is_focused(window))
     }
 
+    /// Put the model text back into the focused single-line input, dropping whatever was typed
+    /// but not committed. Returns whether an input was focused. A focused multi-line field has
+    /// nothing to revert (it applies live) but still counts, so Escape can leave it.
+    pub(super) fn revert_focused_input(&mut self, window: &mut Window, cx: &mut App) -> bool {
+        if self
+            .textareas
+            .values()
+            .any(|field| field.state.read(cx).focus_handle(cx).is_focused(window))
+        {
+            return true;
+        }
+        let Some(field) = self
+            .inputs
+            .values()
+            .find(|field| field.state.read(cx).focus_handle(cx).is_focused(window))
+        else {
+            return false;
+        };
+        let text = field.synced.clone();
+        field
+            .state
+            .update(cx, |state, cx| state.set_value(text, window, cx));
+        true
+    }
+
+    /// The first live single-line input, for UI tests that drive keyboard focus.
+    #[cfg(test)]
+    pub(super) fn first_input(&self) -> Option<Entity<InputState>> {
+        self.inputs.values().next().map(|field| field.state.clone())
+    }
+
+    /// The first live multi-line field (LaTeX source, text content), for UI tests.
+    #[cfg(test)]
+    pub(super) fn first_textarea(&self) -> Option<Entity<TextareaState>> {
+        self.textareas
+            .values()
+            .next()
+            .map(|field| field.state.clone())
+    }
+
     pub(super) fn retain_clips(&mut self, clips: &BTreeSet<ClipId>) {
         let keep = |key: &String| {
             !key.starts_with('c')
@@ -204,13 +244,18 @@ impl Editor {
             subscriptions.push(cx.subscribe_in(
                 &state,
                 window,
-                move |this, _state, event: &InputEvent, _window, cx| {
+                move |this, _state, event: &InputEvent, window, cx| {
                     if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
                         this.commit_input(&commit_key, cx);
                         if commit_key == "timecode" {
                             this.viewer_state.timecode_editing = false;
                             cx.notify();
                         }
+                    }
+                    // Enter commits and hands the keyboard back to the timeline, so Space,
+                    // Delete and the tool keys work again without clicking away first.
+                    if matches!(event, InputEvent::PressEnter { .. }) {
+                        window.focus(&this.panel_focus[0], cx);
                     }
                 },
             ));
@@ -1594,12 +1639,11 @@ impl Editor {
                 .border_b_1()
                 .border_color(cx.theme().sidebar_border)
                 .child(icons::icon(icons::kind_icon(&clip.kind)).small())
-                .child(
-                    div()
-                        .flex_1()
-                        .overflow_hidden()
-                        .child(clip_label(&self.project, &clip)),
-                )
+                .child(div().flex_1().overflow_hidden().child(clip_title(
+                    &self.project,
+                    &clip,
+                    0.0,
+                )))
                 .child(
                     div()
                         .text_color(cx.theme().muted_foreground)
@@ -1632,8 +1676,46 @@ impl Editor {
             .p_1()
             .pb_3()
             .bg(hex(color::PANEL));
+        // Generated clips (text, formulas, shapes, graphs, titles) lead with their own content;
+        // timed media (video, audio) leads with Speed, which matters for it and little for the rest.
+        let timed_media = matches!(clip.kind, ClipKind::Video(_) | ClipKind::Audio(_));
         let speed_rows = self.speed_rows(id, cx);
-        body = body.child(self.section("speed", "Speed", speed_rows, cx));
+        let mut speed = Some(self.section("speed", "Speed", speed_rows, cx));
+        let mut title_rows = title_fields;
+        let mut content: Option<Div> = None;
+        if matches!(clip.kind, ClipKind::Plugin { .. }) && !is_title {
+            content = Some(if let Some(math) = self.math_inspector(id, window, cx) {
+                math
+            } else {
+                let rows = self.plugin_rows(id, window, cx);
+                self.section(
+                    "params",
+                    "Text / Content",
+                    div().flex().flex_col().children(rows),
+                    cx,
+                )
+            });
+        } else if visual {
+            let rows = self.numeric_param_rows(id, window, cx);
+            if !rows.is_empty() {
+                content = Some(self.section(
+                    "params",
+                    "Content",
+                    div().flex().flex_col().children(rows),
+                    cx,
+                ));
+            }
+        }
+        if timed_media {
+            body = body.child(speed.take().expect("speed section"));
+        } else {
+            if let Some(rows) = title_rows.take() {
+                body = body.child(rows);
+            }
+            if let Some(content) = content.take() {
+                body = body.child(content);
+            }
+        }
         if visual {
             let transform_rows = self.transform_rows(id, window, cx);
             body = body.child(self.section(
@@ -1643,7 +1725,7 @@ impl Editor {
                 cx,
             ));
         }
-        if let Some(rows) = title_fields {
+        if let Some(rows) = title_rows.take() {
             body = body.child(rows);
         }
         if let Some(section) = self.caption_style_section(id, window, cx) {
@@ -1666,28 +1748,11 @@ impl Editor {
         if visual {
             body = body.child(self.section("opacity", "Compositing", div().child(opacity_row), cx));
         }
-        if matches!(clip.kind, ClipKind::Plugin { .. }) && !is_title {
-            if let Some(math) = self.math_inspector(id, window, cx) {
-                body = body.child(math);
-            } else {
-                let rows = self.plugin_rows(id, window, cx);
-                body = body.child(self.section(
-                    "params",
-                    "Text / Content",
-                    div().flex().flex_col().children(rows),
-                    cx,
-                ));
-            }
-        } else if visual {
-            let rows = self.numeric_param_rows(id, window, cx);
-            if !rows.is_empty() {
-                body = body.child(self.section(
-                    "params",
-                    "Content",
-                    div().flex().flex_col().children(rows),
-                    cx,
-                ));
-            }
+        if let Some(content) = content.take() {
+            body = body.child(content);
+        }
+        if let Some(speed) = speed.take() {
+            body = body.child(speed);
         }
         if matches!(clip.kind, ClipKind::Audio(_)) {
             let mut rows = self.audio_rows(id, window, cx);
@@ -1710,7 +1775,7 @@ impl Editor {
                         .px_3()
                         .text_size(crate::style::type_size::XS)
                         .text_color(hex(color::TEXT_MUTED))
-                        .child("Drop an effect from the media pool"),
+                        .child("Add effects from Library, Effects"),
                 );
             }
             body = body.child(self.section(
