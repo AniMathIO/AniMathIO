@@ -306,8 +306,8 @@ impl Editor {
             .px_3()
             .py_2()
             .child(format!(
-                "{:.2}%{} · {frames} frames",
-                clip.time_map.speed.percent(),
+                "{}{} · {frames} frames",
+                speed_summary(&clip.time_map),
                 if clip.time_map.reverse {
                     " reverse"
                 } else {
@@ -347,9 +347,38 @@ impl Editor {
             )
     }
 }
+/// A percentage without trailing zeros: `100%`, `62.5%`.
+fn percent_text(percent: f64) -> String {
+    let text = format!("{percent:.2}");
+    format!("{}%", text.trim_end_matches('0').trim_end_matches('.'))
+}
+
+/// The speed line of the inspector: one value for a constant speed, first to last key for a ramp.
+fn speed_summary(map: &animathio_core::ClipTimeMap) -> String {
+    match (map.ramps.first(), map.ramps.last()) {
+        (Some(first), Some(last)) if map.ramps.len() > 1 => format!(
+            "{} to {}",
+            percent_text(first.speed.percent()),
+            percent_text(last.speed.percent())
+        ),
+        (Some(only), _) => percent_text(only.speed.percent()),
+        _ => percent_text(map.speed.percent()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[core::prelude::v1::test]
+    fn ramp_summary_shows_first_to_last_speed() {
+        let rate = FrameRate::new(30, 1).unwrap();
+        let mut map = animathio_core::ClipTimeMap::default();
+        assert_eq!(speed_summary(&map), "100%");
+        map.ramps = ramps("0:100, 30:200", rate).unwrap();
+        assert_eq!(speed_summary(&map), "100% to 200%");
+        map.ramps = ramps("0:62.5", rate).unwrap();
+        assert_eq!(speed_summary(&map), "62.5%");
+    }
     #[core::prelude::v1::test]
     fn percent_and_ramp_input_stay_exact() {
         assert_eq!(percent("6.25").unwrap(), ClipSpeed::new(1, 16).unwrap());

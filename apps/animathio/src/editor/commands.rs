@@ -226,13 +226,7 @@ impl Editor {
                     cx.notify();
                     return;
                 }
-                let value = self
-                    .plugin_model(id, &name)
-                    .and_then(|model| match model {
-                        ParamModel::Number { min, max, .. } => Some(value.clamp(min, max)),
-                        _ => None,
-                    })
-                    .unwrap_or(value);
+                let value = self.plugin_number_from_display(id, &name, value);
                 if let Some(command) = self.plugin_number_command(id, &name, value) {
                     self.execute(&command, cx);
                 }

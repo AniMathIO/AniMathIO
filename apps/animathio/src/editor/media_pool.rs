@@ -573,7 +573,8 @@ impl Editor {
             .p_1()
             .id(("media-body", self.left_tab as usize))
             .debug_selector(|| "library-body".into())
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .track_scroll(&self.library_scroll[self.left_tab as usize]);
         match self.left_tab {
             LeftTab::Elements => {
                 body = body
@@ -901,12 +902,8 @@ impl Editor {
                     if audio && position == audio_start {
                         body = body.child(group("Audio effects"));
                     }
-                    let icon = if audio {
-                        IconName::AudioWaveform
-                    } else {
-                        IconName::Sparkles
-                    };
                     let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
+                    let icon = effect_icon(audio, &effect);
                     let (click_plugin, click_effect) = (plugin.clone(), effect.clone());
                     body = body.child(
                         div()
@@ -919,6 +916,7 @@ impl Editor {
                             .flex_row()
                             .items_center()
                             .gap_2()
+                            .text_size(crate::style::type_size::SM)
                             .child(icons::icon(icon).small())
                             .child(descriptor.name)
                             .debug_selector({
@@ -1125,7 +1123,17 @@ impl Editor {
                         ),
                 )
             })
-            .child(body)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .relative()
+                    .child(body.h_full())
+                    .child(gpui_component::scroll::Scrollbar::vertical(
+                        &self.library_scroll[self.left_tab as usize],
+                    )),
+            )
     }
 
     pub(super) fn library_matches(&self, tab: LeftTab, text: &str) -> bool {
@@ -1325,6 +1333,34 @@ impl Editor {
                 .child(icons::icon(icon).small())
                 .child(label),
         )
+    }
+}
+
+/// The Library icon of a built-in effect: one per effect, so the list reads at a glance.
+pub(super) fn effect_icon(audio: bool, effect: &str) -> IconName {
+    if audio {
+        return match effect {
+            "gain" => IconName::Volume2,
+            "eq3" => IconName::SlidersVertical,
+            "compressor" => IconName::Gauge,
+            "gate" => IconName::ZapOff,
+            "highpass" => IconName::Activity,
+            "voice_cleanup" => IconName::Mic,
+            "denoise" => IconName::AudioLines,
+            _ => IconName::AudioWaveform,
+        };
+    }
+    match effect {
+        "grayscale" => IconName::Contrast,
+        "sepia" => IconName::Coffee,
+        "invert" => IconName::Blend,
+        "saturate" => IconName::Droplet,
+        "brightness" => IconName::Sun,
+        "contrast" => IconName::SunMoon,
+        "blur" => IconName::Aperture,
+        "opacity" => IconName::Layers2,
+        "slide" => IconName::MoveHorizontal,
+        _ => IconName::Sparkles,
     }
 }
 

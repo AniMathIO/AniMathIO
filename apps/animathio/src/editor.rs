@@ -51,6 +51,7 @@ mod dialogs;
 mod ducking;
 mod export_panel;
 mod fields;
+mod inspector_units;
 mod inspector_view;
 mod markers;
 mod math;
@@ -181,6 +182,16 @@ impl LeftTab {
             Self::Titles => "Titles",
             Self::Effects => "Effects",
             Self::Plugins => "Plugins",
+        }
+    }
+    /// The Library panel title when the tab strip is icon-only: names the active tab.
+    const fn header(self) -> &'static str {
+        match self {
+            Self::Media => "Library \u{b7} Media",
+            Self::Elements => "Library \u{b7} Elements",
+            Self::Titles => "Library \u{b7} Titles",
+            Self::Effects => "Library \u{b7} Effects",
+            Self::Plugins => "Library \u{b7} Plugins",
         }
     }
 }
@@ -655,6 +666,17 @@ pub(crate) struct Editor {
     next_id: u64,
     recent: RecentFiles,
     dock: DockLayout,
+    /// The window is shorter than [`COMPACT_WINDOW_HEIGHT`]: the timeline drops its overview strip
+    /// and the transport is slimmer.
+    compact_height: bool,
+    /// The first-run density default was decided (see `apply_density_default`).
+    density_decided: bool,
+    /// The window height seen on the previous frame while the density is undecided: the default
+    /// is only chosen once two consecutive frames agree, so a transient size at window creation
+    /// does not lock a track height in.
+    density_probe: Option<f32>,
+    /// A dock layout file existed at startup, so the user's track height is not overridden.
+    dock_persisted: bool,
     left_tab: LeftTab,
     previous_left_tab: LeftTab,
     tab_changed: Instant,
@@ -667,6 +689,9 @@ pub(crate) struct Editor {
     window_title: String,
     panel_focus: [FocusHandle; 4],
     timeline_scroll_handle: ScrollHandle,
+    /// One scroll handle per Library tab and one for the Inspector, for their scrollbars.
+    library_scroll: [ScrollHandle; 5],
+    inspector_scroll: ScrollHandle,
     launcher_scroll: ScrollHandle,
     duck_scroll: ScrollHandle,
     pointer_down: bool,
@@ -949,6 +974,10 @@ impl Editor {
             next_id: initial_next_id,
             recent: RecentFiles::load(),
             dock: DockLayout::load(),
+            compact_height: false,
+            density_decided: false,
+            density_probe: None,
+            dock_persisted: DockLayout::config_path().is_some_and(|path| path.exists()),
             left_tab: LeftTab::Media,
             previous_left_tab: LeftTab::Media,
             tab_changed: Instant::now()
@@ -964,6 +993,8 @@ impl Editor {
             window_title: String::new(),
             panel_focus: std::array::from_fn(|_| cx.focus_handle()),
             timeline_scroll_handle: ScrollHandle::new(),
+            library_scroll: std::array::from_fn(|_| ScrollHandle::new()),
+            inspector_scroll: ScrollHandle::new(),
             launcher_scroll: ScrollHandle::new(),
             duck_scroll: ScrollHandle::new(),
             pointer_down: false,
@@ -1143,6 +1174,35 @@ impl Focusable for Editor {
     }
 }
 
+/// Window height (logical pixels) below which the editor uses its compact density.
+pub(crate) const COMPACT_WINDOW_HEIGHT: f32 = 800.;
+
+impl Editor {
+    /// Track the window height: short windows hide the timeline overview strip and slim the
+    /// transport, and a first run (no saved layout) in one starts with small track rows so more
+    /// than a few tracks fit. A saved track height is never overridden.
+    fn apply_density(&mut self, window: &Window) {
+        let height = f32::from(window.viewport_size().height);
+        self.compact_height = height < COMPACT_WINDOW_HEIGHT;
+        if !self.density_decided && !self.is_start_screen() {
+            if self.density_probe != Some(height) {
+                self.density_probe = Some(height);
+                window.request_animation_frame();
+                return;
+            }
+            self.density_decided = true;
+            if !self.env.adaptive_density {
+                return;
+            }
+            self.dock.track_height = crate::layout::first_run_track_height(
+                self.dock.track_height,
+                self.compact_height,
+                self.dock_persisted,
+            );
+        }
+    }
+}
+
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.advance_timeline_zoom(window);
@@ -1187,6 +1247,7 @@ impl Render for Editor {
             window.request_animation_frame();
         }
 
+        self.apply_density(window);
         self.refresh_menus(cx);
         let title = self.window_title();
         if self.window_title != title {

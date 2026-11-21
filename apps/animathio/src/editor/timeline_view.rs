@@ -1336,24 +1336,30 @@ impl Editor {
                         .selected(ripple_all)
                         .toggled(ripple_all),
                     )
-                    .children(
-                        [
-                            (crate::layout::TrackHeight::Small, "S"),
-                            (crate::layout::TrackHeight::Medium, "M"),
-                            (crate::layout::TrackHeight::Large, "L"),
-                        ]
-                        .map(|(height, label)| {
-                            Button::new(label)
-                                .ghost()
-                                .compact()
-                                .label(label)
-                                .selected(self.dock.track_height == height)
-                                .tooltip(format!("Track height: {label}"))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_track_height(height, cx);
-                                }))
-                        }),
-                    )
+                    .child({
+                        use crate::layout::TrackHeight;
+                        let heights = [
+                            (TrackHeight::Small, "S", "Small"),
+                            (TrackHeight::Medium, "M", "Medium"),
+                            (TrackHeight::Large, "L", "Large"),
+                        ];
+                        gpui_component::button::ButtonGroup::new("track-height")
+                            .outline()
+                            .compact()
+                            .children(heights.map(|(height, label, name)| {
+                                Button::new(SharedString::from(format!("track-height-{label}")))
+                                    .label(label)
+                                    .selected(self.dock.track_height == height)
+                                    .tooltip(format!("Track height: {name}"))
+                            }))
+                            .on_click(cx.listener(move |this, picked: &Vec<usize>, _, cx| {
+                                if let Some((height, ..)) =
+                                    picked.first().and_then(|index| heights.get(*index))
+                                {
+                                    this.set_track_height(*height, cx);
+                                }
+                            }))
+                    })
                     .child(icon_button(
                         "zoom-out",
                         icons::icon(IconName::ZoomOut),
@@ -1377,7 +1383,8 @@ impl Editor {
                         }),
                     )),
             )
-            .child(
+            .when(!self.compact_height, |timeline| {
+                timeline.child(
                 div()
                     .h(gpui::rems(1.467))
                     .flex_shrink_0()
@@ -1396,6 +1403,7 @@ impl Editor {
                     .child(
                         div()
                             .id("timeline-overview")
+                            .debug_selector(|| "timeline-overview".into())
                             .flex_1()
                             .h_full()
                             .cursor_pointer()
@@ -1449,6 +1457,7 @@ impl Editor {
                             ),
                     ),
             )
+            })
             .child(
                 // The ruler and marker lane live outside the vertical scroll area.
                 div()
@@ -1626,6 +1635,7 @@ impl Editor {
                 crate::style::hex(crate::style::color::CLIP_PLUGIN),
                 |kind| clip_color(kind, cx.theme()),
             );
+            let has_audio = track_has_audio(track);
             let muted = track.is_muted();
             let solo = track.is_solo();
             let locked = track.is_locked();
@@ -1639,125 +1649,151 @@ impl Editor {
                 .flex()
                 .flex_row()
                 .items_center()
-                .child(
-                    div()
-                        .id(("track-gain", id.0))
-                        .w(px(62. * crate::style::ui_scale()))
-                        .h(px(22. * crate::style::ui_scale()))
-                        .flex_shrink_0()
-                        .cursor_pointer()
-                        .tooltip(move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(format!(
-                                "Gain {gain:.2}x. Drag to adjust; double-click to reset"
-                            ))
-                            .build(window, cx)
-                        })
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                cx.stop_propagation();
-                                if event.click_count == 2 {
-                                    this.gain_drag = None;
-                                    this.nudge_track_gain(id, 1.0 - gain, cx);
-                                } else {
-                                    this.gain_drag = Some(GainDrag {
-                                        id,
-                                        x: f32::from(event.position.x),
-                                        original: gain,
-                                        current: gain,
-                                    });
-                                }
-                            }),
-                        )
-                        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                            if event.dragging()
-                                && let Some(drag) = &mut this.gain_drag
-                            {
-                                drag.current = timeline::gain_from_drag(
-                                    drag.original,
-                                    f32::from(event.position.x) - drag.x,
-                                );
-                                cx.notify();
-                            }
-                        }))
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| this.finish_gain_drag(cx)),
-                        )
-                        .on_mouse_up_out(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| this.finish_gain_drag(cx)),
-                        )
-                        .child(
-                            canvas(
-                                |_, _, _| {},
-                                move |bounds, (), window, _| {
-                                    let y = bounds.center().y;
-                                    let left = bounds.left() + px(4.);
-                                    let right = bounds.right() - px(4.);
-                                    window.paint_quad(
-                                        fill(
-                                            Bounds::from_corners(
-                                                point(left, y - px(1.5)),
-                                                point(right, y + px(1.5)),
-                                            ),
-                                            crate::style::hex(crate::style::color::BORDER),
-                                        )
-                                        .corner_radii(px(2.)),
-                                    );
-                                    // Unity-gain tick at the midpoint of the 0-2x range.
-                                    window.paint_quad(fill(
-                                        Bounds::new(
-                                            point(
-                                                f32::midpoint(f32::from(left), f32::from(right))
-                                                    .into(),
-                                                y - px(3.5),
-                                            ),
-                                            size(px(1.), px(7.)),
-                                        ),
-                                        crate::style::hex(crate::style::color::TEXT_MUTED),
-                                    ));
-                                    let x = left + (right - left) * (gain as f32 / 2.0);
-                                    window.paint_quad(
-                                        fill(
-                                            Bounds::from_corners(
-                                                point(left, y - px(1.5)),
-                                                point(x, y + px(1.5)),
-                                            ),
-                                            color,
-                                        )
-                                        .corner_radii(px(2.)),
-                                    );
-                                    window.paint_quad(
-                                        fill(
-                                            Bounds::new(
-                                                point(x - px(3.), y - px(4.)),
-                                                size(px(6.), px(8.)),
-                                            ),
-                                            crate::style::hex(crate::style::color::TEXT),
-                                        )
-                                        .corner_radii(px(3.)),
-                                    );
-                                },
+                .when(has_audio, |controls| {
+                    controls.child(
+                        div()
+                            .id(("track-gain", id.0))
+                            .w(px(62. * crate::style::ui_scale()))
+                            .h(px(22. * crate::style::ui_scale()))
+                            .flex_shrink_0()
+                            .cursor_pointer()
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(format!(
+                                    "Gain {gain:.2}x. Drag to adjust; double-click to reset"
+                                ))
+                                .build(window, cx)
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                    cx.stop_propagation();
+                                    if event.click_count == 2 {
+                                        this.gain_drag = None;
+                                        this.nudge_track_gain(id, 1.0 - gain, cx);
+                                    } else {
+                                        this.gain_drag = Some(GainDrag {
+                                            id,
+                                            x: f32::from(event.position.x),
+                                            original: gain,
+                                            current: gain,
+                                        });
+                                    }
+                                }),
                             )
-                            .size_full(),
-                        ),
-                )
+                            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                                if event.dragging()
+                                    && let Some(drag) = &mut this.gain_drag
+                                {
+                                    drag.current = timeline::gain_from_drag(
+                                        drag.original,
+                                        f32::from(event.position.x) - drag.x,
+                                    );
+                                    cx.notify();
+                                }
+                            }))
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| this.finish_gain_drag(cx)),
+                            )
+                            .on_mouse_up_out(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| this.finish_gain_drag(cx)),
+                            )
+                            .child(
+                                canvas(
+                                    |_, _, _| {},
+                                    move |bounds, (), window, _| {
+                                        let y = bounds.center().y;
+                                        let left = bounds.left() + px(4.);
+                                        let right = bounds.right() - px(4.);
+                                        window.paint_quad(
+                                            fill(
+                                                Bounds::from_corners(
+                                                    point(left, y - px(1.5)),
+                                                    point(right, y + px(1.5)),
+                                                ),
+                                                crate::style::hex(crate::style::color::BORDER),
+                                            )
+                                            .corner_radii(px(2.)),
+                                        );
+                                        // Unity-gain tick at the midpoint of the 0-2x range.
+                                        window.paint_quad(fill(
+                                            Bounds::new(
+                                                point(
+                                                    f32::midpoint(
+                                                        f32::from(left),
+                                                        f32::from(right),
+                                                    )
+                                                    .into(),
+                                                    y - px(3.5),
+                                                ),
+                                                size(px(1.), px(7.)),
+                                            ),
+                                            crate::style::hex(crate::style::color::TEXT_MUTED),
+                                        ));
+                                        let x = left + (right - left) * (gain as f32 / 2.0);
+                                        window.paint_quad(
+                                            fill(
+                                                Bounds::from_corners(
+                                                    point(left, y - px(1.5)),
+                                                    point(x, y + px(1.5)),
+                                                ),
+                                                color,
+                                            )
+                                            .corner_radii(px(2.)),
+                                        );
+                                        window.paint_quad(
+                                            fill(
+                                                Bounds::new(
+                                                    point(x - px(3.), y - px(4.)),
+                                                    size(px(6.), px(8.)),
+                                                ),
+                                                crate::style::hex(crate::style::color::TEXT),
+                                            )
+                                            .corner_radii(px(3.)),
+                                        );
+                                    },
+                                )
+                                .size_full(),
+                            ),
+                    )
+                })
                 .child(div().flex_1())
-                .child(header_pill(
-                    ("track-mute", id.0),
-                    if muted {
-                        IconName::VolumeX
-                    } else {
-                        IconName::Volume2
-                    },
-                    if muted { "Unmute track" } else { "Mute track" },
-                    muted,
-                    crate::style::color::WARNING,
-                    cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
-                    }),
-                ))
+                .child(if has_audio {
+                    header_pill(
+                        ("track-mute", id.0),
+                        if muted {
+                            IconName::VolumeX
+                        } else {
+                            IconName::Volume2
+                        },
+                        if muted { "Unmute track" } else { "Mute track" },
+                        muted,
+                        crate::style::color::WARNING,
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
+                        }),
+                    )
+                } else {
+                    // A muted layer is hidden from rendering, so a picture-only track gets a
+                    // visibility toggle in place of the audio controls.
+                    header_pill(
+                        ("track-mute", id.0),
+                        if muted {
+                            IconName::EyeOff
+                        } else {
+                            IconName::Eye
+                        },
+                        if muted { "Show track" } else { "Hide track" },
+                        muted,
+                        crate::style::color::WARNING,
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.execute(&Command::SetTrackMuted { id, muted: !muted }, cx);
+                        }),
+                    )
+                })
+                // Solo also hides every other track from the picture (`evaluate` skips non-solo
+                // tracks while any is soloed), so picture-only tracks keep the pill.
                 .child(header_pill(
                     ("track-solo", id.0),
                     IconName::Headphones,
@@ -1881,4 +1917,14 @@ impl Editor {
         }
         header
     }
+}
+
+/// Whether a track can carry sound: it holds audio or video, or nothing yet. Tracks of text,
+/// formulas, shapes and images only get a visibility toggle.
+pub(super) fn track_has_audio(track: &Track) -> bool {
+    track.clips().is_empty()
+        || track
+            .clips()
+            .values()
+            .any(|clip| matches!(clip.kind, ClipKind::Audio(_) | ClipKind::Video(_)))
 }
