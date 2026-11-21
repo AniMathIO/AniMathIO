@@ -739,9 +739,13 @@ fn webm_export_decodes_to_the_preview_frames_and_the_mixed_audio() {
     assert_eq!(info.audio[0].sample_rate, 48_000);
     assert_eq!(info.audio[0].channels, 2);
     assert!(info.audio[0].codec.to_lowercase().contains("opus"));
+    // The video ends at 2 s; the audio track may run up to one 20 ms Opus packet longer (the
+    // flushed encoder lag plus padding of the last packet; WebM has no DiscardPadding here).
     let half_frame = TICKS_PER_SECOND / 60;
+    let opus_packet = TICKS_PER_SECOND / 50;
     assert!(
-        (info.duration.0 - 2 * TICKS_PER_SECOND).abs() <= half_frame,
+        info.duration.0 >= 2 * TICKS_PER_SECOND - half_frame
+            && info.duration.0 <= 2 * TICKS_PER_SECOND + opus_packet,
         "duration {}",
         info.duration.0
     );
@@ -778,7 +782,8 @@ fn webm_export_decodes_to_the_preview_frames_and_the_mixed_audio() {
         );
     }
 
-    // The container carries 60 video frames and one Opus packet per 20 ms, ascending in time.
+    // The container carries 60 video frames and one Opus packet per 20 ms (plus one that flushes
+    // the encoder lag), ascending in time.
     let mut demuxer = filmcraft_matroska::Demuxer::from_slice(&bytes).unwrap();
     let delay = demuxer
         .tracks()
@@ -798,7 +803,7 @@ fn webm_export_decodes_to_the_preview_frames_and_the_mixed_audio() {
             video += 1;
         }
     }
-    assert_eq!((video, audio), (60, 100));
+    assert_eq!((video, audio), (60, 101));
 
     // Audio: the decoded stream is the mixer's output (same lattice, pre-skip honoured), and the
     // timestamps line up: no lag between the decoded and the reference samples.
