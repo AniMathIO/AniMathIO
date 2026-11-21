@@ -95,11 +95,51 @@ fn offset_verb(v: &PathVerb, ox: f32, oy: f32) -> PathVerb {
 
 /// Preserve contour winding and subpath boundaries in one non-zero fill. Filling
 /// contours separately paints over counters; this also serves captions and titles.
+///
+/// The host returns one entry per contour, not per glyph. Within the core's path cap
+/// (`animathio_core::MAX_PATH_VERBS`) everything stays in ONE path, exactly as before
+/// weighted text existed. Only above it (formerly an error) are contours grouped per
+/// glyph (text runs left to right: a contour starting at or past the group's right edge
+/// begins a new glyph) and whole glyphs are chunked, so a counter never lands in a
+/// different path than its outer contour.
 fn fill_contours(
     contours: impl IntoIterator<Item = Vec<PathVerb>>,
     color: Color,
 ) -> Vec<DrawCommand> {
-    fill_chunks(contours.into_iter().collect(), color)
+    let contours: Vec<Vec<PathVerb>> = contours.into_iter().collect();
+    let total: usize = contours.iter().map(Vec::len).sum();
+    if total <= CORE_MAX_PATH_VERBS {
+        let path: Vec<PathVerb> = contours.into_iter().flatten().collect();
+        return if path.is_empty() {
+            Vec::new()
+        } else {
+            vec![DrawCommand::FillPath((path, color))]
+        };
+    }
+    let mut groups: Vec<Vec<PathVerb>> = Vec::new();
+    let mut right = f32::MIN;
+    for contour in contours {
+        // `Close` carries no point (`verb_x` gives 0), so it must not count.
+        let xs = || {
+            contour
+                .iter()
+                .filter(|v| !matches!(v, PathVerb::Close))
+                .map(verb_x)
+        };
+        let left = xs().fold(f32::MAX, f32::min);
+        let edge = xs().fold(f32::MIN, f32::max);
+        match groups.last_mut() {
+            Some(group) if left < right => {
+                group.extend(contour);
+                right = right.max(edge);
+            }
+            _ => {
+                groups.push(contour);
+                right = edge;
+            }
+        }
+    }
+    fill_chunks(groups, color)
 }
 
 // Fitted titles use a real clip-local box, so the editor's transform handles and
@@ -1244,6 +1284,8 @@ const MAX_TEXT_VERBS: usize = 200_000;
 const MAX_FONT_PX: f32 = 1_048_560.0;
 /// The core caps one path at 100,000 verbs; stay well below it by splitting into elements.
 const MAX_VERBS_PER_ELEMENT: usize = 40_000;
+/// Mirror of `animathio_core::MAX_PATH_VERBS` (the plugin does not link the core).
+const CORE_MAX_PATH_VERBS: usize = 100_000;
 /// A tab advances 0.6 em: what the host's regular text measures (its tab maps to DejaVu's
 /// `.notdef`, 0.6 em wide). The host also draws that box; weighted text only advances.
 const TAB_ADVANCE_EM: f32 = 0.6;
@@ -1889,5 +1931,46 @@ mod weight_tests {
                 verbs.len()
             );
         }
+    }
+
+    /// Host text arrives as one contour per outline. Above the core's path cap the
+    /// contours are regrouped per glyph, so a counter always shares a path with its
+    /// outer contour (otherwise the non-zero fill paints the counter solid).
+    #[test]
+    fn long_host_text_keeps_counters_with_their_glyph() {
+        let pt = |x: f32, y: f32| Point { x, y };
+        let ring = |x: f32, size: f32, y: f32| {
+            let mut v = vec![PathVerb::MoveTo(pt(x, y))];
+            for i in 1..=29 {
+                v.push(PathVerb::LineTo(pt(x + size * (i % 2) as f32, y + size)));
+            }
+            v.push(PathVerb::Close);
+            v
+        };
+        // 2,000 "o": outer contour then counter, 31 verbs each (124k verbs total).
+        let mut contours = Vec::new();
+        for i in 0..2_000 {
+            let x = i as f32 * 10.0;
+            contours.push(ring(x, 8.0, 0.0));
+            contours.push(ring(x + 2.0, 4.0, 2.0));
+        }
+        let color = Color { r: 0, g: 0, b: 0, a: 255 };
+        let elements = fill_contours(contours.clone(), color);
+        assert!(elements.len() > 1, "above the cap the fill is chunked");
+        let mut glyph_contours = 0;
+        for element in &elements {
+            let DrawCommand::FillPath((verbs, _)) = element else {
+                panic!("paths expected")
+            };
+            assert!(verbs.len() <= MAX_VERBS_PER_ELEMENT + 200);
+            let closes = verbs.iter().filter(|v| matches!(v, PathVerb::Close)).count();
+            assert_eq!(closes % 2, 0, "outer contour and counter split apart");
+            glyph_contours += closes;
+        }
+        assert_eq!(glyph_contours, 4_000);
+
+        // Within the cap: one path, exactly the pre-weight behaviour.
+        let short = fill_contours(contours[..400].to_vec(), color);
+        assert_eq!(short.len(), 1);
     }
 }
