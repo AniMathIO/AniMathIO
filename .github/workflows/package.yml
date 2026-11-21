@@ -14,7 +14,11 @@ name: Package
 #
 # Every job installs the bundle, then runs `animathio --version` and
 # `animathio-cli --version` headlessly and checks that the bundled `.amplugin`
-# bundles arrived next to (or lib-relative to) the executable. A final job
+# bundles arrived next to (or lib-relative to) the executable. The Windows job
+# additionally launches the installed editor on the runner's interactive
+# desktop (with the CLI's sample project, then the launcher), screenshots it
+# and uploads the PNGs and logs as the `windows-editor-smoke` artifact — real
+# Windows, which Wine cannot fake (see docs/release-checklist.md). A final job
 # collects all three installer artifacts and publishes a `SHA256SUMS` file for
 # them (#156, "Release integrity").
 
@@ -183,6 +187,108 @@ jobs:
           if ($plugins.Count -ne $env:PLUGIN_COUNT) {
             throw "expected $env:PLUGIN_COUNT plugins in $dest\plugins, found $($plugins.Count)"
           }
+      - name: Smoke test editor GUI (Windows)
+        # GitHub windows runners run jobs in an interactive desktop session, so
+        # this is a real-Windows GUI smoke check: launch the installed editor,
+        # assert it stays up, screenshot the desktop. Wine cannot do this (gpui
+        # resolves fonts through IDWriteFontSet::GetMatchingFonts, which Wine
+        # does not implement); see the Wine smoke section in
+        # docs/release-checklist.md.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = 'C:\animathio'
+          $exe = Join-Path $dest 'animathio.exe'
+          $cli = Join-Path $dest 'animathio-cli.exe'
+          $smoke = Join-Path (Get-Location) 'smoke'
+          New-Item -ItemType Directory -Force -Path $smoke | Out-Null
+          # The editor must never open an audio device on a shared runner.
+          $env:ANIMATHIO_AUDIO = 'none'
+
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -Namespace Smoke -Name Native -MemberDefinition @'
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+          '@
+
+          # Full-desktop PNG via GDI+ CopyFromScreen.
+          function Save-Screen([string]$Path) {
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            try {
+              $g = [System.Drawing.Graphics]::FromImage($bmp)
+              $g.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bmp.Size)
+              $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally {
+              if ($g) { $g.Dispose() }
+              $bmp.Dispose()
+            }
+          }
+
+          function Show-LogTail([string]$Path, [string]$Name) {
+            if (Test-Path $Path) {
+              Write-Host "---- $Name tail (smoke/$(Split-Path $Path -Leaf)) ----"
+              Get-Content $Path -Tail 40 | ForEach-Object { Write-Host "  $_" }
+            }
+          }
+
+          # Wait <Seconds> for <Proc>; on early exit dump the log tails and
+          # fail the step. Otherwise bring the window to the front, screenshot
+          # the desktop and stop the process again (only the one this step
+          # started).
+          function Watch-Editor([System.Diagnostics.Process]$Proc, [string]$Label, [int]$Seconds) {
+            $out = Join-Path $smoke "$Label.out.log"
+            $err = Join-Path $smoke "$Label.err.log"
+            for ($i = 0; $i -lt $Seconds -and -not $Proc.HasExited; $i++) {
+              Start-Sleep -Seconds 1
+            }
+            if ($Proc.HasExited) {
+              Write-Host "$Label died during startup: exit code $($Proc.ExitCode)"
+              Show-LogTail $out stdout
+              Show-LogTail $err stderr
+              throw "$Label exited during startup (exit code $($Proc.ExitCode)); see the tails above and the windows-editor-smoke artifact"
+            }
+            $Proc.Refresh()
+            if ($Proc.MainWindowHandle -ne [IntPtr]::Zero) {
+              # 9 = SW_RESTORE, in case the window came up minimized.
+              [Smoke.Native]::ShowWindow($Proc.MainWindowHandle, 9) | Out-Null
+              [Smoke.Native]::SetForegroundWindow($Proc.MainWindowHandle) | Out-Null
+              Start-Sleep -Seconds 2
+            }
+            Save-Screen (Join-Path $smoke "$Label.png")
+            $Proc.CloseMainWindow() | Out-Null
+            if (-not $Proc.WaitForExit(10000)) { $Proc.Kill(); $Proc.WaitForExit() }
+            Write-Host "$Label: still running after $Seconds s, screenshot saved to smoke/$Label.png, stopped"
+          }
+
+          # 1. Editor with a real project: build the sample with the packaged
+          #    CLI and open it in the packaged editor.
+          $sample = Join-Path $smoke 'sample.amio'
+          & $cli new-sample -o $sample
+          if ($LASTEXITCODE -ne 0) { throw "animathio-cli new-sample exited $LASTEXITCODE" }
+          $p = Start-Process -FilePath $exe -ArgumentList "`"$sample`"" `
+            -RedirectStandardOutput (Join-Path $smoke 'editor.out.log') `
+            -RedirectStandardError (Join-Path $smoke 'editor.err.log') -PassThru
+          Watch-Editor $p 'editor' 25
+
+          # 2. Launcher: same, without a project argument (start screen).
+          $p = Start-Process -FilePath $exe `
+            -RedirectStandardOutput (Join-Path $smoke 'launcher.out.log') `
+            -RedirectStandardError (Join-Path $smoke 'launcher.err.log') -PassThru
+          Watch-Editor $p 'launcher' 25
+      - name: Upload editor smoke evidence (Windows)
+        # Also on failure, so the logs outlive the job output.
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-editor-smoke
+          path: |
+            smoke/*.png
+            smoke/*.log
+            smoke/*.amio
+          if-no-files-found: ignore
       - name: Smoke test bundle (macOS)
         if: runner.os == 'macOS'
         shell: bash

@@ -71,7 +71,7 @@ once enabled.
 | --- | --- | --- | --- |
 | **M3 exit:** the v1 demo video recreated entirely in 2.0 | Maintainer | No | Not verified |
 | **M4 exit:** every real v1 project in a fixture corpus imports and renders | Maintainer (supplies files), Agent (tests) | Tests yes, corpus no | Only synthetic fixtures |
-| Windows hands-on pass of the editor (CI covers build and tests only) | Maintainer | No | Not done; `scripts/wine-smoke.sh` (below) covers the install and a headless run under Wine in the meantime |
+| Windows hands-on pass of the editor (CI covers build and tests only) | Maintainer | No | Partly: CI launches the editor now — the Windows job of `.github/workflows/package.yml` opens the installed editor on the runner's desktop (CLI sample project and launcher), screenshots it and uploads `windows-editor-smoke`; `scripts/wine-smoke.sh` (below) adds the install + headless Wine pass; interactive input and audio still need the hands-on test |
 | Real-hardware listen test for the audio shuttle (#196 deferred) | Maintainer | No | Not done |
 | **Flatpak sources on Renovate PRs.** `.github/workflows/flatpak-sources.yml` regenerates `packaging/flatpak/cargo-sources.json` on `renovate/**` and `release-plz-*` PRs and pushes a `github-actions[bot]` commit. Without a PAT the commit starts no workflows, so the job dispatches `ci.yml` on the branch to report the required `check` contexts (works without any secret; the required checks must be the `check (ubuntu-latest)` / `check (windows-latest)` jobs of `ci.yml`). With `RELEASE_PLZ_TOKEN` (section 2) the push triggers CI itself and no dispatch happens. `renovate.json` ignores the bot in `gitIgnoredAuthors` so auto-merge is not blocked by a "modified" branch. | Agent (workflow) | Yes; the secret is optional | Done |
 | Baseline `v2.0.0` tag, `RELEASE_PLZ_TOKEN` secret, rulesets, Renovate app, "Allow auto-merge": see sections 2, 3 and 6 (all Maintainer, nothing is agent-doable without admin rights) | Maintainer | Partly | Open |
@@ -90,7 +90,12 @@ PASS/FAIL/SKIP line per check, keeps logs, PNGs and the MP4 in a temp work direc
 removes the prefix afterwards (`--keep` to inspect, `--delay` for slow machines).
 
 Wine is not Windows: GPU preview, audio output, real input handling and installer UX
-still need the hands-on pass. A failure under Wine is a lead, not a verdict. One such
+still need the hands-on pass. CI does cover a real-Windows GUI smoke on every
+packaging run: the Windows job of `package.yml` launches the installed editor on the
+runner's interactive desktop (with the CLI's sample project, then the launcher),
+screenshots the desktop and uploads the PNGs and logs as the `windows-editor-smoke`
+artifact — Wine cannot do this at all. A failure under Wine is a lead, not a verdict.
+One such
 limitation is known: the editor cannot start under current Wine because gpui resolves
 fonts through `IDWriteFontSet::GetMatchingFonts`, which Wine 11.x and master do not
 implement (`E_NOTIMPL`); the script annotates that panic as `editor-wine-note`. The
