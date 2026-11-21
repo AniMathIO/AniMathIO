@@ -152,11 +152,40 @@ pub(crate) fn plugin_source() -> PluginSource {
         .map_or(PluginSource::Discover, |(plugins, _)| plugins.clone())
 }
 
+/// The private configuration directory, when there is one: the installed environment's, or, in
+/// a test binary that has not installed one yet, a per-process directory under `target/`. Test
+/// code can therefore never resolve to the user's real XDG directories (`~/.config/animathio`).
+fn private_config_dir() -> Option<PathBuf> {
+    match PROCESS.get() {
+        Some((_, Some(dir))) => Some(dir.clone()),
+        _ => test_fallback_dir(),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unnecessary_wraps)] // mirrors the non-test stub, which has no fallback
+fn test_fallback_dir() -> Option<PathBuf> {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    let dir = DIR.get_or_init(|| {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/ui-test-config")
+            .join(format!("{}-fallback", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test fallback config dir");
+        dir
+    });
+    Some(dir.clone())
+}
+
+#[cfg(not(test))]
+fn test_fallback_dir() -> Option<PathBuf> {
+    None
+}
+
 /// A settings file (`name`) in the config directory.
 pub(crate) fn config_file(name: &str) -> Option<PathBuf> {
-    match PROCESS.get() {
-        Some((_, Some(dir))) => Some(dir.join(name)),
-        _ => directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
+    match private_config_dir() {
+        Some(dir) => Some(dir.join(name)),
+        None => directories::ProjectDirs::from("org", "AniMathIO", "AniMathIO")
             .map(|dirs| dirs.config_dir().join(name)),
     }
 }
@@ -168,10 +197,7 @@ pub(crate) fn config_file(name: &str) -> Option<PathBuf> {
 /// directory (the headless test harness) also gets a private plugin folder inside it, so tests
 /// never read or write the user's real plugins.
 pub(crate) fn community_store() -> Option<animathio_plugin_host::CommunityStore> {
-    let config = match PROCESS.get() {
-        Some((_, Some(dir))) => Some(dir.clone()),
-        _ => None,
-    };
+    let config = private_config_dir();
     let settings = animathio_plugin_host::settings_path(config.as_deref())?;
     let dir = match &config {
         Some(dir) => dir.join("community-plugins"),
@@ -187,9 +213,9 @@ pub(crate) fn community_plugins_enabled() -> bool {
 
 /// The compiled-plugin cache directory.
 pub(crate) fn plugin_cache_dir() -> PathBuf {
-    match PROCESS.get() {
-        Some((_, Some(dir))) => dir.join("plugin-cache"),
-        _ => directories::BaseDirs::new().map_or_else(
+    match private_config_dir() {
+        Some(dir) => dir.join("plugin-cache"),
+        None => directories::BaseDirs::new().map_or_else(
             || std::env::temp_dir().join("animathio-plugin-cache"),
             |base| base.cache_dir().join("animathio").join("plugin-cache"),
         ),
@@ -208,4 +234,33 @@ pub(crate) fn built_plugins_dir() -> Option<PathBuf> {
             .is_some_and(|ext| ext == "amplugin")
     });
     has_bundle.then_some(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whatever state the process is in (no environment installed yet, or a headless one), the
+    /// settings, community store and plugin cache stay inside `target/`, never in `~/.config`.
+    #[test]
+    fn test_paths_never_resolve_to_the_user_directories() {
+        let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+        let target = target.canonicalize().expect("target dir exists");
+        let inside = |path: PathBuf| {
+            let parent = path.parent().expect("has a parent").to_path_buf();
+            std::fs::create_dir_all(&parent).expect("create parent");
+            let canonical = parent.canonicalize().expect("canonicalize");
+            assert!(
+                canonical.starts_with(&target),
+                "{} escapes {}",
+                path.display(),
+                target.display()
+            );
+        };
+        inside(config_file("x").expect("config file"));
+        inside(plugin_cache_dir().join("x"));
+        let store = community_store().expect("community store");
+        inside(store.dir().join("x"));
+        inside(store.settings_path().to_path_buf());
+    }
 }
