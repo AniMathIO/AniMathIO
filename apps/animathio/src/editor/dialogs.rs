@@ -65,6 +65,25 @@ fn choices(items: Vec<String>, selected: usize, window: &mut Window, cx: &mut Ap
 fn selected(state: &Choices, cx: &App) -> String {
     state.read(cx).selected_value().cloned().unwrap_or_default()
 }
+/// Preset entries of the project settings dialog: the delivery presets and a trailing "Custom".
+fn settings_preset_labels() -> Vec<String> {
+    ExportPreset::ALL
+        .map(|p| p.label().to_owned())
+        .into_iter()
+        .chain(std::iter::once("Custom".to_owned()))
+        .collect()
+}
+
+/// The preset entry matching a project's size and frame rate, else the trailing "Custom" entry.
+pub(super) fn settings_preset_index(width: u32, height: u32, rate: FrameRate) -> usize {
+    ExportPreset::ALL
+        .iter()
+        .position(|p| {
+            p.resolution() == (width, height) && rate.numerator() == 30 && rate.denominator() == 1
+        })
+        .unwrap_or(ExportPreset::ALL.len())
+}
+
 pub(super) fn field(label: &'static str, child: impl IntoElement) -> FormField {
     FormField::new().label(label).child(child)
 }
@@ -598,9 +617,14 @@ impl Editor {
             gpui_component::color_picker::ColorPickerState::new(window, cx)
                 .default_value(fields::to_hsla(background))
         });
+        let background_hex = format!(
+            "#{:02x}{:02x}{:02x}{:02x}",
+            background[0], background[1], background[2], background[3]
+        );
+        let (current_width, current_height) = project_size(&self.project);
         let presets = choices(
-            ExportPreset::ALL.map(|p| p.label().to_owned()).to_vec(),
-            0,
+            settings_preset_labels(),
+            settings_preset_index(current_width, current_height, self.project.frame_rate()),
             window,
             cx,
         );
@@ -685,7 +709,30 @@ impl Editor {
                         ))
                         .child(field(
                             "Background",
-                            gpui_component::color_picker::ColorPicker::new(&color),
+                            // Swatch plus hex like the inspector's colour rows; the bordered
+                            // frame keeps a near-black background visible on the dialog.
+                            div()
+                                .debug_selector(|| "settings-background".into())
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .rounded(px(6.))
+                                        .border_1()
+                                        .border_color(style::hex(style::color::TEXT_MUTED))
+                                        .p_0p5()
+                                        .child(gpui_component::color_picker::ColorPicker::new(
+                                            &color,
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(crate::style::type_size::XS)
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(background_hex.clone()),
+                                ),
                         )),
                 );
             form_dialog(dialog, "Apply", cx, submit)

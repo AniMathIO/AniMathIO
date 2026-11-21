@@ -31,6 +31,7 @@ use super::*;
 use crate::editor_env::{PluginSource, built_plugins_dir};
 
 mod fixtures;
+mod polish_p1;
 mod scenarios;
 
 /// A private config directory (settings, recent files, plugin cache), wiped once per process, so

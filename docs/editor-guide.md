@@ -196,7 +196,8 @@ stores it in the user data directory. The opt-in integration test runs the real 
 ## Describe a formula in words (optional AI assist)
 
 The **LaTeX** math dialog (Library, Math, LaTeX; also the inspector of a LaTeX clip) has an
-optional **Describe it in words** box: type "the integral of x squared from 0 to 1", press
+optional **Describe in words…** section (collapsed by default so the LaTeX form fits at
+1280 x 720; open it with its header and it stays open for the rest of the session): type "the integral of x squared from 0 to 1", press
 **Convert to LaTeX**, and the model's answer replaces the formula field. The live preview
 renders it through the LaTeX plugin, so a reply that does not compile is flagged there and
 **Add** stays disabled until you fix it. You can edit the LaTeX freely; **Add** inserts it as
@@ -493,8 +494,9 @@ Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto d
 
 Depth is a slider; attack, release, minimum gap and voice threshold sit behind the
 **Timing and voice threshold** toggle so the preview stays in view. Clips that already have
-gain keyframes ask you to tick **Replace existing gain keyframes**. The review panel scrolls
-in shorter windows so its actions stay reachable. See the [CLI reference](cli.md#duck) and
+gain keyframes ask you to tick **Replace existing gain keyframes**. The panel body scrolls (with
+a scrollbar) in shorter windows while **Analyse**, **Cancel** and **Apply** stay pinned in a
+footer, so the actions are always reachable. See the [CLI reference](cli.md#duck) and
 [rules](mcp.md#auto-ducking).
 
 ![Auto duck panel previewing the ducked span over a music bed](screenshots/editor-auto-duck.png)

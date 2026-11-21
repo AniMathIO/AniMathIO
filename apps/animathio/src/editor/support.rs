@@ -958,6 +958,10 @@ pub(super) fn paint_ruler(
         snapshot.frame_rate,
     );
     let minor = (step / 4).max(1);
+    // Marker name plates share the ruler's top line with the timecodes: a label that a plate
+    // would cover (even partly) is left out instead of leaving stray digits beside the flag.
+    let plates = super::markers::marker_name_spans(bounds.origin.x, layout, snapshot, window);
+    let mono = font(snapshot.theme.mono_font_family.clone());
     for tick in timeline::ruler_ticks(layout, minor) {
         let x = bounds.origin.x + px(timeline::time_to_x(layout, Time(tick)));
         let is_major = tick % step == 0;
@@ -975,11 +979,16 @@ pub(super) fn paint_ruler(
             } else {
                 timecode::format_timecode(Time(tick), snapshot.frame_rate)
             };
+            let label_left = x + px(5.0);
+            let label_right = label_left + label_width(&label, mono.clone(), window);
+            if super::markers::plates_cover(label_left, label_right, &plates) {
+                continue;
+            }
             paint_clip_label(
                 label.into(),
-                point(x + px(5.0), bounds.origin.y + px(3.0)),
+                point(label_left, bounds.origin.y + px(3.0)),
                 x + px(width),
-                font(snapshot.theme.mono_font_family.clone()),
+                mono.clone(),
                 window,
                 cx,
             );
@@ -1038,6 +1047,30 @@ pub(super) fn clip_color(kind: &animathio_core::ClipKind, _theme: &gpui_componen
     })
 }
 
+/// Width of one line of label text as [`paint_clip_label`] would draw it.
+pub(super) fn label_width(label: &str, label_font: Font, window: &mut Window) -> Pixels {
+    if label.is_empty() {
+        return px(0.);
+    }
+    let run = TextRun {
+        len: label.len(),
+        font: label_font,
+        color: style::hex(colors::TEXT),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .shape_line(
+            SharedString::from(label.to_owned()),
+            window.rem_size() * 0.8,
+            &[run],
+            None,
+        )
+        .width
+}
+
 /// Paint a single line of clip text, clipped to the right edge.
 pub(super) fn paint_clip_label(
     label: SharedString,
@@ -1088,7 +1121,64 @@ pub(super) fn field_value(clip: &Clip, field: &Field) -> f64 {
             .params
             .get(name)
             .and_then(animathio_core::ParamValue::as_number)
-            .unwrap_or(0.0),
+            .unwrap_or_else(|| param_default(name)),
+    }
+}
+
+/// Title and Lucide icon of the inspector section that holds a clip's own content parameters:
+/// named after what the clip is, never "Text" for a shape.
+pub(super) fn plugin_section_identity(kind: &ClipKind) -> (&'static str, IconName) {
+    let ClipKind::Plugin { plugin_id, .. } = kind else {
+        return ("Content", IconName::SlidersHorizontal);
+    };
+    match plugin_id.as_str() {
+        "org.animathio.text" => ("Text", IconName::Type),
+        "org.animathio.shapes" => ("Shape", IconName::Shapes),
+        "org.animathio.latex" => ("Formula", IconName::Sigma),
+        "org.animathio.graph" => ("Graph", IconName::ChartNoAxesColumn),
+        _ => ("Content", IconName::SlidersHorizontal),
+    }
+}
+
+/// Whether the inspector shows plugin parameter `param`. The schema has no conditional
+/// visibility, so the editor hides the shapes plugin's raw `path` verbs unless `shape` is
+/// `path`; `value_of` reads another parameter's current text value.
+pub(super) fn plugin_param_visible(
+    plugin_id: &str,
+    param: &str,
+    value_of: impl Fn(&str) -> Option<String>,
+) -> bool {
+    if plugin_id == "org.animathio.shapes" && param == "path" {
+        return value_of("shape").as_deref() == Some("path");
+    }
+    true
+}
+
+/// The value a builtin clip parameter has when the clip stores none. Playback (`Mixer`) treats a
+/// missing `gain` as unity, so the inspector must show and step from 1, never 0.
+pub(super) fn param_default(name: &str) -> f64 {
+    match name {
+        "gain" => 1.0,
+        _ => 0.0,
+    }
+}
+
+/// Linear gain as decibels (`0 dB` = unity), or `-inf` for silence.
+pub(super) fn gain_db(gain: f64) -> f64 {
+    if gain <= 0.0 {
+        f64::NEG_INFINITY
+    } else {
+        20.0 * gain.log10()
+    }
+}
+
+/// Short unit hint for a linear gain, for example `0.0 dB` or `-20.0 dB`.
+pub(super) fn gain_db_label(gain: f64) -> String {
+    let db = gain_db(gain);
+    if db.is_finite() {
+        format!("{db:+.1} dB")
+    } else {
+        "-inf dB".to_owned()
     }
 }
 

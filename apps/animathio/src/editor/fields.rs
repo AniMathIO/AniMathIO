@@ -89,6 +89,16 @@ pub(super) struct FieldPool {
     sliders: BTreeMap<String, (Entity<SliderState>, Subscription)>,
 }
 
+#[cfg(test)]
+impl FieldPool {
+    /// The text currently in the input registered under `key` (UI tests).
+    pub(super) fn input_text(&self, key: &str, cx: &App) -> Option<String> {
+        self.inputs
+            .get(key)
+            .map(|field| field.state.read(cx).value().to_string())
+    }
+}
+
 pub(super) struct NumberScrub {
     target: InputTarget,
     origin: f32,
@@ -1266,6 +1276,19 @@ impl Editor {
                 rows.push(Self::param_row(None, label.to_owned(), control, cx));
             } else {
                 rows.push(self.number_row(id, field, label, value, window, cx));
+                // Gain is a linear multiplier (1 = unity); show the decibel equivalent so the
+                // number is not mistaken for a level.
+                rows.push(
+                    div()
+                        .px_3()
+                        .pb_1()
+                        .text_size(crate::style::type_size::XS)
+                        .text_color(hex(color::TEXT_MUTED))
+                        .child(format!(
+                            "{value:.2}x = {} (1.00x is unity)",
+                            gain_db_label(value)
+                        )),
+                );
             }
         }
         rows
@@ -1287,8 +1310,19 @@ impl Editor {
             return vec![div().px_2().child("Plugin not loaded")];
         };
         let models = descriptor.models();
+        let hidden: Vec<String> = models
+            .iter()
+            .filter(|model| {
+                !plugin_param_visible(plugin_id, model.id(), |name| {
+                    self.plugin_opaque(id, name)
+                        .and_then(|value| value.as_str().map(str::to_owned))
+                })
+            })
+            .map(|model| model.id().to_owned())
+            .collect();
         models
             .iter()
+            .filter(|model| !hidden.iter().any(|name| name == model.id()))
             .map(|model| self.plugin_row(id, model, window, cx))
             .collect()
     }
@@ -1688,9 +1722,11 @@ impl Editor {
                 math
             } else {
                 let rows = self.plugin_rows(id, window, cx);
-                self.section(
+                let (title, icon) = plugin_section_identity(&clip.kind);
+                self.section_with_icon(
                     "params",
-                    "Text / Content",
+                    title,
+                    Some(icon),
                     div().flex().flex_col().children(rows),
                     cx,
                 )
