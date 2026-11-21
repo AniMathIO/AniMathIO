@@ -115,7 +115,7 @@ surfaced by `animathio-cli mcp` without protocol changes.
 | `markers.list` | — | `[Marker]` sorted by time: `{ id, time, duration?, name, color, note }` (ticks) |
 | `markers.add` | `{ params: { time, duration?, name?, color?, note? } }` | `{ id }`; one undo step; `color` is `red`, `orange`, `yellow`, `green`, `cyan`, `blue` (default), `purple` or `pink` |
 | `markers.remove` | `{ id }` | — (one undo step) |
-| `chapters.export` | `{ params: { format?, output?, overwrite?, intro_title?, min_length?, start?, end? } }` | `{ format, chapters, text?, path? }`; markers as chapters (`format` is `youtube` (default), `vtt` or `ffmetadata`; a `.vtt`/`.ffmeta` extension on `output` picks it); `min_length` (ticks, default 10 s) merges close markers; an `intro_title` chapter is added at 0 when the first marker is later. |
+| `chapters.export` | `{ params: { format?, output?, overwrite?, intro_title?, min_length?, start?, end? } }` | `{ format, chapters, text?, path? }`; markers as chapters (`format` is `youtube` (default), `vtt` or `ffmetadata`; a `.vtt`/`.ffmeta` extension on `output` picks it); `min_length` (ticks, default 10 s) merges close markers; an `intro_title` chapter is added at 0 when the first marker is later |
 | `beats.detect` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar? } }` | `{ bpm, confidence, beats: [{ time, strength }], downbeats }` in timeline ticks; no mutation; silent or very short audio is an error |
 | `beats.add_markers` | `{ params: { clip?, track?, range?, min_bpm?, max_bpm?, bpm?, beats_per_bar?, every?, downbeats_only?, color?, name_prefix? } }` | `{ added, bpm, confidence }`; one batch adding a marker at each selected beat; beats that already carry a marker are skipped |
 | `timeline.sync_cuts_to_beats` | `{ params: { clips, source?, mode?, max_shift?, min_segment?, frame_align?, every?, downbeats_only?, detect? } }` | `{ shifted, splits, unchanged, skipped, bpm? }`; one batch, see [Markers and beat sync](#markers-and-beat-sync) |
@@ -441,7 +441,10 @@ chapters.ffmeta -map_metadata 1 -codec copy out.mp4`).
 `export` and `export_video` also embed the markers inside the exported range in the MP4
 itself, as a Nero `chpl` chapter list in `moov/udta` (read by VLC, mpv and FFmpeg), unless
 `settings.embed_chapters` / `embed_chapters` is `false`. Chapter times are relative to the
-start of the exported range; an unnamed marker becomes `Chapter N`; the list holds at most
+start of the exported range; an unnamed marker becomes `Chapter N`, where `N` is its
+position among all the project's markers by time (markers outside the range still count, so
+the first chapter of a trimmed export may be `Chapter 3`), and unlike `chapters.export` the
+embedded list neither merges close markers nor adds an intro chapter; the list holds at most
 255 chapters (the `chpl` count is one byte) and keeps the first ones. Nothing is written
 when no marker is in range. If the chapter list cannot be added, the export fails with a
 `cannot embed chapters` error and no file is written.

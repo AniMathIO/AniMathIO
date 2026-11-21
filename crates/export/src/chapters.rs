@@ -71,17 +71,21 @@ pub(crate) struct Chapter {
 
 /// The chapters for the markers inside `range`, relative to its start.
 ///
-/// A marker belongs to the range when `start <= time < end`. Unnamed markers become
-/// `Chapter N`, matching the sidecar export. A marker that lands on the same 100-ns
-/// instant as an earlier one is dropped, and the list stops at [`MAX_CHAPTERS`].
+/// A marker belongs to the range when `start <= time < end`. An unnamed marker becomes
+/// `Chapter N` where `N` is its 1-based position among *all* the markers ordered by time
+/// (the numbering of the `chapters.export` sidecar, so a marker keeps its number whichever
+/// range is exported and the first chapter of a trimmed export may be `Chapter 3`). Unlike
+/// the sidecar, embedded chapters do not merge close markers and add no intro chapter. A
+/// marker that lands on the same 100-ns instant as an earlier one is dropped, and the list
+/// stops at [`MAX_CHAPTERS`].
 pub(crate) fn chapters_from_markers(markers: &[Marker], range: TimeRange) -> Vec<Chapter> {
-    let mut sorted: Vec<&Marker> = markers
-        .iter()
-        .filter(|m| m.time >= range.start && m.time < range.end)
-        .collect();
+    let mut sorted: Vec<&Marker> = markers.iter().collect();
     sorted.sort_by_key(|m| (m.time, m.id));
     let mut out: Vec<Chapter> = Vec::new();
-    for marker in sorted {
+    for (index, marker) in sorted.into_iter().enumerate() {
+        if marker.time < range.start || marker.time >= range.end {
+            continue;
+        }
         if out.len() == MAX_CHAPTERS {
             break;
         }
@@ -93,7 +97,7 @@ pub(crate) fn chapters_from_markers(markers: &[Marker], range: TimeRange) -> Vec
         }
         let name = marker.name.split_whitespace().collect::<Vec<_>>().join(" ");
         let title = if name.is_empty() {
-            format!("Chapter {}", out.len() + 1)
+            format!("Chapter {}", index + 1)
         } else {
             truncate_utf8(name, MAX_TITLE_BYTES)
         };
@@ -401,11 +405,22 @@ pub(crate) fn read_chpl(mp4: &[u8]) -> Option<Vec<(u64, String)>> {
     Some(out)
 }
 
+/// The type of every top-level box of a finished MP4, in file order.
+#[cfg(test)]
+pub(crate) fn top_level_kinds(mp4: &[u8]) -> Vec<[u8; 4]> {
+    read_boxes(mp4, 0..mp4.len())
+        .expect("well-formed boxes")
+        .into_iter()
+        .map(|b| b.kind)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     // Test fixtures build byte layouts with small, known values.
     #![allow(
         clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
         clippy::cast_precision_loss,
         clippy::trivially_copy_pass_by_ref
     )]
@@ -674,6 +689,8 @@ mod tests {
             marker(6, 7.0, "Outro"),
         ];
         let chapters = chapters_from_markers(&markers, range);
+        // `Chapter N` counts every marker by time: "before" is 1, "Intro part" 2, the unnamed
+        // one 3.
         assert_eq!(
             chapters
                 .iter()
@@ -681,10 +698,64 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 (0, "Intro part"),
-                (25_000_000, "Chapter 2"),
+                (25_000_000, "Chapter 3"),
                 (50_000_000, "Outro"),
             ]
         );
+    }
+
+    #[test]
+    fn other_udta_items_survive_inserting_and_replacing_the_chpl() {
+        let tool = bx(b"\xa9too", b"\0\x0e\0\0Lavf-test-item");
+        let name = bx(b"\xa9nam", b"\0\x05\0\0title");
+        let old_chpl = build_chpl(&[Chapter {
+            start: 7,
+            title: "an older, longer chapter title".into(),
+        }]);
+        // Insert: the udta has no chpl yet. Replace: it has one, between the other items.
+        for udta_items in [
+            [tool.clone(), name.clone()].concat(),
+            [tool.clone(), old_chpl, name.clone()].concat(),
+        ] {
+            let (file, before) = faststart_file(&bx(b"udta", &udta_items));
+            let patched = inject_chpl(file.clone(), &one_chapter()).unwrap();
+
+            // Top level: ftyp, moov, mdat, with sizes that tile the file exactly.
+            assert_eq!(
+                top_level_kinds(&patched),
+                [*b"ftyp", *b"moov", *b"mdat"].to_vec()
+            );
+            let top = read_boxes(&patched, 0..patched.len()).unwrap();
+            let moov = top[1];
+            // udta is the last moov child; its size covers exactly its children.
+            let udta = *read_boxes(&patched, moov.payload())
+                .unwrap()
+                .last()
+                .unwrap();
+            assert_eq!(&udta.kind, b"udta");
+            assert_eq!(udta.end, moov.end, "udta ends where moov ends");
+            let items = read_boxes(&patched, udta.payload()).unwrap();
+            let kinds: Vec<_> = items.iter().map(|b| b.kind).collect();
+            assert_eq!(
+                kinds,
+                [*b"\xa9too", *b"\xa9nam", *b"chpl"].to_vec(),
+                "the other items are kept in order and the chpl is last"
+            );
+            assert_eq!(&patched[items[0].start..items[0].end], tool.as_slice());
+            assert_eq!(&patched[items[1].start..items[1].end], name.as_slice());
+            assert_eq!(read_chpl(&patched).unwrap(), vec![(0, "A".to_string())]);
+
+            // The chunk offsets moved by exactly the change of the moov size and still hit mdat.
+            let old_moov = read_boxes(&file, 0..file.len()).unwrap()[1];
+            let delta = (moov.end - moov.start) as i64 - (old_moov.end - old_moov.start) as i64;
+            assert_eq!(patched.len() as i64, file.len() as i64 + delta);
+            let after = offsets(&patched);
+            assert_eq!(after.len(), before.len());
+            for (b, a) in before.iter().zip(&after) {
+                assert_eq!(*a as i64, *b as i64 + delta);
+            }
+            assert_eq!(patched[after[0] as usize], 7);
+        }
     }
 
     #[test]

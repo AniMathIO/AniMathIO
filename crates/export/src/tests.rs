@@ -588,8 +588,17 @@ fn chapters_embed_into_a_faststart_export_without_changing_decoded_media() {
     let without =
         export_with_plugins(&project, &assets, range, chapter_settings(false), |_| true).unwrap();
 
-    // The file stays faststart and its tables point at the shifted mdat.
+    // The file stays faststart (moov in front of mdat) and its tables point at the shifted mdat.
     assert!(with.len() > without.len());
+    for (name, bytes) in [("with chapters", &with), ("without", &without)] {
+        let kinds = chapters::top_level_kinds(bytes);
+        let position = |kind: &[u8; 4]| kinds.iter().position(|k| k == kind);
+        let (moov, mdat) = (position(b"moov"), position(b"mdat"));
+        assert!(
+            moov.is_some() && mdat.is_some() && moov < mdat,
+            "{name}: moov must precede mdat, got {kinds:?}"
+        );
+    }
     assert_eq!(
         chapters::read_chpl(&with).unwrap(),
         vec![
