@@ -23,7 +23,7 @@ jobs:
     steps:
       # Full history so the docs-only detection below can diff a pull request or
       # push against its base commit (base object plus common history).
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       # Docs-only changes skip the whole Rust pipeline; the required `check`
@@ -216,6 +216,6 @@ jobs:
       # never in the docs-only set), so this is skipped on the fast path too.
       - name: Check licenses
         if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
         with:
           command: check licenses
