@@ -8,9 +8,9 @@
 use crate::model::{V1Animation, V1Effect, V1Element, V1Placement, V1Project};
 use crate::{Asset, ImportError, ImportLimits, Report};
 use animathio_core::{
-    Asset as CoreAsset, AssetId, Clip, ClipId, ClipKind, Command, EffectId, EffectInstance,
-    FrameRate, Interpolation, Keyframe, Project, TICKS_PER_SECOND, Target, Time, TimeRange, Track,
-    TrackId, Transform, TransformProperty,
+    Asset as CoreAsset, AssetId, BASIC_EFFECTS_PLUGIN, Clip, ClipId, ClipKind, Command, EffectId,
+    EffectInstance, FrameRate, Interpolation, Keyframe, Project, TICKS_PER_SECOND, Target, Time,
+    TimeRange, Track, TrackId, Transform, TransformProperty,
 };
 use animathio_plugin_api::sources::Color;
 use base64::Engine;
@@ -783,12 +783,6 @@ fn import_animation(
         report.warn("animation with no targetId skipped");
         return Ok(());
     }
-    if animation.properties.text_type.as_deref() == Some("character") {
-        report.warn(format!(
-            "animation {}: per-character text slide imported as a whole-element slide",
-            animation.id
-        ));
-    }
     let Some(meta) = elements.get(&animation.target_id) else {
         report.warn(format!(
             "animation {}: target element {} missing; skipped",
@@ -812,6 +806,12 @@ fn import_animation(
         .copied()
         .unwrap_or_default();
     let clip_id = meta.clip_id;
+
+    if matches!(animation.kind.as_str(), "slideIn" | "slideOut")
+        && import_slide_effect(animation, meta, duration_ticks, project, report)?
+    {
+        return Ok(());
+    }
 
     match animation.kind.as_str() {
         "fadeIn" => {
@@ -911,6 +911,135 @@ fn import_animation(
         }
     }
     Ok(())
+}
+
+/// v1's slide options. `useClipPath` ("Use Mask") and `textType: "character"` become one
+/// keyframed `org.animathio.effects-basic` `slide` effect on the clip, which replaces the
+/// whole-element position slide: the effect already moves the content, so keeping both
+/// would move it twice. Returns `false` when the slide has neither option (or an
+/// unsupported direction), so the plain transform slide imports instead.
+fn import_slide_effect(
+    animation: &V1Animation,
+    meta: &ElementMeta,
+    duration_ticks: i64,
+    project: &mut Project,
+    report: &mut Report,
+) -> Result<bool, ImportError> {
+    let masked = animation.properties.use_clip_path.unwrap_or(false);
+    let character = animation.properties.text_type.as_deref() == Some("character");
+    if !masked && !character {
+        return Ok(false);
+    }
+    let direction = match animation.properties.direction.as_deref().unwrap_or("left") {
+        "left" => 1.0,
+        "right" => 2.0,
+        "top" => 3.0,
+        "bottom" => 4.0,
+        other => {
+            report.warn(format!(
+                "animation {}: slide direction {other:?} has no clipped or per-character form; imported as a whole-element slide",
+                animation.id
+            ));
+            return Ok(false);
+        }
+    };
+    let clip_id = meta.clip_id;
+    let is_text = project
+        .tracks()
+        .iter()
+        .find_map(|track| track.clips().get(&clip_id))
+        .is_some_and(|clip| {
+            matches!(&clip.kind, ClipKind::Plugin { plugin_id, .. } if plugin_id == "org.animathio.text")
+        });
+    let characters = character && is_text;
+    if character && !is_text {
+        report.warn(format!(
+            "animation {}: per-character slide applies to text only; ignored for this element",
+            animation.id
+        ));
+    }
+    let exit = animation.kind == "slideOut";
+    let (start, end) = if exit {
+        (
+            late_start(meta.duration_ticks, duration_ticks, &animation.id, report),
+            meta.duration_ticks,
+        )
+    } else {
+        (0, duration_ticks)
+    };
+    let effect = slide_effect_id(project, clip_id)?;
+    let (from, to) = if exit { (1.0, 0.0) } else { (0.0, 1.0) };
+    for (name, first, last, interpolation) in [
+        ("progress", from, to, Interpolation::Linear),
+        ("direction", direction, direction, Interpolation::Hold),
+        (
+            "characters",
+            f64::from(u8::from(characters)),
+            f64::from(u8::from(characters)),
+            Interpolation::Hold,
+        ),
+        (
+            "clip",
+            f64::from(u8::from(masked)),
+            f64::from(u8::from(masked)),
+            Interpolation::Hold,
+        ),
+    ] {
+        for (time, value) in [(start, first), (end, last)] {
+            Command::AddKeyframe {
+                id: clip_id,
+                target: Target::Effect {
+                    effect,
+                    param: name.into(),
+                },
+                time: Time(time),
+                keyframe: Keyframe {
+                    value: value.into(),
+                    interpolation,
+                },
+            }
+            .apply(project)?;
+        }
+    }
+    Ok(true)
+}
+
+/// The clip's `slide` effect, added with plugin defaults when it is missing. A clip with
+/// both a slide in and a slide out shares one instance.
+fn slide_effect_id(project: &mut Project, clip_id: ClipId) -> Result<EffectId, ImportError> {
+    let clip = project
+        .tracks()
+        .iter()
+        .find_map(|track| track.clips().get(&clip_id))
+        .expect("imported clip exists");
+    if let Some(existing) = clip
+        .effects
+        .iter()
+        .find(|effect| effect.plugin == BASIC_EFFECTS_PLUGIN && effect.effect == "slide")
+    {
+        return Ok(existing.id);
+    }
+    let id = EffectId(
+        clip.effects
+            .iter()
+            .chain(&clip.audio_effects)
+            .map(|effect| effect.id.0)
+            .max()
+            .map_or(0, |max| max + 1),
+    );
+    let params = BTreeMap::from([
+        ("progress".to_owned(), 1.0),
+        ("direction".to_owned(), 1.0),
+        ("characters".to_owned(), 0.0),
+        ("clip".to_owned(), 1.0),
+    ]);
+    Command::AddEffect {
+        id: clip_id,
+        index: clip.effects.len(),
+        effect: EffectInstance::new(id, BASIC_EFFECTS_PLUGIN, "slide", params),
+    }
+    .apply(project)?;
+    Ok(id)
 }
 
 fn late_start(clip_duration: i64, animation_duration: i64, id: &str, report: &mut Report) -> i64 {

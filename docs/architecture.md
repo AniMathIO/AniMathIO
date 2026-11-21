@@ -480,8 +480,8 @@ existing key's outgoing interpolation. Unanimated edits update base parameters.
 
 ## Animation presets
 
-Presets (fade, slide, zoom, pop, spin, bounce, wipe, typewriter, breathe, shake,
-hop, flash) come from the `org.animathio.animations` plugin on the API 1.1
+Presets (fade, slide, clipped slide, character slide, zoom, pop, spin, bounce, wipe,
+typewriter, breathe, shake, hop, flash) come from the `org.animathio.animations` plugin on the API 1.1
 `animation-preset-plugin` world; there is no preset table in the core or the apps.
 `PluginHost::animation_preset_command` places the window (in at the clip start, out
 at its end, emphasis centred), samples the clip's current values at the window's
@@ -493,7 +493,12 @@ result is ordinary keyframes, so rendering, export and saved projects never depe
 on the plugin, and one undo restores the previous keys exactly. Easings that core
 keyframes cannot interpolate natively (ease-in/out, back, bounce, elastic) are
 sampled by the plugin into linear segments. The typewriter presets keyframe the
-text plugin's `reveal` parameter (the fraction of characters shown). The control
+text plugin's `reveal` parameter (the fraction of characters shown). The clipped and
+character slides animate the `progress`, `direction`, `characters` and `clip` parameters
+of the first-party `slide` effect: a curve target `effect:<plugin>:<effect>:<param>`
+names an effect parameter, and when the clip's chain has no such effect the host adds it
+(with the plugin's default parameters) in the same batch, so one undo removes the keys
+and the effect together. The control
 methods `animations.list`/`animations.apply`, the MCP tool `apply_animation_preset`,
 the CLI `animations` subcommand and the editor's inspector section all go through
 this one function (`animathio_control::animation_preset_command`).
@@ -575,8 +580,8 @@ processor, a missing plugin, a rejected parameter or a sandbox violation fails t
 with `render::Error::Effect`; the frame is never silently rendered unfiltered.
 
 The eight former builtins (`grayscale`, `sepia`, `invert`, `saturate`, `brightness`,
-`contrast`, `blur`, `opacity`) are the first-party `org.animathio.effects-basic` plugin
-(`plugins/effects-basic`). Schema-2 projects migrate by mapping the old `kind` to the
+`contrast`, `blur`, `opacity`) and the clipped `slide` reveal are the first-party
+`org.animathio.effects-basic` plugin (`plugins/effects-basic`). Schema-2 projects migrate by mapping the old `kind` to the
 plugin id and a lower-case effect id; parameter names are unchanged. Light handling is
 documented in the plugin source: color filters run in linear light, `invert` on encoded
 channels, `blur` on premultiplied linear light.
@@ -985,9 +990,10 @@ and exports. Build them with `scripts/build-plugins.sh`; schema-1 and schema-2 p
 migrate automatically to plugin clips and plugin effects when loaded.
 
 Animation presets are plugins too: `org.animathio.animations` offers fade, slide, zoom,
-pop, spin, bounce, wipe and typewriter in/out presets plus breathe, shake, spin, hop and
+pop, spin, bounce, wipe, typewriter, clipped slide and character slide in/out presets plus breathe, shake, spin, hop and
 flash emphasis. Pick them in the inspector's **Animations** section (In / Out / Emphasis,
-with a duration stepper) or the Effects library, through the `apply_animation_preset` MCP
+with a duration stepper and a **Preset options** row of buttons that cycle each option, such
+as Direction or Clip to text bounds; the Effects library shows the same row) or the Effects library, through the `apply_animation_preset` MCP
 tool or `animathio-cli animations apply`. A preset becomes ordinary keyframes in one undo
 step, so projects render and export without the plugin.
 

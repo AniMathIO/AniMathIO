@@ -184,6 +184,13 @@ runtime cannot target `wasm32-wasip2` here) and is linked only into that plugin;
 `org.animathio.latex` for inline `\color`/`\textcolor`. Keep 1.0 and 1.1 components loading
 unchanged (`hello-1.0.0` fixture); never edit frozen WIT records, add a new world/interface instead.
 
+Clipped and per-character slides need no ABI change: `org.animathio.effects-basic` 1.1.0 has a `slide`
+pixel effect (bounds = alpha bounding box of the clip's layer; per-glyph units = ink columns inside a text
+line, so any text layout is preserved) and the animation presets `clipped-slide-*`/`character-slide-*`
+animate it through the curve target `effect:<plugin>:<effect>:<param>`, which `presets.rs` resolves to an
+existing or newly added (`Command::AddEffect`, same batch) effect instance. `import-v1` maps `useClipPath`
+and `textType: "character"` to the same effect. Never add text-plugin parameters for animation.
+
 Community plugins (`crates/plugin-host/src/community.rs`) are the third-party `.amplugin` files in the
 per-user folder (`ANIMATHIO_USER_PLUGIN_DIR` overrides it). They are off by default: nothing in that folder
 loads unless the global switch and the plugin's own flag in `community-plugins.json`

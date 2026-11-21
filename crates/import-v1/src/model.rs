@@ -193,7 +193,7 @@ pub(crate) struct V1AnimationProperties {
     #[serde(default)]
     pub(crate) direction: Option<String>,
     #[serde(rename = "useClipPath", default)]
-    pub(crate) _use_clip_path: Option<bool>,
+    pub(crate) use_clip_path: Option<bool>,
     #[serde(rename = "textType", default)]
     pub(crate) text_type: Option<String>,
     #[serde(flatten)]

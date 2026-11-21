@@ -1,4 +1,4 @@
-//! First-party `effects-basic` plugin: eight deterministic pixel filters.
+//! First-party `effects-basic` plugin: eight deterministic color/blur filters and the `slide` reveal.
 //!
 //! # Light choice
 //!
@@ -30,8 +30,8 @@ impl Guest for BasicEffects {
     fn describe() -> Manifest {
         Manifest {
             name: "Basic Effects".to_owned(),
-            version: "1.0.0".to_owned(),
-            description: "Color and blur filters".to_owned(),
+            version: "1.1.0".to_owned(),
+            description: "Color and blur filters and the clipped slide reveal".to_owned(),
             kinds: vec!["effect".into()],
             metadata: vec![],
             params: Vec::new(),
@@ -147,7 +147,7 @@ const SPECS: [Spec; 8] = [
 
 impl FrameEffects for BasicEffects {
     fn list_effects() -> Vec<EffectDescriptor> {
-        SPECS
+        let mut effects: Vec<EffectDescriptor> = SPECS
             .iter()
             .map(|spec| EffectDescriptor {
                 id: spec.id.to_owned(),
@@ -164,7 +164,9 @@ impl FrameEffects for BasicEffects {
                     }),
                 }],
             })
-            .collect()
+            .collect();
+        effects.push(slide_descriptor());
+        effects
     }
 
     fn apply_frame(
@@ -179,6 +181,9 @@ impl FrameEffects for BasicEffects {
             let height = size.height as usize;
             if width == 0 || height == 0 || pixels.len() != width * height * 4 {
                 return Err("frame size does not match the pixel buffer".to_owned());
+            }
+            if effect == "slide" {
+                return slide::apply(&pixels, width, height, &params);
             }
             let spec = SPECS
                 .iter()
@@ -235,6 +240,41 @@ impl FrameEffects for BasicEffects {
 }
 
 export!(BasicEffects);
+
+mod slide;
+
+fn slide_descriptor() -> EffectDescriptor {
+    let param = |id: &str, label: &str, min: f64, max: f64, default: f64, step: f64| ParamSpec {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        kind: ParamKind::Number(NumberRange {
+            min,
+            max,
+            default,
+            step,
+        }),
+    };
+    EffectDescriptor {
+        id: "slide".to_owned(),
+        name: "Clipped slide".to_owned(),
+        description:
+            "Slide the clip in or out of its own bounds, optionally one glyph at a time"
+                .to_owned(),
+        params: vec![
+            param("progress", "Progress (1 is at rest)", 0.0, 1.0, 1.0, 0.01),
+            param(
+                "direction",
+                "Direction (1 left, 2 right, 3 top, 4 bottom)",
+                1.0,
+                4.0,
+                1.0,
+                1.0,
+            ),
+            param("characters", "Stagger characters (0 off, 1 on)", 0.0, 1.0, 0.0, 1.0),
+            param("clip", "Clip to bounds (0 off, 1 on)", 0.0, 1.0, 1.0, 1.0),
+        ],
+    }
+}
 
 fn number(params: &[ParamEntry], id: &str) -> Option<f64> {
     params

@@ -524,3 +524,148 @@ fn per_asset_size_is_capped() {
         other => panic!("expected AssetTooLarge, got {other:?}"),
     }
 }
+
+fn slide_project(kind: &str, element_kind: &str, properties: &serde_json::Value) -> Project {
+    let png = b"tiny-png-bytes".to_vec();
+    let props = if element_kind == "text" {
+        json!({"text": "Hello", "fontSize": 24})
+    } else {
+        json!({"src": data_url("image/png", &png), "elementId": "e"})
+    };
+    let input = json!({
+        "editorElements": [element("e", element_kind, "E", "", placement(100.0, 100.0, 200.0, 100.0), 0.0, 2000.0, props)],
+        "animations": [{"id": "s", "targetId": "e", "type": kind, "duration": 500, "properties": properties}],
+        "maxTime": 2000, "fps": 30, "canvas_width": 800, "canvas_height": 600,
+        "mediaFiles": [{"id": "e", "type": "image", "data": data_url("image/png", &png)}],
+    });
+    let (project, _, report) = import_v1_with_report(&deflate(&input)).unwrap();
+    SLIDE_REPORT.with(|r| *r.borrow_mut() = report.warnings().to_vec());
+    project
+}
+
+thread_local! {
+    static SLIDE_REPORT: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn slide_effect_keys(clip: &animathio_core::Clip, param: &str) -> Vec<(i64, f64)> {
+    let effect = clip
+        .effects
+        .iter()
+        .find(|e| e.effect == "slide")
+        .expect("slide effect")
+        .id;
+    clip.animations
+        .iter()
+        .find(|a| {
+            a.target
+                == animathio_core::Target::Effect {
+                    effect,
+                    param: param.into(),
+                }
+        })
+        .map(|a| {
+            a.keys
+                .keys()
+                .iter()
+                .map(|(t, k)| (t.0, k.value.as_number().unwrap()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn text_character_and_mask_slides_become_the_slide_effect() {
+    for kind in ["slideIn", "slideOut"] {
+        let project = slide_project(
+            kind,
+            "text",
+            &json!({"direction": "top", "textType": "character", "useClipPath": true}),
+        );
+        let warnings = SLIDE_REPORT.with(|r| r.borrow().clone());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let clip = &tracks(&project)[0].1;
+        assert_eq!(clip.effects.len(), 1);
+        assert_eq!(clip.effects[0].plugin, "org.animathio.effects-basic");
+        let exit = kind == "slideOut";
+        let progress = slide_effect_keys(clip, "progress");
+        assert_eq!(
+            progress.iter().map(|k| k.1).collect::<Vec<_>>(),
+            if exit { [1.0, 0.0] } else { [0.0, 1.0] }
+        );
+        assert_eq!(progress[0].0, if exit { ticks(1500.0) } else { 0 });
+        assert_eq!(slide_effect_keys(clip, "direction")[0].1, 3.0);
+        assert_eq!(slide_effect_keys(clip, "characters")[0].1, 1.0);
+        assert_eq!(slide_effect_keys(clip, "clip")[0].1, 1.0);
+        // The effect replaces the whole-element position slide instead of doubling it.
+        assert!(clip.animations.iter().all(|a| {
+            !matches!(
+                a.target,
+                animathio_core::Target::Transform(
+                    animathio_core::TransformProperty::X | animathio_core::TransformProperty::Y
+                )
+            )
+        }));
+    }
+}
+
+#[test]
+fn mask_slide_on_media_is_clipped_and_character_on_media_warns() {
+    let project = slide_project(
+        "slideIn",
+        "image",
+        &json!({"direction": "left", "textType": "character", "useClipPath": true}),
+    );
+    let warnings = SLIDE_REPORT.with(|r| r.borrow().clone());
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("per-character slide applies to text only")),
+        "{warnings:?}"
+    );
+    let clip = &tracks(&project)[0].1;
+    assert_eq!(slide_effect_keys(clip, "characters")[0].1, 0.0);
+    assert_eq!(slide_effect_keys(clip, "clip")[0].1, 1.0);
+}
+
+#[test]
+fn plain_slides_stay_whole_element_position_slides() {
+    let project = slide_project(
+        "slideIn",
+        "text",
+        &json!({"direction": "left", "textType": "none", "useClipPath": false}),
+    );
+    let clip = &tracks(&project)[0].1;
+    assert_eq!(clip.effects.len(), 0);
+    assert_ne!(clip.animations.len(), 0);
+}
+
+#[test]
+fn slide_in_and_out_on_one_clip_share_one_effect() {
+    let png = b"tiny-png-bytes".to_vec();
+    let input = json!({
+        "editorElements": [element("e", "text", "E", "", placement(0.0, 0.0, 200.0, 100.0), 0.0, 3000.0, json!({"text": "Hi", "fontSize": 24}))],
+        "animations": [
+            {"id": "a", "targetId": "e", "type": "slideIn", "duration": 500, "properties": {"direction": "left", "textType": "character", "useClipPath": false}},
+            {"id": "b", "targetId": "e", "type": "slideOut", "duration": 500, "properties": {"direction": "right", "textType": "none", "useClipPath": true}},
+        ],
+        "maxTime": 3000, "fps": 30, "canvas_width": 800, "canvas_height": 600,
+        "mediaFiles": [{"id": "x", "type": "image", "data": data_url("image/png", &png)}],
+    });
+    let (project, _, _) = import_v1_with_report(&deflate(&input)).unwrap();
+    let clip = &tracks(&project)[0].1;
+    assert_eq!(clip.effects.len(), 1);
+    assert_eq!(
+        slide_effect_keys(clip, "characters")
+            .iter()
+            .map(|k| k.1)
+            .collect::<Vec<_>>(),
+        [1.0, 1.0, 0.0, 0.0]
+    );
+    assert_eq!(
+        slide_effect_keys(clip, "direction")
+            .iter()
+            .map(|k| k.1)
+            .collect::<Vec<_>>(),
+        [1.0, 1.0, 2.0, 2.0]
+    );
+}

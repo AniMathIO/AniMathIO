@@ -686,6 +686,8 @@ pub(crate) struct Editor {
     audio_advanced: BTreeSet<(AudioChain, EffectId)>,
     /// Inspector window lengths for applying In / Out / Emphasis presets.
     preset_durations: animations::PresetDurations,
+    /// Preset option choices shared by every preset that declares them (`direction`, ...).
+    preset_options: BTreeMap<String, serde_json::Value>,
     context_menu: Option<ContextMenu>,
     context_menu_pos: Option<Point<Pixels>>,
     pool_drag: Option<PoolDrag>,
@@ -918,6 +920,7 @@ impl Editor {
             closed_sections: BTreeSet::new(),
             audio_advanced: BTreeSet::new(),
             preset_durations: animations::PresetDurations::default(),
+            preset_options: BTreeMap::new(),
             context_menu: None,
             context_menu_pos: None,
             pool_drag: None,

@@ -19,10 +19,16 @@ fn legacy(bytes: &[u8]) -> (tempfile::TempDir, PluginHost) {
 fn all_frame_filters_are_bit_identical_across_abi_versions() {
     let (_cache, old) = legacy(include_bytes!("fixtures/effects-basic-0.2.1.amplugin"));
     let new = test_support::host();
-    assert_eq!(old.effects(), new.effects());
+    // `slide` arrived in effects-basic 1.1.0; the frozen 0.2.1 binary has the original eight.
+    let shared: Vec<_> = new
+        .effects()
+        .into_iter()
+        .filter(|effect| effect.effect_id != "slide")
+        .collect();
+    assert_eq!(old.effects(), shared);
     let mut old_handle = old.effect_processor();
     let mut new_handle = new.effect_processor();
-    for desc in new.effects() {
+    for desc in shared {
         let mut effect = desc.instance(EffectId(1));
         for value in [0.0, 0.5, 1.0] {
             for param in &desc.params {

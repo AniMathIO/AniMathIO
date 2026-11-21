@@ -34,7 +34,7 @@ This describes authoring in 2.x; importing saved 1.x projects has the limitation
 | Mafs Cartesian / polar coordinates | Elements → Graphs & grids → Cartesian grid / Polar grid; editable as separate layers | Moved |
 | Fade in/out, directional slide in/out, breathe | Effects → Animations: In / Out / Emphasis; inspector → Animations | Moved |
 | Mafs reveal in/out | Effects → zoom-in / zoom-out presets; LaTeX also has Write on | Moved |
-| Clip-path slide and per-character slide | Whole-clip slide and typewriter are alternatives; exact parity awaits [#301](https://github.com/AniMathIO/AniMathIO/issues/301) | Missing |
+| Clip-path slide and per-character slide | Clipped slide and Character slide presets (Effects → Animations, inspector → Animations); the importer maps the v1 options | Moved |
 | None, black-and-white, sepia, invert, saturate effects | Effects → Video effects; inspector → Effects (remove/bypass gives None) | Moved |
 | Audio mixer volume and mute | Track gain/mute/solo controls; clip inspector gain/mute; viewer monitor volume | Moved |
 | Background Fill | File → Project settings → background colour | Moved |
@@ -82,8 +82,16 @@ where they matter.
   top-left corner; the importer warns and uses the element center.
 - **`fontWeight` is dropped** — the v2 text component has no weight
   equivalent.
-- **Per-character text animation is flattened.** A character-level slide is
-  imported as a whole-element slide (warning).
+- **Slide options become the `slide` effect.** A `slideIn`/`slideOut` with `useClipPath`
+  ("Use Mask") or `textType: "character"` is imported as a keyframed
+  `org.animathio.effects-basic` `slide` effect on the clip instead of the whole-element
+  position slide (the effect already moves the content, so keeping both would move it
+  twice); `useClipPath` masks the slide to the clip's own bounds and `character` staggers
+  the glyphs of a text clip. v1 never rendered the mask, and its per-character slide
+  existed for slide-in on text only, travelled from beyond the canvas edge and faded the
+  letters in; v2 slides within the element's own bounds, supports slide-out too and does
+  not fade. A character slide on a non-text element is ignored with a warning (the mask
+  still applies); a direction other than left/right/top/bottom imports as the plain slide.
 - **`mafsReveal` is a fallback.** It becomes an opacity fade, not a path reveal.
 - **Animations with no `targetId`, unknown types, or invalid durations are
   skipped**, as are animations targeting missing elements. A slide/fade whose
@@ -106,8 +114,9 @@ where they matter.
 - **v1's Animations panel** (fade, slide, breathe, Mafs reveal) maps to the
   `org.animathio.animations` presets in the inspector's Animations section: `fade-in`,
   `fade-out`, `slide-in`, `slide-out`, `breathe` and `zoom-in`/`zoom-out` (reveal). v1's
-  clip-path slide and per-character slide have no preset; `typewriter-in` reveals text
-  one character at a time instead.
+  clip-path slide and per-character slide are the `clipped-slide-in/out` and
+  `character-slide-in/out` presets; `typewriter-in` is an alternative that reveals text
+  one character at a time, not a replacement.
 - **Round-tripping.** Import is one-way; there is no v2 → v1 export.
 
 ## Verifying an import

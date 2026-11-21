@@ -532,6 +532,24 @@ canvas height) and `opacity` (`amount`). Color filters work in linear light with
 linear light with edge replication. Its output is checked bit-for-bit against the former
 builtin implementation by `crates/plugin-host/tests/effects.rs` and by the render goldens.
 
+Since 1.1.0 it also provides `slide`, a clipped slide reveal for any clip. The effect sees
+the clip's rasterized layer, so it works on media, text, shapes and math alike. The clip's
+*bounds* are the tight box around every pixel with nonzero alpha; the content moves by up
+to its own width (left/right) or height (top/bottom) and, with `clip` on, is masked to
+those bounds, so it emerges from (or retreats behind) its own edge. Parameters (all
+numbers, so all keyframeable): `progress` (0..1, 1 is at rest and returns the input
+untouched), `direction` (1 left, 2 right, 3 top, 4 bottom: the side the clip hides on),
+`characters` (1 staggers glyph units) and `clip` (1 masks to the bounds). With
+`characters` on, the ink is split into glyph units, the columns of ink inside one text
+line, and each unit gets its own progress in reading order (the last unit starts at half
+way through the progress, every unit takes the rest). Because the units come from the
+pixels the text plugin already laid out, wrapping, alignment, multiple lines, captions and
+the host's shaping are preserved exactly at rest; glyphs that touch or overlap
+horizontally (tight kerning, italic overhang) and the dot of an `i` travel together, and
+content without gaps (an image) is one unit. Everything is a pure function of the pixels
+and parameters, so preview, export and tests agree. The clipped and character slide
+animation presets add and animate this effect (see Animation-preset plugins below).
+
 ## Audio-effect plugins
 
 An audio-effect plugin is a filter library for sound. It declares
@@ -639,8 +657,12 @@ interface animation-presets {
   current value of every animatable target where the animation must end up (the end of
   an entrance window, the start of an exit or emphasis window), already sampled from
   existing keyframes. Targets are `opacity`, `x`, `y`, `scale-x`, `scale-y`,
-  `rotation` (radians) and `param:<name>` for numeric clip parameters (for plugin clips
-  also the numeric defaults of the clip plugin's schema).
+  `rotation` (radians), `param:<name>` for numeric clip parameters (for plugin clips
+  also the numeric defaults of the clip plugin's schema) and
+  `effect:<plugin-id>:<effect-id>:<param>` for a parameter of a clip effect. For an
+  effect target the host reuses the clip's first instance of that filter or, when the
+  clip has none, adds one with the plugin's default parameters as part of the same
+  batch; an unknown effect plugin, filter or parameter is rejected.
 - It returns curves with window-relative key times (`0..=window-ticks`, strictly
   increasing per curve), finite values and core interpolations. Easings that core
   keyframes cannot express are the plugin's job to sample into linear segments. The host
@@ -656,7 +678,7 @@ options after the colon):
 
 | Role | Presets |
 | --- | --- |
-| In / Out | fade (fade-in, fade-out: easing); slide (slide-in, slide-out: direction, distance, fade, easing); zoom (zoom-in, zoom-out: scale, fade, easing); pop (pop-in, pop-out: intensity overshoot); spin (spin-in, spin-out: turns, rotation, easing); bounce (bounce-in, bounce-out: from); wipe (wipe-in, wipe-out: direction, easing; an edge-anchored stretch reveal, not a mask); typewriter (typewriter-in, typewriter-out: text clips only, keyframes the text plugin's `reveal`) |
+| In / Out | clipped-slide (clipped-slide-in, clipped-slide-out: any clip, direction, easing; animates the `slide` effect, so the clip emerges from its own edge); character-slide (character-slide-in, character-slide-out: text clips only, direction, clip, easing; the same effect with per-glyph stagger); fade (fade-in, fade-out: easing); slide (slide-in, slide-out: direction, distance, fade, easing); zoom (zoom-in, zoom-out: scale, fade, easing); pop (pop-in, pop-out: intensity overshoot); spin (spin-in, spin-out: turns, rotation, easing); bounce (bounce-in, bounce-out: from); wipe (wipe-in, wipe-out: direction, easing; an edge-anchored stretch reveal, not a mask); typewriter (typewriter-in, typewriter-out: text clips only, keyframes the text plugin's `reveal`) |
 | Emphasis | breathe (v1's breathe: intensity, period), shake, spin, hop and flash (intensity, period; spin: turns, rotation, easing) |
 
 Exits mirror their entrance in time. Easing choices are linear, ease-in, ease-out,

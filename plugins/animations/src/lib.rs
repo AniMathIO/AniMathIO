@@ -33,6 +33,9 @@ const MAX_SEGMENTS: i64 = 48;
 const MAX_CYCLES: i64 = 60;
 /// Clip kind id of the first-party text plugin.
 const TEXT: &str = "plugin:org.animathio.text";
+/// Curve-target prefix of the clipped slide effect. The host adds the effect to the
+/// clip's chain when it is missing and animates its parameters.
+const SLIDE: &str = "effect:org.animathio.effects-basic:slide";
 
 struct Animations;
 
@@ -40,7 +43,7 @@ impl Guest for Animations {
     fn describe() -> Manifest {
         Manifest {
             name: "Animations".to_owned(),
-            version: "1.1.0".to_owned(),
+            version: "1.2.0".to_owned(),
             description: "Entrance, exit and emphasis presets".to_owned(),
             kinds: vec!["animation-preset".into()],
             metadata: vec![],
@@ -139,6 +142,37 @@ fn catalog() -> Vec<PresetDescriptor> {
     for (role, verb, suffix) in [(Entrance, "in", "In"), (Exit, "out", "Out")] {
         let into = if role == Entrance { "into" } else { "out of" };
         presets.extend([
+            preset(
+                &format!("clipped-slide-{verb}"),
+                &format!("Clipped slide {suffix}"),
+                &format!("Slide {into} view from the clip's own edge, hidden outside its bounds"),
+                role,
+                &[],
+                vec![
+                    direction(if role == Entrance { "left" } else { "right" }),
+                    easing(if role == Entrance {
+                        "ease-out"
+                    } else {
+                        "ease-in"
+                    }),
+                ],
+            ),
+            preset(
+                &format!("character-slide-{verb}"),
+                &format!("Character slide {suffix}"),
+                &format!("Slide text {into} view one character at a time"),
+                role,
+                &[TEXT],
+                vec![
+                    direction(if role == Entrance { "left" } else { "right" }),
+                    toggle("clip", "Clip to text bounds", true),
+                    easing(if role == Entrance {
+                        "ease-out"
+                    } else {
+                        "ease-in"
+                    }),
+                ],
+            ),
             preset(
                 &format!("fade-{verb}"),
                 &format!("Fade {suffix}"),
@@ -588,6 +622,32 @@ fn generate(
                 curves.push(w.tween("opacity", 0.0, opacity, mirrored(easing, exit), 0.0, full));
             }
             curves
+        }
+        "clipped-slide" | "character-slide" => {
+            let side = o.choice("direction", if exit { "right" } else { "left" });
+            let direction = match side {
+                "right" => 2.0,
+                "top" => 3.0,
+                "bottom" => 4.0,
+                _ => 1.0,
+            };
+            let characters = if base == "character-slide" { 1.0 } else { 0.0 };
+            let clip = if o.flag("clip", true) { 1.0 } else { 0.0 };
+            let easing = mirrored(o.choice("easing", if exit { "ease-in" } else { "ease-out" }), exit);
+            // The choices hold for the whole window; only the progress is eased.
+            let held = |name: &str, value: f64| Curve {
+                target: format!("{SLIDE}:{name}"),
+                keys: vec![
+                    key(0, value, CurveInterpolation::Hold),
+                    key(window, value, CurveInterpolation::Hold),
+                ],
+            };
+            vec![
+                w.tween(&format!("{SLIDE}:progress"), 0.0, 1.0, easing, 0.0, full),
+                held("direction", direction),
+                held("characters", characters),
+                held("clip", clip),
+            ]
         }
         "zoom" => {
             let factor = o.number("scale", 0.0);
