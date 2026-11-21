@@ -36,23 +36,50 @@ pub fn primary_button(id: impl Into<gpui::ElementId>, _cx: &gpui::App) -> Button
         .font_weight(gpui::FontWeight::SEMIBOLD)
 }
 
-/// The secondary button (a filled raised button with a strong border):
+/// The secondary button (a filled raised button with a strong outline):
 /// "Cancel", "Browse…", every other button with a label. The theme maps the
 /// kit's `Secondary` variant to `RAISED`, `HOVER`, `PRESSED` and `TEXT`.
+///
+/// The kit paints its hover border from `theme.border` (`BORDER`, almost the
+/// `HOVER` fill) in a layer that nothing set on the instance can override, so
+/// the 1 px `BORDER_STRONG` outline is an inset hard box shadow (which hover
+/// does not touch) and the kit's own border stays transparent at rest. The outline is therefore the same in every state, a
+/// disabled button included.
 pub fn secondary_button(id: impl Into<gpui::ElementId>, _cx: &gpui::App) -> Button {
     Button::new(id)
         .secondary()
-        .border_color(hex(color::BORDER_STRONG))
+        .border_color(gpui::transparent_black())
+        .shadow(vec![outline_ring(color::BORDER_STRONG)])
 }
 
-/// The destructive button. Filled (danger fill, `ON_ACCENT` text) in a confirm
-/// dialog whose purpose is destruction; otherwise a secondary button with
-/// danger text (see `docs/design.md` "Buttons").
-pub fn destructive_button(id: impl Into<gpui::ElementId>, filled: bool, cx: &gpui::App) -> Button {
+/// A 1 px ring along the inside of the element's edge (rounded like it).
+fn outline_ring(token: u32) -> gpui::BoxShadow {
+    gpui::BoxShadow::new(gpui::px(0.), gpui::px(0.), hex(token))
+        .spread_radius(gpui::px(1.))
+        .inset()
+}
+
+/// The destructive button with its label. Filled (danger fill, `ON_ACCENT`
+/// text) in a confirm dialog whose purpose is destruction; otherwise a
+/// secondary button with `DANGER` text (see `docs/design.md` "Buttons").
+///
+/// The unfilled label is a child with its own colour: the kit's hover layer
+/// resets the button's text colour to `TEXT`, but a child's colour wins over
+/// the inherited one, so the label stays `DANGER` on hover and press.
+pub fn destructive_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<gpui::SharedString>,
+    filled: bool,
+    cx: &gpui::App,
+) -> Button {
     if filled {
-        Button::new(id).danger()
+        Button::new(id).danger().label(label)
     } else {
-        secondary_button(id, cx).text_color(hex(color::DANGER))
+        secondary_button(id, cx).child(
+            gpui::div()
+                .text_color(hex(color::DANGER))
+                .child(label.into()),
+        )
     }
 }
 
@@ -146,8 +173,13 @@ impl SegmentedOption {
 /// controls"): a `BG` well, [`size::ROW`] high, control radius, options sharing
 /// the width, the active one on an accent subtle fill with an accent edge
 /// border and weight 500 (inactive: `TEXT_SECONDARY`, hover fill). Arrow keys,
-/// Home and End move the selection (Space or Enter activates the focused
-/// option); icon-only options get tooltips.
+/// Home and End move the selection **and the focus** from the focused option
+/// (Tab can focus an option that is not selected; Space or Enter activates
+/// it); a click focuses the option too. Icon-only options get tooltips.
+///
+/// `focus` holds one [`gpui::FocusHandle`] per option, owned by the caller's
+/// view state (create them once, as `Editor` does for the Library tabs), so
+/// keyboard focus and tests can reach each option.
 ///
 /// `slide` is `(from index, when the selection changed, reduce motion)`; pass
 /// it (and keep requesting animation frames for
@@ -156,12 +188,15 @@ impl SegmentedOption {
 pub fn segmented(
     id: &'static str,
     options: &[SegmentedOption],
+    focus: &[gpui::FocusHandle],
     selected: usize,
     slide: Option<(usize, std::time::Instant, bool)>,
     labelled: bool,
     on_select: impl Fn(usize, &mut gpui::Window, &mut gpui::App) + Clone + 'static,
 ) -> gpui::Stateful<gpui::Div> {
+    debug_assert_eq!(options.len(), focus.len(), "one focus handle per option");
     let count = options.len().max(1) as f32;
+    let focus: std::rc::Rc<[gpui::FocusHandle]> = focus.iter().cloned().collect();
     let (from, eased) = match slide {
         Some((from, changed, reduce_motion)) => {
             let progress = if reduce_motion {
@@ -199,11 +234,19 @@ pub fn segmented(
                 let selected_option = position == selected;
                 let on_select = on_select.clone();
                 let on_key_select = on_select.clone();
+                let key_focus = focus.clone();
+                let click_focus = focus.clone();
                 gpui::div()
                     .id(option_id)
                     .debug_selector(|| option_id.to_string())
+                    .track_focus(&focus[position])
                     .tab_index(0)
-                    .focus_visible(|styled| styled.border_1().border_color(hex(color::ACCENT)))
+                    // A constant transparent 2 px edge, so the focus ring does not
+                    // shift the content.
+                    .border_2()
+                    .border_color(gpui::transparent_black())
+                    .rounded(gpui::px(radius::CONTROL))
+                    .focus_visible(|styled| styled.border_color(hex(color::ACCENT)))
                     .on_key_down(move |event: &gpui::KeyDownEvent, window, cx| {
                         // Arrows move from the focused option (Tab can focus one
                         // that is not selected), as in a WAI-ARIA tab list.
@@ -221,6 +264,9 @@ pub fn segmented(
                         };
                         if let Some(next) = next {
                             on_key_select(next, window, cx);
+                            if let Some(handle) = key_focus.get(next) {
+                                window.focus(handle, cx);
+                            }
                             cx.stop_propagation();
                         }
                     })
@@ -246,7 +292,12 @@ pub fn segmented(
                     .when(!labelled, |this| {
                         this.tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
                     })
-                    .on_click(move |_event, window, cx| on_select(position, window, cx))
+                    .on_click(move |_event, window, cx| {
+                        on_select(position, window, cx);
+                        if let Some(handle) = click_focus.get(position) {
+                            window.focus(handle, cx);
+                        }
+                    })
                     .children(option_icon.map(|icon_name| icon(icon_name).xsmall()))
                     .when(labelled, |this| this.child(label))
             })),
@@ -257,6 +308,12 @@ pub fn segmented(
 
 /// A header close handler (the header (X) button).
 pub type OnClose = Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
+
+/// Title bar height (the panel's top offset), status line height and the
+/// smallest panel height, all in unscaled pixels.
+const TITLE_BAR: f32 = 56.;
+const STATUS_LINE: f32 = 32.;
+const MIN_HEIGHT: f32 = 160.;
 
 /// The shared frame for non-modal panels over the workspace (Markers and
 /// beats, Automatic cuts, Auto duck, Scenes, Auto reframe, the export queue;
@@ -332,16 +389,29 @@ impl ToolPanel {
         self
     }
 
-    /// Build the frame (see the struct docs for the geometry).
-    #[allow(clippy::too_many_lines)]
+    /// Build the frame (see the struct docs for the geometry) at the current
+    /// UI scale.
     pub fn render(self, window: &gpui::Window) -> gpui::Stateful<gpui::Div> {
+        self.render_at_scale(window, super::ui_scale())
+    }
+
+    /// The top offset and maximum height of the frame, in pixels, for a
+    /// window `viewport_height` high at UI `scale`. The panel sits below the
+    /// title bar and ends above the timeline dock and the status line, so
+    /// every term (title bar, status line, dock) scales together.
+    fn frame(viewport_height: gpui::Pixels, bottom_height: f32, scale: f32) -> (f32, gpui::Pixels) {
+        use gpui::px;
+        let top = TITLE_BAR * scale;
+        let reserved = (TITLE_BAR + STATUS_LINE + bottom_height) * scale;
+        (top, (viewport_height - px(reserved)).max(px(MIN_HEIGHT)))
+    }
+
+    /// [`Self::render`] at an explicit UI scale.
+    #[allow(clippy::too_many_lines)]
+    fn render_at_scale(self, window: &gpui::Window, scale: f32) -> gpui::Stateful<gpui::Div> {
         use gpui::{div, px};
-        let scale = super::ui_scale();
-        // The tool panels sit below the title bar (56px) and end above the
-        // timeline dock and the status line, so their tools stay usable.
-        let max_height = (window.viewport_size().height
-            - px(56. + 32. + self.bottom_height * scale))
-        .max(px(160.));
+        let (top, max_height) =
+            Self::frame(window.viewport_size().height, self.bottom_height, scale);
         let Self {
             id,
             icon: icon_name,
@@ -357,7 +427,7 @@ impl ToolPanel {
             .debug_selector(move || id.to_string())
             .absolute()
             .left(gpui::rems(0.75))
-            .top(px(56. * scale))
+            .top(px(top))
             .w(gpui::rems(24.))
             .max_h(max_height)
             .flex()
@@ -457,7 +527,7 @@ pub fn form_row(label: &'static str, control: impl gpui::IntoElement) -> gpui::D
                 .text_color(hex(color::TEXT_SECONDARY))
                 .child(label),
         )
-        .child(control)
+        .child(gpui::div().flex_1().min_w_0().child(control))
 }
 
 /// A form group (see `docs/design.md` "Dialogs"): a `Heading` group title over
@@ -576,17 +646,17 @@ pub fn chip(
 /// `tint` token at the subtle fill and edge border steps (see `docs/design.md`
 /// "Timeline" and "Interaction states").
 pub fn icon_toggle(
-    id: String,
+    id: (&'static str, u64),
     icon_name: IconName,
     tooltip: &'static str,
     active: bool,
     tint_token: u32,
     listener: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
-    let id_string = id.clone();
     gpui::div()
         .id(id)
-        .debug_selector(move || id_string.clone())
+        // The selector string is only built when a test asks for it.
+        .debug_selector(move || format!("{}-{}", id.0, id.1))
         .h(size::ROW_XS)
         .min_w(size::ROW_XS)
         .px_1()
@@ -673,5 +743,265 @@ impl Toast {
             gpui_component::notification::NotificationType::Error,
             color::DANGER,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{
+        AppContext as _, Context, FocusHandle, IntoElement, Render, ScrollHandle, TestAppContext,
+        VisualTestContext, Window, div, px, size,
+    };
+
+    /// A view holding one `segmented` control and its focus handles, as a
+    /// surface (the Library tabs) would.
+    struct Strip {
+        selected: usize,
+        focus: Vec<FocusHandle>,
+    }
+
+    const OPTIONS: [SegmentedOption; 5] = [
+        SegmentedOption {
+            label: "Media",
+            icon: None,
+            id: "seg-media",
+        },
+        SegmentedOption {
+            label: "Elements",
+            icon: None,
+            id: "seg-elements",
+        },
+        SegmentedOption {
+            label: "Titles",
+            icon: None,
+            id: "seg-titles",
+        },
+        SegmentedOption {
+            label: "Effects",
+            icon: None,
+            id: "seg-effects",
+        },
+        SegmentedOption {
+            label: "Plugins",
+            icon: None,
+            id: "seg-plugins",
+        },
+    ];
+
+    impl Render for Strip {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let this = cx.entity().downgrade();
+            div().w(px(600.)).child(segmented(
+                "strip",
+                &OPTIONS,
+                &self.focus,
+                self.selected,
+                None,
+                true,
+                move |index, _window, cx| {
+                    this.update(cx, |strip, cx| {
+                        strip.selected = index;
+                        cx.notify();
+                    })
+                    .ok();
+                },
+            ))
+        }
+    }
+
+    fn open_strip(
+        cx: &mut TestAppContext,
+    ) -> (gpui::Entity<Strip>, &'static mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+        });
+        let window = cx.update(|cx| {
+            cx.open_window(gpui::WindowOptions::default(), |_, cx| {
+                cx.new(|cx| Strip {
+                    selected: 0,
+                    focus: (0..OPTIONS.len()).map(|_| cx.focus_handle()).collect(),
+                })
+            })
+            .expect("open the strip window")
+        });
+        let strip = window.root(cx).expect("strip view");
+        let cx = VisualTestContext::from_window(*window, cx).into_mut();
+        cx.run_until_parked();
+        (strip, cx)
+    }
+
+    fn focused(strip: &gpui::Entity<Strip>, cx: &mut VisualTestContext) -> Option<usize> {
+        cx.update(|window, cx| {
+            let handles = strip.read(cx).focus.clone();
+            handles.iter().position(|handle| handle.is_focused(window))
+        })
+    }
+
+    /// Arrow keys, Home and End move the selection and the focus, starting
+    /// from the focused option (not the selected one), as the Library tab
+    /// strip did before it was generalised.
+    #[gpui::test]
+    fn segmented_arrows_move_selection_and_focus(cx: &mut TestAppContext) {
+        let (strip, cx) = open_strip(cx);
+        let focus_option = |cx: &mut VisualTestContext, index: usize| {
+            cx.update(|window, cx| {
+                let handle = strip.read(cx).focus[index].clone();
+                window.focus(&handle, cx);
+            });
+        };
+        let state = |cx: &mut VisualTestContext| {
+            (strip.read_with(cx, |s, _| s.selected), focused(&strip, cx))
+        };
+
+        focus_option(cx, 0);
+        cx.simulate_keystrokes("right");
+        assert_eq!(state(cx), (1, Some(1)));
+        // The second press walks on from option 1; it did not when focus stayed behind.
+        cx.simulate_keystrokes("right");
+        assert_eq!(state(cx), (2, Some(2)));
+        cx.simulate_keystrokes("end");
+        assert_eq!(state(cx), (4, Some(4)));
+        cx.simulate_keystrokes("right");
+        assert_eq!(state(cx), (0, Some(0)));
+        cx.simulate_keystrokes("left");
+        assert_eq!(state(cx), (4, Some(4)));
+        cx.simulate_keystrokes("home");
+        assert_eq!(state(cx), (0, Some(0)));
+        // Tab can focus an option without selecting it; arrows start from it.
+        focus_option(cx, 3);
+        cx.simulate_keystrokes("right");
+        assert_eq!(state(cx), (4, Some(4)));
+        focus_option(cx, 2);
+        cx.simulate_keystrokes("left");
+        assert_eq!(state(cx), (1, Some(1)));
+        // Enter activates the focused option and keeps focus on it.
+        focus_option(cx, 3);
+        cx.simulate_keystrokes("enter");
+        assert_eq!(state(cx), (3, Some(3)));
+    }
+
+    /// A click selects the option and focuses it, so the keys that follow
+    /// start from it.
+    #[gpui::test]
+    fn segmented_click_selects_and_focuses(cx: &mut TestAppContext) {
+        let (strip, cx) = open_strip(cx);
+        let bounds = cx.debug_bounds("seg-titles").expect("titles option");
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(strip.read_with(cx, |s, _| s.selected), 2);
+        assert_eq!(focused(&strip, cx), Some(2));
+        cx.simulate_keystrokes("right");
+        assert_eq!(strip.read_with(cx, |s, _| s.selected), 3);
+        assert_eq!(focused(&strip, cx), Some(3));
+    }
+
+    /// A view with one tall `ToolPanel` at an explicit UI scale.
+    struct PanelView {
+        bottom_height: f32,
+        scale: f32,
+        scroll: ScrollHandle,
+    }
+
+    impl Render for PanelView {
+        fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            ToolPanel::new("test-panel", IconName::Flag, "Markers and beats")
+                .bottom_height(self.bottom_height)
+                .body(self.scroll.clone(), div().h(px(4000.)))
+                .render_at_scale(window, self.scale)
+        }
+    }
+
+    /// At 100%, 150% and 80% UI scale a tall panel ends above the timeline
+    /// dock and the status line, whatever the scale (the title bar, status
+    /// line and dock heights scale together).
+    #[gpui::test]
+    fn tool_panel_stays_above_the_timeline_dock_at_any_scale(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+        });
+        let viewport = size(px(1280.), px(900.));
+        for scale in [1.0_f32, 1.5, 0.8] {
+            let bottom_height = 260.;
+            let window = cx.update(|cx| {
+                cx.open_window(
+                    gpui::WindowOptions {
+                        window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::new(
+                            gpui::Point::default(),
+                            viewport,
+                        ))),
+                        ..Default::default()
+                    },
+                    |_, cx| {
+                        cx.new(|_| PanelView {
+                            bottom_height,
+                            scale,
+                            scroll: ScrollHandle::new(),
+                        })
+                    },
+                )
+                .expect("open the panel window")
+            });
+            let cx = VisualTestContext::from_window(*window, cx).into_mut();
+            cx.run_until_parked();
+            let panel = cx.debug_bounds("test-panel").expect("panel bounds");
+            let dock_top = f32::from(viewport.height) - bottom_height * scale;
+            let status_line = STATUS_LINE * scale;
+            let bottom = f32::from(panel.bottom());
+            assert!(
+                bottom <= dock_top - status_line + 0.5,
+                "at {scale}x the panel ends at {bottom}px, below the dock minus the status line ({})",
+                dock_top - status_line
+            );
+            assert!(
+                (f32::from(panel.top()) - TITLE_BAR * scale).abs() < 0.5,
+                "at {scale}x the panel starts at {}px, not below the scaled title bar",
+                f32::from(panel.top())
+            );
+        }
+    }
+
+    /// The frame maths alone, including the minimum height.
+    #[test]
+    fn tool_panel_frame_scales_every_term() {
+        let (top, max) = ToolPanel::frame(px(900.), 260., 1.5);
+        assert_eq!(top, 84.);
+        assert_eq!(f32::from(max), 900. - (56. + 32. + 260.) * 1.5);
+        let (_, max) = ToolPanel::frame(px(300.), 260., 1.0);
+        assert_eq!(f32::from(max), MIN_HEIGHT);
+    }
+
+    /// A form row's control fills the space right of the label.
+    #[gpui::test]
+    fn form_row_control_fills_the_row(cx: &mut TestAppContext) {
+        struct Row;
+        impl Render for Row {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(500.)).child(form_row(
+                    "Name",
+                    div()
+                        .id("row-control")
+                        .debug_selector(|| "row-control".to_string())
+                        .w_full()
+                        .h(px(20.)),
+                ))
+            }
+        }
+        cx.update(|cx| {
+            gpui_component::init(cx);
+        });
+        let window = cx.update(|cx| {
+            cx.open_window(gpui::WindowOptions::default(), |_, cx| cx.new(|_| Row))
+                .expect("open the row window")
+        });
+        let cx = VisualTestContext::from_window(*window, cx).into_mut();
+        cx.run_until_parked();
+        let control = cx.debug_bounds("row-control").expect("control");
+        // 500 wide, minus the 8.5rem label column and the gap.
+        assert!(
+            f32::from(control.size.width) > 300.,
+            "the control is only {}px wide",
+            f32::from(control.size.width)
+        );
     }
 }

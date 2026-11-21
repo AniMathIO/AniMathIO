@@ -5,7 +5,7 @@ a multi-track timeline, plus math objects, captions, audio tools and plugins. Th
 document is the design system for that editor. It names every colour, size and
 component the UI is allowed to use, and the words it uses.
 
-**Status.** The 2.3 tokens are in code (the UI-rework foundation PR); components
+**Status.** The 2.3 tokens and shared components are in code (`style/`); components
 migrate per surface (UI rework PRs 2-6). Surface modules that still name a retired
 2.2 constant (the gradient endpoints, the yellow snap guide) read it as a deprecated
 alias for the new token until their PR removes it. Take every value from
@@ -71,13 +71,18 @@ the footage looks.
 |---|---|---|
 | `TEXT` | `#E8E9EB` | Primary text, values, titles |
 | `TEXT_SECONDARY` | `#A9ACB3` | Labels, inactive tabs, secondary values |
-| `TEXT_MUTED` | `#8F939B` | Hints, captions, placeholder text |
+| `TEXT_MUTED` | `#969AA2` | Hints, captions, placeholder text |
 | `TEXT_DISABLED` | `#6B6F77` | Disabled labels only (exempt from contrast minimums) |
 
 Every text token except `TEXT_DISABLED` reaches WCAG AA (4.5:1) on `BG`, `PANEL`,
-`RAISED` and `HOVER`; the `muted_text_meets_aa_contrast` test in `style/mod.rs`
-enforces it and must keep covering every text token (it also checks `ON_ACCENT` on
-`ACCENT`, and `TEXT` at 7:1 on every clip body).
+`RAISED`, `HOVER` and `PRESSED`; the `muted_text_meets_aa_contrast` test in
+`style/mod.rs` enforces it and must keep covering every text token (it also checks
+`ON_ACCENT` on `ACCENT`, and `TEXT` at 7:1 on every resting clip body).
+
+On the selection fill (`ACCENT` at the subtle step) `TEXT` and `TEXT_SECONDARY` reach
+AA over both `PANEL` and `RAISED` (`text_on_selection_fill_meets_aa_contrast`);
+`TEXT_MUTED` does over `PANEL` (4.7:1) but not over a selected `RAISED` card (4.3:1), so
+a selected card sets its meta line in `TEXT_SECONDARY`.
 
 **Accent and semantic colours**
 
@@ -108,7 +113,7 @@ the logo.
 | scrim | 0.78 | `BG` behind a modal dialog |
 
 **Clip kinds.** Muted so a timeline full of clips stays calm, hue-separated from each
-other, from the accent and from the playhead. Labels on the clip body reach 7:1 or more.
+other, from the accent and from the playhead. `TEXT` on the resting clip body reaches 7:1 or more. The hovered body (+0.08 alpha) is lower (about 6.2:1 for shape and graph), and the clip duration in `TEXT_SECONDARY` reaches only about 3.9-4.9:1 on some bodies; the timeline PR (UI rework PR 4), which paints clips, must lift both (a lighter duration colour or a darker hover step) and extend the test.
 
 | Token | hex | Kind |
 |---|---|---|
@@ -268,7 +273,7 @@ Stretch/1:1 in the inspector and any other choice of two to five short options.
 - Active option: `ACCENT` subtle fill, `ACCENT` edge border, `TEXT`, weight 500. Inactive:
   `TEXT_SECONDARY`, `HOVER` fill on hover. The sliding pill animates in `BASE_MS`.
 - Labels are one word where possible. When labels do not fit, show icons only, with a
-  tooltip on each. Arrow keys, Home and End move between options.
+  tooltip on each. Arrow keys, Home and End move between options and move keyboard focus with the selection; a click focuses the option. The focus ring is a constant 2 px edge (transparent at rest), so focusing never shifts the content. The caller owns one `FocusHandle` per option.
 - A heading under a tab strip never repeats the active tab's name.
 
 ### Inspector
@@ -341,8 +346,10 @@ v [icon] Transform                                    [reset]   ROW, HEADING
 | Link | `ACCENT` text, no fill | "Source", "Open Plugins", inline navigation |
 
 - `style::primary_button` builds the primary variant (solid `ACCENT`, no gradient);
-  `style::secondary_button` and `style::destructive_button(filled)` build the secondary
-  and destructive looks; other variants come from the kit (`.ghost()`, `.outline()`)
+  `style::secondary_button` and `style::destructive_button(label, filled)` build the
+  secondary and destructive looks (the kit's hover layer resets a button's border and
+  text colour, so the outline is an inset hard shadow and the destructive text is the
+  label's own colour; both stay put on hover and press); other variants come from the kit (`.ghost()`, `.outline()`)
   with the theme set from tokens. No other custom button styles. The kit draws keyboard
   focus as a 3 px ring in `ACCENT` at 50% **outside** the button's edge, so it stays
   visible around a solid `ACCENT` fill against the panel; the 2.3 foundation keeps that
@@ -391,8 +398,11 @@ v [icon] Transform                                    [reset]   ROW, HEADING
 Markers and beats, Automatic cuts, Auto duck, Scenes, Auto reframe and the export queue
 are non-modal panels over the workspace. They share one frame:
 
-- Anchored at the top left of the viewer area (`gap_3` inset), width 24rem, height at
-  most the space above the timeline, so it never covers the clips it is working on.
+- Anchored at the top left of the window below the title bar (`style::ToolPanel` places
+  it at `0.75rem` from the left edge, so today it sits over the Library; the surface PR
+  that adopts it adds an `anchor` option to start at the viewer area), width 24rem,
+  height at most the space above the timeline (title bar, status line and dock heights
+  all scale with UI scale), so it never covers the clips it is working on.
   All of them open on the same side. `RAISED` fill, `BORDER_STRONG` outline,
   `radius::OVERLAY`, `shadow_lg`.
 - Header as a panel header (`HEADER`), title in `TITLE`, close button (`X`) at the
@@ -414,7 +424,7 @@ success toasts dismiss themselves; warnings and errors stay until closed.
 
 ### Empty states
 
-An empty panel or list is centred in its space: a Lucide icon (1.5rem, `TEXT_MUTED`),
+An empty panel or list is centred horizontally in its space (`style::empty_state` fills the width; give it a `flex_1` parent to centre it vertically in a panel): a Lucide icon (1.5rem, `TEXT_MUTED`),
 one line in `BODY` `TEXT_SECONDARY` that says what will be here, and one button that
 adds it.
 
@@ -498,7 +508,7 @@ The launcher is a start page, not a landing page.
 | Element | Hover | Pressed | Selected / on | Keyboard focus | Disabled |
 |---|---|---|---|---|---|
 | Ghost button | `HOVER` fill, `TEXT` | `PRESSED` fill | `ACCENT` subtle fill, `ACCENT` icon | 2 px `ACCENT` ring | `TEXT_DISABLED`, no hover |
-| Secondary button | `HOVER` fill | `PRESSED` fill | n/a | 2 px `ACCENT` ring | `TEXT_DISABLED`, `BORDER` outline |
+| Secondary button | `HOVER` fill, outline and text unchanged | `PRESSED` fill | n/a | 2 px `ACCENT` ring | `TEXT_DISABLED` (the `BORDER_STRONG` outline stays) |
 | Primary button | `ACCENT_HOVER` | `ACCENT_PRESSED` | n/a | the kit's outer 3 px `ACCENT` ring at 50%, visible around the fill | `RAISED` fill, `TEXT_DISABLED` text |
 | List row, card | `HOVER` fill | `PRESSED` fill | `ACCENT` subtle fill, 1 px `ACCENT` border | 2 px `ACCENT` ring | 50% opacity |
 | Tab option | `HOVER` fill | `PRESSED` fill | sliding `ACCENT` pill | 2 px `ACCENT` ring | `TEXT_DISABLED` |
@@ -621,8 +631,7 @@ See [Keyboard shortcuts](keyboard-shortcuts.md) for the Premiere default keymap.
 
 ## Reproducing panel screenshots
 
-The foundation PR (UI rework PR 1) also added selection and dialog hooks for
-captures: `--screenshot-panel=select-<kind>` (kinds `image`, `video`, `audio`,
+The developer launch options for captures include selection and dialog hooks: `--screenshot-panel=select-<kind>` (kinds `image`, `video`, `audio`,
 `text`, `shapes`, `latex`, `graph`) selects the first clip of that kind (audio
 also scrolls the timeline to the bottom), so inspector and timeline shots show a
 real selection; `--screenshot-panel=export`, `preferences` and `settings` open

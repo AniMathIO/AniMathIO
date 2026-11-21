@@ -753,8 +753,8 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         match panel {
-            // Select the first clip of a kind (image, audio, video, or a plugin-id
-            // substring such as text, shapes, latex, graph) so inspector captures
+            // Select the first clip of a kind (image, audio, video, or the last
+            // segment of a plugin id: text, shapes, latex, graph) so inspector captures
             // show a real selection. Audio sits below the visual tracks.
             panel if let Some(kind) = panel.strip_prefix("select-") => {
                 let matches_kind = |clip: &animathio_core::Clip| match &clip.kind {

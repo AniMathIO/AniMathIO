@@ -68,14 +68,7 @@ pub(super) fn header_pill(
     tint: u32,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    style::icon_toggle(
-        format!("{}-{}", id.0, id.1),
-        icon,
-        tooltip,
-        active,
-        tint,
-        listener,
-    )
+    style::icon_toggle(id, icon, tooltip, active, tint, listener)
 }
 
 /// Which half of the timeline a paint call draws. The ruler and marker lane stay fixed

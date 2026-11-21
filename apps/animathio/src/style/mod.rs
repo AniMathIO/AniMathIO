@@ -288,11 +288,18 @@ mod theme_tests {
     }
 
     /// Every text token except `TEXT_DISABLED` (hints, labels, values) stays
-    /// readable (WCAG AA, 4.5:1) on every surface it sits on.
+    /// readable (WCAG AA, 4.5:1) on every flat surface it sits on, including
+    /// the pressed fill.
     #[test]
     fn muted_text_meets_aa_contrast() {
         for text in [color::TEXT, color::TEXT_SECONDARY, color::TEXT_MUTED] {
-            for surface in [color::BG, color::PANEL, color::RAISED, color::HOVER] {
+            for surface in [
+                color::BG,
+                color::PANEL,
+                color::RAISED,
+                color::HOVER,
+                color::PRESSED,
+            ] {
                 let ratio = contrast(text, surface);
                 assert!(
                     ratio >= 4.5,
@@ -300,6 +307,31 @@ mod theme_tests {
                 );
             }
         }
+    }
+
+    /// The selection fill (`ACCENT` at the subtle step over a panel or a card
+    /// surface) carries `TEXT` and `TEXT_SECONDARY` at AA. `TEXT_MUTED` only
+    /// reaches AA over `PANEL`, not over a `RAISED` card, so selected cards put
+    /// their meta line in `TEXT_SECONDARY` (see `docs/design.md`).
+    #[test]
+    fn text_on_selection_fill_meets_aa_contrast() {
+        let subtle = f64::from(Alpha::Subtle.value());
+        for (name, base) in [("PANEL", color::PANEL), ("RAISED", color::RAISED)] {
+            let fill = composite(color::ACCENT, subtle, base);
+            for text in [color::TEXT, color::TEXT_SECONDARY] {
+                let ratio = contrast(text, fill);
+                assert!(
+                    ratio >= 4.5,
+                    "{text:#08X} on the selection fill over {name} is only {ratio:.2}:1"
+                );
+            }
+        }
+        let over_panel = composite(color::ACCENT, subtle, color::PANEL);
+        let ratio = contrast(color::TEXT_MUTED, over_panel);
+        assert!(
+            ratio >= 4.5,
+            "TEXT_MUTED on the selection fill over PANEL is only {ratio:.2}:1"
+        );
     }
 
     /// Lettering on a primary (accent fill) button stays readable (4.5:1).

@@ -36,7 +36,7 @@ pub mod color {
     /// Labels, inactive tabs, secondary values.
     pub const TEXT_SECONDARY: u32 = 0xA9ACB3;
     /// Hints, captions, placeholder text (see `muted_text_meets_aa_contrast`).
-    pub const TEXT_MUTED: u32 = 0x8F939B;
+    pub const TEXT_MUTED: u32 = 0x969AA2;
     /// Disabled labels only (exempt from the contrast minimums).
     pub const TEXT_DISABLED: u32 = 0x6B6F77;
 
@@ -290,7 +290,11 @@ pub trait TextRole: Styled + Sized {
 
     /// Tabular figures (`tnum`) for numbers and timecode-like values.
     fn tabular(self) -> Self {
-        self.font_features(FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])))
+        static TNUM: std::sync::OnceLock<FontFeatures> = std::sync::OnceLock::new();
+        self.font_features(
+            TNUM.get_or_init(|| FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])))
+                .clone(),
+        )
     }
 }
 impl<T: Styled> TextRole for T {}
