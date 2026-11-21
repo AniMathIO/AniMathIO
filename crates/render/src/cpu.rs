@@ -5,7 +5,7 @@ use animathio_core::{
     VectorScene, WipeDirection,
 };
 use animathio_text_layout::{
-    Align, TextLayouter, block_offset,
+    Align, MAX_FONT_SIZE, TextLayouter, block_offset,
     parley::{self, PositionedLayoutItem},
 };
 use std::sync::Arc;
@@ -142,14 +142,14 @@ fn runs_of(layout: &parley::Layout<()>) -> Vec<ShapedRun> {
 /// Convert a normalized drawing font size into pixels.
 pub(crate) fn relative_text_pixel_size(font_size: f64, size: Size) -> Result<f64, Error> {
     let font_size = font_size * f64::from(size.1);
-    if !font_size.is_finite() || font_size <= 0.0 || font_size > 1_048_560.0 {
+    if !font_size.is_finite() || font_size <= 0.0 || font_size > f64::from(MAX_FONT_SIZE) {
         return Err(Error::Invalid("invalid scene font size"));
     }
     Ok(font_size)
 }
 
 pub(crate) fn check_vector_font_size(font_size: f64) -> Result<(), Error> {
-    if !font_size.is_finite() || font_size <= 0.0 || font_size > 1_048_560.0 {
+    if !font_size.is_finite() || font_size <= 0.0 || font_size > f64::from(MAX_FONT_SIZE) {
         return Err(Error::Invalid("invalid scene font size"));
     }
     Ok(())

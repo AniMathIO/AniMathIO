@@ -642,8 +642,12 @@ fn character_slide_is_refused_on_a_clip_with_a_caption_style() {
         // The other presets still apply to a styled caption.
         apply(&project, "clipped-slide-in").unwrap();
     }
-    // `off` is the plain text: the preset applies.
-    apply(&captioned("off"), "character-slide-in").unwrap();
+    // `off`, an empty style and a name the text plugin does not know are the plain text: the
+    // plugin draws no caption for them, so the preset applies.
+    for style in ["off", "", "no-such-style"] {
+        apply(&captioned(style), "character-slide-in")
+            .unwrap_or_else(|error| panic!("style {style:?}: {error}"));
+    }
 }
 
 #[test]
