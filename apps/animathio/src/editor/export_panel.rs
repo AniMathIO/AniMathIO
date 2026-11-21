@@ -29,6 +29,7 @@ impl Editor {
         let active = queue.is_busy();
         div()
             .id("status-export-queue")
+            .debug_selector(|| "status-export-queue".into())
             .flex()
             .flex_row()
             .items_center()

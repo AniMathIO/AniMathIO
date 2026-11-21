@@ -417,7 +417,9 @@ impl Editor {
                         .child(
                             div()
                                 .text_color(style::hex(color::TEXT_SECONDARY))
-                                .child("Your next project starts here.")
+                                .id("start-recent-empty")
+                                .debug_selector(|| "start-recent-empty".into())
+                                .child("No recent projects yet")
                                 .child(
                                     div()
                                         .text_size(crate::style::type_size::XS)
@@ -504,9 +506,26 @@ impl Editor {
                     }),
             );
 
+        // More content (Templates, recent projects) sits below the fold on a short window.
+        let scroll_handle = self.launcher_scroll.clone();
+        let below_fold = |handle: &ScrollHandle| {
+            let max = f32::from(handle.max_offset().y);
+            max > 8. && -f32::from(handle.offset().y) < max - 8.
+        };
+        let cue_shown = below_fold(&scroll_handle);
+        let cue_view = cx.entity().downgrade();
+        let cue_handle = scroll_handle.clone();
         div().relative().flex_1().min_h_0().w_full()
-            .child(canvas(|_, _, _| {}, move |_, (), window, _| {
+            .child(canvas(|_, _, _| {}, move |_, (), window, cx| {
                 if hover_progress < 1. { window.request_animation_frame(); }
+                // The scroll extent is only known after layout, so re-render once when it
+                // changes whether the cue should show.
+                if below_fold(&cue_handle) != cue_shown {
+                    let view = cue_view.clone();
+                    cx.defer(move |cx| {
+                        let _ = view.update(cx, |_, cx| cx.notify());
+                    });
+                }
             }).absolute().size_full())
             .child(
             div()
@@ -609,6 +628,39 @@ impl Editor {
                 ),
         )
         .child(gpui_component::scroll::Scrollbar::vertical(&self.launcher_scroll))
+        .when(cue_shown, |root| {
+            root.child(
+                div()
+                    .id("start-scroll-cue")
+                    .debug_selector(|| "start-scroll-cue".into())
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .h(px(72.))
+                    .flex()
+                    .items_end()
+                    .justify_center()
+                    .pb_3()
+                    .bg(linear_gradient(
+                        180.,
+                        linear_color_stop(style::hexa(color::BG, 0.), 0.),
+                        linear_color_stop(style::hexa(color::BG, 0.96), 1.),
+                    ))
+                    .child(
+                        Button::new("start-scroll-more")
+                            .small()
+                            .outline()
+                            .icon(icons::icon(IconName::ChevronDown))
+                            .label("Templates and recent projects")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let max = this.launcher_scroll.max_offset();
+                                this.launcher_scroll.set_offset(point(px(0.), -max.y));
+                                cx.notify();
+                            })),
+                    ),
+            )
+        })
     }
 }
 

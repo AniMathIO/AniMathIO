@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use animathio_core::{AssetId, Scene};
@@ -36,6 +37,37 @@ pub(crate) enum WorkerMsg {
 pub(crate) struct RenderWorker {
     tx: Sender<WorkerMsg>,
     rx: Receiver<RenderResult>,
+    active: Arc<AtomicU8>,
+}
+
+/// What the worker is really rendering the preview with, as opposed to what was requested.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ActiveBackend {
+    /// No backend has been selected yet.
+    Unknown,
+    Cpu,
+    Gpu,
+    /// The GPU was requested but is unavailable or failed, so the CPU renders.
+    CpuFallback,
+}
+
+impl ActiveBackend {
+    fn code(self) -> u8 {
+        match self {
+            Self::Unknown => 0,
+            Self::Cpu => 1,
+            Self::Gpu => 2,
+            Self::CpuFallback => 3,
+        }
+    }
+    fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::Cpu,
+            2 => Self::Gpu,
+            3 => Self::CpuFallback,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 impl RenderWorker {
@@ -45,11 +77,13 @@ impl RenderWorker {
     pub(crate) fn spawn() -> Result<Self, String> {
         let (tx, worker_rx) = channel::<WorkerMsg>();
         let (result_tx, rx) = channel::<RenderResult>();
+        let active = Arc::new(AtomicU8::new(ActiveBackend::Unknown.code()));
+        let worker_active = active.clone();
         std::thread::Builder::new()
             .name("animathio-render".into())
-            .spawn(move || worker_loop(&worker_rx, &result_tx))
+            .spawn(move || worker_loop(&worker_rx, &result_tx, &worker_active))
             .map_err(|error| format!("spawn render worker: {error}"))?;
-        Ok(Self { tx, rx })
+        Ok(Self { tx, rx, active })
     }
 
     /// An inert worker for when the render thread could not start: posts are
@@ -58,7 +92,16 @@ impl RenderWorker {
     pub(crate) fn disabled() -> Self {
         let (tx, _) = channel::<WorkerMsg>();
         let (_, rx) = channel::<RenderResult>();
-        Self { tx, rx }
+        Self {
+            tx,
+            rx,
+            active: Arc::new(AtomicU8::new(ActiveBackend::Cpu.code())),
+        }
+    }
+
+    /// The backend the preview is really rendered with right now.
+    pub(crate) fn active_backend(&self) -> ActiveBackend {
+        ActiveBackend::from_code(self.active.load(Ordering::Relaxed))
     }
 
     pub(crate) fn load(&self, assets: Arc<BTreeMap<AssetId, Vec<u8>>>) {
@@ -78,7 +121,7 @@ impl RenderWorker {
     }
 }
 
-fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
+fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>, active: &AtomicU8) {
     let mut ctx = RenderCtx::default();
     let (mut host, _, _) = crate::editor::load_plugins();
     if let Some(host) = &host {
@@ -119,17 +162,23 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>) {
         }
         if let Some(requested) = backend {
             let selected = preview_backend(requested);
-            match (&selected.fallback, selected.kind) {
-                (Some(error), _) => eprintln!("preview renderer: CPU ({error})"),
-                (None, kind) => eprintln!("preview renderer: {kind:?}"),
-            }
+            let used = match (&selected.fallback, selected.kind) {
+                (Some(error), _) => {
+                    eprintln!("preview renderer: CPU ({error})");
+                    ActiveBackend::CpuFallback
+                }
+                (None, BackendKind::Gpu) => ActiveBackend::Gpu,
+                (None, BackendKind::Cpu) => ActiveBackend::Cpu,
+            };
+            eprintln!("preview renderer: {used:?}");
+            active.store(used.code(), Ordering::Relaxed);
             ctx.set_backend(selected.backend);
         }
         if let Some(mut request) = latest {
             if let Some(host) = &mut host {
                 request.scene = host.resolve(&request.scene, request.size);
             }
-            let (image, effect_failures) = render_image(&mut ctx, &request);
+            let (image, effect_failures) = render_image(&mut ctx, &request, active);
             let failed_effect_clips = effect_failures.iter().map(|(id, _)| *id).collect();
             let effect_error = effect_failures.into_iter().next().map(|(_, error)| error);
             let _ = tx.send(RenderResult {
@@ -147,6 +196,7 @@ type EffectFailures = Vec<(animathio_core::ClipId, String)>;
 fn render_image(
     ctx: &mut RenderCtx,
     request: &RenderRequest,
+    active: &AtomicU8,
 ) -> (Result<Arc<RenderImage>, String>, EffectFailures) {
     let preview = match render_preview(&request.scene, ctx, request.size) {
         Ok(preview) => preview,
@@ -154,6 +204,7 @@ fn render_image(
             // A GPU failure mid-session (device lost, size limit): fall back to CPU.
             eprintln!("preview renderer: GPU failed ({error}); using CPU");
             ctx.set_backend(Box::new(animathio_render::CpuBackend::default()));
+            active.store(ActiveBackend::CpuFallback.code(), Ordering::Relaxed);
             match render_preview(&request.scene, ctx, request.size) {
                 Ok(preview) => preview,
                 Err(error) => return (Err(error.to_string()), Vec::new()),

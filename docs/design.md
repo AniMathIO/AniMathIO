@@ -73,8 +73,8 @@ third-party plugins. Plugins is an inventory of all loaded plugin kinds, version
 enabled status and bundle origins, with a link to the plugin catalog. Arrow keys,
 Home and End move selection and focus between tabs; Tab reaches search and cards. The title bar shows the project name, an
 unsaved dot, MCP listener status and Export. The bottom chips report the canvas,
-frame rate, duration, autosave policy, requested preview renderer and export queue.
-“GPU requested” describes the preview preference: the worker can fall back to CPU.
+frame rate, duration, autosave policy, preview renderer actually in use and export queue.
+The renderer chip names the backend the worker really uses: “GPU preview”, “CPU preview”, or “CPU preview (fallback)” when the GPU was requested but is unavailable. On the launcher the autosave and export-queue chips are hidden, as are the Playback, Tools and Clip menus and the title-bar Export button.
 
 The launcher offers five canvas preset cards, a Templates section with cached CPU
 thumbnails, aspect labels and user-template deletion, recent-project cards with

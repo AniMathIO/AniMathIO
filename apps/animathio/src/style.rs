@@ -20,7 +20,8 @@ pub mod color {
     pub const BORDER: u32 = 0x262C3A;
     pub const TEXT: u32 = 0xE6E9F0;
     pub const TEXT_SECONDARY: u32 = 0x9AA3B5;
-    pub const TEXT_MUTED: u32 = 0x5D6578;
+    /// Hints and group labels; at least 4.5:1 on every surface (see `muted_text_meets_aa_contrast`).
+    pub const TEXT_MUTED: u32 = 0x838CA3;
 
     /// Solid accent for selection outlines, active tabs and focus.
     pub const ACCENT: u32 = 0x8B7BFF;
@@ -426,6 +427,37 @@ impl Toast {
 #[cfg(test)]
 mod theme_tests {
     use super::*;
+
+    fn luminance(rgb: u32) -> f64 {
+        let channel = |shift: u32| {
+            let value = f64::from((rgb >> shift) & 0xFF) / 255.0;
+            if value <= 0.03928 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+    }
+
+    fn contrast(foreground: u32, background: u32) -> f64 {
+        let (a, b) = (luminance(foreground), luminance(background));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// Hint and group-label text must stay readable (WCAG AA, 4.5:1) on every surface it sits on.
+    #[test]
+    fn muted_text_meets_aa_contrast() {
+        for text in [color::TEXT_SECONDARY, color::TEXT_MUTED] {
+            for surface in [color::BG, color::PANEL, color::RAISED, color::HOVER] {
+                let ratio = contrast(text, surface);
+                assert!(
+                    ratio >= 4.5,
+                    "{text:#08X} on {surface:#08X} is only {ratio:.2}:1"
+                );
+            }
+        }
+    }
     #[test]
     fn palette_covers_component_surfaces_and_semantic_variants() {
         let mut colors = gpui_component::ThemeColor::default();

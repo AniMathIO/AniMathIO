@@ -102,7 +102,7 @@ Animations section and the Effects-tab preset library), `video_effects` (inspect
 opt-out in Preferences or with `ANIMATHIO_NO_UPDATE_CHECK=1`, silent on failure) and
 `community_plugins` (Installed/Browse UI, injected bounded registry transport in
 `apps/animathio/src/editor/community_plugins/registry.rs`, verified background installs,
-and the shared Preferences "Community plugins" switch: re-reads the trust
+and the "Community plugins" switch (one control, in Library → Plugins; Preferences links to it): re-reads the trust
 settings and calls `PluginHost::sync_community_plugins`, then refreshes the plugin list and
 re-renders, so plugins load and unload without a restart).
 Shared drawing/resource helpers live in
