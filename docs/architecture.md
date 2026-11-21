@@ -736,8 +736,11 @@ editor, CLI (`duck`) and MCP (`auto_duck`): voice activity from the autocut sile
 over the dry transcription mix, merged regions, then clip-local `gain` keyframes applied as
 one `Command::Batch`, targeting the union of selected audio clips and whole music tracks
 (see [Auto-ducking](mcp.md#auto-ducking)). The editor's `ducking` module owns
-the ephemeral review state (voice/music pickers, sliders, background analysis, timeline overlay of
-the ducked spans). The `denoise` audio effect is
+the ephemeral review state (voice/music pickers with suggested default music tracks, sliders,
+background analysis, a plain-language summary of the proposal and a timeline overlay of the
+ducked spans). Learned denoise profiles are `control::learn_noise_command` batches of
+`SetAudioEffectParam` (`noise_0`..`noise_15`, `noise_profile`) written from a bounded
+In/Out or range-marker selection; the profile lives in the project, never in the mixer. The `denoise` audio effect is
 streaming spectral gating inside `org.animathio.audio-basic`; its noise profile is a
 per-bin minimum over ~1 s of smoothed power, so its memory is about as long as the mixer's
 state warm-up; whatever the warm-up leaves, the output stays a pure function of the project.

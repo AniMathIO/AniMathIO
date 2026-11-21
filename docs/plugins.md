@@ -1098,7 +1098,10 @@ ticks, one per whitespace-separated word of `text`, relative to the clip's sourc
 (words per line, 0 fits the box). They only apply in the fitted-title mode (`fit_width` and
 `fit_height` set). The active word is the last one whose start time has passed; the scene is a
 pure function of the clip's source time, so preview and export match. `classic` renders exactly
-like the plain fitted title; when the edited text no longer has as many words as `words`, the
+like the plain fitted title (over its translucent bar clip; multi-line cues are centred line by
+line and shrunk to the box, and Latin diacritics, Greek, Cyrillic and common symbols come from the
+embedded DejaVu Sans, covered by `crates/control/tests/classic_caption_render.rs` goldens; scripts the
+font lacks, such as CJK, are not drawn); when the edited text no longer has as many words as `words`, the
 timings are spread over the stored span. When caption text is edited in the editor, unchanged
 words retain their timings and inserted words share the gap between their neighbours
 (weighted by character count); text and timings undo together. A full gap leaves inserted

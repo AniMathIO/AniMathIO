@@ -17,6 +17,71 @@ pub(super) fn duck_clip_label(project: &Project, track: &Track, clip: &Clip) -> 
     )
 }
 
+/// Music tracks to suggest when Auto duck opens: every unlocked track that holds audio clips
+/// but neither the voice clips nor their linked companions (a video's own audio). The panel
+/// previews the result before anything is written.
+pub(super) fn default_music_tracks(project: &Project, voice_clips: &[ClipId]) -> Vec<TrackId> {
+    let is_voice = |clip: &Clip| {
+        voice_clips.contains(&clip.id)
+            || clip
+                .link_group
+                .is_some_and(|group| voice_clips.contains(&group))
+            || project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .any(|v| {
+                    voice_clips.contains(&v.id)
+                        && v.link_group.is_some()
+                        && v.link_group == clip.link_group
+                })
+    };
+    project
+        .tracks()
+        .iter()
+        .filter(|t| {
+            !t.is_locked()
+                && t.clips()
+                    .values()
+                    .any(|c| matches!(c.kind, ClipKind::Audio(_)))
+                && !t.clips().values().any(is_voice)
+        })
+        .map(Track::id)
+        .collect()
+}
+
+/// One sentence describing what applying `proposal` will do.
+pub(super) fn duck_summary(params: &DuckParams, proposal: &DuckProposal) -> String {
+    let keyframes: usize = proposal.clips.iter().map(|c| c.keys.len()).sum();
+    if proposal.voice.is_empty() {
+        return "No voice found. Lower the voice threshold or widen the analysed range.".into();
+    }
+    if proposal.clips.is_empty() {
+        return format!(
+            "Found {} voice region{}, but no chosen music clip overlaps the ducked spans.",
+            proposal.voice.len(),
+            plural(proposal.voice.len())
+        );
+    }
+    let ducked: i64 = proposal.ducked.iter().map(|r| r.end.0 - r.start.0).sum();
+    #[allow(clippy::cast_precision_loss)]
+    let seconds = ducked as f64 / TICKS_PER_SECOND as f64;
+    format!(
+        "Music drops by {:.1} dB under {} voice region{} ({seconds:.1} s ducked). Writes {} keyframe{} on {} clip{} as one undo step.",
+        params.depth_db,
+        proposal.voice.len(),
+        plural(proposal.voice.len()),
+        keyframes,
+        plural(keyframes),
+        proposal.clips.len(),
+        plural(proposal.clips.len()),
+    )
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
 pub(super) struct DuckReview {
     identity: Arc<()>,
     pub(super) params: DuckParams,
@@ -48,16 +113,22 @@ impl DuckReview {
 impl Editor {
     pub(super) fn open_duck(&mut self, cx: &mut Context<Self>) {
         let defaults = DuckParams::default();
-        let params = DuckParams {
-            voice_clips: self
-                .selected
-                .filter(|id| {
-                    self.find_clip(*id).is_some_and(|clip| {
-                        matches!(clip.kind, ClipKind::Audio(_) | ClipKind::Video(_))
-                    })
+        let voice_clips: Vec<ClipId> = self
+            .selected
+            .filter(|id| {
+                self.find_clip(*id).is_some_and(|clip| {
+                    matches!(clip.kind, ClipKind::Audio(_) | ClipKind::Video(_))
                 })
-                .into_iter()
-                .collect(),
+            })
+            .into_iter()
+            .collect();
+        let params = DuckParams {
+            music_tracks: if voice_clips.is_empty() {
+                Vec::new()
+            } else {
+                default_music_tracks(&self.project, &voice_clips)
+            },
+            voice_clips,
             range: self
                 .marks
                 .range(animathio_export::duration(&self.project).0),
@@ -128,6 +199,12 @@ impl Editor {
                 Ok(command) => {
                     if self.try_execute(&command, cx) {
                         self.duck_review = None;
+                        let keyframes: usize = p.clips.iter().map(|c| c.keys.len()).sum();
+                        self.notices.push(crate::style::Toast::info(format!(
+                            "Ducked {} music clip{} ({keyframes} keyframes). Edit > Undo restores the previous levels.",
+                            p.clips.len(),
+                            plural(p.clips.len()),
+                        )));
                     }
                 }
                 Err(error) => self.error = Some(error.to_string()),
@@ -247,7 +324,7 @@ impl Editor {
                     .child("Auto duck"),
             )
             .child(div().text_size(crate::style::type_size::XS).text_color(theme.muted_foreground).child(
-                "Lower the music under speech. Pick where the voice is and which tracks or clips to duck.",
+                "Lower the music while someone speaks. Choose the voice, choose what to duck, check the shaded spans on the timeline, then Apply. Edit > Undo reverts it in one step.",
             ));
         let audio_tracks: Vec<(TrackId, String)> = self
             .project
@@ -303,11 +380,12 @@ impl Editor {
                 .child(
                     div()
                         .text_size(crate::style::type_size::XS)
+                        .font_weight(FontWeight::SEMIBOLD)
                         .child(title.to_owned()),
                 )
                 .child(row)
         };
-        panel = chips(panel, "Voice tracks", false, cx);
+        panel = chips(panel, "1. Voice: tracks", false, cx);
         let selected_audio = self.selected.is_some_and(|id| {
             self.find_clip(id).is_some_and(|c| {
                 matches!(
@@ -326,7 +404,7 @@ impl Editor {
                 } else {
                     IconName::Minus
                 }))
-                .label("Selected clip is the voice")
+                .label("Use the selected clip as the voice")
                 .on_click(cx.listener(|this, _, _, cx| {
                     let selected = this.selected;
                     if let Some(r) = this.duck_review.as_mut() {
@@ -339,7 +417,7 @@ impl Editor {
                     this.analyse_duck(cx);
                 })),
         );
-        panel = chips(panel, "Music tracks to duck", true, cx);
+        panel = chips(panel, "2. Music: tracks to duck", true, cx);
         let mut clip_targets = div().flex().flex_wrap().gap_1();
         for track in self.project.tracks() {
             for clip in track
@@ -377,7 +455,8 @@ impl Editor {
             .child(
                 div()
                     .text_size(crate::style::type_size::XS)
-                    .child("Music clips to duck"),
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("2. Music: individual clips to duck"),
             )
             .child(clip_targets);
         let labels = [
@@ -433,13 +512,28 @@ impl Editor {
             );
         }
         if let Some(proposal) = &review.proposal {
-            let keyframes: usize = proposal.clips.iter().map(|c| c.keys.len()).sum();
-            panel = panel.child(div().text_size(crate::style::type_size::XS).child(format!(
-                "{} voice regions / {} music clips / {} keyframes",
-                proposal.voice.len(),
-                proposal.clips.len(),
-                keyframes
-            )));
+            panel = panel
+                .child(
+                    div()
+                        .text_size(crate::style::type_size::XS)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("3. Preview"),
+                )
+                .child(
+                    div()
+                        .id("duck-summary")
+                        .debug_selector(|| "duck-summary".into())
+                        .text_size(crate::style::type_size::XS)
+                        .child(duck_summary(&review.params, proposal)),
+                )
+                .child(
+                    div()
+                        .text_size(crate::style::type_size::XS)
+                        .text_color(theme.muted_foreground)
+                        .child(
+                            "Shaded spans on the music tracks show where the level is lowered. The play button beside a voice region moves the playhead to where that region starts.",
+                        ),
+                );
             let mut list = div()
                 .id("duck-list")
                 .max_h(px(120.))
@@ -464,7 +558,7 @@ impl Editor {
                                 .ghost()
                                 .compact()
                                 .icon(icons::icon(IconName::Play))
-                                .tooltip("Preview voice start")
+                                .tooltip("Move the playhead to the start of this voice region")
                                 .on_click(
                                     cx.listener(move |this, _, _, cx| this.seek_to(start, cx)),
                                 ),
@@ -512,5 +606,58 @@ impl Editor {
                 ),
         );
         Some(panel)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use animathio_control::ClipDuck;
+
+    fn range(start: i64, end: i64) -> TimeRange {
+        TimeRange {
+            start: Time(start * TICKS_PER_SECOND),
+            end: Time(end * TICKS_PER_SECOND),
+        }
+    }
+
+    fn proposal(voice: Vec<TimeRange>, clips: usize) -> DuckProposal {
+        DuckProposal {
+            revision: String::new(),
+            ducked: voice.clone(),
+            voice,
+            clips: (0..clips)
+                .map(|i| ClipDuck {
+                    clip: ClipId(i as u64),
+                    track: TrackId(1),
+                    keys: vec![
+                        animathio_control::DuckKey {
+                            time: Time(0),
+                            gain: 1.0,
+                        };
+                        2
+                    ],
+                })
+                .collect(),
+            replace_existing: false,
+        }
+    }
+
+    #[core::prelude::v1::test]
+    fn summary_states_depth_regions_keyframes_and_undo() {
+        let params = DuckParams::default();
+        assert_eq!(
+            duck_summary(&params, &proposal(vec![range(1, 2), range(4, 6)], 1)),
+            "Music drops by 12.0 dB under 2 voice regions (3.0 s ducked). Writes 2 keyframes on 1 clip as one undo step."
+        );
+        assert!(duck_summary(&params, &proposal(vec![range(1, 2)], 2)).contains("on 2 clips"));
+    }
+
+    #[core::prelude::v1::test]
+    fn summary_explains_empty_proposals() {
+        let params = DuckParams::default();
+        assert!(duck_summary(&params, &proposal(vec![], 0)).starts_with("No voice found"));
+        let none = duck_summary(&params, &proposal(vec![range(1, 2)], 0));
+        assert!(none.contains("1 voice region,") && none.contains("no chosen music clip"));
     }
 }

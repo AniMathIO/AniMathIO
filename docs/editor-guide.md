@@ -348,12 +348,36 @@ Optional local Whisper adds filler-phrase and immediate-repeat suggestions; see 
 ![Automatic cut review of a voice pause over music](screenshots/editor-autocut.png)
 
 Music ducking under speech is one undoable edit of gain keyframes: Clip > Auto duck…,
-`animathio-cli duck`, or MCP `auto_duck`. Pick the voice clip/tracks and the music tracks or clips,
-tune depth and attack/release, and review the ducked spans on the timeline first; see the
-[CLI reference](cli.md#duck) and [rules](mcp.md#auto-ducking).
-Only audio/video selections default to the voice source. The review panel scrolls
-in shorter windows so its actions stay reachable. Clip targets show the asset name,
-track name and start timecode, so repeated uses of the same asset remain identifiable.
+`animathio-cli duck`, or MCP `auto_duck`. The panel walks through three steps:
+
+1. **Voice.** Pick the voice tracks, or use the selected clip as the voice (only audio and
+   video selections default to it; a selected image never does).
+2. **Music.** Pick the music tracks, or individual music clips (each button shows the asset
+   name, track name and start timecode, so repeated uses of one asset stay distinguishable).
+   When you open the panel with a voice clip selected, every other unlocked audio track is
+   suggested as music; untick the ones you want left alone. The voice's own track (and a
+   video's linked audio) is never suggested.
+3. **Preview.** The panel analyses on open and after every change and then says what will
+   happen, for example "Music drops by 12.0 dB under 2 voice regions (3.6 s ducked). Writes
+   10 keyframes on 1 clip as one undo step." The ducked spans are shaded on the music tracks
+   of the timeline, and the play button beside a voice region moves the playhead to where it
+   starts. Nothing is written until **Apply**; Edit > Undo then reverts the whole duck.
+
+Depth, attack, release, minimum gap and voice threshold are sliders; clips that already have
+gain keyframes ask you to tick **Replace existing gain keyframes**. The review panel scrolls
+in shorter windows so its actions stay reachable. See the [CLI reference](cli.md#duck) and
+[rules](mcp.md#auto-ducking).
+
+![Auto duck panel previewing the ducked span over a music bed](screenshots/editor-auto-duck.png)
+
+Denoise learns a fixed noise profile from a noise-only selection. Add **Denoise** to an audio
+clip, set In and Out around a stretch of room tone (or select one range marker), then choose
+Clip > Learn denoise from selection or press **Learn noise from selection** on the Denoise
+card. The range is trimmed to the clip, must be 32 ms to 30 s long, and is analysed on the
+dry mix; the sixteen band values are stored as plain effect parameters, so the learned profile
+is part of the project and the result stays a pure function of it. Learning is one undo step
+(undo restores adaptive mode or the previous profile); learn again after changing clip gain or
+earlier effects. See [rules](mcp.md#auto-ducking) for the shared control API.
 
 In clip and track audio-effect cards, Denoise keeps its sixteen learned noise-band
 controls in an **Advanced** section, collapsed initially. Expanding it preserves the

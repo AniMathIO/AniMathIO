@@ -130,7 +130,8 @@ See [Keyboard shortcuts](keyboard-shortcuts.md) for the Premiere default keymap.
 ## Reproducing panel screenshots
 
 The developer launch option `--screenshot-panel=markers` opens the same panel as
-Clip > Markers and beat sync. `--screenshot-panel=autocut` selects the first audio
+Clip > Markers and beat sync. `--screenshot-panel=duck` selects the first audio clip as the voice and opens Auto duck (the other
+audio tracks are suggested as music, then the normal analysis runs). `--screenshot-panel=autocut` selects the first audio
 clip in track order and runs the normal asynchronous analysis before showing its
 review. `--screenshot-panel=plugins` opens the Library's Plugins tab, and
 `--screenshot-panel=plugins-browse` also opens Browse, which fetches the community index
@@ -158,9 +159,11 @@ scripts/virtual-display.sh --screenshot docs/screenshots/editor-markers.png 30 \
   ./target/release/animathio --screenshot-panel=markers target/screenshot-project.amio
 scripts/virtual-display.sh --screenshot docs/screenshots/editor-autocut.png 30 \
   ./target/release/animathio --screenshot-panel=autocut target/screenshot-project.amio
+scripts/virtual-display.sh --screenshot docs/screenshots/editor-auto-duck.png 30 \
+  ./target/release/animathio --screenshot-panel=duck target/screenshot-project.amio
 ```
 
 The private config directory avoids changing personal preferences. Captures use
 1920×1080 Xvfb, silent audio and release binaries with first-party plugins. Inspect
-both PNGs: markers must have named rows; autocut must have completed analysis and
-show a proposed cut before capturing (increase the delay on slower machines).
+all PNGs: markers must have named rows; autocut must have completed analysis and
+show a proposed cut, and duck must show its preview summary, before capturing (increase the delay on slower machines).
