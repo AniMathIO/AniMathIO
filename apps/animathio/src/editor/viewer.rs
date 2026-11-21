@@ -501,11 +501,13 @@ impl Editor {
     }
 
     /// The ink bounds of a generated clip, recomputed only when what it draws changes (and not
-    /// at all while playing, when the last bounds stay). Scrubbing while paused moves
-    /// `source_time` between frame boundaries without drawing anything meaningfully
-    /// different, so the key quantises the source time to the project frame index: ticks
-    /// within one frame hit the cache instead of re-resolving, re-rendering and re-scanning
-    /// the clip per tick, while a real change (frame step, param edit, plugin reload) misses.
+    /// at all while playing, when the last bounds stay). The key quantises the playhead to
+    /// the *output* frame index: plugin clips draw at the retimed `source_time`, which below
+    /// 1x speed advances by less than one source frame per output frame, so a source-time
+    /// key served stale bounds across several frames. Scrubbing inside one output frame
+    /// draws (sub-tick) the same frame and hits; any other output frame, a param edit, a
+    /// retime or move (the placement and retiming clock are in the key, so either at a
+    /// paused playhead misses without a frame step) or a plugin reload misses.
     fn content_rect(
         &mut self,
         clip: &animathio_core::SceneClip,
@@ -514,15 +516,24 @@ impl Editor {
         use std::hash::{Hash as _, Hasher as _};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         let generation = self.plugin_host.as_ref().map_or(0, PluginHost::generation);
-        let frame = self
+        let output_frame = self
             .project
             .frame_rate()
-            .frame_to_time(1, Rounding::Floor)
-            .map_or(Time(1), |t| Time(t.0.max(1)));
-        let time_key = clip.source_time.0 - clip.source_time.0.rem_euclid(frame.0);
-        serde_json::to_string(&(&clip.kind, &clip.params, time_key, canvas, generation))
-            .unwrap_or_default()
-            .hash(&mut hasher);
+            .time_to_frame(self.position, Rounding::Floor)
+            .unwrap_or(i64::MAX);
+        let retime = self
+            .find_clip(clip.id)
+            .map(|c| (c.range, c.time_map.clone(), c.source_offset));
+        serde_json::to_string(&(
+            &clip.kind,
+            &clip.params,
+            output_frame,
+            retime,
+            canvas,
+            generation,
+        ))
+        .unwrap_or_default()
+        .hash(&mut hasher);
         let key = hasher.finish();
         if let Some(cache) = &self.viewer_state.content
             && cache.id == clip.id

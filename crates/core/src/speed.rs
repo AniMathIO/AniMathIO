@@ -487,13 +487,7 @@ pub fn freeze_frame_command(
                     hold: true,
                     ..ClipTimeMap::default()
                 };
-                hold.range = TimeRange::new(
-                    at,
-                    Time(
-                        at.0.checked_add(duration)
-                            .ok_or_else(|| invalid("hold overflow"))?,
-                    ),
-                )?;
+                hold.range = TimeRange::new(at, Time(at.0 + duration))?;
                 hold.link_group = original.link_group.map(|_| hold_group);
                 hold.animations.clone_from(&tail.animations);
                 let mut pieces = vec![hold, tail];
