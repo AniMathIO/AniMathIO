@@ -1,6 +1,6 @@
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -14,6 +14,8 @@ use crate::settings::Endpoint;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The default time one conversion may take, local models included.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+/// How often a waiting conversion looks at its [`CancelToken`].
+const CANCEL_POLL: Duration = Duration::from_millis(25);
 /// The largest response body read, in bytes.
 const MAX_RESPONSE_BYTES: u64 = 1 << 20;
 /// The longest server error message kept for the dialog, in characters.
@@ -169,11 +171,69 @@ impl Converter for HttpConverter {
     ) -> Result<String, AssistError> {
         let agent = self.agent(endpoint);
         cancel.attach(&agent)?;
-        let result = self.exchange(&agent, endpoint, prose);
+        let result = {
+            let converter = self.clone();
+            let worker_agent = agent.clone();
+            let endpoint = endpoint.clone();
+            let prose = prose.to_owned();
+            run_cancellable(cancel, move || {
+                converter.exchange(&worker_agent, &endpoint, &prose)
+            })
+        };
         cancel.detach();
         match result {
             Err(_) if cancel.is_cancelled() => Err(AssistError::Cancelled),
             other => other,
+        }
+    }
+}
+
+/// Run `work` on its own thread and wait for it, looking at `cancel` every [`CANCEL_POLL`].
+///
+/// A blocking `ureq` call cannot be interrupted portably: `Agent::shutdown` wakes a blocked
+/// read on Linux and macOS but not on Windows, where only closing the socket does. So the
+/// caller never waits on the socket: once `cancel` is observed this returns
+/// [`AssistError::Cancelled`] at once (after a best-effort `Agent::shutdown`, done by
+/// [`CancelToken::cancel`]). The abandoned worker keeps running until the request ends or
+/// the global timeout (60 s by default) fires; it owns copies of its inputs and touches no
+/// application state, and its result is dropped.
+///
+/// Rule: the token is checked before every wait, so once `cancel()` has been called this
+/// always returns `Cancelled`, even if the result arrived in the meantime. A result that
+/// arrived before `cancel()` was called is returned.
+fn run_cancellable<T, F>(cancel: &CancelToken, work: F) -> Result<T, AssistError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, AssistError> + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("assist-request".into())
+        .spawn(move || {
+            // The receiver is gone after a cancel: the result is simply dropped.
+            let _ = tx.send(work());
+        });
+    if let Err(error) = spawned {
+        return Err(AssistError::Network(format!(
+            "could not start the request: {error}"
+        )));
+    }
+    loop {
+        if cancel.is_cancelled() {
+            return Err(AssistError::Cancelled);
+        }
+        match rx.recv_timeout(CANCEL_POLL) {
+            Ok(result) => {
+                return if cancel.is_cancelled() {
+                    Err(AssistError::Cancelled)
+                } else {
+                    result
+                };
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(AssistError::Network("the request thread stopped".into()));
+            }
         }
     }
 }
@@ -355,6 +415,45 @@ mod tests {
         let shown = bounded(&redact(&text, &endpoint));
         assert!(!shown.contains("sk-"), "{shown}");
         assert!(!shown.contains(&key[..4]), "{shown}");
+    }
+
+    #[test]
+    fn cancel_returns_promptly_while_the_worker_ignores_it() {
+        use std::time::Instant;
+        let token = CancelToken::new();
+        let (release, blocked) = mpsc::channel::<()>();
+        let canceller = {
+            let token = token.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                token.cancel();
+            })
+        };
+        let started = Instant::now();
+        // The worker blocks on something no socket shutdown can wake.
+        let result = run_cancellable(&token, move || {
+            let _ = blocked.recv();
+            Ok("late".to_owned())
+        });
+        assert_eq!(result, Err(AssistError::Cancelled));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        canceller.join().unwrap();
+        drop(release);
+    }
+
+    #[test]
+    fn a_result_before_cancel_is_returned_and_cancel_after_wins() {
+        let token = CancelToken::new();
+        assert_eq!(run_cancellable(&token, || Ok(7)), Ok(7));
+        assert_eq!(
+            run_cancellable(&token, || Err::<u8, _>(AssistError::EmptyInput)),
+            Err(AssistError::EmptyInput)
+        );
+        token.cancel();
+        assert_eq!(
+            run_cancellable(&token, || Ok(7)),
+            Err(AssistError::Cancelled)
+        );
     }
 
     #[test]

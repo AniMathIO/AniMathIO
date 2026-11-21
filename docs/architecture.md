@@ -642,8 +642,12 @@ sandbox without network access, and the core must stay free of provider behaviou
   redacted of the key before it is shortened.
 - **Explicit action only.** The editor calls it from the Convert button, on a dedicated worker
   thread (the call blocks; the result returns through a oneshot channel), with the description
-  text alone. Dropping the panel cancels a request in flight. `CancelToken::cancel` shuts down the request's `ureq::Agent`,
-  so a blocked read returns `Cancelled` immediately; the editor also drops the result.
+  text alone. Dropping the panel cancels a request in flight. `HttpConverter` runs the blocking `ureq` call on an inner
+  worker thread while the caller polls the `CancelToken` every 25 ms, so `Cancelled` returns
+  immediately on every platform (`Agent::shutdown`, still called, does not wake a blocked read on
+  Windows). Once cancel is observed it wins over a result that has just arrived. The abandoned
+  worker owns copies of its inputs, touches no application state and ends with the request or the
+  60 s global timeout; the editor also drops the result.
 - **Secrets.** `assist.json` (`editor_env::config_file`) holds only `base_url` and `model`. The
   key is stored in the operating system keyring through GPUI's credential API (Secret Service or
   the Flatpak Secret portal, Windows Credential Manager, macOS Keychain) in one entry per
