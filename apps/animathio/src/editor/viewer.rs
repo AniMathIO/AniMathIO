@@ -501,7 +501,11 @@ impl Editor {
     }
 
     /// The ink bounds of a generated clip, recomputed only when what it draws changes (and not
-    /// at all while playing, when the last bounds stay).
+    /// at all while playing, when the last bounds stay). Scrubbing while paused moves
+    /// `source_time` between frame boundaries without drawing anything meaningfully
+    /// different, so the key quantises the source time to the project frame index: ticks
+    /// within one frame hit the cache instead of re-resolving, re-rendering and re-scanning
+    /// the clip per tick, while a real change (frame step, param edit, plugin reload) misses.
     fn content_rect(
         &mut self,
         clip: &animathio_core::SceneClip,
@@ -510,15 +514,15 @@ impl Editor {
         use std::hash::{Hash as _, Hasher as _};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         let generation = self.plugin_host.as_ref().map_or(0, PluginHost::generation);
-        serde_json::to_string(&(
-            &clip.kind,
-            &clip.params,
-            clip.source_time,
-            canvas,
-            generation,
-        ))
-        .unwrap_or_default()
-        .hash(&mut hasher);
+        let frame = self
+            .project
+            .frame_rate()
+            .frame_to_time(1, Rounding::Floor)
+            .map_or(Time(1), |t| Time(t.0.max(1)));
+        let time_key = clip.source_time.0 - clip.source_time.0.rem_euclid(frame.0);
+        serde_json::to_string(&(&clip.kind, &clip.params, time_key, canvas, generation))
+            .unwrap_or_default()
+            .hash(&mut hasher);
         let key = hasher.finish();
         if let Some(cache) = &self.viewer_state.content
             && cache.id == clip.id

@@ -403,6 +403,29 @@ fn extreme_valid_curves_and_invalid_serialized_clocks_are_bounded() {
 }
 
 #[test]
+fn frame_hold_at_the_tick_limit_reports_a_clean_overflow() {
+    // A clip that runs to the very end of the tick domain validates, but no hold can fit
+    // one frame before its end: the batch must report the overflow instead of panicking
+    // on, or wrapping around, `at.0 + duration`.
+    let mut p = Project::default();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "layer"),
+        index: 0,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let end = i64::MAX;
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(ClipId(1), ClipKind::Error("fixture".into()), range(0, end)),
+    }
+    .apply(&mut p)
+    .unwrap();
+    let error = freeze_frame_command(&p, ClipId(1), Time(end - 1), 1).unwrap_err();
+    assert!(error.0.contains("hold overflow"), "{error:?}");
+}
+
+#[test]
 fn hold_at_start_and_retime_rollback_leave_no_orphaned_links() {
     let mut p = project(true, true);
     exact(
