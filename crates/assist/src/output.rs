@@ -53,12 +53,29 @@ fn strip_thinking(text: &str) -> String {
 }
 
 /// The inside of the first fenced block, or the text itself without one. An unclosed fence
-/// keeps everything after it.
+/// keeps everything after it. A fence opened and closed on one line (```` ```x^2``` ````) is
+/// the text between the backticks.
 fn strip_fence(text: &str) -> &str {
     let Some(open) = text.find("```") else {
         return text;
     };
     let after = &text[open + 3..];
+    let first_line = after.split_once('\n').map_or(after, |(line, _)| line);
+    if let Some(close) = first_line.find("```") {
+        let inner = after[..close].trim();
+        if matches!(inner, "latex" | "tex") {
+            return "";
+        }
+        // A language tag may precede the formula (```latex x^2```).
+        return ["latex", "tex"]
+            .iter()
+            .find_map(|tag| {
+                inner
+                    .strip_prefix(tag)
+                    .filter(|rest| rest.starts_with(char::is_whitespace))
+            })
+            .unwrap_or(inner);
+    }
     // The rest of the opening line is the language tag (`latex`, `tex`, ...).
     let body = after.split_once('\n').map_or("", |(_, body)| body);
     body.find("```").map_or(body, |close| &body[..close])
@@ -70,8 +87,8 @@ fn strip_delimiters(text: &str) -> &str {
             .strip_prefix(open)
             .and_then(|rest| rest.strip_suffix(close))
         {
-            // `$a$ and $b$` is two formulas, not one wrapped one.
-            if !inner.contains(open) || open.starts_with('\\') {
+            // `$a$ and $b$` and `\[a\] + \[b\]` are two formulas, not one wrapped one.
+            if !inner.contains(open) && !inner.contains(close) {
                 return inner.trim();
             }
         }
@@ -138,8 +155,27 @@ mod tests {
             clean_latex("<think>the user wants x</think>\n```latex\nx^2\n```").unwrap(),
             "x^2"
         );
-        // Two separate inline formulas are left alone.
+        // Two separate inline formulas are left alone, whatever the delimiter.
         assert_eq!(clean_latex("$a$ and $b$").unwrap(), "$a$ and $b$");
+        assert_eq!(clean_latex(r"\[a\] + \[b\]").unwrap(), r"\[a\] + \[b\]");
+        assert_eq!(clean_latex(r"\(a\) and \(b\)").unwrap(), r"\(a\) and \(b\)");
+        assert_eq!(clean_latex(r"\[ \frac{a}{b} \]").unwrap(), r"\frac{a}{b}");
+    }
+
+    #[test]
+    fn one_line_fences_keep_their_content() {
+        assert_eq!(clean_latex("```x^2```").unwrap(), "x^2");
+        assert_eq!(clean_latex("  ```x^2```  ").unwrap(), "x^2");
+        assert_eq!(clean_latex("```latex x^2```").unwrap(), "x^2");
+        assert_eq!(clean_latex("```$x^2$```").unwrap(), "x^2");
+        assert_eq!(
+            clean_latex("Answer: ```\\frac{a}{b}``` done").unwrap(),
+            r"\frac{a}{b}"
+        );
+        // A language tag alone is not a formula.
+        assert!(clean_latex("```latex```").is_err());
+        // Multi-line fences still work.
+        assert_eq!(clean_latex("```latex\nx^2\n```").unwrap(), "x^2");
     }
 
     #[test]

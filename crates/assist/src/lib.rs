@@ -25,4 +25,4 @@ pub use client::{CancelToken, Converter, HttpConverter};
 pub use error::AssistError;
 pub use output::clean_latex;
 pub use prompt::{MAX_INPUT_CHARS, SYSTEM_PROMPT};
-pub use settings::{AssistSettings, Endpoint, PRESETS, Preset, Secret};
+pub use settings::{AssistSettings, Endpoint, KeyUse, PRESETS, Preset, Secret};

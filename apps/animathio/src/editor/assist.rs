@@ -3,14 +3,17 @@
 //! Off until the user sets up an OpenAI-compatible endpoint. Nothing is sent automatically:
 //! only the **Convert** button sends the description, on a worker thread, with a Cancel button
 //! that aborts the request. The API key lives in the operating system keyring (one entry per
-//! host, so switching provider never sends a key to the wrong server); base URL and model are
-//! the non-secret `assist.json` settings. The result replaces the formula field, so the live
+//! origin, `scheme://host:port`, so switching provider or scheme never sends a key to the wrong
+//! server); base URL and model are the non-secret `assist.json` settings, read once and cached.
+//! The keyring is touched only by a user action (opening Set up, Save, Remove, Convert), never
+//! when the panel is built, because that can raise a keyring unlock prompt. The result replaces the formula field, so the live
 //! LaTeX preview validates it and the user edits it before **Add** inserts it as one undoable
 //! command, the same path as typing LaTeX. All provider logic is in `animathio-assist`.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use animathio_assist::{
-    AssistError, AssistSettings, CancelToken, Converter, Endpoint, PRESETS, Secret,
+    AssistError, AssistSettings, CancelToken, Converter, Endpoint, KeyUse, PRESETS, Secret,
 };
 use gpui::{prelude::*, *};
 use gpui_component::button::{Button, ButtonVariants};
@@ -25,16 +28,57 @@ pub(super) struct AssistBackend(pub(super) Arc<dyn Converter>);
 
 impl Global for AssistBackend {}
 
-/// Account name of the keyring entry; the entry itself is addressed by host.
+/// How often the editor checks whether the worker thread has an answer.
+const RESULT_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// Account name of the keyring entry; the entry itself is addressed by origin.
 const KEY_ACCOUNT: &str = "api-key";
 
-/// The keyring address of the API key for `host`.
-fn credential_url(host: &str) -> String {
-    format!("animathio-assist://{host}")
+/// The keyring address of the API key for `origin` (`https://api.openai.com:443`): scheme,
+/// host and port, so `http` and `https` of one host, or two ports, never share a key.
+fn credential_url(origin: &str) -> String {
+    format!("animathio-assist:{origin}")
 }
 
 fn settings_path() -> Option<std::path::PathBuf> {
     crate::editor_env::config_file("assist.json")
+}
+
+/// Settings and key status shared by every panel of the editor, so rebuilding the Math dialog
+/// reads neither `assist.json` nor the keyring again.
+#[derive(Default)]
+struct AssistState {
+    /// `assist.json`, read on first use and replaced when the setup form saves.
+    settings: Option<AssistSettings>,
+    /// What the keyring said about each origin, learnt from a user action.
+    keys: HashMap<String, KeyStatus>,
+}
+
+impl Global for AssistState {}
+
+fn cached_settings(cx: &mut App) -> AssistSettings {
+    let state = cx.default_global::<AssistState>();
+    state
+        .settings
+        .get_or_insert_with(|| {
+            settings_path().map_or_else(AssistSettings::default, |path| AssistSettings::load(&path))
+        })
+        .clone()
+}
+
+fn cached_key_status(cx: &App, origin: &str) -> Option<KeyStatus> {
+    cx.try_global::<AssistState>()?.keys.get(origin).cloned()
+}
+
+#[cfg(test)]
+pub(super) fn cached_key_status_for_tests(cx: &App, origin: &str) -> Option<KeyStatus> {
+    cached_key_status(cx, origin)
+}
+
+pub(super) fn set_key_status(cx: &mut App, origin: &str, status: KeyStatus) {
+    cx.default_global::<AssistState>()
+        .keys
+        .insert(origin.to_owned(), status);
 }
 
 /// Emitted when a conversion produced LaTeX for the formula field.
@@ -43,7 +87,7 @@ pub(super) enum AssistEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum KeyStatus {
+pub(super) enum KeyStatus {
     Unknown,
     Saved,
     Missing,
@@ -64,7 +108,6 @@ pub(super) struct AssistPanel {
     model: Entity<InputState>,
     api_key: Entity<InputState>,
     setup_open: bool,
-    key: KeyStatus,
     converting: bool,
     cancel: Option<CancelToken>,
     generation: u64,
@@ -75,9 +118,7 @@ impl EventEmitter<AssistEvent> for AssistPanel {}
 
 impl AssistPanel {
     pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let settings = settings_path()
-            .map(|path| AssistSettings::load(&path))
-            .unwrap_or_default();
+        let settings = cached_settings(cx);
         let converter = cx.global::<AssistBackend>().0.clone();
         let prose = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -99,7 +140,7 @@ impl AssistPanel {
                 .placeholder("API key (kept in the system keyring)")
                 .masked(true)
         });
-        let mut this = Self {
+        Self {
             setup_open: !settings.is_configured(),
             settings,
             converter,
@@ -107,14 +148,11 @@ impl AssistPanel {
             base_url,
             model,
             api_key,
-            key: KeyStatus::Unknown,
             converting: false,
             cancel: None,
             generation: 0,
             message: None,
-        };
-        this.refresh_key_status(cx);
-        this
+        }
     }
 
     /// Whether a conversion is running.
@@ -167,25 +205,56 @@ impl AssistPanel {
         &self.settings
     }
 
+    /// What is known about the saved key of the configured server (from the shared cache).
+    pub(super) fn key_status(&self, cx: &App) -> KeyStatus {
+        self.settings
+            .origin()
+            .ok()
+            .and_then(|origin| cached_key_status(cx, &origin))
+            .unwrap_or(KeyStatus::Unknown)
+    }
+
     /// Look the saved key up (asynchronously) so the setup form can say whether one exists.
-    fn refresh_key_status(&mut self, cx: &mut Context<Self>) {
-        let Ok(host) = self.settings.host() else {
-            self.key = KeyStatus::Unknown;
+    /// Only called for a user action. Without `force` a known answer is kept, so reopening the
+    /// form does not ask the keyring again. Plain `http://` network servers never use a key.
+    fn refresh_key_status(&mut self, force: bool, cx: &mut Context<Self>) {
+        let Ok(origin) = self.settings.origin() else {
             return;
         };
-        let task = cx.read_credentials(&credential_url(&host));
+        if self.settings.key_use() == Ok(KeyUse::Never) {
+            return;
+        }
+        let known = cached_key_status(cx, &origin);
+        if !force && matches!(known, Some(KeyStatus::Saved | KeyStatus::Missing)) {
+            return;
+        }
+        let task = cx.read_credentials(&credential_url(&origin));
         cx.spawn(async move |this, cx| {
             let status = match task.await {
                 Ok(Some(_)) => KeyStatus::Saved,
                 Ok(None) => KeyStatus::Missing,
                 Err(error) => KeyStatus::Unavailable(error.to_string()),
             };
-            let _ = this.update(cx, |this, cx| {
-                this.key = status;
+            let _ = this.update(cx, |_, cx| {
+                set_key_status(cx, &origin, status);
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_setup_open(&self) -> bool {
+        self.setup_open
+    }
+
+    /// Open or close the setup form. Opening it is the user action that may read the keyring.
+    pub(super) fn toggle_setup(&mut self, cx: &mut Context<Self>) {
+        self.setup_open = !self.setup_open;
+        if self.setup_open {
+            self.refresh_key_status(false, cx);
+        }
+        cx.notify();
     }
 
     fn apply_preset(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -212,6 +281,15 @@ impl AssistPanel {
             cx.notify();
             return;
         }
+        let typed = Secret::new(&self.api_key.read(cx).value());
+        // A key for a plain http:// network server would never be sent: refuse it up front.
+        if let Some(secret) = &typed
+            && let Err(error) = Endpoint::new(&settings, Some(secret.clone()))
+        {
+            self.message = Some(Message::Error(error.to_string()));
+            cx.notify();
+            return;
+        }
         if let Some(path) = settings_path()
             && let Err(error) = settings.save(&path)
         {
@@ -221,8 +299,8 @@ impl AssistPanel {
             cx.notify();
             return;
         }
+        cx.default_global::<AssistState>().settings = Some(settings.clone());
         self.settings = settings;
-        let typed = self.api_key.read(cx).value().to_string();
         // The key leaves the text field at once; only the keyring task holds it.
         self.api_key
             .update(cx, |state, cx| state.set_value(String::new(), window, cx));
@@ -234,10 +312,10 @@ impl AssistPanel {
             }
             .into(),
         ));
-        match (self.settings.host(), Secret::new(&typed)) {
-            (Ok(host), Some(secret)) => {
+        match (self.settings.origin(), typed) {
+            (Ok(origin), Some(secret)) => {
                 let task = cx.write_credentials(
-                    &credential_url(&host),
+                    &credential_url(&origin),
                     KEY_ACCOUNT,
                     secret.expose().as_bytes(),
                 );
@@ -245,11 +323,17 @@ impl AssistPanel {
                     let result = task.await;
                     let _ = this.update(cx, |this, cx| {
                         match result {
-                            Ok(()) => this.refresh_key_status(cx),
+                            Ok(()) => set_key_status(cx, &origin, KeyStatus::Saved),
                             Err(error) => {
                                 log::warn!("saving the AI assist key failed: {error}");
+                                set_key_status(
+                                    cx,
+                                    &origin,
+                                    KeyStatus::Unavailable(error.to_string()),
+                                );
                                 this.message = Some(Message::Error(format!(
-                                    "Could not save the key to the system keyring: {error}"
+                                    "Could not save the key: the system keyring is not \
+                                     available ({error})."
                                 )));
                             }
                         }
@@ -258,22 +342,22 @@ impl AssistPanel {
                 })
                 .detach();
             }
-            _ => self.refresh_key_status(cx),
+            _ => self.refresh_key_status(true, cx),
         }
         cx.notify();
     }
 
-    /// Delete the saved key of the configured host.
+    /// Delete the saved key of the configured server.
     fn remove_key(&mut self, cx: &mut Context<Self>) {
-        let Ok(host) = self.settings.host() else {
+        let Ok(origin) = self.settings.origin() else {
             return;
         };
-        let task = cx.delete_credentials(&credential_url(&host));
+        let task = cx.delete_credentials(&credential_url(&origin));
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(()) => this.key = KeyStatus::Missing,
+                    Ok(()) => set_key_status(cx, &origin, KeyStatus::Missing),
                     Err(error) => {
                         this.message = Some(Message::Error(format!(
                             "Could not remove the key from the system keyring: {error}"
@@ -287,20 +371,28 @@ impl AssistPanel {
     }
 
     /// Send the description to the configured model. Explicit user action only; runs on a
-    /// worker, so the UI never blocks. The outcome arrives as an [`AssistEvent`] or a message.
+    /// dedicated thread (the HTTP call blocks), so the UI never blocks. The outcome arrives as
+    /// an [`AssistEvent`] or a message. The keyring is read here only when a key can matter: an
+    /// online service always, a local server only when a key is known to be saved for it, and
+    /// never for a plain `http://` network server.
     pub(super) fn convert(&mut self, cx: &mut Context<Self>) {
         if self.converting {
             return;
         }
         let prose = self.prose.read(cx).value().to_string();
         let settings = self.settings.clone();
-        let host = match Endpoint::new(&settings, None) {
-            Ok(endpoint) => endpoint.host().to_owned(),
+        let (origin, key_use) = match Endpoint::new(&settings, None) {
+            Ok(endpoint) => (endpoint.origin().to_owned(), endpoint.key_use()),
             Err(error) => return self.fail(error, cx),
         };
         if prose.trim().is_empty() {
             return self.fail(AssistError::EmptyInput, cx);
         }
+        let read_key = match key_use {
+            KeyUse::Required => true,
+            KeyUse::Optional => cached_key_status(cx, &origin) == Some(KeyStatus::Saved),
+            KeyUse::Never => false,
+        };
         self.generation += 1;
         let generation = self.generation;
         let token = CancelToken::new();
@@ -308,34 +400,72 @@ impl AssistPanel {
         self.converting = true;
         self.message = None;
         let converter = self.converter.clone();
-        let key_task = cx.read_credentials(&credential_url(&host));
+        let key_task = read_key.then(|| cx.read_credentials(&credential_url(&origin)));
         cx.spawn(async move |this, cx| {
-            let (key, key_problem) = match key_task.await {
-                Ok(Some((_, bytes))) => (
-                    String::from_utf8(bytes)
-                        .ok()
-                        .and_then(|text| Secret::new(&text)),
-                    None,
-                ),
-                Ok(None) => (None, None),
-                Err(error) => {
-                    log::warn!("reading the AI assist key failed: {error}");
-                    (None, Some(error.to_string()))
-                }
+            let mut key_problem = None;
+            let mut key_status = None;
+            let key = match key_task {
+                None => None,
+                Some(task) => match task.await {
+                    Ok(Some((_, bytes))) => {
+                        key_status = Some(KeyStatus::Saved);
+                        String::from_utf8(bytes)
+                            .ok()
+                            .and_then(|text| Secret::new(&text))
+                    }
+                    Ok(None) => {
+                        key_status = Some(KeyStatus::Missing);
+                        None
+                    }
+                    Err(error) => {
+                        log::warn!("reading the AI assist key failed: {error}");
+                        key_status = Some(KeyStatus::Unavailable(error.to_string()));
+                        key_problem = Some(error.to_string());
+                        None
+                    }
+                },
             };
             if token.is_cancelled() {
                 return;
             }
             let had_key = key.is_some();
-            let result = {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let worker = {
                 let token = token.clone();
-                cx.background_spawn(async move {
-                    let endpoint = Endpoint::new(&settings, key)?;
-                    converter.convert(&endpoint, &prose, &token)
-                })
-                .await
+                std::thread::Builder::new()
+                    .name("animathio-assist".into())
+                    .spawn(move || {
+                        let result = Endpoint::new(&settings, key)
+                            .and_then(|endpoint| converter.convert(&endpoint, &prose, &token));
+                        let _ = tx.send(result);
+                    })
+            };
+            let result = match worker {
+                // Poll the worker's channel: no other thread ever wakes this task.
+                Ok(_) => loop {
+                    match rx.try_recv() {
+                        Ok(result) => break result,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            break Err(AssistError::Network(
+                                "the request stopped unexpectedly".into(),
+                            ));
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            if token.is_cancelled() {
+                                return;
+                            }
+                            cx.background_executor().timer(RESULT_POLL).await;
+                        }
+                    }
+                },
+                Err(error) => Err(AssistError::Network(format!(
+                    "could not start the request: {error}"
+                ))),
             };
             let _ = this.update(cx, |this, cx| {
+                if let Some(status) = key_status {
+                    set_key_status(cx, &origin, status);
+                }
                 if this.generation != generation {
                     return;
                 }
@@ -352,10 +482,20 @@ impl AssistPanel {
                     }
                     Err(AssistError::Cancelled) => this.message = None,
                     Err(error @ AssistError::Auth { .. }) if !had_key => {
-                        let hint = key_problem.map_or_else(
-                            || "No API key is saved for this host; add one in Set up.".to_owned(),
-                            |problem| format!("The system keyring could not be read: {problem}"),
-                        );
+                        let hint = match (key_problem, key_use) {
+                            (Some(problem), _) => {
+                                format!("The system keyring could not be read: {problem}")
+                            }
+                            (None, KeyUse::Optional) => "If this server needs a key, open Set up \
+                                so the saved key for it is loaded, or add one."
+                                .to_owned(),
+                            (None, KeyUse::Never) => "A key is never sent over plain http://; \
+                                use an https:// address for a server that needs one."
+                                .to_owned(),
+                            (None, KeyUse::Required) => {
+                                "No API key is saved for this server; add one in Set up.".to_owned()
+                            }
+                        };
                         this.message = Some(Message::Error(format!("{error} {hint}")));
                     }
                     Err(error) => this.message = Some(Message::Error(error.to_string())),
@@ -385,14 +525,18 @@ impl AssistPanel {
         cx.notify();
     }
 
-    fn notice(&self) -> String {
-        let (Ok(host), Ok(local)) = (self.settings.host(), self.settings.is_local()) else {
+    fn notice(&self, key: &KeyStatus) -> String {
+        let (Ok(host), Ok(local), Ok(key_use)) = (
+            self.settings.host(),
+            self.settings.is_local(),
+            self.settings.key_use(),
+        ) else {
             return String::new();
         };
-        let key = if self.key == KeyStatus::Saved {
-            " and your API key"
-        } else {
-            ""
+        let key = match key_use {
+            KeyUse::Required => " and your saved API key (if any)",
+            KeyUse::Optional if *key == KeyStatus::Saved => " and your API key",
+            KeyUse::Optional | KeyUse::Never => "",
         };
         let scope = if local {
             "a server on your own machine or network"
@@ -406,20 +550,42 @@ impl AssistPanel {
         )
     }
 
-    fn key_line(&self) -> String {
-        match &self.key {
-            KeyStatus::Unknown => "API key: not checked yet".into(),
-            KeyStatus::Saved => "API key: saved in the system keyring for this host".into(),
-            KeyStatus::Missing => "API key: none saved (local servers need none)".into(),
-            KeyStatus::Unavailable(error) => {
-                format!("The system keyring is not available: {error}")
-            }
+    fn key_line(&self, key: &KeyStatus) -> String {
+        key_status_line(self.settings.key_use().ok(), key)
+    }
+}
+
+/// The setup form's one-line key state.
+fn key_status_line(key_use: Option<KeyUse>, key: &KeyStatus) -> String {
+    if key_use == Some(KeyUse::Never) {
+        return "API key: not used, this server is reached over plain http:// and a key \
+                would not be encrypted. Use https:// for a server that needs one."
+            .into();
+    }
+    match key {
+        KeyStatus::Unknown => "API key: not checked yet".into(),
+        KeyStatus::Saved => "API key: saved in the system keyring for this server".into(),
+        KeyStatus::Missing => "API key: none saved (local servers need none)".into(),
+        KeyStatus::Unavailable(error) => format!(
+            "Keyring not available: {error}. A key cannot be saved or read here; local \
+             servers need none."
+        ),
+    }
+}
+
+impl Drop for AssistPanel {
+    /// Closing the dialog (or switching clips) abandons a request in flight: close its
+    /// connection instead of leaving the worker waiting on the network.
+    fn drop(&mut self) {
+        if let Some(token) = self.cancel.take() {
+            token.cancel();
         }
     }
 }
 
 impl Render for AssistPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let key = self.key_status(cx);
         let secondary = hex(color::TEXT_SECONDARY);
         let configured = self.settings.is_configured();
         let mut panel = div().id("assist-panel").flex().flex_col().gap_2().child(
@@ -438,7 +604,7 @@ impl Render for AssistPanel {
                     div()
                         .text_size(style::type_size::XS)
                         .text_color(secondary)
-                        .child(self.notice()),
+                        .child(self.notice(&key)),
                 )
                 .child(
                     div()
@@ -473,10 +639,7 @@ impl Render for AssistPanel {
                                 .ghost()
                                 .icon(icons::icon(IconName::Settings))
                                 .label("Set up")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.setup_open = !this.setup_open;
-                                    cx.notify();
-                                })),
+                                .on_click(cx.listener(|this, _, _, cx| this.toggle_setup(cx))),
                         ),
                 );
         } else {
@@ -528,7 +691,7 @@ impl Render for AssistPanel {
                         div()
                             .text_size(style::type_size::XS)
                             .text_color(secondary)
-                            .child(self.key_line()),
+                            .child(self.key_line(&key)),
                     )
                     .child(
                         div()
@@ -557,7 +720,7 @@ impl Render for AssistPanel {
                                 Button::new("assist-remove-key")
                                     .small()
                                     .label("Remove saved key")
-                                    .disabled(self.key != KeyStatus::Saved)
+                                    .disabled(key != KeyStatus::Saved)
                                     .on_click(cx.listener(|this, _, _, cx| this.remove_key(cx))),
                             ),
                     ),
@@ -578,5 +741,24 @@ impl Render for AssistPanel {
             None => {}
         }
         panel
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KeyStatus, KeyUse, key_status_line};
+
+    #[test]
+    fn the_form_says_when_the_keyring_is_not_available() {
+        let line = key_status_line(
+            Some(KeyUse::Required),
+            &KeyStatus::Unavailable("no Secret Service".into()),
+        );
+        assert!(line.starts_with("Keyring not available"), "{line}");
+        assert!(line.contains("no Secret Service"), "{line}");
+        // A plain http:// network server never uses a key, whatever the keyring says.
+        let line = key_status_line(Some(KeyUse::Never), &KeyStatus::Saved);
+        assert!(line.contains("plain http://"), "{line}");
+        assert!(key_status_line(None, &KeyStatus::Missing).contains("none saved"));
     }
 }

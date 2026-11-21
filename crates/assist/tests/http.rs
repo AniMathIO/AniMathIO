@@ -359,3 +359,52 @@ fn unreachable_servers_are_a_network_error() {
         .unwrap_err();
     assert!(matches!(error, AssistError::Network(_)), "{error:?}");
 }
+
+#[test]
+fn an_error_in_a_200_body_is_redacted_and_short() {
+    let key = "sk-test-key-0123456789";
+    for message in [
+        format!("Incorrect API key provided: {key}."),
+        format!("{}{key}{}", "x".repeat(195), "y".repeat(400)),
+    ] {
+        let server = serve(Reply::Json(
+            200,
+            serde_json::json!({ "error": { "message": message } }).to_string(),
+        ));
+        let error = HttpConverter::new()
+            .convert(&endpoint(&server, Some(key)), "x", &CancelToken::new())
+            .unwrap_err();
+        let AssistError::BadResponse(detail) = &error else {
+            panic!("expected a bad response, got {error:?}");
+        };
+        assert!(detail.chars().count() <= 201, "{} characters", detail.len());
+        let shown = format!("{error} {error:?}");
+        assert!(!shown.contains(key), "{shown}");
+        assert!(!shown.contains("sk-test"), "{shown}");
+    }
+}
+
+#[test]
+fn an_oversized_reply_is_reported_as_too_large() {
+    let body = format!(
+        r#"{{"choices":[{{"message":{{"content":"{}"}}}}]}}"#,
+        "x".repeat(2 << 20)
+    );
+    let server = serve(Reply::Json(200, body));
+    let error = HttpConverter::new()
+        .convert(&endpoint(&server, None), "x", &CancelToken::new())
+        .unwrap_err();
+    assert_eq!(error, AssistError::BadResponse("reply too large".into()));
+}
+
+#[test]
+fn a_key_is_refused_for_plain_http_off_this_machine() {
+    let settings = AssistSettings {
+        base_url: "http://192.168.1.20:11434/v1".into(),
+        model: "m".into(),
+    };
+    let error = Endpoint::new(&settings, Secret::new("sk-test-key")).unwrap_err();
+    assert!(matches!(error, AssistError::InsecureKey(_)), "{error:?}");
+    assert!(error.to_string().contains("192.168.1.20"));
+    assert!(!error.to_string().contains("sk-test-key"));
+}

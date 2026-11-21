@@ -30,6 +30,12 @@ pub enum AssistError {
         /// The server's message, when it sent one.
         detail: String,
     },
+    /// A saved key would have gone over plain `http://` to a server that is not on this machine.
+    #[error(
+        "The API key is not sent to {0} because the connection is plain http://. Use an \
+         https:// address, or remove the saved key."
+    )]
+    InsecureKey(String),
     /// The request did not finish in time.
     #[error("The request timed out after {0} seconds.")]
     Timeout(u64),

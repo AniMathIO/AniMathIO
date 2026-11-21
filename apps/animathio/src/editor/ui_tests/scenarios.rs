@@ -3089,6 +3089,11 @@ fn text_font_weight_edit_is_a_command_with_undo(cx: &mut TestAppContext) {
 struct MockAssist {
     reply: std::sync::Mutex<Result<String, animathio_assist::AssistError>>,
     seen: std::sync::Mutex<Vec<(String, String)>>,
+    /// Whether each request carried an API key.
+    keys: std::sync::Mutex<Vec<bool>>,
+    /// Block in `complete` until the request is cancelled (then record that it was).
+    block: bool,
+    cancelled: std::sync::atomic::AtomicBool,
 }
 
 impl MockAssist {
@@ -3096,6 +3101,20 @@ impl MockAssist {
         std::sync::Arc::new(Self {
             reply: std::sync::Mutex::new(reply),
             seen: std::sync::Mutex::default(),
+            keys: std::sync::Mutex::default(),
+            block: false,
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// A client that waits for its token to be cancelled, like a request stuck on the network.
+    fn blocking() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            reply: std::sync::Mutex::new(Err(animathio_assist::AssistError::Cancelled)),
+            seen: std::sync::Mutex::default(),
+            keys: std::sync::Mutex::default(),
+            block: true,
+            cancelled: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -3109,12 +3128,21 @@ impl animathio_assist::Converter for MockAssist {
         &self,
         endpoint: &animathio_assist::Endpoint,
         prose: &str,
-        _cancel: &animathio_assist::CancelToken,
+        cancel: &animathio_assist::CancelToken,
     ) -> Result<String, animathio_assist::AssistError> {
         self.seen
             .lock()
             .unwrap()
             .push((endpoint.host().to_owned(), prose.to_owned()));
+        self.keys.lock().unwrap().push(endpoint.has_key());
+        if self.block {
+            let started = std::time::Instant::now();
+            while !cancel.is_cancelled() && started.elapsed() < std::time::Duration::from_secs(20) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            self.cancelled
+                .store(cancel.is_cancelled(), std::sync::atomic::Ordering::SeqCst);
+        }
         self.reply.lock().unwrap().clone()
     }
 }
@@ -3152,6 +3180,23 @@ fn assist_ui(
     (ui, panel, assist)
 }
 
+/// The conversion runs on its own thread, so wait (bounded) for it to report back.
+fn finish_convert(ui: &mut Ui, assist: &Entity<AssistPanel>) {
+    let started = std::time::Instant::now();
+    loop {
+        ui.advance_clock(std::time::Duration::from_millis(30));
+        ui.settle();
+        if !ui.cx.update(|_, cx| assist.read(cx).is_converting()) {
+            return;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "the conversion never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
 fn type_prose(ui: &mut Ui, assist: &Entity<AssistPanel>, text: &str) {
     ui.cx.update(|window, cx| {
         assist.update(cx, |assist, cx| assist.set_prose(text, window, cx));
@@ -3177,7 +3222,7 @@ fn assist_convert_preview_insert_undo(cx: &mut TestAppContext) {
     // Convert sends exactly the prose to the configured host and shows editable LaTeX.
     ui.cx
         .update(|_, cx| assist.update(cx, AssistPanel::convert));
-    ui.settle();
+    finish_convert(&mut ui, &assist);
     assert_eq!(
         mock.seen(),
         vec![(
@@ -3229,6 +3274,9 @@ fn assist_cancel_ignores_the_result(cx: &mut TestAppContext) {
         });
     });
     ui.settle();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    ui.advance_clock(std::time::Duration::from_millis(30));
+    ui.settle();
     assert_eq!(ui.cx.update(|_, cx| panel.read(cx).draft_source()), initial);
     assert!(!ui.cx.update(|_, cx| assist.read(cx).is_converting()));
 }
@@ -3246,7 +3294,7 @@ fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) 
     // Empty description: no request at all.
     ui.cx
         .update(|_, cx| assist.update(cx, AssistPanel::convert));
-    ui.settle();
+    finish_convert(&mut ui, &assist);
     assert_eq!(mock.seen(), Vec::<(String, String)>::new());
     let message = ui.cx.update(|_, cx| assist.read(cx).message().cloned());
     assert!(matches!(message, Some(Message::Error(_))), "{message:?}");
@@ -3255,7 +3303,7 @@ fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) 
     type_prose(&mut ui, &assist, "x squared");
     ui.cx
         .update(|_, cx| assist.update(cx, AssistPanel::convert));
-    ui.settle();
+    finish_convert(&mut ui, &assist);
     let Some(Message::Error(text)) = ui.cx.update(|_, cx| assist.read(cx).message().cloned())
     else {
         panic!("expected an error message");
@@ -3267,7 +3315,7 @@ fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) 
     *mock.reply.lock().unwrap() = Ok("Sorry, I cannot help with that request today.".into());
     ui.cx
         .update(|_, cx| assist.update(cx, AssistPanel::convert));
-    ui.settle();
+    finish_convert(&mut ui, &assist);
     let Some(Message::Error(text)) = ui.cx.update(|_, cx| assist.read(cx).message().cloned())
     else {
         panic!("expected an error message");
@@ -3283,7 +3331,7 @@ fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) 
             assist.convert(cx);
         });
     });
-    ui.settle();
+    finish_convert(&mut ui, &assist);
     assert_eq!(mock.seen().len(), calls);
 }
 
@@ -3331,4 +3379,151 @@ fn assist_setup_saves_settings_without_the_key(cx: &mut TestAppContext) {
     );
     // Leave the shared test config directory as found.
     let _ = std::fs::remove_file(path);
+}
+
+fn assist_settings(url: &str) -> animathio_assist::AssistSettings {
+    animathio_assist::AssistSettings {
+        base_url: url.into(),
+        model: "m".into(),
+    }
+}
+
+#[gpui::test]
+fn assist_panel_does_not_touch_the_keyring_until_asked(cx: &mut TestAppContext) {
+    use crate::editor::assist::{KeyStatus, cached_key_status_for_tests};
+    let mock = MockAssist::new(Ok("x".into()));
+    let (mut ui, _panel, assist) = assist_ui(cx, &mock);
+    ui.cx.update(|_, cx| {
+        assist.update(cx, |assist, _| {
+            assist.set_settings(assist_settings("https://api.openai.com/v1"));
+        });
+    });
+    ui.settle();
+    // Building (and rebuilding) the panel never reads the keyring: no status is known.
+    let origin = "https://api.openai.com:443";
+    ui.cx.update(|window, cx| {
+        for _ in 0..3 {
+            let panel = cx.new(|cx| AssistPanel::new(window, cx));
+            assert_eq!(panel.read(cx).key_status(cx), KeyStatus::Unknown);
+        }
+        assert_eq!(cached_key_status_for_tests(cx, origin), None);
+    });
+    ui.settle();
+    ui.cx
+        .update(|_, cx| assert_eq!(cached_key_status_for_tests(cx, origin), None));
+    // Opening the setup form is the user action that looks the key up (the test platform
+    // keyring is empty).
+    ui.cx.update(|_, cx| {
+        assist.update(cx, |assist, cx| {
+            if assist.is_setup_open() {
+                assist.toggle_setup(cx);
+            }
+            assert!(!assist.is_setup_open());
+            assist.toggle_setup(cx);
+            assert!(assist.is_setup_open());
+        });
+    });
+    ui.settle();
+    ui.cx.update(|_, cx| {
+        assert_eq!(assist.read(cx).key_status(cx), KeyStatus::Missing);
+    });
+}
+
+#[gpui::test]
+fn assist_convert_reads_the_keyring_only_when_a_key_can_matter(cx: &mut TestAppContext) {
+    use crate::editor::assist::{KeyStatus, set_key_status};
+    let mock = MockAssist::new(Ok("x".into()));
+    let (mut ui, _panel, assist) = assist_ui(cx, &mock);
+    let status = |ui: &mut Ui, origin: &str| {
+        ui.cx
+            .update(|_, cx| crate::editor::assist::cached_key_status_for_tests(cx, origin))
+    };
+    type_prose(&mut ui, &assist, "x");
+    let run = |ui: &mut Ui, url: &str| {
+        ui.cx.update(|_, cx| {
+            assist.update(cx, |assist, _| assist.set_settings(assist_settings(url)));
+        });
+        ui.cx
+            .update(|_, cx| assist.update(cx, AssistPanel::convert));
+        finish_convert(ui, &assist);
+    };
+    // An online service: the key is looked up on Convert.
+    run(&mut ui, "https://api.openai.com/v1");
+    assert_eq!(
+        status(&mut ui, "https://api.openai.com:443"),
+        Some(KeyStatus::Missing)
+    );
+    // A server on this machine: not read, as nothing says a key is saved for it.
+    run(&mut ui, "http://localhost:11434/v1");
+    assert_eq!(status(&mut ui, "http://localhost:11434"), None);
+    // ... unless the setup form already found one.
+    ui.cx
+        .update(|_, cx| set_key_status(cx, "http://localhost:11434", KeyStatus::Saved));
+    run(&mut ui, "http://localhost:11434/v1");
+    assert_eq!(
+        status(&mut ui, "http://localhost:11434"),
+        Some(KeyStatus::Missing)
+    );
+    // A network server over plain http: never read, never sent.
+    run(&mut ui, "http://192.168.1.20:11434/v1");
+    assert_eq!(status(&mut ui, "http://192.168.1.20:11434"), None);
+    assert_eq!(mock.keys.lock().unwrap().len(), 4);
+}
+
+#[gpui::test]
+fn assist_refuses_a_key_for_plain_http_on_the_network(cx: &mut TestAppContext) {
+    use crate::editor::assist::Message;
+    let mock = MockAssist::new(Ok("x".into()));
+    let (mut ui, _panel, assist) = assist_ui(cx, &mock);
+    ui.cx.update(|window, cx| {
+        assist.update(cx, |assist, cx| {
+            assist.set_form(
+                ("http://192.168.1.20:11434/v1", "m", "sk-secret-value"),
+                window,
+                cx,
+            );
+            assist.save_setup(window, cx);
+        });
+    });
+    ui.settle();
+    ui.cx.update(|_, cx| {
+        let assist = assist.read(cx);
+        let Some(Message::Error(text)) = assist.message() else {
+            panic!("expected a refusal, got {:?}", assist.message());
+        };
+        assert!(text.contains("plain http://"), "{text}");
+        assert!(!text.contains("sk-secret-value"), "{text}");
+        // The settings were not changed.
+        assert_eq!(assist.settings().base_url, "http://localhost:11434/v1");
+    });
+}
+
+#[gpui::test]
+fn dropping_the_assist_panel_cancels_the_request(cx: &mut TestAppContext) {
+    let mock = MockAssist::blocking();
+    let (mut ui, panel, assist) = assist_ui(cx, &mock);
+    type_prose(&mut ui, &assist, "x squared");
+    ui.cx
+        .update(|_, cx| assist.update(cx, AssistPanel::convert));
+    ui.settle();
+    // Wait until the worker has the request.
+    let started = std::time::Instant::now();
+    while mock.seen().is_empty() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    // Closing the dialog drops the panel; its request is cancelled.
+    drop(assist);
+    ui.cx.update(|_, _| drop(panel));
+    ui.settle();
+    let started = std::time::Instant::now();
+    while !mock.cancelled.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "the request was not cancelled"
+        );
+        ui.advance_clock(std::time::Duration::from_millis(30));
+        ui.settle();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
 }

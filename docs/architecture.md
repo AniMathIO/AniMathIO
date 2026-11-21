@@ -633,17 +633,27 @@ sandbox without network access, and the core must stay free of provider behaviou
 
 - **One protocol.** `Converter::convert` builds an OpenAI-compatible `POST <base>/chat/completions`
   (`HttpConverter`, blocking `ureq` with rustls, no redirects, 10 s connect and 60 s total
-  timeouts, loopback targets bypass proxies). OpenAI, Gemini's OpenAI-compatible endpoint and
-  local Ollama or llama.cpp servers differ only in settings. `http://` is accepted only for
-  local-network hosts.
-- **Explicit action only.** The editor calls it from the Convert button, on a background worker,
-  with the description text alone. `CancelToken::cancel` shuts down the request's `ureq::Agent`,
+  timeouts; only loopback targets (`localhost`, `127.0.0.0/8`, `::1`) bypass proxies, LAN hosts
+  honour the proxy environment). OpenAI, Gemini's OpenAI-compatible endpoint and local Ollama
+  or llama.cpp servers differ only in settings. `http://` is accepted only for local-network
+  hosts, and an `Authorization` header is never sent over plain `http://` to a host that is not
+  loopback (`Endpoint::new` returns `AssistError::InsecureKey`; the setup form refuses to store
+  such a key). Reply bodies are capped at 1 MiB (`reply too large`) and server error text is
+  redacted of the key before it is shortened.
+- **Explicit action only.** The editor calls it from the Convert button, on a dedicated worker
+  thread (the call blocks; the result returns through a oneshot channel), with the description
+  text alone. Dropping the panel cancels a request in flight. `CancelToken::cancel` shuts down the request's `ureq::Agent`,
   so a blocked read returns `Cancelled` immediately; the editor also drops the result.
 - **Secrets.** `assist.json` (`editor_env::config_file`) holds only `base_url` and `model`. The
   key is stored in the operating system keyring through GPUI's credential API (Secret Service or
-  the Flatpak Secret portal, Windows Credential Manager, macOS Keychain) at
-  `animathio-assist://<host>`, read just before a request and passed in an `Endpoint` whose
-  `Debug` redacts it. Error text is scrubbed of the key.
+  the Flatpak Secret portal, Windows Credential Manager, macOS Keychain) in one entry per
+  origin, `animathio-assist:<scheme>://<host>:<port>` with default ports written out, so the
+  `http` and `https` servers of one host never share a key. The editor touches the keyring only
+  for a user action (opening Set up, Save, Remove, Convert), never when the Math dialog is
+  built; `assist.json` and the per-origin key status are read once into a global cache that Save
+  refreshes. Convert reads the key for online services, for a local server only once Set up has
+  found a key for it, and never for a plain `http://` network server. The key is passed in an
+  `Endpoint` whose `Debug` redacts it. Error text is scrubbed of the key.
 - **Injection.** `EditorEnv::assist` is the `Converter` the editor uses (the real client in
   production, a mock in `ui_tests`); `animathio-assist`'s tests run the client against an
   in-process loopback server.

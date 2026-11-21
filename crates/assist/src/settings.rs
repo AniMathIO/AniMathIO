@@ -94,7 +94,34 @@ pub struct AssistSettings {
 pub(crate) struct Target {
     pub(crate) chat_url: String,
     pub(crate) host: String,
+    /// `scheme://host:port` with the default port written out; the identity a key belongs to.
+    pub(crate) origin: String,
+    pub(crate) https: bool,
+    /// `localhost`, `127.0.0.0/8` and `::1`: the only hosts that may be reached over plain
+    /// `http://` with a key and the only ones that bypass the proxy.
+    pub(crate) loopback: bool,
     pub(crate) local: bool,
+}
+
+impl Target {
+    /// Whether an `Authorization` header may go to this server: never over plain `http://`
+    /// to a host that is not on this machine.
+    pub(crate) fn may_send_key(&self) -> bool {
+        self.https || self.loopback
+    }
+}
+
+/// Whether the API key matters for a server, which decides whether the editor looks it up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyUse {
+    /// An online service over `https://`: it needs a key.
+    Required,
+    /// A server on this machine or network over a connection that may carry a key
+    /// (loopback `http://`, or `https://`): most need none.
+    Optional,
+    /// A network server over plain `http://`: a key would travel unencrypted, so none is ever
+    /// stored or sent.
+    Never,
 }
 
 impl AssistSettings {
@@ -104,10 +131,21 @@ impl AssistSettings {
         !self.base_url.trim().is_empty() && !self.model.trim().is_empty()
     }
 
-    /// The host (with a non-default port) requests go to, for the "what is sent where" notice
-    /// and as the identity the API key is stored under.
+    /// The host (with a non-default port) requests go to, for the "what is sent where" notice.
     pub fn host(&self) -> Result<String, AssistError> {
         self.target().map(|target| target.host)
+    }
+
+    /// The identity the API key is stored under: `scheme://host:port` with the default port
+    /// written out (`https://api.openai.com:443`), so the `http` and `https` servers of one
+    /// host and port, or two ports of one host, never share a key.
+    pub fn origin(&self) -> Result<String, AssistError> {
+        self.target().map(|target| target.origin)
+    }
+
+    /// Whether this server needs, may take or must never be given an API key.
+    pub fn key_use(&self) -> Result<KeyUse, AssistError> {
+        self.target().map(|target| target.key_use())
     }
 
     /// Whether the server is on this machine or the local network (no internet involved).
@@ -144,7 +182,8 @@ impl AssistSettings {
         }
         let host = uri.host().unwrap_or_default();
         let local = is_local_host(host);
-        if scheme == "http" && !local {
+        let https = scheme == "https";
+        if !https && !local {
             return Err(AssistError::InvalidBaseUrl(
                 "remote servers must use https:// so your text and key are encrypted".into(),
             ));
@@ -154,9 +193,13 @@ impl AssistSettings {
         } else {
             format!("{base}/chat/completions")
         };
+        let port = uri.port_u16().unwrap_or(if https { 443 } else { 80 });
         Ok(Target {
             chat_url,
             host: authority.as_str().to_ascii_lowercase(),
+            origin: format!("{scheme}://{}:{port}", host.to_ascii_lowercase()),
+            https,
+            loopback: is_loopback_host(host),
             local,
         })
     }
@@ -190,15 +233,45 @@ pub struct Endpoint {
     pub(crate) api_key: Option<Secret>,
 }
 
+impl Target {
+    fn key_use(&self) -> KeyUse {
+        if !self.may_send_key() {
+            KeyUse::Never
+        } else if self.local {
+            KeyUse::Optional
+        } else {
+            KeyUse::Required
+        }
+    }
+}
+
 impl Endpoint {
     /// Validate `settings` for a request. `api_key` comes from the system keyring and is
-    /// optional (local servers need none).
+    /// optional (local servers need none). A key together with a plain `http://` server that
+    /// is not on this machine is refused with [`AssistError::InsecureKey`]: the key would
+    /// cross the network unencrypted.
     pub fn new(settings: &AssistSettings, api_key: Option<Secret>) -> Result<Self, AssistError> {
+        let target = settings.target()?;
+        if api_key.is_some() && !target.may_send_key() {
+            return Err(AssistError::InsecureKey(target.host));
+        }
         Ok(Self {
-            target: settings.target()?,
+            target,
             model: settings.model.trim().to_owned(),
             api_key,
         })
+    }
+
+    /// The identity the key is stored under, see [`AssistSettings::origin`].
+    #[must_use]
+    pub fn origin(&self) -> &str {
+        &self.target.origin
+    }
+
+    /// Whether a key matters for this server, see [`KeyUse`].
+    #[must_use]
+    pub fn key_use(&self) -> KeyUse {
+        self.target.key_use()
     }
 
     /// The host the request goes to (`api.openai.com`, `localhost:11434`).
@@ -218,6 +291,13 @@ impl Endpoint {
     pub fn has_key(&self) -> bool {
         self.api_key.is_some()
     }
+}
+
+/// `localhost`, `127.0.0.0/8` and `::1`: this machine only. Other names are never trusted to
+/// resolve to it.
+fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
+    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 /// `localhost`, loopback, private-range and link-local addresses, and `.local` names: servers
@@ -320,6 +400,83 @@ mod tests {
         ] {
             assert!(settings(ok).target().is_ok(), "{ok} should be accepted");
         }
+    }
+
+    #[test]
+    fn origin_writes_out_default_ports_and_separates_schemes() {
+        let origin = |url: &str| settings(url).origin().unwrap();
+        assert_eq!(
+            origin("https://API.OpenAI.com/v1"),
+            "https://api.openai.com:443"
+        );
+        assert_eq!(
+            origin("https://api.openai.com:443/v1/"),
+            origin("https://api.openai.com/v1")
+        );
+        assert_eq!(origin("http://localhost/v1"), "http://localhost:80");
+        assert_eq!(origin("http://[::1]:8080/v1"), "http://[::1]:8080");
+        // The path and a full endpoint URL do not matter, the scheme and port do.
+        assert_eq!(
+            origin("http://localhost:11434/v1/chat/completions"),
+            origin("http://localhost:11434/other")
+        );
+        let all = [
+            "https://example.test:8443/v1",
+            "https://example.test/v1",
+            "http://localhost:8443/v1",
+            "https://localhost:8443/v1",
+            "http://localhost:80/v1",
+            "https://localhost:443/v1",
+            "http://localhost:443/v1",
+            "https://localhost:80/v1",
+        ];
+        let origins: std::collections::BTreeSet<_> = all.iter().map(|url| origin(url)).collect();
+        assert_eq!(origins.len(), all.len(), "{origins:?}");
+    }
+
+    #[test]
+    fn a_key_never_goes_with_plain_http_off_this_machine() {
+        let key = || Secret::new("sk-secret");
+        // Loopback http and any https are fine.
+        for ok in [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:8080/v1",
+            "http://[::1]:8080/v1",
+            "https://api.openai.com/v1",
+            "https://192.168.1.20/v1",
+        ] {
+            assert!(Endpoint::new(&settings(ok), key()).is_ok(), "{ok}");
+        }
+        // A LAN or .local server over http would carry it in the clear: refused.
+        for bad in [
+            "http://192.168.1.20:11434/v1",
+            "http://10.0.0.5/v1",
+            "http://my-box.local:8080/v1",
+            "http://[fd00::1]/v1",
+        ] {
+            let error = Endpoint::new(&settings(bad), key()).unwrap_err();
+            assert!(
+                matches!(error, AssistError::InsecureKey(_)),
+                "{bad}: {error:?}"
+            );
+            assert!(!error.to_string().contains("sk-secret"));
+            assert!(error.to_string().contains("http://"), "{error}");
+            // Without a key the same server is fine.
+            assert!(Endpoint::new(&settings(bad), None).is_ok(), "{bad}");
+            assert_eq!(settings(bad).key_use(), Ok(KeyUse::Never), "{bad}");
+        }
+        assert_eq!(
+            settings("https://api.openai.com/v1").key_use(),
+            Ok(KeyUse::Required)
+        );
+        assert_eq!(
+            settings("http://localhost:11434/v1").key_use(),
+            Ok(KeyUse::Optional)
+        );
+        assert_eq!(
+            settings("https://nas.local/v1").key_use(),
+            Ok(KeyUse::Optional)
+        );
     }
 
     #[test]

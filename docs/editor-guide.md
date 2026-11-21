@@ -179,7 +179,9 @@ services, an API key.
 
 Model names change often; use whatever your provider currently offers. Remote servers must use
 `https://`; plain `http://` is accepted only for `localhost`, `.local` names and private
-network addresses, so text and keys never cross the internet unencrypted. A full
+network addresses, so text never crosses the internet unencrypted. A key is never sent or
+stored for a plain `http://` server unless it is on your own machine (`localhost`,
+`127.0.0.1`, `::1`): for a network server that needs a key, use `https://`. A full
 `.../chat/completions` URL works too. Press **Save**; leaving the fields empty and saving turns
 the feature off again.
 
@@ -187,9 +189,14 @@ the feature off again.
 configuration directory (next to `recent.json`). The API key is **never** written there, nor to
 projects, logs or error messages: it goes to the operating system keyring (Secret Service /
 GNOME Keyring / KWallet on Linux, Windows Credential Manager, macOS Keychain; inside Flatpak the
-Secret portal) under an entry for the server's host, so changing the base URL never sends one
-service's key to another. **Remove saved key** deletes it. If no keyring is available the setup
-form says so; local servers need no key anyway.
+Secret portal) under an entry for the server's origin (scheme, host and port), so changing the
+base URL never sends one service's key to another, not even the `http` and `https` versions
+of the same address. **Remove saved key** deletes it. The keyring is only asked when you open
+**Set up**, press **Save** or **Convert to LaTeX**, never just by opening the dialog. A working
+keyring backend is required for keys: GNOME Keyring or KWallet (Secret Service) on Linux, and
+inside Flatpak a Secret portal backend on the host (GNOME Keyring or KWallet with its portal).
+Without one, **Set up** shows "Keyring not available" and a key cannot be saved; online
+services then answer with a rejected-key error. Local servers need no key anyway.
 
 **Data flow and privacy.** Nothing is sent when you open the dialog, type, or save the setup.
 Only pressing **Convert to LaTeX** sends one HTTPS (or local) `POST` to

@@ -147,8 +147,9 @@ impl HttpConverter {
             .https_only(false)
             .timeout_connect(Some(CONNECT_TIMEOUT.min(self.timeout)))
             .timeout_global(Some(self.timeout));
-        if endpoint.target.local {
-            // Local servers are reached directly, whatever proxy the environment names.
+        if endpoint.target.loopback {
+            // A server on this machine is reached directly, whatever proxy the environment
+            // names. Every other host, a LAN server included, honours the proxy settings.
             builder = builder.proxy(None);
         }
         builder.build().into()
@@ -190,6 +191,10 @@ impl HttpConverter {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
         if let Some(key) = &endpoint.api_key {
+            // `Endpoint::new` already refuses this; check again where the header is built.
+            if !endpoint.target.may_send_key() {
+                return Err(AssistError::InsecureKey(endpoint.target.host.clone()));
+            }
             request = request.header("Authorization", format!("Bearer {}", key.expose()));
         }
         let mut response = request
@@ -203,14 +208,20 @@ impl HttpConverter {
             .read_to_string()
             .map_err(|error| self.map_error(&error, endpoint))?;
         if !(200..300).contains(&status) {
-            let detail = redact(&error_detail(&text), endpoint);
+            let detail = bounded(&redact(&error_detail(&text), endpoint));
             return Err(if status == 401 || status == 403 {
                 AssistError::Auth { status, detail }
             } else {
                 AssistError::Http { status, detail }
             });
         }
-        parse_reply(&text)
+        // A 2xx body can carry an error message (or echo the key) just like an error status.
+        parse_reply(&text).map_err(|error| match error {
+            AssistError::BadResponse(message) => {
+                AssistError::BadResponse(bounded(&redact(&message, endpoint)))
+            }
+            other => other,
+        })
     }
 
     fn map_error(&self, error: &ureq::Error, endpoint: &Endpoint) -> AssistError {
@@ -219,12 +230,13 @@ impl HttpConverter {
             ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut => {
                 AssistError::Timeout(self.timeout_secs())
             }
+            ureq::Error::BodyExceedsLimit(_) => AssistError::BadResponse("reply too large".into()),
             other => AssistError::Network(redact(&other.to_string(), endpoint)),
         }
     }
 }
 
-/// The `error.message` of an OpenAI-style error body, or the start of the body.
+/// The `error.message` of an OpenAI-style error body, or the body itself.
 fn error_detail(body: &str) -> String {
     let message = serde_json::from_str::<Value>(body).ok().and_then(|json| {
         let error = json
@@ -236,7 +248,13 @@ fn error_detail(body: &str) -> String {
             .or_else(|| error.as_str())
             .map(str::to_owned)
     });
-    let text = message.unwrap_or_else(|| body.to_owned());
+    message.unwrap_or_else(|| body.to_owned())
+}
+
+/// A server message on one line, at most [`MAX_DETAIL_CHARS`] characters. Run [`redact`]
+/// first: cutting a message can leave a prefix of the key that `redact` would no longer
+/// recognise.
+fn bounded(text: &str) -> String {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut short: String = text.chars().take(MAX_DETAIL_CHARS).collect();
     if text.chars().count() > MAX_DETAIL_CHARS {
@@ -314,10 +332,29 @@ mod tests {
             "Incorrect API key"
         );
         assert_eq!(
-            error_detail("<html>\n  Bad gateway </html>"),
+            bounded(&error_detail("<html>\n  Bad gateway </html>")),
             "<html> Bad gateway </html>"
         );
-        assert!(error_detail(&"a".repeat(1000)).chars().count() <= MAX_DETAIL_CHARS + 1);
+        assert!(bounded(&"a".repeat(1000)).chars().count() <= MAX_DETAIL_CHARS + 1);
+    }
+
+    #[test]
+    fn a_key_cut_by_the_length_cap_is_still_redacted() {
+        let settings = crate::AssistSettings {
+            base_url: "https://api.example.test/v1".into(),
+            model: "m".into(),
+        };
+        let key = "sk-0123456789abcdef";
+        let endpoint = Endpoint::new(&settings, crate::Secret::new(key)).unwrap();
+        // The key straddles the 200 character cap: redact before cutting, not after.
+        let text = format!(
+            "{}{key}{}",
+            "a".repeat(MAX_DETAIL_CHARS - 5),
+            "b".repeat(50)
+        );
+        let shown = bounded(&redact(&text, &endpoint));
+        assert!(!shown.contains("sk-"), "{shown}");
+        assert!(!shown.contains(&key[..4]), "{shown}");
     }
 
     #[test]
