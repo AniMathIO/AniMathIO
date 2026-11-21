@@ -15,6 +15,7 @@ the render/audio/export data flow. The authority for these rules is
 | `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
 | `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
 | `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
+| `assist` | Optional prose-to-LaTeX authoring for the Math dialog: one OpenAI-compatible `chat/completions` client (`ureq` + rustls; covers OpenAI, Gemini's compatible endpoint and local Ollama or llama.cpp), non-secret `AssistSettings` (base URL and model, no key field), a strict LaTeX-only prompt, reply cleaning (code fences, math delimiters, reasoning blocks, prose rejection) and a `CancelToken` that closes the connection of a request in flight. The API key is supplied by the editor from the OS keyring and never serialised or put in an error. An integration crate: no `core` dependency, no provider-specific behaviour in the editor core, not a plugin (the sandbox has no network). |
 | `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
 | `plugin-api` | The WIT world (`crates/plugin-api/wit/plugin.wit`), the `plugin.toml` manifest format, `.amplugin` package (zip of `plugin.toml` + `plugin.wasm`), the inspector schema, guest SDK and first-party clip authoring helpers (`sources`). |
 | `plugin-host` | wasmtime Component Model runtime: loading/compiling plugins, the sandbox (fuel, epoch, memory, output caps), host imports (shape-text, svg-to-paths, typeset-math, typeset-math-colored, limits, log, and `read-sibling` for importers), ABI 1.2.0 (1.0.0 and 1.1.0 components load unchanged; the opt-in `colored-source-plugin` world adds per-path math colours) plus an explicit 0.2.x adapter, plugin scene resolution, pixel-effect plugins (`PluginHost::effects`, `effect_processor`: instance-pre cached components, a fresh fuel/memory/epoch-limited store per call, frame-size caps), animation presets (`PluginHost::animation_presets`, `animation_preset_command`) and importers (`PluginHost::importers`, `PluginHost::import`), and the community plugin trust model (`CommunityStore`: per-user plugin folder, global switch + per-plugin enabled set in `community-plugins.json`, verified install/uninstall, and `PluginHost::sync_community_plugins` / `unload_plugin` for hot load and unload). |
@@ -623,6 +624,32 @@ builder returns one `Command::Batch` and a fresh link group; it stores no runtim
 resources in the project. `_title_preset` / `_title_field` are opaque plugin JSON
 metadata for the editor's grouped text inspector. CPU library thumbnails are
 rendered off-thread and cached in editor session state by project canvas size.
+
+## AI-assisted LaTeX
+
+`crates/assist` backs the optional "Describe it in words" box of the Math dialog (user guide:
+`docs/editor-guide.md`). It is an integration beside the core, not a plugin: plugins run in a
+sandbox without network access, and the core must stay free of provider behaviour.
+
+- **One protocol.** `Converter::convert` builds an OpenAI-compatible `POST <base>/chat/completions`
+  (`HttpConverter`, blocking `ureq` with rustls, no redirects, 10 s connect and 60 s total
+  timeouts, loopback targets bypass proxies). OpenAI, Gemini's OpenAI-compatible endpoint and
+  local Ollama or llama.cpp servers differ only in settings. `http://` is accepted only for
+  local-network hosts.
+- **Explicit action only.** The editor calls it from the Convert button, on a background worker,
+  with the description text alone. `CancelToken::cancel` shuts down the request's `ureq::Agent`,
+  so a blocked read returns `Cancelled` immediately; the editor also drops the result.
+- **Secrets.** `assist.json` (`editor_env::config_file`) holds only `base_url` and `model`. The
+  key is stored in the operating system keyring through GPUI's credential API (Secret Service or
+  the Flatpak Secret portal, Windows Credential Manager, macOS Keychain) at
+  `animathio-assist://<host>`, read just before a request and passed in an `Endpoint` whose
+  `Debug` redacts it. Error text is scrubbed of the key.
+- **Injection.** `EditorEnv::assist` is the `Converter` the editor uses (the real client in
+  production, a mock in `ui_tests`); `animathio-assist`'s tests run the client against an
+  in-process loopback server.
+- **Insertion.** A reply goes through `clean_latex` and then into the formula field, where the
+  existing LaTeX plugin preview validates it (`strict_errors`); Add is the ordinary math-object
+  `Command` (one undo step). The CLI and MCP surface have no network-using tool.
 
 ## Automatic subtitles
 

@@ -38,6 +38,7 @@ use crate::timeline::{self, TimelineLayout, TrimEdge};
 
 pub(crate) mod actions;
 mod animations;
+mod assist;
 mod audio_effects;
 mod autocut;
 mod caption_styles;
@@ -796,6 +797,7 @@ impl Editor {
         env: EditorEnv,
     ) -> Self {
         env.install();
+        cx.set_global(assist::AssistBackend(env.assist.clone()));
         let mut pool = AudioPool::default();
         let mut error = None;
         if let Err(message) = load_audio(&mut pool, &project, &assets) {

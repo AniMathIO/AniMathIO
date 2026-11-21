@@ -3,7 +3,7 @@
 use crate::editing;
 use crate::editor::{TimelineGesture, TrimDrag};
 use crate::timeline::TrimEdge;
-use gpui::{AppContext, AsKeystroke, MouseUpEvent};
+use gpui::{AppContext, AsKeystroke, Entity, MouseUpEvent};
 
 use animathio_control::{
     MathObjectDraft, MathObjectKind, caption_styles, clip_caption_style, math_object_range,
@@ -3081,4 +3081,258 @@ fn text_font_weight_edit_is_a_command_with_undo(cx: &mut TestAppContext) {
         e.execute(&command, cx);
     });
     assert!((weight(&ui) - 900.0).abs() < 1e-9);
+}
+
+/// A scripted AI assist client: records what it was asked and returns a canned reply.
+#[derive(Debug)]
+struct MockAssist {
+    reply: std::sync::Mutex<Result<String, animathio_assist::AssistError>>,
+    seen: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+impl MockAssist {
+    fn new(reply: Result<String, animathio_assist::AssistError>) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            reply: std::sync::Mutex::new(reply),
+            seen: std::sync::Mutex::default(),
+        })
+    }
+
+    fn seen(&self) -> Vec<(String, String)> {
+        self.seen.lock().unwrap().clone()
+    }
+}
+
+impl animathio_assist::Converter for MockAssist {
+    fn complete(
+        &self,
+        endpoint: &animathio_assist::Endpoint,
+        prose: &str,
+        _cancel: &animathio_assist::CancelToken,
+    ) -> Result<String, animathio_assist::AssistError> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push((endpoint.host().to_owned(), prose.to_owned()));
+        self.reply.lock().unwrap().clone()
+    }
+}
+
+fn local_assist_settings() -> animathio_assist::AssistSettings {
+    animathio_assist::AssistSettings {
+        base_url: "http://localhost:11434/v1".into(),
+        model: "llama3.2".into(),
+    }
+}
+
+/// An editor whose AI assist client is `mock`, a Latex math panel on it, and its assist panel.
+fn assist_ui(
+    cx: &mut TestAppContext,
+    mock: &std::sync::Arc<MockAssist>,
+) -> (
+    Ui,
+    Entity<MathEditor>,
+    Entity<crate::editor::assist::AssistPanel>,
+) {
+    let (project, assets) = sample();
+    let mut env = super::test_env();
+    env.assist = mock.clone();
+    let mut ui = Ui::open_with_env(cx, project, assets, env);
+    let panel = ui.update(|e, window, cx| {
+        let draft = MathObjectDraft::new(MathObjectKind::Latex);
+        let range = math_object_range(e.position).expect("range");
+        let editor = cx.entity().downgrade();
+        let session = e.project_session;
+        let size = project_size(&e.project);
+        cx.new(|cx| MathEditor::new(draft, editor, session, range, None, false, size, window, cx))
+    });
+    let assist = ui
+        .cx
+        .update(|_, cx| panel.read(cx).assist_panel().expect("latex has assist"));
+    ui.cx.update(|_, cx| {
+        assist.update(cx, |assist, _| assist.set_settings(local_assist_settings()));
+    });
+    (ui, panel, assist)
+}
+
+fn type_prose(ui: &mut Ui, assist: &Entity<crate::editor::assist::AssistPanel>, text: &str) {
+    ui.cx.update(|window, cx| {
+        assist.update(cx, |assist, cx| assist.set_prose(text, window, cx));
+    });
+    ui.settle();
+}
+
+#[gpui::test]
+fn assist_convert_preview_insert_undo(cx: &mut TestAppContext) {
+    if !require_plugins("assist_convert_preview_insert_undo") {
+        return;
+    }
+    let mock = MockAssist::new(Ok("```latex\n\\frac{1}{2} + x^2\n```".into()));
+    let (mut ui, panel, assist) = assist_ui(cx, &mock);
+    let before = ui.read(|e| e.project.clone());
+    let initial = ui.cx.update(|_, cx| panel.read(cx).draft_source());
+
+    // Typing the description sends nothing.
+    type_prose(&mut ui, &assist, "one half plus x squared");
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    assert!(mock.seen().is_empty(), "nothing is sent before Convert");
+
+    // Convert sends exactly the prose to the configured host and shows editable LaTeX.
+    ui.cx
+        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+    ui.settle();
+    assert_eq!(
+        mock.seen(),
+        vec![(
+            "localhost:11434".to_owned(),
+            "one half plus x squared".to_owned()
+        )]
+    );
+    assert_ne!(initial, "\\frac{1}{2} + x^2");
+    assert_eq!(
+        ui.cx.update(|_, cx| panel.read(cx).draft_source()),
+        "\\frac{1}{2} + x^2"
+    );
+    assert!(!ui.cx.update(|_, cx| assist.read(cx).is_converting()));
+
+    // The live preview validates it through the latex plugin; then Add inserts one object.
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    ui.settle();
+    ui.cx
+        .update(|window, cx| panel.update(cx, |panel, cx| panel.apply(window, cx)));
+    ui.settle();
+    let added = ui.read(|e| e.selected.expect("inserted clip selected"));
+    ui.read(|e| {
+        let clip = e.find_clip(added).expect("clip");
+        assert!(matches!(
+            &clip.kind,
+            animathio_core::ClipKind::Plugin { plugin_id, .. } if plugin_id == "org.animathio.latex"
+        ));
+        let animathio_core::ParamValue::String(source) = clip.params.get("source").unwrap() else {
+            panic!("source param");
+        };
+        assert_eq!(source, "\\frac{1}{2} + x^2");
+    });
+    // One undo removes it.
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn assist_cancel_ignores_the_result(cx: &mut TestAppContext) {
+    let mock = MockAssist::new(Ok("x^2".into()));
+    let (mut ui, panel, assist) = assist_ui(cx, &mock);
+    let initial = ui.cx.update(|_, cx| panel.read(cx).draft_source());
+    type_prose(&mut ui, &assist, "x squared");
+    ui.cx.update(|_, cx| {
+        assist.update(cx, |assist, cx| {
+            assist.convert(cx);
+            assert!(assist.is_converting());
+            assist.cancel(cx);
+            assert!(!assist.is_converting());
+        });
+    });
+    ui.settle();
+    assert_eq!(ui.cx.update(|_, cx| panel.read(cx).draft_source()), initial);
+    assert!(!ui.cx.update(|_, cx| assist.read(cx).is_converting()));
+}
+
+#[gpui::test]
+fn assist_errors_are_shown_and_leave_the_formula_alone(cx: &mut TestAppContext) {
+    use crate::editor::assist::Message;
+    let mock = MockAssist::new(Err(animathio_assist::AssistError::Auth {
+        status: 401,
+        detail: "bad key".into(),
+    }));
+    let (mut ui, panel, assist) = assist_ui(cx, &mock);
+    let initial = ui.cx.update(|_, cx| panel.read(cx).draft_source());
+
+    // Empty description: no request at all.
+    ui.cx
+        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+    ui.settle();
+    assert!(mock.seen().is_empty());
+    let message = ui.cx.update(|_, cx| assist.read(cx).message().cloned());
+    assert!(matches!(message, Some(Message::Error(_))), "{message:?}");
+
+    // An authentication failure is reported with its status.
+    type_prose(&mut ui, &assist, "x squared");
+    ui.cx
+        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+    ui.settle();
+    let Some(Message::Error(text)) = ui.cx.update(|_, cx| assist.read(cx).message().cloned())
+    else {
+        panic!("expected an error message");
+    };
+    assert!(text.contains("HTTP 401"), "{text}");
+    assert_eq!(ui.cx.update(|_, cx| panel.read(cx).draft_source()), initial);
+
+    // A reply that is not LaTeX is rejected before it reaches the formula field.
+    *mock.reply.lock().unwrap() = Ok("Sorry, I cannot help with that request today.".into());
+    ui.cx
+        .update(|_, cx| assist.update(cx, |assist, cx| assist.convert(cx)));
+    ui.settle();
+    let Some(Message::Error(text)) = ui.cx.update(|_, cx| assist.read(cx).message().cloned())
+    else {
+        panic!("expected an error message");
+    };
+    assert!(text.contains("did not return LaTeX"), "{text}");
+    assert_eq!(ui.cx.update(|_, cx| panel.read(cx).draft_source()), initial);
+
+    // Unconfigured: off, nothing is sent.
+    let calls = mock.seen().len();
+    ui.cx.update(|_, cx| {
+        assist.update(cx, |assist, cx| {
+            assist.set_settings(animathio_assist::AssistSettings::default());
+            assist.convert(cx);
+        });
+    });
+    ui.settle();
+    assert_eq!(mock.seen().len(), calls);
+}
+
+#[gpui::test]
+fn assist_setup_saves_settings_without_the_key(cx: &mut TestAppContext) {
+    let mock = MockAssist::new(Ok("x".into()));
+    let (mut ui, _panel, assist) = assist_ui(cx, &mock);
+    ui.cx.update(|window, cx| {
+        assist.update(cx, |assist, cx| {
+            assist.set_form(
+                (
+                    "https://api.openai.com/v1",
+                    "gpt-4.1-mini",
+                    "sk-secret-value",
+                ),
+                window,
+                cx,
+            );
+            assist.save_setup(window, cx);
+        });
+    });
+    ui.settle();
+    let path = crate::editor_env::config_file("assist.json").expect("config path");
+    let text = std::fs::read_to_string(&path).expect("settings file");
+    assert!(text.contains("api.openai.com"), "{text}");
+    assert!(!text.contains("sk-secret-value"), "{text}");
+    ui.cx.update(|_, cx| {
+        let assist = assist.read(cx);
+        assert_eq!(assist.settings().model, "gpt-4.1-mini");
+        // The key left the text field as soon as it was saved.
+        assert_eq!(assist.api_key_field(cx), "");
+    });
+    // An invalid base URL is refused and not saved.
+    ui.cx.update(|window, cx| {
+        assist.update(cx, |assist, cx| {
+            assist.set_form(("http://api.openai.com/v1", "m", ""), window, cx);
+            assist.save_setup(window, cx);
+        });
+    });
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("https://api.openai.com/v1"),
+        "the invalid URL must not replace the saved one"
+    );
+    // Leave the shared test config directory as found.
+    let _ = std::fs::remove_file(path);
 }

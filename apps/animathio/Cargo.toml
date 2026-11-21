@@ -12,6 +12,7 @@ publish.workspace = true
 whisper = ["animathio-control/whisper"]
 
 [dependencies]
+animathio-assist = { path = "../../crates/assist" }
 animathio-transcribe = { path = "../../crates/transcribe" }
 animathio-media = { path = "../../crates/media" }
 animathio-export = { path = "../../crates/export" }
