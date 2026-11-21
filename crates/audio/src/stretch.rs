@@ -3,8 +3,20 @@
 //! by at most 5 ms, using the same offset for every channel (stereo stays coherent).
 //! Each 64-hop segment replays eight warm-up grains from a canonical entry point.
 //! Adjacent segments overlap for one hop and crossfade their independent histories.
+//! Two independent reconstructions of a tone differ by a phase, and crossfading them
+//! straight would cancel it, so a segment is first slid onto its predecessor: the lag
+//! (at most 5 ms, the smallest one that correlates best) is found from the two raw
+//! segments alone, applied at full size at the join and ramped linearly to zero over the
+//! segment (a pitch change of at most lag/segment, under 0.8% and typically a few cents),
+//! so the next join sees an unshifted tail and no lag ever accumulates or depends on
+//! earlier segments.
 //! The cache changes cost only: every segment can be reconstructed on a cold seek.
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::many_single_char_names
+)]
 use crate::{Error, prepared::Cursor};
 use animathio_core::{Clip, ClipSpeed, TICKS_PER_SECOND, Time};
 use std::{
@@ -82,12 +94,29 @@ impl Cache {
     }
 }
 
+/// Source ticks the clip may read from `source_offset`: the recorded span, or (for a
+/// clock that never recorded one) the integral up to the clip's end, which a tail trim
+/// moves.
+fn source_span(clip: &Clip) -> i64 {
+    clip.time_map
+        .source_length
+        .map_or_else(|| clip.source_bounds().1.0 - clip.source_offset.0, |t| t.0)
+}
+
 /// Fingerprint of everything a clip's stretched signal depends on besides the shared
-/// source and output format: the asset, the placement and the source clock.
+/// source and output format: the asset, the placement, the source clock and the source
+/// end it may read up to.
 pub(crate) fn key(rate: u32, channels: usize, clip: &Clip) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    (rate, channels, clip.range.start.0, clip.source_offset.0).hash(&mut hasher);
+    (
+        rate,
+        channels,
+        clip.range.start.0,
+        clip.source_offset.0,
+        source_span(clip),
+    )
+        .hash(&mut hasher);
     format!("{:?}{:?}", clip.kind, clip.time_map).hash(&mut hasher);
     hasher.finish()
 }
@@ -112,6 +141,8 @@ pub(crate) struct Reader<'a> {
     first_frame: usize,
     cache: &'a Mutex<Cache>,
     slots: [Option<(usize, Arc<Vec<f32>>)>; 2],
+    /// The lag of the segment being played, with its index.
+    lag: Option<(usize, i64)>,
 }
 impl<'a> Reader<'a> {
     pub(crate) fn new(
@@ -130,6 +161,7 @@ impl<'a> Reader<'a> {
             first_frame,
             cache,
             slots: [None, None],
+            lag: None,
         }
     }
     fn load(&mut self, index: usize, cursor: &mut Cursor<'_>) -> Result<(), Error> {
@@ -164,6 +196,28 @@ impl<'a> Reader<'a> {
             .expect("segment was loaded")
             .1
     }
+    /// The lag that slides segment `segment` onto the tail of its predecessor, zero for
+    /// the first segment and for one whose predecessor lies wholly before the clip.
+    fn lag(&mut self, segment: usize, cursor: &mut Cursor<'_>) -> Result<i64, Error> {
+        if segment == 0 || segment * segment_frames(self.rate) <= self.first_frame {
+            return Ok(0);
+        }
+        if let Some((held, lag)) = self.lag
+            && held == segment
+        {
+            return Ok(lag);
+        }
+        self.load(segment - 1, cursor)?;
+        let lag = align(
+            self.slot(segment - 1),
+            self.slot(segment),
+            self.channels,
+            hop(self.rate),
+            segment_frames(self.rate),
+        );
+        self.lag = Some((segment, lag));
+        Ok(lag)
+    }
     /// Append output frame `frame` (global frame index) to `samples`.
     pub(crate) fn frame(
         &mut self,
@@ -174,10 +228,36 @@ impl<'a> Reader<'a> {
         let channels = self.channels;
         let span = segment_frames(self.rate);
         let hop = hop(self.rate);
+        let pre = preroll(self.rate);
         let (segment, offset) = (frame / span, frame % span);
         self.load(segment, cursor)?;
+        let lag = self.lag(segment, cursor)?;
         samples.clear();
-        samples.extend_from_slice(&self.slot(segment)[offset * channels..(offset + 1) * channels]);
+        let current = self.slot(segment);
+        if lag == 0 {
+            let at = (pre + offset) * channels;
+            samples.extend_from_slice(&current[at..at + channels]);
+        } else {
+            // The slide fades out linearly across the segment: position
+            // `offset + lag * (span - offset) / span`, read with a cubic.
+            let numerator = i128::from(lag) * (span - offset) as i128;
+            let whole = numerator.div_euclid(span as i128) as i64;
+            let fraction = numerator.rem_euclid(span as i128) as f32 / span as f32;
+            let base = (pre + offset) as i64 + whole;
+            for channel in 0..channels {
+                let tap = |k: i64| {
+                    let frame = usize::try_from(base + k)
+                        .unwrap_or(0)
+                        .min(current.len() / channels - 1);
+                    current[frame * channels + channel]
+                };
+                samples.push(if fraction == 0.0 {
+                    tap(0)
+                } else {
+                    cubic([tap(-1), tap(0), tap(1), tap(2)], fraction)
+                });
+            }
+        }
         // Blend with the predecessor's independent reconstruction of this hop, unless that
         // segment lies wholly before the clip starts: it would only add a spurious fade.
         if segment > 0 && offset < hop && segment * span > self.first_frame {
@@ -185,7 +265,7 @@ impl<'a> Reader<'a> {
             let previous = self.slot(segment - 1);
             let weight = offset as f32 / hop as f32;
             for (channel, sample) in samples.iter_mut().enumerate() {
-                *sample = previous[(span + offset) * channels + channel] * (1.0 - weight)
+                *sample = previous[(pre + span + offset) * channels + channel] * (1.0 - weight)
                     + *sample * weight;
             }
         }
@@ -193,7 +273,63 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Render one segment, including the following hop used to blend the next reset.
+/// Catmull-Rom interpolation between `y[1]` and `y[2]` at `t` in `[0, 1)`.
+fn cubic(y: [f32; 4], t: f32) -> f32 {
+    let [a, b, c, d] = y;
+    b + 0.5 * t * (c - a + t * (2.0 * a - 5.0 * b + 4.0 * c - d + t * (3.0 * (b - c) + d - a)))
+}
+
+/// Frames of lead-in kept before each segment (the largest slide plus the cubic's reach),
+/// all inside the warm-up so they are fully reconstructed.
+pub(crate) fn preroll(rate: u32) -> usize {
+    (rate as usize / 200).max(1) + 2
+}
+
+/// How far a segment must slide to line up with its predecessor's tail: the lag within
+/// the search range at which the two reconstructions of the shared hop correlate best,
+/// the smallest such lag when several (periodic material) do.
+fn align(previous: &[f32], current: &[f32], channels: usize, hop: usize, span: usize) -> i64 {
+    let pre =
+        (previous.len() / channels - (span + hop)).min(current.len() / channels - (span + hop));
+    let search = i64::try_from(pre).expect("small") - 2;
+    let tail =
+        |i: usize, channel: usize| f64::from(previous[(pre + span + i) * channels + channel]);
+    let reference: f64 = (0..hop)
+        .flat_map(|i| (0..channels).map(move |c| (i, c)))
+        .map(|(i, c)| tail(i, c).powi(2))
+        .sum();
+    if reference <= SILENCE {
+        return 0;
+    }
+    let scores: Vec<f64> = (-search..=search)
+        .map(|lag| {
+            let (mut dot, mut energy) = (0.0, 0.0);
+            for i in 0..hop {
+                let at = usize::try_from((pre + i) as i64 + lag).expect("inside the lead-in");
+                for channel in 0..channels {
+                    let candidate = f64::from(current[at * channels + channel]);
+                    dot += tail(i, channel) * candidate;
+                    energy += candidate * candidate;
+                }
+            }
+            if energy <= SILENCE {
+                -1.0
+            } else {
+                dot / (energy * reference).sqrt()
+            }
+        })
+        .collect();
+    let best = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    (-search..=search)
+        .zip(&scores)
+        .filter(|(_, score)| **score >= best - 0.02)
+        .map(|(lag, _)| lag)
+        .min_by_key(|lag| (lag.abs(), *lag))
+        .unwrap_or(0)
+}
+
+/// Render one segment: a short lead-in before it (for the slide onto its predecessor),
+/// the segment, and the following hop used to blend the next reset.
 pub(crate) fn render(
     clip: &Clip,
     rate: u32,
@@ -210,15 +346,13 @@ pub(crate) fn render(
     // the last one touching the end of the source span (the mixer's varispeed path
     // clamps to the same frames).
     let first = i128::from(clip.source_offset.0) * i128::from(rate) / ticks;
-    let length = clip
-        .time_map
-        .source_length
-        .map_or_else(|| clip.source_bounds().1.0 - clip.source_offset.0, |t| t.0);
+    let length = source_span(clip);
     let end = ((i128::from(clip.source_offset.0) + i128::from(length)) * i128::from(rate) + ticks
         - 1)
         / ticks;
     let width = 2 * hop + 2 * search;
-    let mut out = vec![0.0; (HOPS + 1) * hop * channels];
+    let pre = preroll(rate);
+    let mut out = vec![0.0; (pre + (HOPS + 1) * hop) * channels];
     // Two grain buffers alternate as "previous" and "current"; no per-grain allocation.
     let mut region = vec![0.0; width * channels];
     let mut grains = [vec![0.0; 2 * hop * channels], vec![0.0; 2 * hop * channels]];
@@ -273,9 +407,9 @@ pub(crate) fn render(
         };
         current.copy_from_slice(&region[offset * channels..(offset + 2 * hop) * channels]);
         for i in 0..2 * hop {
-            let output = frame - base * hop as i128 + i as i128;
+            let output = frame - base * hop as i128 + i as i128 + pre as i128;
             if let Ok(output) = usize::try_from(output)
-                && output < (HOPS + 1) * hop
+                && output < pre + (HOPS + 1) * hop
             {
                 let weight = if i < hop {
                     i as f32 / hop as f32
