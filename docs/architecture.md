@@ -120,18 +120,25 @@ monotonic clock stands in.
 Microphone recording keeps capture outside the project model. `animathio_audio::CaptureSource`
 lists input devices and opens one as a polled `CaptureStream`; `Recorder` owns the open stream,
 keeps the take as 16-bit PCM (at most two channels, capped at `MAX_RECORDING_BYTES`) and
-measures a live `Level` (peak and RMS) at every poll. `CpalCapture` is the real device source;
-`NullCapture` never opens anything and explains why; `SyntheticCapture` replays scripted
-samples for tests. `EditorEnv::capture` chooses the source: production uses `CpalCapture`
-unless `ANIMATHIO_AUDIO` is `none`/`off`/`0`, and the headless test environment uses
-`NullCapture`. The editor opens the device on Record, polls it from its 25 ms tick (meter and
-elapsed time), and on Stop encodes a WAV (`encode_wav`), stores the bytes in the asset store
-exactly like an imported file and executes one undoable `Command::Batch` (`AddAsset`, plus
-`AddTrack` and `AddClip` at the playhead when "Add to timeline at playhead" is on). Cancel, a
-new or opened project, or closing the editor drops the take and closes the device; the
-project is untouched until Stop. A device error mid-take ends the take and keeps the audio
-delivered so far. There is no control or MCP method for recording: it needs a person at a
-microphone.
+measures a live `Level` (peak and RMS) at every poll. A poll landing between the device
+callback's frames carries the torn frame into the next poll (`CaptureStream::drain`), so the
+channels never swap, and a callback that finds the ring full drops whole frames and counts
+them (`Recorder::dropped_frames`, surfaced as a warning in the record card). `CpalCapture` is
+the real device source; `NullCapture` never opens anything and explains why; `SyntheticCapture`
+replays scripted samples for tests. `EditorEnv::capture` chooses the source: production uses
+`CpalCapture` unless `ANIMATHIO_AUDIO` is `none`/`off`/`0`, and the headless test environment
+uses `NullCapture`. The editor opens the device on Record, polls it from its 25 ms tick (meter
+and elapsed time), and on Stop hands the take to a background task that encodes the WAV
+(`encode_wav`), hashes the asset id and decode-checks it while the card shows "Saving
+recording…"; when it lands, the bytes enter the asset store exactly like an imported file and
+one undoable `Command::Batch` (`AddAsset`, plus `AddTrack` and `AddClip` where the playhead
+was when Record was pressed, with "Add to timeline at the record position" on; an empty
+"Audio" track is reused, and a failed command leaves no asset bytes or decoded pool entry
+behind) applies on the interface thread. Cancel, a new or opened project, or closing the editor drops the take and
+closes the device — with a take live or saving, replacing the project or closing the window
+asks first — and the project is untouched until Stop. A device error mid-take ends the take
+and keeps the audio delivered so far. There is no control or MCP method for recording: it
+needs a person at a microphone.
 
 Audible shuttle lives in `crates/audio` (`Speed`, `BlockGenerator`, `varispeed`).
 `Player::set_speed` restarts the session at the latency-corrected position like a seek.

@@ -23,7 +23,7 @@ use cpal::{
     FromSample, SampleFormat, SizedSample,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use rtrb::{Consumer, RingBuffer};
+use rtrb::{Consumer, Producer, RingBuffer};
 use std::{
     fmt,
     sync::{
@@ -69,6 +69,12 @@ pub trait CaptureStream {
     /// # Errors
     /// The device stopped (unplugged, revoked or a backend failure).
     fn drain(&mut self, out: &mut Vec<f32>) -> Result<(), Error>;
+    /// Whole frames the device dropped since the stream opened (its buffer ran full while the
+    /// poller was stalled, say because the interface thread was busy). Monotonic; the
+    /// [`Recorder`] tracks the change between polls. Zero for sources that never drop.
+    fn dropped_frames(&self) -> u64 {
+        0
+    }
 }
 
 /// Lists input devices and opens one.
@@ -167,9 +173,16 @@ pub struct Recorder {
     source_channels: usize,
     pcm: Vec<i16>,
     scratch: Vec<f32>,
+    /// Samples of a torn frame from the last poll (a poll can land between the device
+    /// callback's frames), carried into the next one so the channels stay in order.
+    tail: Vec<f32>,
     level: Level,
     max_samples: usize,
     full: bool,
+    /// Frames the stream dropped so far, as seen on the last poll.
+    seen_dropped: u64,
+    /// Frames the stream dropped in total.
+    dropped_frames: u64,
 }
 impl fmt::Debug for Recorder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -218,9 +231,12 @@ impl Recorder {
             source_channels: usize::from(input.channels),
             pcm: Vec::new(),
             scratch: Vec::new(),
+            tail: Vec::new(),
             level: Level::default(),
             max_samples: max_bytes / 2,
             full: false,
+            seen_dropped: 0,
+            dropped_frames: 0,
         })
     }
 
@@ -232,9 +248,19 @@ impl Recorder {
     pub fn poll(&mut self) -> Result<Level, Error> {
         self.scratch.clear();
         let drained = self.stream.drain(&mut self.scratch);
+        let dropped = self.stream.dropped_frames();
+        self.dropped_frames += dropped.saturating_sub(self.seen_dropped);
+        self.seen_dropped = dropped;
+        // A poll can land between the device callback's frames, so `drain` may end with a
+        // torn frame. Keep the leftovers and finish the frame from the next poll's samples
+        // instead of dropping the odd sample and swapping the channels for the rest of the
+        // take.
+        self.tail.append(&mut self.scratch);
         let channels = usize::from(self.format.channels);
-        let mut metered = Vec::with_capacity(self.scratch.len());
-        for frame in self.scratch.chunks_exact(self.source_channels) {
+        let whole = self.tail.len() - self.tail.len() % self.source_channels;
+        let mut metered = Vec::with_capacity(whole / self.source_channels * channels);
+        let mut consumed = 0;
+        for frame in self.tail[..whole].chunks_exact(self.source_channels) {
             if self.pcm.len() + channels > self.max_samples {
                 self.full = true;
                 break;
@@ -243,9 +269,24 @@ impl Recorder {
                 metered.push(sample);
                 self.pcm.push(to_pcm16(sample));
             }
+            consumed += self.source_channels;
+        }
+        if self.full {
+            // The cap was reached: whatever is still buffered is dropped from here on.
+            self.tail.clear();
+        } else {
+            self.tail.drain(..consumed);
         }
         self.level = Level::of(&metered);
         drained.map(|()| self.level)
+    }
+
+    /// Frames the input dropped because its buffer ran full while the poller was stalled
+    /// (the interface was busy for longer than the stream buffers). The recording is
+    /// shorter than the take was; the caller should tell the person.
+    #[must_use]
+    pub fn dropped_frames(&self) -> u64 {
+        self.dropped_frames
     }
 
     /// The level of the last poll.
@@ -290,11 +331,17 @@ impl Recorder {
                 "nothing was recorded; check that the microphone is not muted".into(),
             ));
         }
-        let Self { format, pcm, .. } = self;
+        let Self {
+            format,
+            pcm,
+            dropped_frames,
+            ..
+        } = self;
         Ok(Recording {
             rate: format.rate,
             channels: format.channels,
             frames: (pcm.len() / usize::from(format.channels)) as u64,
+            dropped_frames,
             pcm,
         })
     }
@@ -312,6 +359,8 @@ pub struct Recording {
     pub channels: u16,
     /// Number of frames.
     pub frames: u64,
+    /// Frames the input dropped during the take (see [`Recorder::dropped_frames`]).
+    pub dropped_frames: u64,
     pcm: Vec<i16>,
 }
 impl Recording {
@@ -387,6 +436,11 @@ pub struct SyntheticDevice {
     pub open_error: Option<String>,
     /// The stream fails with this message after this many polls (an unplugged device).
     pub fail_after_polls: Option<(usize, String)>,
+    /// Whole frames the stream reports as dropped (a full buffer while the poller stalled).
+    pub dropped_frames: u64,
+    /// Deliver at most this many raw samples per poll instead of `chunk_frames` frames, so a
+    /// frame can tear across polls as on a real device whose poll lands mid-callback.
+    pub chunk_samples: Option<usize>,
 }
 impl SyntheticDevice {
     /// A device that hears `seconds` of a 440 Hz sine at `amplitude`, `chunk_frames` per poll.
@@ -428,7 +482,23 @@ impl SyntheticDevice {
             chunk_frames: chunk_frames.max(1),
             open_error: None,
             fail_after_polls: None,
+            dropped_frames: 0,
+            chunk_samples: None,
         }
+    }
+    /// The same device, but its stream reports `frames` dropped frames (a full buffer).
+    #[must_use]
+    pub fn dropping(mut self, frames: u64) -> Self {
+        self.dropped_frames = frames;
+        self
+    }
+    /// The same device, but each poll delivers at most `samples` raw samples instead of
+    /// `chunk_frames` whole frames, so a frame tears across polls (as when a poll lands
+    /// between a real device callback's frames).
+    #[must_use]
+    pub fn torn(mut self, samples: usize) -> Self {
+        self.chunk_samples = Some(samples.max(1));
+        self
     }
     /// The same device, but opening it fails with `message`.
     #[must_use]
@@ -527,11 +597,17 @@ impl CaptureStream for SyntheticStream {
             return Err(Error::Capture(message.clone()));
         }
         let channels = usize::from(self.device.format.channels);
-        let end =
-            (self.position + self.device.chunk_frames * channels).min(self.device.samples.len());
+        let per_poll = self
+            .device
+            .chunk_samples
+            .unwrap_or(self.device.chunk_frames * channels);
+        let end = (self.position + per_poll).min(self.device.samples.len());
         out.extend_from_slice(&self.device.samples[self.position..end]);
         self.position = end;
         Ok(())
+    }
+    fn dropped_frames(&self) -> u64 {
+        self.device.dropped_frames
     }
 }
 
@@ -642,6 +718,7 @@ struct CpalStream {
     _stream: cpal::Stream,
     consumer: Consumer<f32>,
     failed: Arc<AtomicBool>,
+    dropped: Arc<AtomicUsize>,
     format: InputFormat,
 }
 impl CaptureStream for CpalStream {
@@ -659,6 +736,9 @@ impl CaptureStream for CpalStream {
         }
         Ok(())
     }
+    fn dropped_frames(&self) -> u64 {
+        self.dropped.load(Ordering::Acquire) as u64
+    }
 }
 
 fn open_stream<T>(
@@ -673,16 +753,19 @@ where
     let capacity = (format.rate as usize * usize::from(format.channels) * RING_SECONDS).max(1);
     let (mut producer, consumer) = RingBuffer::new(capacity);
     let failed = Arc::new(AtomicBool::new(false));
+    let dropped = Arc::new(AtomicUsize::new(0));
     let callback_error = Arc::clone(&failed);
+    let callback_dropped = Arc::clone(&dropped);
+    let channels = usize::from(format.channels.max(1));
     let stream = device
         .build_input_stream(
             config,
             move |data: &[T], _| {
-                // Real-time callback: no allocation, locking or logging. A full ring drops the
-                // sample (the poller fell behind).
-                for &sample in data {
-                    let _ = producer.push(sample.to_sample::<f32>());
-                }
+                // Real-time callback: no allocation, locking or logging. Push whole frames
+                // only — a partial frame at the ring's end would drop an odd sample and
+                // swap the channels of every later frame. A full ring drops whole frames
+                // and counts them.
+                push_whole_frames(&mut producer, data, channels, &callback_dropped);
             },
             move |_| callback_error.store(true, Ordering::Release),
             None,
@@ -702,8 +785,30 @@ where
         _stream: stream,
         consumer,
         failed,
+        dropped,
         format,
     })
+}
+
+/// Push `data`'s whole frames onto `producer`, dropping (and counting in `dropped`) what does
+/// not fit, so a torn frame can never reach the ring. Called from the real-time callback.
+fn push_whole_frames<T>(
+    producer: &mut Producer<f32>,
+    data: &[T],
+    channels: usize,
+    dropped: &AtomicUsize,
+) where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let frames = (producer.slots() / channels).min(data.len() / channels);
+    let keep = frames * channels;
+    if keep < data.len() {
+        dropped.fetch_add((data.len() - keep) / channels, Ordering::Relaxed);
+    }
+    for &sample in &data[..keep] {
+        let _ = producer.push(sample.to_sample::<f32>());
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -893,6 +998,73 @@ mod tests {
         let error = recorder.poll().unwrap_err();
         assert!(error.to_string().contains("unplugged"), "{error}");
         assert_eq!(recorder.finish().unwrap().frames, 200);
+    }
+
+    #[test]
+    fn a_poll_landing_mid_frame_keeps_the_channels_in_order_and_drops_nothing() {
+        // Four stereo frames; each poll delivers three raw samples, so every frame except
+        // the first tears across a poll boundary, as when a poll lands mid-callback.
+        let frames = [0.1, -0.1, 0.2, -0.2, 0.3, -0.3, 0.4, -0.4];
+        let capture = source(
+            SyntheticDevice::scripted(
+                "Mic",
+                InputFormat {
+                    rate: 8000,
+                    channels: 2,
+                },
+                frames.to_vec(),
+                1,
+            )
+            .torn(3),
+        );
+        let mut recorder = Recorder::start(&capture, None).unwrap();
+        while recorder.frames() < 4 {
+            recorder.poll().unwrap();
+        }
+        let expected: Vec<i16> = frames.iter().map(|&sample| to_pcm16(sample)).collect();
+        let recording = recorder.finish().unwrap();
+        assert_eq!(recording.frames, 4);
+        assert_eq!(recording.pcm, expected, "left and right stay in order");
+    }
+
+    #[test]
+    fn a_full_ring_drops_whole_frames_and_counts_them() {
+        let (mut producer, mut consumer) = RingBuffer::new(7);
+        let dropped = AtomicUsize::new(0);
+        // Three stereo frames fit the seven-sample ring whole, leaving one odd slot free.
+        push_whole_frames(
+            &mut producer,
+            &[0.1, -0.1, 0.2, -0.2, 0.3, -0.3],
+            2,
+            &dropped,
+        );
+        assert_eq!(dropped.load(Ordering::Acquire), 0, "three frames fit whole");
+        // One free slot: a whole second callback cannot fit, so both its frames are dropped.
+        push_whole_frames(&mut producer, &[0.4, -0.4, 0.5, -0.5], 2, &dropped);
+        assert_eq!(dropped.load(Ordering::Acquire), 2);
+        let mut buffered = Vec::new();
+        while let Ok(sample) = consumer.pop() {
+            buffered.push(sample);
+        }
+        assert_eq!(buffered, [0.1, -0.1, 0.2, -0.2, 0.3, -0.3]);
+        // A ring with room again takes whole frames unchanged.
+        push_whole_frames(&mut producer, &[0.6, -0.6, 0.7, -0.7], 2, &dropped);
+        assert_eq!(dropped.load(Ordering::Acquire), 2);
+        let mut buffered = Vec::new();
+        while let Ok(sample) = consumer.pop() {
+            buffered.push(sample);
+        }
+        assert_eq!(buffered, [0.6, -0.6, 0.7, -0.7]);
+    }
+
+    #[test]
+    fn dropped_frames_are_counted_once_and_reported() {
+        let capture = source(SyntheticDevice::tone("Mic", 8000, 1, 1.0, 0.5, 800).dropping(5));
+        let mut recorder = Recorder::start(&capture, None).unwrap();
+        recorder.poll().unwrap();
+        assert_eq!(recorder.dropped_frames(), 5);
+        recorder.poll().unwrap();
+        assert_eq!(recorder.dropped_frames(), 5, "the counter is monotonic");
     }
 
     #[test]

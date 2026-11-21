@@ -4,8 +4,10 @@
 //! Capture lives outside the project model (`animathio_audio::Recorder`, opened through the
 //! environment's `CaptureSource`). Stopping a take registers it exactly like an imported file:
 //! the WAV bytes enter the asset store and one undoable `Command::Batch` adds the asset and,
-//! when asked, an audio clip at the playhead. Cancelling drops the audio and closes the device;
-//! the project is untouched until Stop.
+//! when asked, an audio clip at the playhead position captured when Record was pressed. The
+//! encode, hash and decode check run on a background task ("Saving recording…"); cancelling
+//! or replacing the project while it runs discards the take. Cancelling drops the audio and
+//! closes the device; the project is untouched until Stop.
 
 use super::*;
 use crate::style::{self, color, hex};
@@ -13,6 +15,7 @@ use animathio_audio::{InputDevice, Level, Recorder};
 use gpui_component::select::{Select, SelectEvent, SelectState};
 use gpui_component::switch::Switch;
 use gpui_component::{Disableable, IndexPath};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 /// The device menu entry that records from the system's default input.
 const DEFAULT_DEVICE: &str = "System default";
@@ -31,6 +34,24 @@ pub(super) fn meter_fraction(peak: f32) -> f32 {
     ((20.0 * peak.log10() - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0)
 }
 
+/// A take whose audio is waiting for its background save: the WAV encode, hash and decode
+/// check run off the interface thread, then the registering batch is applied here. Dropping
+/// it (cancel, a new project, closing the editor) discards the take safely.
+pub(super) struct SavingTake {
+    /// Identifies this take, so a save landing after the panel was replaced (a new project, then
+    /// a second take) can never register the wrong audio.
+    token: u64,
+    /// Length of the recording.
+    duration: Time,
+    /// Also place an audio clip at `position` when the batch applies.
+    add_to_timeline: bool,
+    /// Where the clip goes: the playhead position captured when Record was pressed.
+    position: Time,
+}
+
+/// Source of [`SavingTake::token`]s.
+static NEXT_SAVE_TOKEN: AtomicU64 = AtomicU64::new(1);
+
 /// State of the open recorder panel.
 pub(super) struct RecordPanel {
     pub(super) devices: Vec<InputDevice>,
@@ -39,6 +60,12 @@ pub(super) struct RecordPanel {
     select: Entity<SelectState<Vec<String>>>,
     /// The take in progress; `None` while idle.
     pub(super) session: Option<Recorder>,
+    /// A finished take waiting for its off-thread save; `None` when nothing is pending.
+    pub(super) saving: Option<SavingTake>,
+    /// Frames the input dropped during this take (a full buffer while the app was busy).
+    pub(super) dropped: u64,
+    /// Where a new clip goes: the playhead captured when Record was pressed.
+    pub(super) position: Time,
     pub(super) level: Level,
     /// The meter as drawn: the latest peak, falling slowly.
     pub(super) shown: f32,
@@ -54,6 +81,12 @@ pub(super) struct RecordPanel {
 impl RecordPanel {
     pub(super) fn is_recording(&self) -> bool {
         self.session.is_some()
+    }
+
+    /// A take is being captured or is waiting for its save: the panel stays open and the
+    /// device choices stay frozen.
+    pub(super) fn is_busy(&self) -> bool {
+        self.session.is_some() || self.saving.is_some()
     }
 }
 
@@ -71,7 +104,9 @@ fn recording_name(project: &Project) -> String {
 
 /// One undoable batch registering a recorded asset and, with `placement` (clip id and start),
 /// an audio clip of the recording's length on the first unlocked audio-only track that is free
-/// there, or on a new "Audio" track.
+/// there, or on a new "Audio" track. An empty unlocked track named "Audio" (the name the app
+/// gives its audio tracks) counts as free; other empty tracks stay visual, since a video track
+/// may be waiting for its first clip.
 pub(super) fn recording_command(
     project: &Project,
     id: AssetId,
@@ -96,12 +131,14 @@ pub(super) fn recording_command(
             .ok_or("the clip would end past the supported timeline")?;
         let range = TimeRange::new(start, Time(end)).map_err(|error| error.0)?;
         let free = |track: &Track| {
+            let audio_only = track.name() == "Audio"
+                || (!track.clips().is_empty()
+                    && track
+                        .clips()
+                        .values()
+                        .all(|clip| matches!(clip.kind, ClipKind::Audio(_))));
             !track.is_locked()
-                && !track.clips().is_empty()
-                && track
-                    .clips()
-                    .values()
-                    .all(|clip| matches!(clip.kind, ClipKind::Audio(_)))
+                && audio_only
                 && !track
                     .clips()
                     .values()
@@ -156,6 +193,9 @@ impl Editor {
                 device: None,
                 select,
                 session: None,
+                saving: None,
+                dropped: 0,
+                position: Time(0),
                 level: Level::default(),
                 shown: 0.0,
                 elapsed: Time(0),
@@ -169,13 +209,10 @@ impl Editor {
         cx.notify();
     }
 
-    /// Close the recorder. A take in progress keeps the panel open: stop or cancel it first.
+    /// Close the recorder. A take in progress or saving keeps the panel open: stop or cancel
+    /// it first (and wait out the save).
     pub(super) fn close_recorder(&mut self, cx: &mut Context<Self>) {
-        if self
-            .record_panel
-            .as_ref()
-            .is_some_and(RecordPanel::is_recording)
-        {
+        if self.record_panel.as_ref().is_some_and(RecordPanel::is_busy) {
             return;
         }
         self.record_panel = None;
@@ -187,7 +224,7 @@ impl Editor {
         let Some(panel) = self.record_panel.as_mut() else {
             return;
         };
-        if panel.listing || panel.is_recording() {
+        if panel.listing || panel.is_busy() {
             return;
         }
         panel.listing = true;
@@ -248,12 +285,14 @@ impl Editor {
     }
 
     /// Open the chosen input and start capturing. A failure (permission, busy or missing
-    /// device, audio turned off) is shown in the panel and nothing is left open.
+    /// device, audio turned off) is shown in the panel and nothing is left open. The clip, if
+    /// asked for, goes to the playhead position captured here, so moving the playhead during
+    /// the take does not move it.
     pub(super) fn start_recording(&mut self, cx: &mut Context<Self>) {
         let Some(panel) = self.record_panel.as_mut() else {
             return;
         };
-        if panel.is_recording() {
+        if panel.is_busy() {
             return;
         }
         panel.message = None;
@@ -262,6 +301,8 @@ impl Editor {
                 panel.level = Level::default();
                 panel.shown = 0.0;
                 panel.elapsed = Time(0);
+                panel.dropped = 0;
+                panel.position = self.position;
                 panel.session = Some(recorder);
             }
             Err(error) => panel.message = Some(error.to_string()),
@@ -283,6 +324,7 @@ impl Editor {
         panel.level = recorder.level();
         panel.elapsed = recorder.duration();
         panel.shown = meter_fraction(panel.level.peak).max(panel.shown - METER_FALL);
+        panel.dropped = recorder.dropped_frames();
         let full = recorder.is_full();
         match polled {
             Err(error) => {
@@ -316,15 +358,17 @@ impl Editor {
             panel.level = Level::default();
             panel.shown = 0.0;
             panel.elapsed = Time(0);
+            panel.dropped = 0;
             self.notices
                 .push(crate::style::Toast::info("Recording discarded."));
             cx.notify();
         }
     }
 
-    /// End the take and register it: the WAV enters the asset store and one `Command::Batch`
-    /// adds the asset (and the clip at the playhead when asked), so a single undo removes both.
-    /// `notice` is shown when the take ended by itself.
+    /// End the take: the device is closed at once and the WAV encode, hash and decode check
+    /// move to a background task, so a long take never freezes the interface. The card shows
+    /// "Saving recording…" until the task registers the asset and the clip (see
+    /// [`Editor::finish_saving`]). `notice` is shown when the take ended by itself.
     fn finish_recording(&mut self, notice: Option<String>, cx: &mut Context<Self>) {
         let Some(panel) = self.record_panel.as_mut() else {
             return;
@@ -335,7 +379,6 @@ impl Editor {
         panel.level = Level::default();
         panel.shown = 0.0;
         panel.elapsed = Time(0);
-        let add_to_timeline = panel.add_to_timeline;
         panel.message = notice;
         let recording = match recorder.finish() {
             Ok(recording) => recording,
@@ -349,13 +392,65 @@ impl Editor {
                 return;
             }
         };
-        let duration = recording.duration();
-        let wav = recording.into_wav();
-        let id = AssetId::of(&wav);
-        let name = recording_name(&self.project);
-        let placement = add_to_timeline.then(|| (self.next_clip_id(), self.position));
-        let command = match recording_command(&self.project, id.clone(), name, duration, placement)
-        {
+        panel.dropped = recording.dropped_frames;
+        let token = NEXT_SAVE_TOKEN.fetch_add(1, AtomicOrdering::Relaxed);
+        panel.saving = Some(SavingTake {
+            token,
+            duration: recording.duration(),
+            add_to_timeline: panel.add_to_timeline,
+            position: panel.position,
+        });
+        cx.spawn(async move |this, cx| {
+            // Off the interface thread: `into_wav` copies the whole take, the hash reads it
+            // all and the decode check opens it — seconds of work at the size cap.
+            let prepared = cx
+                .background_spawn(async move {
+                    let wav = recording.into_wav();
+                    let id = AssetId::of(&wav);
+                    let source = SymphoniaSource::from_bytes(wav.clone()).ok();
+                    (id, wav, source)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| this.finish_saving(token, prepared, cx));
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Register a finished take whose background save landed: insert the WAV bytes into the
+    /// asset store exactly like an imported file and execute one undoable `Command::Batch`
+    /// (`AddAsset`, plus `AddTrack` and `AddClip` where the take started), so a single undo
+    /// removes both. Cancelling, a new project or closing the editor dropped the panel and
+    /// with it the take, so a save landing after that is discarded here.
+    fn finish_saving(
+        &mut self,
+        token: u64,
+        prepared: (AssetId, Vec<u8>, Option<SymphoniaSource>),
+        cx: &mut Context<Self>,
+    ) {
+        let Some(panel) = self.record_panel.as_mut() else {
+            return;
+        };
+        if panel.saving.as_ref().map(|saving| saving.token) != Some(token) {
+            // The panel this take belonged to is gone (a new project replaced it).
+            return;
+        }
+        let saving = panel.saving.take().expect("checked above");
+        let (id, wav, source) = prepared;
+        let SavingTake {
+            token: _,
+            duration,
+            add_to_timeline,
+            position,
+        } = saving;
+        let placement = add_to_timeline.then(|| (self.next_clip_id(), position));
+        let command = match recording_command(
+            &self.project,
+            id.clone(),
+            recording_name(&self.project),
+            duration,
+            placement,
+        ) {
             Ok(command) => command,
             Err(error) => {
                 self.error = Some(error);
@@ -365,8 +460,8 @@ impl Editor {
         };
         let known = self.assets.contains_key(&id);
         if !known {
-            if let Ok(source) = SymphoniaSource::from_bytes(wav.clone()) {
-                let _ = self.pool.insert(id.clone(), &source);
+            if let Some(source) = &source {
+                let _ = self.pool.insert(id.clone(), source);
             }
             Arc::make_mut(&mut self.assets).insert(id.clone(), wav);
         }
@@ -380,14 +475,23 @@ impl Editor {
                 }));
         } else if !known {
             Arc::make_mut(&mut self.assets).remove(&id);
+            // The decode went into the pool for a clip that never existed: prune it.
+            self.pool.collect(&self.project);
         }
         cx.notify();
+    }
+
+    /// Whether a take is being captured or its save is still pending: closing the editor asks
+    /// instead of dropping the work silently.
+    pub(super) fn take_in_progress(&self) -> bool {
+        self.record_panel.as_ref().is_some_and(RecordPanel::is_busy)
     }
 
     /// The recorder card shown at the top of the Media library.
     pub(super) fn record_panel_view(&self, cx: &mut Context<Self>) -> Option<Div> {
         let panel = self.record_panel.as_ref()?;
         let recording = panel.is_recording();
+        let saving = panel.saving.is_some();
         let disabled_reason = self.env.capture.disabled_reason().map(str::to_owned);
         let timecode = timecode::format_timecode(panel.elapsed, self.project.frame_rate());
         let db = panel.level.peak_db();
@@ -400,6 +504,8 @@ impl Editor {
             Some((reason.clone(), true))
         } else if let Some(message) = &panel.message {
             Some((message.clone(), true))
+        } else if saving {
+            Some(("Saving recording\u{2026}".to_owned(), false))
         } else if !panel.listing && panel.devices.is_empty() && !recording {
             Some((
                 "No microphone was found. Plug one in and refresh the list.".to_owned(),
@@ -440,7 +546,7 @@ impl Editor {
                                 "Close the recorder",
                                 cx.listener(|this, _, _, cx| this.close_recorder(cx)),
                             )
-                            .disabled(recording),
+                            .disabled(recording || saving),
                         ),
                 )
                 .child(
@@ -457,7 +563,7 @@ impl Editor {
                                     Select::new(&panel.select)
                                         .small()
                                         .placeholder("Input device")
-                                        .disabled(recording || disabled_reason.is_some()),
+                                        .disabled(recording || saving || disabled_reason.is_some()),
                                 ),
                         )
                         .child(
@@ -469,7 +575,7 @@ impl Editor {
                                     this.refresh_input_devices(window, cx);
                                 }),
                             )
-                            .disabled(recording || disabled_reason.is_some()),
+                            .disabled(recording || saving || disabled_reason.is_some()),
                         ),
                 )
                 .child(
@@ -515,7 +621,7 @@ impl Editor {
                 .child(
                     div().debug_selector(|| "record-add".into()).child(
                         Switch::new("record-add-to-timeline")
-                            .label("Add to timeline at playhead")
+                            .label("Add to timeline at the record position")
                             .checked(panel.add_to_timeline)
                             .disabled(recording)
                             .on_click(cx.listener(|this, checked, _, cx| {
@@ -539,11 +645,20 @@ impl Editor {
                             .child(text),
                     )
                 })
+                .when(panel.dropped > 0, |card| {
+                    card.child(
+                        div()
+                            .debug_selector(|| "record-dropped".into())
+                            .text_size(style::type_size::XS)
+                            .text_color(hex(color::WARNING))
+                            .child("Some audio was lost because the app was busy, so the recording has gaps."),
+                    )
+                })
                 .child(
                     div()
                         .flex()
                         .gap_1()
-                        .when(!recording, |row| {
+                        .when(!recording && !saving, |row| {
                             row.child(
                                 Button::new("record-start")
                                     .primary()
@@ -750,6 +865,62 @@ mod tests {
         };
         assert!(
             matches!(&commands[1], Command::AddTrack { track, .. } if track.id() == TrackId(3))
+        );
+    }
+
+    #[core::prelude::v1::test]
+    fn an_empty_audio_track_is_reused_but_other_empty_tracks_are_not() {
+        let (wav, duration) = take(0.5);
+        let id = AssetId::of(&wav);
+        let mut project = base_project();
+        Command::AddTrack {
+            track: Track::new(TrackId(2), "Audio"),
+            index: 1,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let command = recording_command(
+            &project,
+            id,
+            "r".into(),
+            duration,
+            Some((ClipId(1), Time(0))),
+        )
+        .unwrap();
+        let Command::Batch { commands } = &command else {
+            panic!()
+        };
+        assert!(matches!(commands[0], Command::AddAsset { .. }));
+        assert!(
+            matches!(&commands[1], Command::AddClip { track, .. } if *track == TrackId(2)),
+            "the user's empty Audio track takes the clip: {commands:?}"
+        );
+        assert_eq!(commands.len(), 2, "no track is added");
+
+        // A renamed (or video) empty track stays visual: a new "Audio" track instead.
+        Command::RemoveTrack { id: TrackId(2) }
+            .apply(&mut project)
+            .unwrap();
+        Command::AddTrack {
+            track: Track::new(TrackId(3), "Voiceover"),
+            index: 1,
+        }
+        .apply(&mut project)
+        .unwrap();
+        let command = recording_command(
+            &project,
+            AssetId::of(b"other"),
+            "r".into(),
+            duration,
+            Some((ClipId(2), Time(0))),
+        )
+        .unwrap();
+        let Command::Batch { commands } = &command else {
+            panic!()
+        };
+        assert!(
+            matches!(&commands[1], Command::AddTrack { track, .. } if track.name() == "Audio"),
+            "{commands:?}"
         );
     }
 

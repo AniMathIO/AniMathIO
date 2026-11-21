@@ -152,16 +152,18 @@ pub(super) enum ReplaceProject {
 }
 
 impl Editor {
-    /// Run `action`, first asking whether to discard unsaved changes. Without
-    /// this guard New, Open, Open Recent and Import v1 silently dropped the
-    /// project (an untitled project has no autosave to recover from).
+    /// Run `action`, first asking whether to discard unsaved changes or a recording still
+    /// in progress (a take that would be dropped by New, Open, Import v1 or closing the
+    /// window). Without this guard New, Open, Open Recent and Import v1 silently dropped
+    /// the project (an untitled project has no autosave to recover from).
     pub(super) fn replace_project(
         &mut self,
         action: ReplaceProject,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.dirty {
+        let take_in_progress = self.take_in_progress();
+        if !self.dirty && !take_in_progress {
             self.run_replace(action, window, cx);
             return;
         }
@@ -169,6 +171,14 @@ impl Editor {
         let (title, label) = match action {
             ReplaceProject::CloseWindow => ("Quit without saving?", "Quit without saving"),
             _ => ("Discard unsaved changes?", "Discard changes"),
+        };
+        let detail = match (self.dirty, take_in_progress) {
+            (true, true) => {
+                "The current project has unsaved changes and a recording in progress that will be lost."
+            }
+            (true, false) => "The current project has unsaved changes that will be lost.",
+            (false, true) => "A recording is in progress and will be lost.",
+            (false, false) => unreachable!("guarded above"),
         };
         open_dialog(window, cx, move |dialog, _, cx| {
             let editor = editor.clone();
@@ -179,7 +189,7 @@ impl Editor {
                     div()
                         .text_size(crate::style::type_size::SM)
                         .text_color(style::hex(style::color::TEXT_SECONDARY))
-                        .child("The current project has unsaved changes that will be lost."),
+                        .child(detail),
                 )
                 .footer(submit_footer(label, cx));
             on_enter(dialog, move |window, cx| {
