@@ -3525,6 +3525,8 @@ fn dropping_the_assist_panel_cancels_the_request(cx: &mut TestAppContext) {
         ui.advance_clock(std::time::Duration::from_millis(30));
         ui.settle();
         std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
 
 #[gpui::test]
 fn launcher_open_and_imports_are_pinned_in_view_at_720p(cx: &mut TestAppContext) {

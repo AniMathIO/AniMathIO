@@ -909,9 +909,6 @@ impl Render for MathEditor {
                 };
             }
         }
-        if let Some(assist) = &self.assist {
-            form = form.child(assist.clone());
-        }
         // Colour and Write on come before the palette so they are never the part that scrolls
         // out of view; one compact row keeps them discoverable.
         form = form.child(
@@ -953,6 +950,10 @@ impl Render for MathEditor {
                     },
                 ),
         );
+        // The assist panel is tall, so it comes after Colour and Write on: it is what scrolls.
+        if let Some(assist) = &self.assist {
+            form = form.child(assist.clone());
+        }
         let mut palette = div()
             .debug_selector(|| "math-palette".into())
             .flex()
