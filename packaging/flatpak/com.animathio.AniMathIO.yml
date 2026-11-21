@@ -11,7 +11,9 @@ finish-args:
   - --share=ipc
   - --device=dri
   - --socket=pulseaudio
-  # Community plugin browsing/downloads are explicit user actions.
+  # Community plugin browsing/downloads and the optional AI assist in the Math dialog are
+  # explicit user actions. The assist API key is stored through the Secret portal (oo7 uses it
+  # automatically when sandboxed), which needs no extra permission.
   - --share=network
   - --env=ANIMATHIO_NO_UPDATE_CHECK=1
 modules:

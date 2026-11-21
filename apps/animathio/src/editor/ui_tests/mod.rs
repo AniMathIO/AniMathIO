@@ -76,6 +76,16 @@ impl Ui {
         project: Project,
         assets: BTreeMap<AssetId, Vec<u8>>,
     ) -> Self {
+        Self::open_with_env(cx, project, assets, test_env())
+    }
+
+    /// [`Ui::open`] on an explicit environment (for example with a mocked AI assist client).
+    pub(super) fn open_with_env(
+        cx: &mut TestAppContext,
+        project: Project,
+        assets: BTreeMap<AssetId, Vec<u8>>,
+        env: EditorEnv,
+    ) -> Self {
         cx.update(|cx| {
             gpui_component::init(cx);
             crate::style::install_theme(cx, true, true);
@@ -85,17 +95,7 @@ impl Ui {
         let capture = slot.clone();
         let window = cx.add_window(move |window, cx| {
             let editor = cx.new(|cx| {
-                Editor::with_env(
-                    cx,
-                    window,
-                    project,
-                    assets,
-                    None,
-                    false,
-                    None,
-                    false,
-                    test_env(),
-                )
+                Editor::with_env(cx, window, project, assets, None, false, None, false, env)
             });
             *capture.borrow_mut() = Some(editor.clone());
             gpui_component::Root::new(editor, window, cx)

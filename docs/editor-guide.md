@@ -155,6 +155,64 @@ the app: pick `tiny` (78 MB), `base` (148 MB, default) or
 stores it in the user data directory. The opt-in integration test runs the real tiny model:
 `cargo test -p animathio-transcribe --features whisper --test whisper_tiny -- --ignored`.
 
+## Describe a formula in words (optional AI assist)
+
+The **LaTeX** math dialog (Library, Math, LaTeX; also the inspector of a LaTeX clip) has an
+optional **Describe it in words** box: type "the integral of x squared from 0 to 1", press
+**Convert to LaTeX**, and the model's answer replaces the formula field. The live preview
+renders it through the LaTeX plugin, so a reply that does not compile is flagged there and
+**Add** stays disabled until you fix it. You can edit the LaTeX freely; **Add** inserts it as
+one undo step, exactly like typing LaTeX. Everything else about LaTeX authoring (snippets,
+templates, source editing) works offline and unchanged; this box is simply off until you set
+it up.
+
+**Setup.** Press **Set up** in the box (it is open on first use), pick a starting point and
+fill in three things: the base URL of an OpenAI-compatible server, a model name and, for online
+services, an API key.
+
+| Service | Base URL | Model (example) | Key |
+| --- | --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4.1-mini` | an OpenAI API key |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` | a Gemini API key from Google AI Studio |
+| Ollama (offline) | `http://localhost:11434/v1` | a model you pulled, e.g. `llama3.2` | none |
+| llama.cpp `llama-server` (offline) | `http://localhost:8080/v1` | `default` | none |
+
+Model names change often; use whatever your provider currently offers. Remote servers must use
+`https://`; plain `http://` is accepted only for `localhost`, `.local` names and private
+network addresses, so text never crosses the internet unencrypted. A key is never sent or
+stored for a plain `http://` server unless it is on your own machine (`localhost`,
+`127.0.0.1`, `::1`): for a network server that needs a key, use `https://`. A full
+`.../chat/completions` URL works too. Press **Save**; leaving the fields empty and saving turns
+the feature off again.
+
+**Where things are stored.** The base URL and model are in `assist.json` in the editor
+configuration directory (next to `recent.json`). The API key is **never** written there, nor to
+projects, logs or error messages: it goes to the operating system keyring (Secret Service /
+GNOME Keyring / KWallet on Linux, Windows Credential Manager, macOS Keychain; inside Flatpak the
+Secret portal) under an entry for the server's origin (scheme, host and port), so changing the
+base URL never sends one service's key to another, not even the `http` and `https` versions
+of the same address. **Remove saved key** deletes it. The keyring is only asked when you open
+**Set up**, press **Save** or **Convert to LaTeX**, never just by opening the dialog. A working
+keyring backend is required for keys: GNOME Keyring or KWallet (Secret Service) on Linux, and
+inside Flatpak a Secret portal backend on the host (GNOME Keyring or KWallet with its portal).
+Without one, **Set up** shows "Keyring not available" and a key cannot be saved; online
+services then answer with a rejected-key error. Local servers need no key anyway.
+
+**Data flow and privacy.** Nothing is sent when you open the dialog, type, or save the setup.
+Only pressing **Convert to LaTeX** sends one HTTPS (or local) `POST` to
+`<base URL>/chat/completions` containing a fixed instruction asking for LaTeX only, the model
+name and the text in the description box. No project data, file names, media or other clips are
+included. A one-line notice under the box names the host the text goes to and whether a key is
+sent. The conversion runs on a background worker; **Cancel** closes the connection at once
+and discards the answer, requests time out after 60 seconds and redirects are not followed.
+Failures are reported in words (HTTP status, rejected key, timeout, unreachable server, a reply
+that is not a chat completion, or a reply that is not LaTeX). The text you send is handled
+under the provider's own terms; choose a local server when it must stay on your machine.
+
+The integration lives in its own crate (`animathio-assist`), not in the core and not in a
+plugin (plugins are sandboxed without network access). The command line and the MCP server make
+no AI requests; they keep taking LaTeX directly.
+
 ## Editor gallery
 
 The editor shell (dark theme, Media library, viewer

@@ -7,8 +7,11 @@
 //! touches a sound card, a GPU or the user's settings.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+#[cfg(test)]
+use animathio_assist::{AssistError, CancelToken, Endpoint};
+use animathio_assist::{Converter, HttpConverter};
 use animathio_audio::AudioPool;
 use animathio_core::Project;
 use animathio_render::BackendKind;
@@ -50,6 +53,26 @@ pub(crate) struct EditorEnv {
     /// Whether this environment may check for a newer release at startup
     /// (`update_check`); the headless test harness never touches the network.
     pub(crate) updates: bool,
+    /// The AI assist client behind the Math dialog's Convert button. Production uses the real
+    /// HTTP client; tests inject a mock, and the headless default never touches the network.
+    pub(crate) assist: Arc<dyn Converter>,
+}
+
+/// The headless default for [`EditorEnv::assist`]: every conversion fails as offline.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct OfflineConverter;
+
+#[cfg(test)]
+impl Converter for OfflineConverter {
+    fn complete(
+        &self,
+        _endpoint: &Endpoint,
+        _prose: &str,
+        _cancel: &CancelToken,
+    ) -> Result<String, AssistError> {
+        Err(AssistError::Network("offline test environment".into()))
+    }
 }
 
 /// Process-wide part of the environment. Plugin loading and settings files are reached from
@@ -65,6 +88,7 @@ impl EditorEnv {
             plugins: PluginSource::Discover,
             config_dir: None,
             updates: true,
+            assist: Arc::new(HttpConverter::new()),
         }
     }
 
@@ -78,6 +102,7 @@ impl EditorEnv {
             plugins,
             config_dir: Some(config_dir),
             updates: false,
+            assist: Arc::new(OfflineConverter),
         }
     }
 

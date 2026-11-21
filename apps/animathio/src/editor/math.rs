@@ -1,4 +1,5 @@
 //! Math library and a reusable, draft-based object editor. Preview never mutates the project.
+use super::assist::{AssistEvent, AssistPanel};
 use super::*;
 use crate::style::{self, color, hex};
 use animathio_control::{
@@ -403,6 +404,7 @@ pub(super) struct MathEditor {
     dialog: bool,
     fields: BTreeMap<String, Entity<InputState>>,
     source: Option<Entity<TextareaState>>,
+    assist: Option<Entity<AssistPanel>>,
     vertices: Vec<[Entity<InputState>; 2]>,
     color: Entity<ColorPickerState>,
     subscriptions: Vec<Subscription>,
@@ -518,11 +520,26 @@ impl MathEditor {
                 this.schedule_preview(cx);
             }),
         );
+        // LaTeX only: describe a formula in words and convert it (opt-in, see `assist`).
+        let assist = (draft.kind == MathObjectKind::Latex).then(|| {
+            let panel = cx.new(|cx| AssistPanel::new(window, cx));
+            subscriptions.push(cx.subscribe_in(
+                &panel,
+                window,
+                |this, _, event: &AssistEvent, window, cx| {
+                    let AssistEvent::Converted(latex) = event;
+                    // The formula field takes the result; the live preview then validates it.
+                    this.snippet(latex, true, window, cx);
+                },
+            ));
+            panel
+        });
         let mut this = Self {
             draft,
             dialog,
             fields,
             source,
+            assist,
             vertices: Vec::new(),
             color,
             subscriptions,
@@ -552,6 +569,16 @@ impl MathEditor {
         }
         this.schedule_preview(cx);
         this
+    }
+    /// The AI assist panel of a LaTeX editor (UI tests drive Convert through it).
+    #[cfg(test)]
+    pub(super) fn assist_panel(&self) -> Option<Entity<AssistPanel>> {
+        self.assist.clone()
+    }
+    /// The LaTeX source in the draft, as the preview and Add see it.
+    #[cfg(test)]
+    pub(super) fn draft_source(&self) -> String {
+        self.draft.fields.get("source").cloned().unwrap_or_default()
     }
     fn add_vertex(&mut self, values: [&str; 2], window: &mut Window, cx: &mut Context<Self>) {
         let states =
@@ -826,6 +853,9 @@ impl Render for MathEditor {
                     form.child(Input::new(state).small())
                 };
             }
+        }
+        if let Some(assist) = &self.assist {
+            form = form.child(assist.clone());
         }
         if self.draft.kind == MathObjectKind::Latex {
             for (title, items, replace) in [

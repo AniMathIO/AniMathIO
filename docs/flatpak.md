@@ -25,6 +25,14 @@ when the SDK Rust version changes. `ANIMATHIO_SKIP_RUSTUP=1` tells
 `scripts/build-plugins.sh` to use this offline target. The build sandbox has no
 network access; Flatpak downloads the declared sources before building.
 
+The installed app keeps `--share=network` for community plugin Browse/downloads and the
+optional AI assist in the Math dialog (explicit user actions only). The assist API key is kept
+in the system keyring: inside the sandbox GPUI's credential store (`oo7`) uses the Secret
+portal automatically, which needs no extra `--talk-name`; the encrypted keyring file lives in
+the app's own data directory. The host must provide a Secret portal backend (GNOME Keyring, or
+KWallet with its portal); without one the Math dialog's setup shows "Keyring not available"
+and no API key can be saved (local servers need none).
+
 To refresh `cargo-sources.json`, install `flatpak-cargo-generator==0.1.5` and
 `tomlkit` in a Python virtual environment, then run
 `python packaging/flatpak/generate-sources.py` with that environment active.
