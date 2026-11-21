@@ -1160,9 +1160,9 @@ rest the plain text is drawn, so a resting clip costs nothing extra.
 Text plugin 1.2.0 fills shaped glyph contours together with their original winding,
 preserving counters in canvas text, fitted titles and Classic captions. Normalized
 text runs use the renderer’s shared embedded-font shaping on CPU and GPU.
-Text plugin 1.3.0 adds numeric `font_weight` (100–900, default 400, clamped) and the enum
+Text plugin 1.4.0 adds numeric `font_weight` (100–900, default 400, clamped) and the enum
 `font` (`dejavu` or `inter`, default `dejavu` when absent). With `font = dejavu`, weight
-400 keeps the host's DejaVu Sans `TextRun`, so projects saved before 1.3.0 render
+400 keeps the host's DejaVu Sans `TextRun`, so projects saved before 1.4.0 render
 unchanged, and every other weight is outlined inside the plugin from the bundled Inter
 variable font (SIL OFL; `LICENSE-Inter.txt` ships in the bundle), so keyframing the weight
 of such a clip switches typeface at 400. With `font = inter` every weight, 400 included, is
@@ -1180,8 +1180,12 @@ an over-long word overflows.
 Weighted text keeps the regular layout contract: normalized text wraps at the canvas width, honours
 `align` and explicit newlines and is centred in the clip box; fitted title boxes
 (`fit_width`/`fit_height`) and animated caption styles also honour the weight. The shaper
-advances glyph by glyph (no kerning or ligatures) and needs no host import. The plugin
-still uses ABI 1.2; no frozen WIT records or host imports changed.
+advances glyph by glyph (no kerning or ligatures) and needs no host import. The ABI stays 1.3
+(the plugin already imports `layout-text` for the glyph slide); no frozen WIT records or
+host imports changed. The per-character slide follows the typeface: outlined text (weight other
+than 400, or `font = inter`) builds its glyph units from the same Inter shaper and line wrapping as
+its plain render (never the host's `layout-text` or `shape-text`), so the typeface never changes
+while it animates; a character with a combining mark stays one unit there too.
 Caption styles (introduced in text plugin 1.1.0, ABI unchanged) add optional parameters that are ignored
 when `caption_style` is absent or `off`: `caption_style` (`off`, `classic`, `"word-highlight"`,
 `karaoke`, `pop`, `"one-word"`, `"bold-outline"`), `words` (space-separated `start:end` pairs in
@@ -1225,8 +1229,8 @@ still declares the older minor and keeps loading on a 1.2 host. LaTeX selects
 `colored-source-plugin` and text `text-layout-source-plugin`; other source plugins retain
 `source-plugin`. Plugin versions: animations 1.2.0, audio-basic 1.2.0, effects-basic 1.1.0
 (the clipped slide), graph 1.4.0, import-manim 1.0.0, latex 1.3.0 (per-path inline color,
-normalized sizing, strict validation and preserved glyph holes), shapes 1.1.0, text 1.3.0
-(per-character slide), trap 1.0.0 and the example 1.0.0. The frozen 1.0
+normalized sizing, strict validation and preserved glyph holes), shapes 1.1.0, text 1.4.0
+(per-character slide, weighted and Inter text), trap 1.0.0 and the example 1.0.0. The frozen 1.0
 fixture and the explicit 0.2.x adapter retain older binaries; 0.1 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.

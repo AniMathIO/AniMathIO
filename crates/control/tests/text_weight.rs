@@ -1,4 +1,4 @@
-//! Text plugin 1.3.0 `font_weight`: schema, rendering and backward compatibility.
+//! Text plugin 1.4.0 `font_weight`: schema, rendering and backward compatibility.
 use animathio_core::{
     ClipId, ClipKind, CoordinateSpace, Fit, ParamValue, Scene, SceneClip, Time, TrackId, Transform,
     VectorElement,
@@ -29,6 +29,7 @@ fn scene(text: &str, weight: Option<f64>, fit: bool) -> Scene {
             track: TrackId(1),
             kind,
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit: Fit::Stretch,
             transform: Transform::default(),
             params: BTreeMap::new(),
@@ -78,7 +79,7 @@ fn heavier_weights_render_more_ink_than_regular() {
 
 #[test]
 fn a_missing_weight_equals_regular() {
-    // Projects saved before text 1.3.0 have no `font_weight`: same frame as an explicit 400.
+    // Projects saved before text 1.4.0 have no `font_weight`: same frame as an explicit 400.
     for fit in [false, true] {
         assert_eq!(
             ink("Regular", None, fit),
@@ -561,4 +562,224 @@ fn a_two_thousand_character_paragraph_at_weight_700_fits_the_sandbox_budgets() {
         panic!("pixel paragraph failed: {:?}", resolved.clips[0].kind)
     };
     vector.validate().unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Per-character slide (`char_slide*`) of weighted and Inter text.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug)]
+enum Layout {
+    Wrapped,
+    Fitted,
+    Pixels,
+}
+
+const LAYOUTS: [Layout; 3] = [Layout::Wrapped, Layout::Fitted, Layout::Pixels];
+/// Weighted or Inter faces: (parameters, label). Every one is outlined from Inter.
+const INTER_FACES: [(f64, &str); 3] = [(700.0, "dejavu"), (700.0, "inter"), (400.0, "inter")];
+
+/// A left-aligned text clip in `layout` with the given typeface, sliding at `progress`
+/// (`None`: no slide parameters at all). No stagger, mask or fade, so each glyph is at the
+/// same state and only its travel (a fraction of the line height) differs from the plain text.
+fn slide_scene(
+    text: &str,
+    layout: Layout,
+    face: Option<(f64, &str)>,
+    progress: Option<f64>,
+) -> Scene {
+    let mut params = vec![("align", serde_json::json!("left"))];
+    match layout {
+        Layout::Wrapped => {}
+        Layout::Fitted => {
+            params.push(("fit_width", 0.9.into()));
+            params.push(("fit_height", 0.5.into()));
+        }
+        Layout::Pixels => {
+            params.push(("units", "pixels".into()));
+            params.push(("font_size", 40.into()));
+        }
+    }
+    if let Some((weight, font)) = face {
+        params.push(("font_weight", weight.into()));
+        params.push(("font", font.into()));
+    }
+    let mut scene = scene_with(text, &params);
+    if let Some(progress) = progress {
+        for (name, value) in [
+            ("char_slide", progress),
+            ("char_slide_direction", 1.0),
+            ("char_slide_stagger", 0.0),
+            ("char_slide_clip", 0.0),
+            ("char_slide_fade", 0.0),
+        ] {
+            scene.clips[0]
+                .params
+                .insert(name.into(), ParamValue::Number(value));
+        }
+    }
+    scene
+}
+
+/// Sum of absolute red-channel differences between two frames.
+fn pixel_diff(a: &[u8], b: &[u8]) -> u64 {
+    a.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0)
+        .map(|(p, q)| u64::from(p[0].abs_diff(q[0])))
+        .sum()
+}
+
+#[test]
+fn a_resting_weighted_char_slide_renders_the_plain_weighted_text() {
+    for layout in LAYOUTS {
+        for (weight, font) in INTER_FACES {
+            let face = Some((weight, font));
+            let plain = render_scene(&slide_scene("Resting title", layout, face, None)).unwrap();
+            let rest =
+                render_scene(&slide_scene("Resting title", layout, face, Some(1.0))).unwrap();
+            assert!(lit(&plain) > 0, "{layout:?} {weight} {font}");
+            assert_eq!(plain, rest, "{layout:?} {weight} {font}");
+        }
+    }
+}
+
+#[test]
+fn a_sliding_weighted_char_slide_is_drawn_with_inter_glyphs_not_dejavu() {
+    // Barely off rest: each glyph is a hair away from its resting place, so the frame is the
+    // plain Inter text up to anti-aliasing. DejaVu glyphs would be a clearly different frame.
+    for layout in LAYOUTS {
+        for (weight, font) in INTER_FACES {
+            let face = Some((weight, font));
+            let sliding =
+                render_scene(&slide_scene("Hamburgefonts", layout, face, Some(0.9999))).unwrap();
+            let inter = render_scene(&slide_scene("Hamburgefonts", layout, face, None)).unwrap();
+            // The host's DejaVu text of the same string at the same layout.
+            let dejavu = render_scene(&slide_scene("Hamburgefonts", layout, None, None)).unwrap();
+            let (near, far) = (pixel_diff(&sliding, &inter), pixel_diff(&sliding, &dejavu));
+            assert!(
+                near * 20 < lit(&inter),
+                "{layout:?} {weight} {font}: sliding is not the Inter render ({near} of {})",
+                lit(&inter)
+            );
+            assert!(
+                far > near * 8,
+                "{layout:?} {weight} {font}: sliding looks like DejaVu (Inter {near}, DejaVu {far})"
+            );
+        }
+    }
+}
+
+#[test]
+fn halfway_through_the_slide_inter_glyphs_travel_and_keep_their_ink() {
+    for layout in LAYOUTS {
+        let face = Some((700.0, "inter"));
+        let rest = render_scene(&slide_scene("Slide", layout, face, None)).unwrap();
+        // From the top: the travel stays on the canvas, so no ink is lost off its edge.
+        let mut sliding = slide_scene("Slide", layout, face, Some(0.5));
+        sliding.clips[0]
+            .params
+            .insert("char_slide_direction".into(), ParamValue::Number(3.0));
+        let half = render_scene(&sliding).unwrap();
+        assert_ne!(rest, half, "{layout:?}: the glyphs moved");
+        // No mask or fade: the same glyph shapes, so (nearly) the same amount of ink, and
+        // moving them half a line height is nothing like drawing a different face.
+        let (a, b) = (lit(&rest), lit(&half));
+        assert!(a.abs_diff(b) * 50 < a, "{layout:?}: {a} vs {b}");
+    }
+}
+
+/// One drawn glyph unit: contour count, alpha and every point.
+type DrawnUnit = (usize, u8, Vec<(f64, f64)>);
+
+/// The filled paths of a resolved text clip, one per glyph unit.
+fn slide_units(scene: &Scene, size: (u32, u32)) -> Vec<DrawnUnit> {
+    let resolved = test_support::resolve(scene, size);
+    let ClipKind::Vector(vector) = &resolved.clips[0].kind else {
+        panic!("text failed: {:?}", resolved.clips[0].kind)
+    };
+    vector
+        .elements
+        .iter()
+        .map(|element| {
+            let VectorElement::FillPath { path, color } = element else {
+                panic!("expected filled glyph paths while sliding")
+            };
+            let mut contours = 0;
+            let mut points = Vec::new();
+            for verb in path {
+                match verb {
+                    animathio_core::PathVerb::MoveTo(p) => {
+                        contours += 1;
+                        points.push((p.x, p.y));
+                    }
+                    animathio_core::PathVerb::LineTo(p)
+                    | animathio_core::PathVerb::QuadTo(_, p)
+                    | animathio_core::PathVerb::CubicTo(_, _, p) => points.push((p.x, p.y)),
+                    animathio_core::PathVerb::Close => {}
+                }
+            }
+            (contours, color.a, points)
+        })
+        .collect()
+}
+
+#[test]
+fn inter_slide_timing_and_geometry_do_not_depend_on_the_resolution() {
+    for layout in [Layout::Wrapped, Layout::Fitted] {
+        for (weight, font) in INTER_FACES {
+            let mut scene = slide_scene(
+                "Slide in\nline two",
+                layout,
+                Some((weight, font)),
+                Some(0.55),
+            );
+            for (name, value) in [
+                ("char_slide_direction", 4.0),
+                ("char_slide_stagger", 0.6),
+                ("char_slide_clip", 1.0),
+                ("char_slide_fade", 1.0),
+            ] {
+                scene.clips[0]
+                    .params
+                    .insert(name.into(), ParamValue::Number(value));
+            }
+            let hd = slide_units(&scene, (1920, 1080));
+            let uhd = slide_units(&scene, (3840, 2160));
+            assert_eq!(hd.len(), uhd.len(), "{layout:?} {weight} {font}");
+            assert!(hd.len() > 6, "one unit per glyph");
+            for (a, b) in hd.iter().zip(&uhd) {
+                assert_eq!((a.0, a.1), (b.0, b.1), "{layout:?} {weight} {font}: timing");
+                assert_eq!(a.2.len(), b.2.len(), "{layout:?} {weight} {font}");
+                for (p, q) in a.2.iter().zip(&b.2) {
+                    assert!(
+                        (p.0 - q.0).abs() < 0.002 && (p.1 - q.1).abs() < 0.002,
+                        "{layout:?} {weight} {font}: {p:?} vs {q:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn inter_slide_units_keep_dots_and_accents_with_their_letter() {
+    for layout in LAYOUTS {
+        let units = |text: &str| {
+            slide_units(
+                &slide_scene(text, layout, Some((700.0, "inter")), Some(0.5)),
+                (1920, 1080),
+            )
+        };
+        let dotted = units("in");
+        assert_eq!(dotted.len(), 2, "{layout:?}: one unit per letter");
+        assert_eq!(dotted[0].0, 2, "{layout:?}: the i is its stem and its dot");
+        assert_eq!(dotted[1].0, 1, "{layout:?}: the n");
+        assert_eq!(units("e\u{301}").len(), 1, "{layout:?}: a combining accent");
+        assert_eq!(units("ae\u{301}").len(), 2, "{layout:?}");
+        assert_eq!(units("é").len(), 1, "{layout:?}: a precomposed letter");
+        // Blanks make no unit; each line starts its own.
+        assert_eq!(units("a b\nc").len(), 3, "{layout:?}");
+    }
 }

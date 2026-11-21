@@ -203,16 +203,16 @@ fn fitted_text(
             y: (p.y + oy) / box_height,
         };
         if slide.is_some() {
-            // One `shape-text` call per character of this line: bounded by MAX_GLYPHS in total
-            // (the slide is dropped above that many characters), and only mid-animation.
-            let units = glyph_slide::split_contours(text, &contours, |s| host::shape_text(s, font));
-            let units = units.unwrap_or_else(|| vec![contours.clone()]);
-            for unit in units {
+            for unit in slide_units(text, font, face, &contours) {
                 let shifted: Vec<Vec<PathVerb>> = unit
+                    .contours
                     .iter()
                     .map(|c| c.iter().map(|v| offset_verb(v, ox, oy)).collect())
                     .collect();
-                let (left, right) = glyph_slide::ink_cell(&shifted);
+                let (left, right) = match unit.cell {
+                    Some((left, right)) => (left + ox, right + ox),
+                    None => glyph_slide::ink_cell(&shifted),
+                };
                 layout.glyphs.push(glyph_slide::Glyph {
                     contours: shifted,
                     line,
@@ -812,7 +812,7 @@ impl Guest for TextPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "text".to_string(),
-            version: "1.3.0".to_string(),
+            version: "1.4.0".to_string(),
             description:
                 "Host-shaped text with size, colour, alignment, animated caption styles and per-character slides"
                     .to_string(),
@@ -1094,7 +1094,11 @@ impl Guest for TextPlugin {
                 );
             }
             if let Some(slide) = &slide {
-                return wrapped_slide(&text, font_size, &align, color, size, slide);
+                return if face.outlined() {
+                    weighted_slide(&text, font_size, face, &align, color, size, slide)
+                } else {
+                    wrapped_slide(&text, font_size, &align, color, size, slide)
+                };
             }
             if face.outlined() {
                 return weighted_text_run(&text, font_size, face, &align, color, size);
@@ -1143,11 +1147,12 @@ impl Guest for TextPlugin {
                 elements: pixel_slide(
                     &text,
                     font_size,
+                    face,
                     &contours,
                     (x_offset, y_offset),
                     color,
                     slide,
-                ),
+                )?,
             });
         }
         let paths = contours.into_iter().map(|contour| {
@@ -1223,30 +1228,80 @@ fn wrapped_slide(
     })
 }
 
+/// A slide unit of one line before it is placed: its contours in the line's coordinates and
+/// its advance cell (`None`: use the ink, as the host layout gives no advances).
+struct SlideUnit {
+    contours: Vec<Vec<PathVerb>>,
+    cell: Option<(f32, f32)>,
+}
+
+/// The glyph units of one line whose whole outline is `whole`. Outlined (weighted or Inter)
+/// text takes them from the Inter shaper that drew `whole`; the host's text splits its
+/// `shape-text` contours per character: one host call per `char` of `text`, bounded by
+/// [`glyph_slide::MAX_GLYPHS`] over the whole text (the slide is dropped above that many
+/// characters) and only mid-animation.
+fn slide_units(
+    text: &str,
+    size: f32,
+    face: Typeface,
+    whole: &[Vec<PathVerb>],
+) -> Vec<SlideUnit> {
+    if face.outlined() {
+        if let Ok(shaper) = Shaper::get(face.weight) {
+            return shaper
+                .units(text, size)
+                .into_iter()
+                .map(|unit| SlideUnit {
+                    contours: unit.contours,
+                    cell: Some((unit.left, unit.right)),
+                })
+                .collect();
+        }
+    }
+    glyph_slide::split_contours(text, whole, |s| host::shape_text(s, size))
+        .unwrap_or_else(|| vec![whole.to_vec()])
+        .into_iter()
+        .map(|contours| SlideUnit {
+            contours,
+            cell: None,
+        })
+        .collect()
+}
+
 /// Per-glyph slide of the single-line pixel layout.
 fn pixel_slide(
     text: &str,
     font_size: f32,
+    face: Typeface,
     contours: &[Vec<PathVerb>],
     (ox, oy): (f32, f32),
     color: Color,
     slide: &glyph_slide::Slide,
-) -> Vec<DrawCommand> {
-    let units = glyph_slide::split_contours(text, contours, |s| host::shape_text(s, font_size))
-        .unwrap_or_else(|| vec![contours.to_vec()]);
+) -> Result<Vec<DrawCommand>, Diagnostic> {
+    // The line box of the typeface: Inter's own metrics for outlined text, DejaVu's otherwise.
+    let (above, below) = if face.outlined() {
+        let metrics = Shaper::get(face.weight)?.line_metrics(font_size);
+        (metrics.ascent, metrics.line_height - metrics.ascent)
+    } else {
+        (ASCENT * font_size, DESCENT * font_size)
+    };
     let layout = glyph_slide::Layout {
         lines: vec![glyph_slide::Band {
-            top: oy - ASCENT * font_size,
-            bottom: oy + DESCENT * font_size,
+            top: oy - above,
+            bottom: oy + below,
         }],
-        glyphs: units
+        glyphs: slide_units(text, font_size, face, contours)
             .into_iter()
             .map(|unit| {
                 let contours: Vec<Vec<PathVerb>> = unit
+                    .contours
                     .iter()
                     .map(|c| c.iter().map(|v| offset_verb(v, ox, oy)).collect())
                     .collect();
-                let (left, right) = glyph_slide::ink_cell(&contours);
+                let (left, right) = match unit.cell {
+                    Some((left, right)) => (left + ox, right + ox),
+                    None => glyph_slide::ink_cell(&contours),
+                };
                 glyph_slide::Glyph {
                     contours,
                     line: 0,
@@ -1256,7 +1311,7 @@ fn pixel_slide(
             })
             .collect(),
     };
-    glyph_slide::draw(&layout, slide, color, |p| p)
+    Ok(glyph_slide::draw(&layout, slide, color, |p| p))
 }
 
 /// The first `reveal` fraction of the characters (typewriter presets keyframe it).
@@ -1536,6 +1591,59 @@ impl Shaper {
         }
         paths
     }
+
+    /// The slide units of one line, laid out exactly like [`Shaper::outline`] (same pen
+    /// positions, same glyphs): one per character with ink, a combining mark joining the
+    /// character before it (a dot or accent never separates from its letter), each with its
+    /// advance cell. Blanks and control characters make no unit.
+    fn units(&self, text: &str, size: f32) -> Vec<GlyphUnit> {
+        let mut units: Vec<GlyphUnit> = Vec::new();
+        let mut cursor = 0.0;
+        for ch in text.chars() {
+            let advance = self.advance(ch, size);
+            let ink: Vec<Vec<PathVerb>> = if ch.is_control() {
+                Vec::new()
+            } else {
+                self.glyph(ch)
+                    .contours
+                    .iter()
+                    .map(|contour| {
+                        contour
+                            .iter()
+                            .map(|verb| {
+                                map_verb(verb, |p| Point {
+                                    x: cursor + p.x * size,
+                                    y: p.y * size,
+                                })
+                            })
+                            .collect()
+                    })
+                    .collect()
+            };
+            match units.last_mut() {
+                Some(unit) if glyph_slide::is_mark(ch) => {
+                    unit.contours.extend(ink);
+                    unit.right = unit.right.max(cursor + advance);
+                }
+                _ => units.push(GlyphUnit {
+                    contours: ink,
+                    left: cursor,
+                    right: cursor + advance,
+                }),
+            }
+            cursor += advance;
+        }
+        units.retain(|unit| !unit.contours.is_empty());
+        units
+    }
+}
+
+/// One glyph slide unit of outlined text: its contours (separate subpaths, so counters stay
+/// open) and its advance cell along x, in the line's own coordinates.
+struct GlyphUnit {
+    contours: Vec<Vec<PathVerb>>,
+    left: f32,
+    right: f32,
 }
 
 fn map_verb(verb: &PathVerb, f: impl Fn(Point) -> Point) -> PathVerb {
@@ -1679,17 +1787,34 @@ fn fill_chunks(contours: Vec<Vec<PathVerb>>, color: Color) -> Vec<DrawCommand> {
     commands
 }
 
-/// Weighted counterpart of the host's normalized `TextRun`: wrapped at the canvas
-/// width, lines aligned inside the block and the block centred in the clip box, so
-/// switching weight does not move the text.
-fn weighted_text_run(
+/// One laid-out line of an outlined text block: its text, left edge and baseline in pixels.
+struct PlacedLine {
+    text: String,
+    x: f32,
+    baseline: f32,
+}
+
+/// The wrapped block of an outlined normalized text: shared by the plain weighted render
+/// and its per-character slide, so the glyphs sit where the plain text puts them.
+struct Block {
+    shaper: std::rc::Rc<Shaper>,
+    lines: Vec<PlacedLine>,
+    /// Top of the first line and the distance between lines.
+    top: f32,
+    line_height: f32,
+    /// The font size in pixels.
+    px: f32,
+}
+
+/// Wrapped at the canvas width, lines aligned inside the block and the block centred in the
+/// clip box, like the host's normalized `TextRun`, so switching weight does not move the text.
+fn place_block(
     text: &str,
     font_size: f32,
     face: Typeface,
     align: &str,
-    color: Color,
     size: Size,
-) -> Result<Scene, Diagnostic> {
+) -> Result<Block, Diagnostic> {
     let px = font_size * size.height as f32;
     check_size(px)?;
     check_text(text)?;
@@ -1704,21 +1829,50 @@ fn weighted_text_run(
     let block_width = widths.iter().copied().fold(0.0, f32::max);
     let top = (height - metrics.line_height * lines.len() as f32) / 2.0;
     let left = (width - block_width) / 2.0;
+    let placed = lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let remaining = block_width - widths[index];
+            PlacedLine {
+                text: line.text,
+                x: left
+                    + match align {
+                        "left" => 0.0,
+                        "right" => remaining,
+                        _ => remaining / 2.0,
+                    },
+                baseline: top + index as f32 * metrics.line_height + metrics.ascent,
+            }
+        })
+        .collect();
+    Ok(Block {
+        shaper,
+        lines: placed,
+        top,
+        line_height: metrics.line_height,
+        px,
+    })
+}
+
+/// Weighted counterpart of the host's normalized `TextRun` (see [`place_block`]).
+fn weighted_text_run(
+    text: &str,
+    font_size: f32,
+    face: Typeface,
+    align: &str,
+    color: Color,
+    size: Size,
+) -> Result<Scene, Diagnostic> {
+    let (width, height) = (size.width as f32, size.height as f32);
+    let block = place_block(text, font_size, face, align, size)?;
     let mut contours = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let remaining = block_width - widths[index];
-        let x = left
-            + match align {
-                "left" => 0.0,
-                "right" => remaining,
-                _ => remaining / 2.0,
-            };
-        let y = top + index as f32 * metrics.line_height + metrics.ascent;
+    for line in &block.lines {
         let scale = |p: Point| Point {
-            x: (p.x + x) / width,
-            y: (p.y + y) / height,
+            x: (p.x + line.x) / width,
+            y: (p.y + line.baseline) / height,
         };
-        for contour in shaper.outline(&line.text, px) {
+        for contour in block.shaper.outline(&line.text, block.px) {
             contours.push(contour.iter().map(|verb| map_verb(verb, scale)).collect());
         }
     }
@@ -1726,6 +1880,60 @@ fn weighted_text_run(
     Ok(Scene {
         coordinate_space: CoordinateSpace::Normalized,
         elements: fill_chunks(contours, color),
+    })
+}
+
+/// Per-glyph slide of an outlined (weighted or Inter) normalized text: the units are the
+/// Inter shaper's own glyphs on the lines of [`place_block`], never the host's DejaVu layout,
+/// so the typeface does not change while the text animates.
+fn weighted_slide(
+    text: &str,
+    font_size: f32,
+    face: Typeface,
+    align: &str,
+    color: Color,
+    size: Size,
+    slide: &glyph_slide::Slide,
+) -> Result<Scene, Diagnostic> {
+    let (width, height) = (size.width as f32, size.height as f32);
+    let block = place_block(text, font_size, face, align, size)?;
+    let mut layout = glyph_slide::Layout {
+        lines: Vec::new(),
+        glyphs: Vec::new(),
+    };
+    for (index, line) in block.lines.iter().enumerate() {
+        let band_top = block.top + index as f32 * block.line_height;
+        layout.lines.push(glyph_slide::Band {
+            top: band_top,
+            bottom: band_top + block.line_height,
+        });
+        for unit in block.shaper.units(&line.text, block.px) {
+            layout.glyphs.push(glyph_slide::Glyph {
+                contours: unit
+                    .contours
+                    .iter()
+                    .map(|c| c.iter().map(|v| offset_verb(v, line.x, line.baseline)).collect())
+                    .collect(),
+                line: index,
+                left: unit.left + line.x,
+                right: unit.right + line.x,
+            });
+        }
+    }
+    check_verbs(
+        &layout
+            .glyphs
+            .iter()
+            .flat_map(|glyph| glyph.contours.iter().cloned())
+            .collect::<Vec<_>>(),
+    )?;
+    let elements = glyph_slide::draw(&layout, slide, color, |p| Point {
+        x: p.x / width,
+        y: p.y / height,
+    });
+    Ok(Scene {
+        coordinate_space: CoordinateSpace::Normalized,
+        elements,
     })
 }
 
@@ -1745,7 +1953,7 @@ mod weight_tests {
     #[test]
     fn weight_schema_keeps_regular_as_default() {
         let manifest = TextPlugin::describe();
-        assert_eq!(manifest.version, "1.3.0");
+        assert_eq!(manifest.version, "1.4.0");
         let param = manifest
             .params
             .iter()
@@ -1788,6 +1996,38 @@ mod weight_tests {
         // Inter outlines regular too, so weight never decides the typeface.
         assert!(params(Some("inter"), 400.0).outlined());
         assert!(!params(Some("dejavu"), 400.0).outlined());
+    }
+
+    #[test]
+    fn slide_units_are_the_outline_glyph_for_glyph() {
+        let shaper = Shaper::get(700.0).unwrap();
+        for text in ["Hamburgefonts", "in", "a b", "∀x ∈ ℝ", "e\u{301}x"] {
+            let units = shaper.units(text, 40.0);
+            let whole: Vec<Vec<PathVerb>> = units
+                .iter()
+                .map(|unit| unit.contours.iter().flatten().cloned().collect())
+                .collect();
+            // The units regroup the very same verbs as the plain outline (marks merged).
+            let count = |paths: &[Vec<PathVerb>]| paths.iter().map(Vec::len).sum::<usize>();
+            assert_eq!(count(&whole), count(&shaper.outline(text, 40.0)), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn slide_units_merge_marks_and_skip_blanks() {
+        let shaper = Shaper::get(700.0).unwrap();
+        // The i carries its dot as a second contour; the space makes no unit.
+        let units = shaper.units("i n", 40.0);
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0].contours.len(), 2);
+        // A combining accent joins the letter before it.
+        assert_eq!(shaper.units("e\u{301}", 40.0).len(), 1);
+        assert_eq!(shaper.units("ae\u{301}", 40.0).len(), 2);
+        // Cells follow the pen: left to right, each as wide as its advance.
+        let units = shaper.units("Hi", 40.0);
+        assert_eq!(units[0].left, 0.0);
+        assert!((units[0].right - shaper.advance('H', 40.0)).abs() < 1e-3);
+        assert_eq!(units[1].left, units[0].right);
     }
 
     #[test]
