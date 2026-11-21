@@ -35,6 +35,7 @@ mod polish_audio;
 mod polish_inspector;
 mod polish_p1;
 mod polish_plugins;
+mod polish_retime;
 mod recording;
 mod scenarios;
 

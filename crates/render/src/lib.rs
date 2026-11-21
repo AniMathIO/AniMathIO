@@ -351,9 +351,21 @@ impl FrameSource for animathio_media::MediaPool {
             pixels: frame.pixels.clone(),
         })
     }
+    /// The nominal index `floor(t * frame_rate)`. It assumes frame `k` is due at `k / rate`,
+    /// so it is only trusted for constant-rate sources: the decoder API reports no stream
+    /// start offset (a leading empty edit or first presentation time) to subtract, and a
+    /// variable-rate source has no fixed grid at all. For variable-rate sources this
+    /// returns `None` and the blend falls back to grouping taps by the shared allocation
+    /// (`Arc::ptr_eq`), which is always correct and only costs a decode per distinct tap.
     fn frame_index(&mut self, asset: &AssetId, media_time: Time) -> Option<i64> {
-        let rate = self.info(asset)?.video?.frame_rate;
-        rate.time_to_frame(media_time, Rounding::Floor).ok()
+        let video = self.info(asset)?.video?;
+        if video.vfr {
+            return None;
+        }
+        video
+            .frame_rate
+            .time_to_frame(media_time, Rounding::Floor)
+            .ok()
     }
 }
 

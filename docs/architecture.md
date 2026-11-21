@@ -893,7 +893,10 @@ timeline times (keys beyond a shortened end are retained). `Clip::source_time`
 is used by evaluation, so CPU/GPU preview, exports and `FrameSource` all read the
 same clock. Reverse starts at the exclusive source end minus one tick. Splits
 and head trims retain the original curve phase, so their source samples stay
-continuous; merge accepts true split pairs only. The source-limit guards use
+continuous (a pitch-preserved head trim differs from the uncut clip for up to two
+64-hop segments after the cut, then is identical: the first new segment has no
+predecessor and the join after it blends against a differently aligned neighbour);
+merge accepts true split pairs only. The source-limit guards use
 mapped source bounds. Extending a retimed clip past its retained source interval
 is rejected; reset/retime the interval instead. Retimed transition handles clamp
 to the retained interval.
@@ -968,7 +971,11 @@ pixels at a time (no frame-sized accumulator). Known limit: the tap count follow
 speed against the *project* frame rate because the project model holds no source frame
 rate; a source faster than the project (for example 60 fps footage at 2x in a 30 fps
 project) is therefore sampled by fewer taps than it has frames in the span and keeps
-some aliasing, and a variable-rate source's frame indices are nominal. At or near 1x,
+some aliasing. Frame indices are the nominal `floor(t * rate)` and assume the stream
+starts at media time 0 (the decoder API reports no start offset, so a source with a
+leading offset may attribute a tap near a frame boundary to the neighbouring frame); a
+variable-rate source reports no index at all and its taps are grouped by shared decoded
+frame instead. At or near 1x,
 slow motion, holds and stills there are no taps and the path is the exact point
 sample. Output stays a pure function of the scene and the frame source.
 

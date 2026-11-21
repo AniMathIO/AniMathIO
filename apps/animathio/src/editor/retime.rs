@@ -55,6 +55,8 @@ pub(super) fn ramps(text: &str, rate: FrameRate) -> Result<Vec<SpeedPoint>, Stri
 }
 /// Pixel radius within which a pointer grabs a ramp handle.
 const RAMP_GRAB: f32 = 7.0;
+/// A clip block narrower than this (pixels) draws no speed lane, so it takes no key edits.
+pub(super) const RAMP_LANE_MIN_WIDTH: f32 = 24.0;
 
 impl Editor {
     /// Ticks in one project frame: the closest two ramp keys may be.
@@ -86,6 +88,16 @@ impl Editor {
             .find_map(|(row, track)| track.clips().get(&selected).map(|clip| (row, clip)))
     }
 
+    /// Whether the selected clip's speed lane is drawn (and so editable): the row is tall
+    /// enough, the block is at least [`RAMP_LANE_MIN_WIDTH`] wide and the clip is not a hold.
+    fn ramp_lane_drawn(layout: &TimelineLayout, row: usize, clip: &Clip) -> bool {
+        let width = timeline::time_to_x(layout, clip.range.end)
+            - timeline::time_to_x(layout, clip.range.start);
+        !clip.time_map.hold
+            && width >= RAMP_LANE_MIN_WIDTH
+            && Self::ramp_lane(layout, row).is_some()
+    }
+
     /// The speed key under a canvas-relative point, on the selected clip only. Only keys
     /// inside the clip block have handles, and the pointer must be over that block.
     pub(super) fn hit_ramp_handle(
@@ -95,6 +107,9 @@ impl Editor {
         y: f32,
     ) -> Option<(ClipId, usize)> {
         let (row, clip) = self.ramp_target()?;
+        if !Self::ramp_lane_drawn(layout, row, clip) {
+            return None;
+        }
         let lane = Self::ramp_lane(layout, row)?;
         let (block_x0, block_x1) = (
             timeline::time_to_x(layout, clip.range.start),
@@ -162,10 +177,11 @@ impl Editor {
             return false;
         }
         // Alt-click on the selected clip adds a key at the pointer's time, but only where
-        // the speed lane is drawn (a clip row too short for it shows no keys).
+        // the speed lane is drawn (a row too short or a clip block too narrow for it shows
+        // no keys).
         if self
             .ramp_target()
-            .is_none_or(|(row, _)| Self::ramp_lane(layout, row).is_none())
+            .is_none_or(|(row, clip)| !Self::ramp_lane_drawn(layout, row, clip))
         {
             return false;
         }
