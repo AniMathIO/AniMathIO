@@ -52,7 +52,7 @@ pub enum PluginKind {
 /// Plugin manifest stored as `plugin.toml` inside `.amplugin` packages.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginManifestToml {
-    /// Minimum ABI version required by the component. Stable 1.0.0, 1.1.0 and 1.2.0 and the
+    /// Minimum ABI version required by the component. Stable 1.0.0, 1.1.0, 1.2.0 and 1.3.0 and the
     /// explicitly supported legacy releases 0.2.0, 0.2.1 and 0.2.2 are accepted.
     pub api_version: String,
     /// Reverse-domain plugin identifier, e.g. "org.animathio.shapes".
@@ -97,7 +97,7 @@ impl PluginManifestToml {
             || !api.build.is_empty()
             || !matches!(
                 (api.major, api.minor, api.patch),
-                (0, 2, 0..=2) | (1, 0..=2, 0)
+                (0, 2, 0..=2) | (1, 0..=3, 0)
             )
         {
             return Err(ManifestError::UnsupportedApiVersion(

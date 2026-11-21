@@ -103,6 +103,10 @@ fn the_catalog_covers_every_role_and_v1_parity_presets() {
         "fade-out",
         "slide-in",
         "slide-out",
+        "clipped-slide-in",
+        "clipped-slide-out",
+        "character-slide-in",
+        "character-slide-out",
         "zoom-in",
         "pop-in",
         "spin-in",
@@ -430,4 +434,340 @@ fn manim_plugin_selects_scenes_and_reports_failures() {
             .iter()
             .any(|i| i.plugin_id == MANIM && i.extensions == ["py"])
     );
+}
+
+const BASIC_EFFECTS: &str = "org.animathio.effects-basic";
+
+fn slide_effect(project: &Project) -> &animathio_core::EffectInstance {
+    clip(project)
+        .effects
+        .iter()
+        .find(|e| e.plugin == BASIC_EFFECTS && e.effect == "slide")
+        .expect("preset added the slide effect")
+}
+
+fn effect_keys(project: &Project, param: &str) -> Vec<(i64, ParamValue)> {
+    let effect = slide_effect(project).id;
+    keys(
+        project,
+        &Target::Effect {
+            effect,
+            param: param.into(),
+        },
+    )
+}
+
+fn param_keys(project: &Project, name: &str) -> Vec<(i64, ParamValue)> {
+    keys(project, &Target::Param(name.into()))
+}
+
+fn number(value: &ParamValue) -> f64 {
+    value.as_number().expect("a number")
+}
+
+#[test]
+fn clipped_slide_presets_add_the_effect_and_are_one_undoable_batch_for_any_clip() {
+    let host = test_support::host();
+    let kinds = [
+        ("text", text_project()),
+        ("image", project_with(ClipKind::Image(AssetId::of(b"img")))),
+    ];
+    for (kind, base) in kinds {
+        for preset in ["clipped-slide-in", "clipped-slide-out"] {
+            let mut project = base.clone();
+            let before = project.clone();
+            let command = host
+                .animation_preset_command(
+                    &project,
+                    ClipId(1),
+                    ANIMATIONS,
+                    preset,
+                    Some(Time(SECOND)),
+                    &BTreeMap::from([("easing".to_owned(), ParamValue::Enum("linear".into()))]),
+                )
+                .unwrap();
+            assert!(matches!(command, Command::Batch { .. }));
+            let inverse = command.apply(&mut project).unwrap();
+            let exit = preset.ends_with("out");
+            let progress = effect_keys(&project, "progress");
+            let (first, last) = if exit { (1.0, 0.0) } else { (0.0, 1.0) };
+            assert_eq!(progress.first().unwrap().1, ParamValue::Number(first));
+            assert_eq!(progress.last().unwrap().1, ParamValue::Number(last));
+            assert_eq!(
+                effect_keys(&project, "direction")[0].1,
+                ParamValue::Number(if exit { 2.0 } else { 1.0 })
+            );
+            assert_eq!(effect_keys(&project, "clip")[0].1, ParamValue::Number(1.0));
+            assert!(
+                effect_keys(&project, "characters").is_empty(),
+                "the effect has no per-character mode"
+            );
+            // The rest value of the effect is the identity, so the clip is unchanged outside
+            // the preset window.
+            assert_eq!(slide_effect(&project).params["progress"], 1.0);
+            // Evaluated in the middle of the window the effect is half way, with its option
+            // held.
+            let middle = if exit {
+                4 * SECOND - SECOND / 2
+            } else {
+                SECOND / 2
+            };
+            let scene = animathio_core::evaluate(&project, Time(middle));
+            let evaluated = &scene.clips[0].effects[0].params;
+            assert!(
+                (evaluated["progress"] - 0.5).abs() < 1e-6,
+                "{kind} {preset}: {}",
+                evaluated["progress"]
+            );
+            assert_eq!(evaluated["direction"], if exit { 2.0 } else { 1.0 });
+            inverse.apply(&mut project).unwrap();
+            assert_eq!(project, before, "{kind} {preset}");
+        }
+    }
+}
+
+#[test]
+fn character_slide_presets_drive_the_text_parameters_in_one_undoable_batch() {
+    let host = test_support::host();
+    for preset in ["character-slide-in", "character-slide-out"] {
+        let mut project = text_project();
+        let before = project.clone();
+        let command = host
+            .animation_preset_command(
+                &project,
+                ClipId(1),
+                ANIMATIONS,
+                preset,
+                Some(Time(SECOND)),
+                &BTreeMap::from([("easing".to_owned(), ParamValue::Enum("linear".into()))]),
+            )
+            .unwrap();
+        assert!(matches!(command, Command::Batch { .. }));
+        let inverse = command.apply(&mut project).unwrap();
+        assert!(
+            clip(&project).effects.is_empty(),
+            "the text plugin animates itself, no effect is added"
+        );
+        let exit = preset.ends_with("out");
+        let progress = param_keys(&project, "char_slide");
+        let (first, last) = if exit { (1.0, 0.0) } else { (0.0, 1.0) };
+        assert_eq!(number(&progress.first().unwrap().1), first);
+        assert_eq!(number(&progress.last().unwrap().1), last);
+        let held = |name: &str| number(&param_keys(&project, name)[0].1);
+        assert_eq!(held("char_slide_direction"), if exit { 2.0 } else { 1.0 });
+        // An exit plays the entrance backwards, so the sign flips to keep reading order.
+        assert_eq!(held("char_slide_stagger"), if exit { -0.5 } else { 0.5 });
+        assert_eq!(held("char_slide_clip"), 1.0);
+        assert_eq!(held("char_slide_fade"), 1.0);
+        // Evaluated in the middle of the window the progress is half way and the options
+        // hold; outside the window the glyphs are at rest.
+        let middle = if exit {
+            4 * SECOND - SECOND / 2
+        } else {
+            SECOND / 2
+        };
+        let scene = animathio_core::evaluate(&project, Time(middle));
+        let params = &scene.clips[0].params;
+        assert!(
+            (number(&params["char_slide"]) - 0.5).abs() < 1e-6,
+            "{preset}: {:?}",
+            params["char_slide"]
+        );
+        assert_eq!(
+            number(&params["char_slide_direction"]),
+            if exit { 2.0 } else { 1.0 }
+        );
+        let rest = animathio_core::evaluate(&project, Time(2 * SECOND));
+        assert_eq!(number(&rest.clips[0].params["char_slide"]), 1.0, "{preset}");
+        inverse.apply(&mut project).unwrap();
+        assert_eq!(project, before, "{preset}");
+    }
+}
+
+#[test]
+fn character_slide_options_reach_the_text_parameters() {
+    let host = test_support::host();
+    let mut project = text_project();
+    let options = BTreeMap::from([
+        ("direction".to_owned(), ParamValue::Enum("bottom".into())),
+        ("stagger".to_owned(), ParamValue::Number(0.8)),
+        ("clip".to_owned(), ParamValue::Bool(false)),
+        ("fade".to_owned(), ParamValue::Bool(false)),
+    ]);
+    host.animation_preset_command(
+        &project,
+        ClipId(1),
+        ANIMATIONS,
+        "character-slide-in",
+        None,
+        &options,
+    )
+    .unwrap()
+    .apply(&mut project)
+    .unwrap();
+    let held = |name: &str| number(&param_keys(&project, name)[0].1);
+    assert_eq!(held("char_slide_direction"), 4.0);
+    assert_eq!(held("char_slide_stagger"), 0.8);
+    assert_eq!(held("char_slide_clip"), 0.0);
+    assert_eq!(held("char_slide_fade"), 0.0);
+}
+
+#[test]
+fn character_slide_is_refused_on_a_clip_with_a_caption_style() {
+    let host = test_support::host();
+    let captioned = |style: &str| {
+        let mut kind = animathio_plugin_api::sources::text("Hello".into(), 0.1, [255; 4]);
+        let ClipKind::Plugin { params, .. } = &mut kind else {
+            unreachable!("the text source is a plugin clip");
+        };
+        params["caption_style"] = style.into();
+        project_with(kind)
+    };
+    let apply = |project: &Project, preset: &str| {
+        host.animation_preset_command(
+            project,
+            ClipId(1),
+            ANIMATIONS,
+            preset,
+            None,
+            &BTreeMap::new(),
+        )
+    };
+    for style in ["classic", "karaoke", "bold-outline"] {
+        let project = captioned(style);
+        let error = apply(&project, "character-slide-in")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("caption style"), "{style}: {error}");
+        // The other presets still apply to a styled caption.
+        apply(&project, "clipped-slide-in").unwrap();
+    }
+    // `off` is the plain text: the preset applies.
+    apply(&captioned("off"), "character-slide-in").unwrap();
+}
+
+#[test]
+fn clipped_slide_applies_to_media_and_character_slide_to_text_only() {
+    let host = test_support::host();
+    let image = project_with(ClipKind::Image(AssetId::of(b"img")));
+    host.animation_preset_command(
+        &image,
+        ClipId(1),
+        ANIMATIONS,
+        "clipped-slide-in",
+        None,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(
+        host.animation_preset_command(
+            &image,
+            ClipId(1),
+            ANIMATIONS,
+            "character-slide-in",
+            None,
+            &BTreeMap::new(),
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn clipped_slide_in_and_out_share_one_effect_instance() {
+    let host = test_support::host();
+    let mut project = text_project();
+    for preset in ["clipped-slide-in", "clipped-slide-out"] {
+        host.animation_preset_command(
+            &project,
+            ClipId(1),
+            ANIMATIONS,
+            preset,
+            Some(Time(SECOND)),
+            &BTreeMap::new(),
+        )
+        .unwrap()
+        .apply(&mut project)
+        .unwrap();
+    }
+    let slides = clip(&project)
+        .effects
+        .iter()
+        .filter(|e| e.effect == "slide")
+        .count();
+    assert_eq!(slides, 1);
+    let progress = effect_keys(&project, "progress");
+    assert_eq!(progress.first().unwrap().1, ParamValue::Number(0.0));
+    assert_eq!(progress.last().unwrap().1, ParamValue::Number(0.0));
+}
+
+#[test]
+fn a_bypassed_slide_is_reenabled_by_the_preset_that_animates_it() {
+    let host = test_support::host();
+    let mut project = text_project();
+    // Two instances: the first one bypassed, the second one on. The preset animates the one
+    // that is on and changes nothing else.
+    let add = |project: &mut Project, id: u64, bypass: bool| {
+        let mut effect = animathio_core::EffectInstance::new(
+            animathio_core::EffectId(id),
+            BASIC_EFFECTS,
+            "slide",
+            BTreeMap::from([
+                ("progress".to_owned(), 1.0),
+                ("direction".to_owned(), 1.0),
+                ("clip".to_owned(), 1.0),
+            ]),
+        );
+        effect.bypass = bypass;
+        Command::AddEffect {
+            id: ClipId(1),
+            index: clip(project).effects.len(),
+            effect,
+        }
+        .apply(project)
+        .unwrap();
+    };
+    add(&mut project, 1, true);
+    add(&mut project, 2, false);
+    let command = host
+        .animation_preset_command(
+            &project,
+            ClipId(1),
+            ANIMATIONS,
+            "clipped-slide-in",
+            None,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    command.apply(&mut project).unwrap();
+    let animated: Vec<_> = clip(&project)
+        .animations
+        .iter()
+        .filter_map(|a| match &a.target {
+            Target::Effect { effect, .. } => Some(effect.0),
+            _ => None,
+        })
+        .collect();
+    assert!(animated.iter().all(|id| *id == 2), "{animated:?}");
+    assert!(clip(&project).effects[0].bypass);
+
+    // With only a bypassed instance the same batch switches it back on (one undo step).
+    let mut only = text_project();
+    add(&mut only, 1, true);
+    let before = only.clone();
+    let command = host
+        .animation_preset_command(
+            &only,
+            ClipId(1),
+            ANIMATIONS,
+            "clipped-slide-in",
+            None,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    let inverse = command.apply(&mut only).unwrap();
+    assert!(!clip(&only).effects[0].bypass, "re-enabled");
+    assert_eq!(clip(&only).effects.len(), 1, "no second instance");
+    inverse.apply(&mut only).unwrap();
+    assert_eq!(only, before);
+    assert!(clip(&only).effects[0].bypass);
 }

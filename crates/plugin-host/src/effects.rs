@@ -85,6 +85,75 @@ impl EffectDescriptor {
 struct EffectPluginEntry {
     pre: EffectPluginPre,
     effects: Vec<EffectDescriptor>,
+    /// Identity declarations per effect id (manifest metadata `effect.<id>.identity`).
+    identity: BTreeMap<String, Vec<IdentityRule>>,
+}
+
+/// One declared identity condition: the effect does nothing while `param <op> value`.
+#[derive(Clone, Debug, PartialEq)]
+struct IdentityRule {
+    param: String,
+    op: IdentityOp,
+    value: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum IdentityOp {
+    AtLeast,
+    AtMost,
+    Equal,
+}
+
+impl IdentityRule {
+    fn holds(&self, params: &BTreeMap<String, f64>) -> bool {
+        let Some(value) = params.get(&self.param) else {
+            return false;
+        };
+        match self.op {
+            IdentityOp::AtLeast => *value >= self.value,
+            IdentityOp::AtMost => *value <= self.value,
+            IdentityOp::Equal => (*value - self.value).abs() <= f64::EPSILON,
+        }
+    }
+}
+
+/// Parse `effect.<id>.identity` metadata: rules separated by `;`, each `<param><op><number>`
+/// with `op` one of `>=`, `<=` or `==`. The effect is an identity while ANY rule holds.
+/// Malformed rules are ignored, so a bad declaration can only cost speed, never correctness.
+fn identity_rules(metadata: &[(String, String)]) -> BTreeMap<String, Vec<IdentityRule>> {
+    let mut out: BTreeMap<String, Vec<IdentityRule>> = BTreeMap::new();
+    for (key, value) in metadata {
+        let Some(id) = key
+            .strip_prefix("effect.")
+            .and_then(|rest| rest.strip_suffix(".identity"))
+        else {
+            continue;
+        };
+        for rule in value.split(';') {
+            let rule = rule.trim();
+            for (token, op) in [
+                (">=", IdentityOp::AtLeast),
+                ("<=", IdentityOp::AtMost),
+                ("==", IdentityOp::Equal),
+            ] {
+                let Some((param, number)) = rule.split_once(token) else {
+                    continue;
+                };
+                if let Ok(value) = number.trim().parse::<f64>()
+                    && value.is_finite()
+                    && !param.trim().is_empty()
+                {
+                    out.entry(id.to_owned()).or_default().push(IdentityRule {
+                        param: param.trim().to_owned(),
+                        op,
+                        value,
+                    });
+                }
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Registry plus sandbox policy; shared by the host and every [`EffectHandle`].
@@ -157,7 +226,11 @@ impl EffectRuntime {
         }
         self.plugins.write().expect("effect registry lock").insert(
             plugin_id.to_owned(),
-            Arc::new(EffectPluginEntry { pre, effects }),
+            Arc::new(EffectPluginEntry {
+                pre,
+                effects,
+                identity: identity_rules(&manifest.metadata),
+            }),
         );
         Ok(manifest)
     }
@@ -204,6 +277,22 @@ impl EffectRuntime {
             (fuel, self.limits.effect_epoch_deadline_ticks),
             self.limits,
         )
+    }
+
+    /// Whether the plugin declares `effect` an identity at its current (clamped) parameters.
+    fn is_identity(&self, effect: &EffectInstance) -> bool {
+        let plugins = self.plugins.read().expect("effect registry lock");
+        let Some(entry) = plugins.get(&effect.plugin) else {
+            return false;
+        };
+        let Some(rules) = entry.identity.get(&effect.effect) else {
+            return false;
+        };
+        let Some(descriptor) = entry.effects.iter().find(|e| e.effect_id == effect.effect) else {
+            return false;
+        };
+        let params = descriptor.clamped_params(&effect.params);
+        rules.iter().any(|rule| rule.holds(&params))
     }
 
     fn apply(
@@ -435,6 +524,10 @@ impl EffectProcessor for EffectHandle {
         pixels: &mut Vec<u8>,
     ) -> Result<(), String> {
         self.runtime.apply(effect, time, size, pixels, self.preview)
+    }
+
+    fn is_identity(&self, effect: &EffectInstance) -> bool {
+        self.runtime.is_identity(effect)
     }
 }
 

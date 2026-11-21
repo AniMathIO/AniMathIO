@@ -437,6 +437,7 @@ dependencies = [
  "animathio-import-manim",
  "animathio-plugin-api",
  "animathio-render",
+ "animathio-text-layout",
  "animathio-typeset",
  "blake3",
  "directories",
@@ -468,15 +469,22 @@ dependencies = [
  "animathio-media",
  "animathio-plugin-api",
  "animathio-plugin-host",
+ "animathio-text-layout",
  "fearless_simd 1.2.0",
  "image",
- "parley",
  "pollster 0.4.0",
  "proptest",
  "serde_json",
  "thiserror 2.0.21",
  "vello",
  "vello_cpu 0.4.0",
+]
+
+[[package]]
+name = "animathio-text-layout"
+version = "2.2.0"
+dependencies = [
+ "parley",
 ]
 
 [[package]]

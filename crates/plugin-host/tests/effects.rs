@@ -50,7 +50,7 @@ fn max_diff(a: &[u8], b: &[u8]) -> u8 {
 }
 
 #[test]
-fn host_lists_the_eight_basic_effects_with_defaults() {
+fn host_lists_the_basic_effects_with_defaults() {
     let host = test_support::host();
     let effects: Vec<_> = host
         .effects()
@@ -68,7 +68,8 @@ fn host_lists_the_eight_basic_effects_with_defaults() {
             "brightness",
             "contrast",
             "blur",
-            "opacity"
+            "opacity",
+            "slide"
         ]
     );
     let blur = effects.iter().find(|e| e.effect_id == "blur").unwrap();
@@ -416,7 +417,7 @@ fn handles_see_plugins_loaded_after_they_were_created() {
         .unwrap()
         .clone();
     host.load_plugin_package(package).unwrap();
-    assert_eq!(handle.effects().len(), 8);
+    assert_eq!(handle.effects().len(), 9);
     handle
         .apply(
             &instance("invert", "amount", 1.0),
@@ -512,4 +513,156 @@ fn bench_1080p() {
         }
         println!("{:<10} {best:7.1} ms", effect.effect);
     }
+}
+
+// --- clipped slide -------------------------------------------------------------------
+
+const W: usize = 40;
+const H: usize = 12;
+
+fn slide(direction: f64, clip: f64, progress: f64) -> EffectInstance {
+    EffectInstance::new(
+        EffectId(1),
+        PLUGIN,
+        "slide",
+        BTreeMap::from([
+            ("progress".to_owned(), progress),
+            ("direction".to_owned(), direction),
+            ("clip".to_owned(), clip),
+        ]),
+    )
+}
+
+/// Opaque blocks of `(x0, x1, y0, y1)` in distinct colours on a transparent frame.
+fn blocks(rects: &[(usize, usize, usize, usize)]) -> Vec<u8> {
+    let mut pixels = vec![0; W * H * 4];
+    for (i, &(x0, x1, y0, y1)) in rects.iter().enumerate() {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                pixels[(y * W + x) * 4..][..4].copy_from_slice(&[40 * (i as u8 + 1), 200, 90, 255]);
+            }
+        }
+    }
+    pixels
+}
+
+fn run(effect: &EffectInstance, pixels: &[u8]) -> Vec<u8> {
+    let mut out = pixels.to_vec();
+    test_support::effect_processor()
+        .apply(effect, Time(0), (W as u32, H as u32), &mut out)
+        .unwrap();
+    out
+}
+
+fn alpha_at(pixels: &[u8], x: usize, y: usize) -> u8 {
+    pixels[(y * W + x) * 4 + 3]
+}
+
+fn ink_columns(pixels: &[u8]) -> Vec<usize> {
+    (0..W)
+        .filter(|&x| (0..H).any(|y| alpha_at(pixels, x, y) > 0))
+        .collect()
+}
+
+fn ink_rows(pixels: &[u8]) -> Vec<usize> {
+    (0..H)
+        .filter(|&y| (0..W).any(|x| alpha_at(pixels, x, y) > 0))
+        .collect()
+}
+
+#[test]
+fn slide_at_rest_is_the_input_and_fully_slid_shows_nothing() {
+    let frame = blocks(&[(10, 30, 3, 9)]);
+    for direction in 1..=4 {
+        assert_eq!(run(&slide(f64::from(direction), 1.0, 1.0), &frame), frame);
+        let hidden = run(&slide(f64::from(direction), 1.0, 0.0), &frame);
+        assert!(
+            hidden.as_chunks::<4>().0.iter().all(|p| p[3] == 0),
+            "direction {direction}"
+        );
+    }
+    let empty = vec![0; W * H * 4];
+    assert_eq!(run(&slide(1.0, 1.0, 0.3), &empty), empty);
+}
+
+#[test]
+fn clipped_slide_emerges_from_the_clip_bounds_in_every_direction() {
+    let frame = blocks(&[(10, 30, 3, 9)]);
+    // Half way: the 20x6 block has moved half its own size toward its start side, and
+    // the part that left its bounds is cut off.
+    let left = run(&slide(1.0, 1.0, 0.5), &frame);
+    assert_eq!(ink_columns(&left), (10..20).collect::<Vec<_>>());
+    assert_eq!(ink_rows(&left), (3..9).collect::<Vec<_>>());
+    let right = run(&slide(2.0, 1.0, 0.5), &frame);
+    assert_eq!(ink_columns(&right), (20..30).collect::<Vec<_>>());
+    let top = run(&slide(3.0, 1.0, 0.5), &frame);
+    assert_eq!(ink_rows(&top), (3..6).collect::<Vec<_>>());
+    assert_eq!(ink_columns(&top), (10..30).collect::<Vec<_>>());
+    let bottom = run(&slide(4.0, 1.0, 0.5), &frame);
+    assert_eq!(ink_rows(&bottom), (6..9).collect::<Vec<_>>());
+    // The visible pixels are the original colours, not smeared.
+    assert_eq!(
+        &left[(5 * W + 15) * 4..][..4],
+        &frame[(5 * W + 15) * 4..][..4]
+    );
+}
+
+#[test]
+fn unclipped_slide_moves_the_content_past_its_bounds() {
+    let frame = blocks(&[(10, 30, 3, 9)]);
+    let moved = run(&slide(1.0, 0.0, 0.5), &frame);
+    assert_eq!(ink_columns(&moved), (0..20).collect::<Vec<_>>());
+}
+
+#[test]
+fn the_slide_moves_everything_as_one_block_whatever_the_gaps() {
+    // Three separate blocks: the effect has no notion of glyphs, so they stay together and
+    // keep their spacing (per-character slides are the text plugin's job).
+    let frame = blocks(&[(4, 10, 3, 9), (16, 22, 3, 9), (28, 34, 3, 9)]);
+    let half = run(&slide(2.0, 1.0, 0.5), &frame);
+    // 30 px wide bounds starting at x = 4: half way the block has moved 15 px right and only
+    // what is still inside the bounds (x < 34) shows.
+    assert_eq!(
+        ink_columns(&half),
+        (19..25).chain(31..34).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn slide_is_deterministic_and_validates_its_parameters() {
+    let frame = blocks(&[(4, 10, 3, 9), (16, 22, 3, 9)]);
+    let effect = slide(3.0, 1.0, 0.37);
+    assert_eq!(run(&effect, &frame), run(&effect, &frame));
+    // The host clamps stored values to the declared range, so an out-of-range direction
+    // behaves like the nearest valid one.
+    assert_eq!(
+        run(&slide(9.0, 1.0, 0.5), &frame),
+        run(&slide(4.0, 1.0, 0.5), &frame)
+    );
+}
+
+#[test]
+fn the_manifest_declares_when_a_slide_is_an_identity() {
+    let processor = test_support::effect_processor();
+    assert!(processor.is_identity(&slide(1.0, 1.0, 1.0)), "arrived");
+    assert!(
+        !processor.is_identity(&slide(1.0, 1.0, 0.99)),
+        "still moving"
+    );
+    assert!(!processor.is_identity(&slide(1.0, 1.0, 0.0)), "hidden");
+    // An out-of-range stored value is clamped before the check, like when it is applied.
+    assert!(processor.is_identity(&slide(1.0, 1.0, 7.0)));
+    // Filters declare nothing, so they always run, and so does a missing plugin.
+    let grayscale = EffectInstance::new(
+        EffectId(2),
+        PLUGIN,
+        "grayscale",
+        BTreeMap::from([("amount".to_owned(), 0.0)]),
+    );
+    assert!(!processor.is_identity(&grayscale));
+    let unknown = EffectInstance::new(EffectId(3), "org.example.nope", "slide", BTreeMap::new());
+    assert!(!processor.is_identity(&unknown));
+    // The identity claim is true: applying an identity slide returns the pixels untouched.
+    let frame = blocks(&[(10, 30, 3, 9)]);
+    assert_eq!(run(&slide(2.0, 1.0, 1.0), &frame), frame);
 }

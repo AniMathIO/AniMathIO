@@ -184,7 +184,7 @@ impl GpuBackend {
                 Affine::IDENTITY,
                 &canvas,
             );
-            if clip.has_active_effects() {
+            if pool.runs_effects(clip) {
                 // Effects run through the plugin processor on CPU pixels for now (WGSL
                 // ports are a follow-up): rasterize the clip alone, filter it, composite it.
                 let mut layer = self

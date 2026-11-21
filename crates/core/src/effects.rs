@@ -140,6 +140,17 @@ pub trait EffectProcessor {
         size: (u32, u32),
         pixels: &mut Vec<u8>,
     ) -> Result<(), String>;
+
+    /// Whether `effect` leaves every frame unchanged at its current parameters (a slide
+    /// that has arrived, a zero-strength filter). The renderer then skips the effect and,
+    /// when nothing else in the chain runs, keeps the clip on the direct drawing path
+    /// instead of rasterizing it into a layer and copying that through the plugin.
+    ///
+    /// Must be a pure function of `effect` and only ever return `true` when
+    /// [`apply`](Self::apply) would return the pixels untouched. The default is `false`.
+    fn is_identity(&self, _effect: &EffectInstance) -> bool {
+        false
+    }
 }
 
 /// One block of interleaved `f32` PCM handed to an [`AudioEffectProcessor`].

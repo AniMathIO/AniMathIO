@@ -7,7 +7,8 @@
 use super::*;
 use crate::style::{color, hex};
 use animathio_core::TICKS_PER_SECOND;
-use animathio_plugin_host::{PresetDescriptor, PresetRole, clip_kind_id};
+use animathio_plugin_host::{PresetDescriptor, PresetParamKind, PresetRole, clip_kind_id};
+use serde_json::Value;
 
 /// Window-length step of the inspector's duration buttons: a quarter second.
 const DURATION_STEP: i64 = TICKS_PER_SECOND / 4;
@@ -38,6 +39,84 @@ impl PresetDurations {
             PresetRole::Emphasis => &mut self.emphasis,
         }
     }
+}
+
+/// One preset option shown as a button that cycles through its choices (or flips a
+/// switch). Options with the same id are shared by every preset that declares them, so
+/// "Direction" is chosen once for the clipped slide, the character slide, wipe and slide.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct OptionControl {
+    id: String,
+    label: String,
+    choices: Vec<String>,
+    /// `true` for a switch (`choices` is then empty).
+    toggle: bool,
+    default: Value,
+}
+
+impl OptionControl {
+    /// The option id (`direction`, `clip`, ...).
+    #[cfg(test)]
+    pub(super) fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+/// The cyclable options of `presets`, `direction` and `clip` first.
+pub(super) fn option_controls(presets: &[&PresetDescriptor]) -> Vec<OptionControl> {
+    let mut controls: Vec<OptionControl> = Vec::new();
+    for preset in presets {
+        for param in &preset.params {
+            if controls.iter().any(|c| c.id == param.id) {
+                continue;
+            }
+            let control = match &param.kind {
+                PresetParamKind::Choice { options, default } => OptionControl {
+                    id: param.id.clone(),
+                    label: param.label.clone(),
+                    choices: options.clone(),
+                    toggle: false,
+                    default: Value::String(default.clone()),
+                },
+                PresetParamKind::Toggle { default } => OptionControl {
+                    id: param.id.clone(),
+                    label: param.label.clone(),
+                    choices: Vec::new(),
+                    toggle: true,
+                    default: Value::Bool(*default),
+                },
+                PresetParamKind::Number { .. } => continue,
+            };
+            controls.push(control);
+        }
+    }
+    controls.sort_by_key(|c| !matches!(c.id.as_str(), "direction" | "clip"));
+    controls
+}
+
+/// The stored options that `descriptor` declares and accepts; everything else keeps the
+/// preset's own default (an easing the preset does not offer would be rejected).
+pub(super) fn options_for(
+    descriptor: &PresetDescriptor,
+    chosen: &BTreeMap<String, Value>,
+) -> BTreeMap<String, Value> {
+    chosen
+        .iter()
+        .filter(|(id, value)| {
+            descriptor
+                .params
+                .iter()
+                .find(|p| &p.id == *id)
+                .is_some_and(|param| match (&param.kind, value) {
+                    (PresetParamKind::Choice { options, .. }, Value::String(v)) => {
+                        options.contains(v)
+                    }
+                    (PresetParamKind::Toggle { .. }, Value::Bool(_)) => true,
+                    _ => false,
+                })
+        })
+        .map(|(id, value)| (id.clone(), value.clone()))
+        .collect()
 }
 
 const ROLES: [(PresetRole, &str); 3] = [
@@ -93,7 +172,7 @@ impl Editor {
                 preset: preset.to_owned(),
                 plugin: Some(plugin.to_owned()),
                 duration: (duration.0 > 0).then_some(duration),
-                options: BTreeMap::new(),
+                options: options_for(&descriptor, &self.preset_options),
             };
             match animathio_control::animation_preset_command(
                 &working,
@@ -127,6 +206,110 @@ impl Editor {
             Command::Batch { commands }
         };
         self.execute(&command, cx);
+    }
+
+    /// The user's choice for a shared option, or `None` while every preset keeps its own
+    /// default (the defaults differ: an entrance slides in from the left, an exit leaves to
+    /// the right).
+    fn option_value(&self, control: &OptionControl) -> Option<&Value> {
+        self.preset_options.get(&control.id)
+    }
+
+    /// What the option's button shows: `default` until a value is picked.
+    pub(super) fn option_label(&self, control: &OptionControl) -> String {
+        let value = match self.option_value(control) {
+            None => "default".to_owned(),
+            Some(Value::Bool(true)) => "on".to_owned(),
+            Some(Value::Bool(false)) => "off".to_owned(),
+            Some(Value::String(text)) => text.clone(),
+            Some(other) => other.to_string(),
+        };
+        format!("{}: {value}", control.label)
+    }
+
+    /// Advance one shared preset option to its next choice (or flip the switch). The cycle
+    /// is default, then each choice, then back to default.
+    pub(super) fn cycle_preset_option(&mut self, control: &OptionControl, cx: &mut Context<Self>) {
+        let next = match self.option_value(control) {
+            None if control.toggle => {
+                Some(Value::Bool(!control.default.as_bool().unwrap_or(false)))
+            }
+            None => control.choices.first().cloned().map(Value::String),
+            // A switch: default, then the other value, then the default value explicitly,
+            // then back to "default" (unset).
+            Some(Value::Bool(on)) if Some(*on) != control.default.as_bool() => {
+                Some(control.default.clone())
+            }
+            Some(Value::String(current)) => control
+                .choices
+                .iter()
+                .position(|c| c == current)
+                .and_then(|i| control.choices.get(i + 1))
+                .cloned()
+                .map(Value::String),
+            // A switch already back on its default value, or anything unexpected: unset.
+            Some(_) => None,
+        };
+        match next {
+            Some(value) => {
+                self.preset_options.insert(control.id.clone(), value);
+            }
+            None => {
+                self.preset_options.remove(&control.id);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The options block shared by the inspector and the Effects tab: one button per
+    /// option showing its current value.
+    pub(super) fn preset_option_buttons(
+        &self,
+        scope: &str,
+        controls: &[OptionControl],
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
+        if controls.is_empty() {
+            return None;
+        }
+        let buttons = controls.iter().map(|control| {
+            let label = self.option_label(control);
+            let target = control.clone();
+            Button::new(SharedString::from(format!(
+                "anim-option-{scope}-{}",
+                control.id
+            )))
+            .ghost()
+            .compact()
+            .label(label)
+            .tooltip("Click to change; applies to the next preset you apply")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.cycle_preset_option(&target, cx);
+            }))
+        });
+        Some(
+            div()
+                .px_2()
+                .py_1()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(crate::style::type_size::XS)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(hex(color::TEXT_SECONDARY))
+                        .child("Preset options"),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap_1()
+                        .children(buttons),
+                ),
+        )
     }
 
     fn step_preset_duration(&mut self, role: PresetRole, delta: i64, cx: &mut Context<Self>) {
@@ -176,9 +359,14 @@ impl Editor {
                     .child("No animation plugins loaded"),
             ];
         }
-        ROLES
+        let fitting_all: Vec<&PresetDescriptor> = presets
             .iter()
-            .filter_map(|&(role, label)| {
+            .filter(|p| p.applies_to_kind(&kind))
+            .collect();
+        let options = self.preset_option_buttons("inspector", &option_controls(&fitting_all), cx);
+        options
+            .into_iter()
+            .chain(ROLES.iter().filter_map(|&(role, label)| {
                 let fitting: Vec<_> = presets
                     .iter()
                     .filter(|p| p.role == role && p.applies_to_kind(&kind))
@@ -256,7 +444,7 @@ impl Editor {
                         )
                         .child(div().flex().flex_row().flex_wrap().gap_1().children(chips)),
                 )
-            })
+            }))
             .collect()
     }
 
@@ -264,6 +452,8 @@ impl Editor {
     pub(super) fn animation_library_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let presets = self.available_animation_presets();
         let mut rows = Vec::new();
+        let all: Vec<&PresetDescriptor> = presets.iter().collect();
+        let options = self.preset_option_buttons("library", &option_controls(&all), cx);
         for (role, label) in [
             (PresetRole::Entrance, "Animations: In"),
             (PresetRole::Exit, "Animations: Out"),
@@ -327,6 +517,10 @@ impl Editor {
                         .into_any_element(),
                 );
             }
+        }
+        // The shared options sit above the groups, but only when a group matched the search.
+        if let Some(options) = options.filter(|_| !rows.is_empty()) {
+            rows.insert(0, options.into_any_element());
         }
         rows
     }

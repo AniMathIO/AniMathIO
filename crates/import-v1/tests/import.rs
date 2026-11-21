@@ -524,3 +524,240 @@ fn per_asset_size_is_capped() {
         other => panic!("expected AssetTooLarge, got {other:?}"),
     }
 }
+
+fn slide_project(kind: &str, element_kind: &str, properties: &serde_json::Value) -> Project {
+    let png = b"tiny-png-bytes".to_vec();
+    let props = if element_kind == "text" {
+        json!({"text": "Hello", "fontSize": 24})
+    } else {
+        json!({"src": data_url("image/png", &png), "elementId": "e"})
+    };
+    let input = json!({
+        "editorElements": [element("e", element_kind, "E", "", placement(100.0, 100.0, 200.0, 100.0), 0.0, 2000.0, props)],
+        "animations": [{"id": "s", "targetId": "e", "type": kind, "duration": 500, "properties": properties}],
+        "maxTime": 2000, "fps": 30, "canvas_width": 800, "canvas_height": 600,
+        "mediaFiles": [{"id": "e", "type": "image", "data": data_url("image/png", &png)}],
+    });
+    let (project, _, report) = import_v1_with_report(&deflate(&input)).unwrap();
+    SLIDE_REPORT.with(|r| *r.borrow_mut() = report.warnings().to_vec());
+    project
+}
+
+thread_local! {
+    static SLIDE_REPORT: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn slide_effect_keys(clip: &animathio_core::Clip, param: &str) -> Vec<(i64, f64)> {
+    let effect = clip
+        .effects
+        .iter()
+        .find(|e| e.effect == "slide")
+        .expect("slide effect")
+        .id;
+    clip.animations
+        .iter()
+        .find(|a| {
+            a.target
+                == animathio_core::Target::Effect {
+                    effect,
+                    param: param.into(),
+                }
+        })
+        .map_or_default(|a| {
+            a.keys
+                .keys()
+                .iter()
+                .map(|(t, k)| (t.0, k.value.as_number().unwrap()))
+                .collect()
+        })
+}
+
+fn param_keys(clip: &animathio_core::Clip, param: &str) -> Vec<(i64, f64)> {
+    clip.animations
+        .iter()
+        .find(|a| a.target == animathio_core::Target::Param(param.into()))
+        .map_or_default(|a| {
+            a.keys
+                .keys()
+                .iter()
+                .map(|(t, k)| (t.0, k.value.as_number().unwrap()))
+                .collect()
+        })
+}
+
+fn moves_position(clip: &animathio_core::Clip) -> bool {
+    clip.animations.iter().any(|a| {
+        matches!(
+            a.target,
+            animathio_core::Target::Transform(
+                animathio_core::TransformProperty::X | animathio_core::TransformProperty::Y
+            )
+        )
+    })
+}
+
+#[test]
+fn text_character_slides_become_the_text_plugin_glyph_slide() {
+    for kind in ["slideIn", "slideOut"] {
+        let project = slide_project(
+            kind,
+            "text",
+            &json!({"direction": "top", "textType": "character", "useClipPath": true}),
+        );
+        let warnings = SLIDE_REPORT.with(|r| r.borrow().clone());
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("per-glyph slide") && w.contains("1.x")),
+            "one warning explains the look differs: {warnings:?}"
+        );
+        let clip = &tracks(&project)[0].1;
+        assert_eq!(clip.effects.len(), 0, "the text plugin animates itself");
+        let exit = kind == "slideOut";
+        let progress = param_keys(clip, "char_slide");
+        assert_eq!(
+            progress.iter().map(|k| k.1).collect::<Vec<_>>(),
+            if exit { [1.0, 0.0] } else { [0.0, 1.0] }
+        );
+        assert_eq!(progress[0].0, if exit { ticks(1500.0) } else { 0 });
+        assert_eq!(param_keys(clip, "char_slide_direction")[0].1, 3.0);
+        assert_eq!(
+            param_keys(clip, "char_slide_stagger")[0].1,
+            if exit { -0.5 } else { 0.5 }
+        );
+        assert_eq!(param_keys(clip, "char_slide_clip")[0].1, 1.0);
+        // The glyph slide replaces the whole-element position slide instead of doubling it.
+        assert!(!moves_position(clip));
+    }
+}
+
+#[test]
+fn mask_slide_on_text_and_media_is_the_clipped_effect() {
+    for element_kind in ["text", "image"] {
+        let project = slide_project(
+            "slideIn",
+            element_kind,
+            &json!({"direction": "left", "textType": "none", "useClipPath": true}),
+        );
+        let warnings = SLIDE_REPORT.with(|r| r.borrow().clone());
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("never rendered the mask")),
+            "{warnings:?}"
+        );
+        let clip = &tracks(&project)[0].1;
+        assert_eq!(clip.effects.len(), 1);
+        assert_eq!(clip.effects[0].plugin, "org.animathio.effects-basic");
+        assert_eq!(slide_effect_keys(clip, "clip")[0].1, 1.0);
+        assert_eq!(slide_effect_keys(clip, "direction")[0].1, 1.0);
+        assert!(!moves_position(clip));
+    }
+}
+
+#[test]
+fn character_slide_on_media_with_a_mask_is_clipped_and_warns() {
+    let project = slide_project(
+        "slideIn",
+        "image",
+        &json!({"direction": "left", "textType": "character", "useClipPath": true}),
+    );
+    let warnings = SLIDE_REPORT.with(|r| r.borrow().clone());
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("per-character slide applies to text only")),
+        "{warnings:?}"
+    );
+    let clip = &tracks(&project)[0].1;
+    assert_eq!(slide_effect_keys(clip, "clip")[0].1, 1.0);
+    assert_eq!(param_keys(clip, "char_slide").len(), 0);
+}
+
+#[test]
+fn character_slide_on_media_without_a_mask_is_the_plain_slide() {
+    // No text and no mask: nothing the slide options could add, so no effect and the
+    // ordinary whole-element position slide.
+    let project = slide_project(
+        "slideIn",
+        "image",
+        &json!({"direction": "left", "textType": "character", "useClipPath": false}),
+    );
+    let warnings = SLIDE_REPORT.with(|r| r.borrow().clone());
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("per-character slide applies to text only")),
+        "{warnings:?}"
+    );
+    let clip = &tracks(&project)[0].1;
+    assert_eq!(clip.effects.len(), 0, "no unclipped effect is added");
+    assert!(moves_position(clip));
+}
+
+#[test]
+fn plain_slides_stay_whole_element_position_slides() {
+    let project = slide_project(
+        "slideIn",
+        "text",
+        &json!({"direction": "left", "textType": "none", "useClipPath": false}),
+    );
+    let clip = &tracks(&project)[0].1;
+    assert_eq!(clip.effects.len(), 0);
+    assert_ne!(clip.animations.len(), 0);
+    assert!(SLIDE_REPORT.with(|r| r.borrow().is_empty()));
+}
+
+#[test]
+fn slide_in_and_out_on_one_clip_share_one_effect_and_one_set_of_text_keys() {
+    let png = b"tiny-png-bytes".to_vec();
+    let input = json!({
+        "editorElements": [
+            element("e", "text", "E", "", placement(0.0, 0.0, 200.0, 100.0), 0.0, 3000.0, json!({"text": "Hi", "fontSize": 24})),
+            element("f", "text", "F", "", placement(0.0, 0.0, 200.0, 100.0), 0.0, 3000.0, json!({"text": "Yo", "fontSize": 24})),
+        ],
+        "animations": [
+            {"id": "a", "targetId": "e", "type": "slideIn", "duration": 500, "properties": {"direction": "left", "textType": "character", "useClipPath": false}},
+            {"id": "b", "targetId": "e", "type": "slideOut", "duration": 500, "properties": {"direction": "right", "textType": "none", "useClipPath": true}},
+            {"id": "c", "targetId": "f", "type": "slideIn", "duration": 500, "properties": {"direction": "left", "textType": "character", "useClipPath": false}},
+            {"id": "d", "targetId": "f", "type": "slideOut", "duration": 500, "properties": {"direction": "right", "textType": "character", "useClipPath": false}},
+        ],
+        "maxTime": 3000, "fps": 30, "canvas_width": 800, "canvas_height": 600,
+        "mediaFiles": [{"id": "x", "type": "image", "data": data_url("image/png", &png)}],
+    });
+    let (project, _, _) = import_v1_with_report(&deflate(&input)).unwrap();
+    // In as characters, out as a clipped slide: the text params and one effect coexist.
+    let mixed = &tracks(&project)[0].1;
+    assert_eq!(mixed.effects.len(), 1);
+    assert_eq!(
+        param_keys(mixed, "char_slide")
+            .iter()
+            .map(|k| k.1)
+            .collect::<Vec<_>>(),
+        [0.0, 1.0]
+    );
+    assert_eq!(
+        slide_effect_keys(mixed, "direction")
+            .iter()
+            .map(|k| k.1)
+            .collect::<Vec<_>>(),
+        [2.0, 2.0]
+    );
+    // In and out as characters: one set of text keys, no effect.
+    let both = &tracks(&project)[1].1;
+    assert_eq!(both.effects.len(), 0);
+    assert_eq!(
+        param_keys(both, "char_slide_stagger")
+            .iter()
+            .map(|k| k.1)
+            .collect::<Vec<_>>(),
+        [0.5, 0.5, -0.5, -0.5]
+    );
+    assert_eq!(
+        param_keys(both, "char_slide_direction")
+            .iter()
+            .map(|k| k.1)
+            .collect::<Vec<_>>(),
+        [1.0, 1.0, 2.0, 2.0]
+    );
+}

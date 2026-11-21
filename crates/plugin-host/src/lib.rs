@@ -84,6 +84,18 @@ mod colored_world {
     });
 }
 
+/// ABI 1.3 adds an opt-in glyph-cluster text layout import; older worlds stay unchanged.
+mod text_layout_world {
+    wasmtime::component::bindgen!({
+        path: "../plugin-api/wit",
+        world: "text-layout-source-plugin",
+        with: {
+            "animathio:plugin/types": crate::animathio::plugin::types,
+            "animathio:plugin/host": crate::animathio::plugin::host,
+        },
+    });
+}
+
 mod audio;
 mod community;
 mod compat;
@@ -92,6 +104,7 @@ mod effect_params;
 mod effects;
 mod importers;
 mod presets;
+mod text_layout;
 pub use audio::AudioEffectHandle;
 pub use community::{
     CommunityError, CommunitySettings, CommunityStore, InstallOutcome, InstalledPlugin,
@@ -824,6 +837,10 @@ impl PluginHost {
             HasSelf<HostState>,
         >(&mut linker, |s| s)?;
         colored_world::animathio::plugin::math_colors::add_to_linker::<
+            HostState,
+            HasSelf<HostState>,
+        >(&mut linker, |s| s)?;
+        text_layout_world::animathio::plugin::text_layout::add_to_linker::<
             HostState,
             HasSelf<HostState>,
         >(&mut linker, |s| s)?;
@@ -2036,6 +2053,60 @@ impl colored_world::animathio::plugin::math_colors::Host for HostState {
                 })
                 .collect(),
         })
+    }
+}
+
+impl text_layout_world::animathio::plugin::text_layout::Host for HostState {
+    fn layout_text(
+        &mut self,
+        text: String,
+        font_size: f32,
+        canvas: wit_types::Size,
+        align: wit_types::TextAlignment,
+    ) -> Result<
+        Vec<text_layout_world::animathio::plugin::text_layout::TextLine>,
+        wit_types::Diagnostic,
+    > {
+        use text_layout_world::animathio::plugin::text_layout::{GlyphCluster, TextLine};
+        if text.chars().count() > MAX_SHAPE_TEXT_CHARS {
+            return Err(diagnostic("limit-exceeded", "text exceeds character limit"));
+        }
+        let align = match align {
+            wit_types::TextAlignment::Left => text_layout::Align::Left,
+            wit_types::TextAlignment::Center => text_layout::Align::Center,
+            wit_types::TextAlignment::Right => text_layout::Align::Right,
+        };
+        let lines = text_layout::layout_text(
+            &text,
+            font_size,
+            (canvas.width, canvas.height),
+            align,
+            MAX_SHAPE_TEXT_VERBS,
+        )
+        .map_err(|message| {
+            let code = if message.contains("limit") {
+                "limit-exceeded"
+            } else {
+                "invalid-input"
+            };
+            diagnostic(code, message)
+        })?;
+        Ok(lines
+            .into_iter()
+            .map(|line| TextLine {
+                top: line.top,
+                bottom: line.bottom,
+                clusters: line
+                    .clusters
+                    .into_iter()
+                    .map(|cluster| GlyphCluster {
+                        outline: cluster.outline,
+                        left: cluster.left,
+                        right: cluster.right,
+                    })
+                    .collect(),
+            })
+            .collect())
     }
 }
 

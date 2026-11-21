@@ -11,7 +11,7 @@ animathio-plugin-api = { path = "../plugin-api" }
 animathio-media = { path = "../media" }
 animathio-core.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-parley = { version = "0.12", default-features = false, features = ["std"] }
+animathio-text-layout = { path = "../text-layout" }
 vello_cpu = { version = "0.4", default-features = false, features = ["std", "text", "u8_pipeline"] }
 thiserror.workspace = true
 # Keep CPU reference frames independent of the host SIMD feature set.

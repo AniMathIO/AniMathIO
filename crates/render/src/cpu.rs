@@ -4,10 +4,9 @@ use animathio_core::{
     StrokeJoin, StrokeStyle, TextElement, Transform, TransitionKind, TransitionRole, VectorElement,
     VectorScene, WipeDirection,
 };
-use parley::{
-    Alignment, AlignmentOptions, FontContext, Layout, LayoutContext, PositionedLayoutItem,
-    StyleProperty,
-    fontique::{Collection, CollectionOptions, SourceCache},
+use animathio_text_layout::{
+    Align, TextLayouter, block_offset,
+    parley::{self, PositionedLayoutItem},
 };
 use std::sync::Arc;
 use vello_cpu::{
@@ -15,35 +14,17 @@ use vello_cpu::{
     Resources,
     color::{AlphaColor, Srgb},
     kurbo::{Affine, BezPath, Cap, Join, Rect, Shape as _, Stroke},
-    peniko::{Blob, ImageAlphaType, ImageSampler},
+    peniko::{ImageAlphaType, ImageSampler},
 };
 
-const FONT: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
-
 /// Single-threaded scalar Vello CPU reference backend, with embedded fonts only.
+#[derive(Default)]
 pub struct CpuBackend {
     pub(crate) canvas: Size,
-    fonts: FontContext,
-    layout: LayoutContext<()>,
+    /// The shared text layout (`animathio-text-layout`), the same one the plugin host's
+    /// `text-layout` import runs.
+    text: TextLayouter,
 }
-impl Default for CpuBackend {
-    fn default() -> Self {
-        let mut collection = Collection::new(CollectionOptions {
-            shared: false,
-            system_fonts: false,
-        });
-        collection.register_fonts(Blob::new(Arc::new(FONT)), None);
-        Self {
-            canvas: (0, 0),
-            fonts: FontContext {
-                collection,
-                source_cache: SourceCache::default(),
-            },
-            layout: LayoutContext::new(),
-        }
-    }
-}
-
 impl Backend for CpuBackend {
     fn render(
         &mut self,
@@ -107,7 +88,7 @@ impl Backend for CpuBackend {
                 _ => unit_transform(clip.transform, size)?,
             };
             ctx.set_transform(transform);
-            if clip.has_active_effects() {
+            if pool.runs_effects(clip) {
                 // Rasterize the clip into its own layer, apply the effect chain
                 // there, then composite. Effects must not see other clips.
                 let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;
@@ -141,11 +122,21 @@ pub(crate) struct ShapedRun {
     pub(crate) glyphs: Vec<(u32, f32, f32)>,
 }
 
-/// Horizontal extent and height, in pixels, of a laid-out text block.
-struct TextBlock {
-    min_x: f32,
-    max_x: f32,
-    height: f32,
+/// Every glyph run of a laid-out block, in layout order, uncentred.
+fn runs_of(layout: &parley::Layout<()>) -> Vec<ShapedRun> {
+    let mut runs = Vec::new();
+    for line in layout.lines() {
+        for item in line.items() {
+            if let PositionedLayoutItem::GlyphRun(run) = item {
+                runs.push(ShapedRun {
+                    font: run.run().font().clone(),
+                    font_size: run.run().font_size(),
+                    glyphs: run.positioned_glyphs().map(|g| (g.id, g.x, g.y)).collect(),
+                });
+            }
+        }
+    }
+    runs
 }
 
 /// Convert a normalized drawing font size into pixels.
@@ -518,7 +509,26 @@ impl CpuBackend {
         size: Size,
         align: animathio_core::TextAlignment,
     ) -> Result<Vec<ShapedRun>, Error> {
-        Ok(self.layout_text(text, font_size, size, align)?.0)
+        let layout = self.layout_text(text, font_size, size, align)?;
+        Ok(runs_of(&layout))
+    }
+
+    /// The `(glyph id, x, y)` of every glyph this backend draws for a normalized text
+    /// run of `text` at `font_size` pixels on a `size` canvas, in layout order and canvas
+    /// pixels. The plugin host's ABI 1.3 `text-layout` import must place the same glyphs;
+    /// its tests compare against this.
+    pub fn text_glyphs(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        size: Size,
+        align: animathio_core::TextAlignment,
+    ) -> Result<Vec<(u32, f32, f32)>, Error> {
+        Ok(self
+            .shape_centered(text, font_size, size, align)?
+            .into_iter()
+            .flat_map(|run| run.glyphs)
+            .collect())
     }
 
     /// Shape `text` like [`Self::shape_aligned`], then shift every glyph so the centre of
@@ -533,11 +543,10 @@ impl CpuBackend {
         size: Size,
         align: animathio_core::TextAlignment,
     ) -> Result<Vec<ShapedRun>, Error> {
-        let (mut runs, block) = self.layout_text(text, font_size, size, align)?;
+        let layout = self.layout_text(text, font_size, size, align)?;
         #[allow(clippy::cast_precision_loss)] // Canvas sizes are far below 2^24.
-        let (half_width, half_height) = (size.0 as f32 / 2.0, size.1 as f32 / 2.0);
-        let dx = half_width - f32::midpoint(block.min_x, block.max_x);
-        let dy = half_height - block.height / 2.0;
+        let (dx, dy) = block_offset(&layout, (size.0 as f32, size.1 as f32));
+        let mut runs = runs_of(&layout);
         for glyph in runs.iter_mut().flat_map(|run| run.glyphs.iter_mut()) {
             glyph.1 += dx;
             glyph.2 += dy;
@@ -551,49 +560,18 @@ impl CpuBackend {
         font_size: f32,
         size: Size,
         align: animathio_core::TextAlignment,
-    ) -> Result<(Vec<ShapedRun>, TextBlock), Error> {
-        let mut builder = self
-            .layout
-            .ranged_builder(&mut self.fonts, text, 1.0, false);
-        builder.push_default(StyleProperty::FontFamily("DejaVu Sans".into()));
-        builder.push_default(StyleProperty::FontSize(font_size));
-        let mut layout: Layout<()> = builder.build(text);
-        layout.break_all_lines(Some(f32::from(check_size(size)?.0)));
-        layout.align(
+    ) -> Result<parley::Layout<()>, Error> {
+        let width = f32::from(check_size(size)?.0);
+        Ok(self.text.layout(
+            text,
+            font_size,
+            width,
             match align {
-                animathio_core::TextAlignment::Left => Alignment::Start,
-                animathio_core::TextAlignment::Center => Alignment::Center,
-                animathio_core::TextAlignment::Right => Alignment::End,
+                animathio_core::TextAlignment::Left => Align::Left,
+                animathio_core::TextAlignment::Center => Align::Center,
+                animathio_core::TextAlignment::Right => Align::Right,
             },
-            AlignmentOptions::default(),
-        );
-        let mut runs = Vec::new();
-        let mut block = TextBlock {
-            min_x: f32::MAX,
-            max_x: f32::MIN,
-            height: layout.height(),
-        };
-        for line in layout.lines() {
-            let metrics = line.metrics();
-            block.min_x = block.min_x.min(metrics.offset);
-            block.max_x = block
-                .max_x
-                .max(metrics.offset + metrics.advance - metrics.hanging_advance);
-            for item in line.items() {
-                if let PositionedLayoutItem::GlyphRun(run) = item {
-                    runs.push(ShapedRun {
-                        font: run.run().font().clone(),
-                        font_size: run.run().font_size(),
-                        glyphs: run.positioned_glyphs().map(|g| (g.id, g.x, g.y)).collect(),
-                    });
-                }
-            }
-        }
-        if block.max_x < block.min_x {
-            block.min_x = 0.0;
-            block.max_x = 0.0;
-        }
-        Ok((runs, block))
+        ))
     }
 
     fn fill_runs(

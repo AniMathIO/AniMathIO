@@ -1,7 +1,7 @@
 api_version = "1.2.0"
 id = "org.animathio.effects-basic"
 name = "Basic Effects"
-version = "1.0.0"
-description = "Color and blur filters: grayscale, sepia, invert, saturate, brightness, contrast, blur and opacity"
+version = "1.1.0"
+description = "Color and blur filters (grayscale, sepia, invert, saturate, brightness, contrast, blur, opacity) and the clipped slide reveal"
 kinds = ["effect"]
 capabilities = []

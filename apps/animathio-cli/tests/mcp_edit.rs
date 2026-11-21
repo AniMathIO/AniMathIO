@@ -475,7 +475,8 @@ fn effects_come_from_loaded_plugins_and_render() {
             "brightness",
             "contrast",
             "blur",
-            "opacity"
+            "opacity",
+            "slide"
         ]
     );
     assert!(

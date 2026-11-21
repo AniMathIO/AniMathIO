@@ -115,6 +115,21 @@ pub struct ResourcePool {
     pub(crate) effects: Option<Box<dyn EffectProcessor>>,
 }
 impl ResourcePool {
+    /// Whether any effect of `clip` will actually run: not bypassed and not declared an
+    /// identity by the processor at its current parameters. A clip for which this is false
+    /// is drawn directly, without the rasterize-filter-composite layer.
+    pub(crate) fn runs_effects(&self, clip: &animathio_core::SceneClip) -> bool {
+        clip.effects
+            .iter()
+            .filter(|effect| !effect.bypass)
+            .any(|effect| {
+                !self
+                    .effects
+                    .as_deref()
+                    .is_some_and(|processor| processor.is_identity(effect))
+            })
+    }
+
     /// Register verified bytes; re-registering identical content preserves its cache.
     pub fn insert(&mut self, id: AssetId, bytes: Vec<u8>) -> Result<(), Error> {
         if AssetId::of(&bytes) != id {

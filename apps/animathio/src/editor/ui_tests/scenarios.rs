@@ -729,6 +729,63 @@ fn animation_preset_apply_and_undo(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn clipped_slide_options_choose_the_edge_and_apply_as_one_undoable_batch(cx: &mut TestAppContext) {
+    if !require_plugins("clipped_slide_options") {
+        return;
+    }
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    let id = ui.read(|e| e.project.tracks()[0].clips().values().next().unwrap().id);
+    ui.update(|e, _, cx| {
+        e.select_only(id, cx);
+        // The inspector and the Effects tab both render the shared option buttons.
+        assert!(!e.animation_rows(id, cx).is_empty());
+        assert!(!e.animation_library_rows(cx).is_empty());
+        let presets = e.available_animation_presets();
+        let fitting: Vec<_> = presets.iter().collect();
+        let controls = crate::editor::animations::option_controls(&fitting);
+        assert_eq!(controls[0].id(), "direction");
+        // default -> left -> right -> top
+        let direction = controls[0].clone();
+        assert!(e.option_label(&direction).ends_with("default"));
+        e.cycle_preset_option(&direction, cx);
+        assert!(e.option_label(&direction).ends_with("left"));
+        e.cycle_preset_option(&direction, cx);
+        e.cycle_preset_option(&direction, cx);
+        assert!(e.option_label(&direction).ends_with("top"));
+        e.apply_animation_preset("org.animathio.animations", "clipped-slide-in", cx);
+    });
+    let direction_keys = ui.read(|e| {
+        let clip = e.find_clip(id).unwrap();
+        let effect = clip
+            .effects
+            .iter()
+            .find(|f| f.effect == "slide")
+            .expect("slide effect added")
+            .id;
+        clip.animations
+            .iter()
+            .find(|a| {
+                a.target
+                    == animathio_core::Target::Effect {
+                        effect,
+                        param: "direction".into(),
+                    }
+            })
+            .unwrap()
+            .keys
+            .keys()
+            .values()
+            .map(|k| k.value.as_number().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(direction_keys, [3.0, 3.0], "direction top");
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
 fn latex_on_occupied_track_creates_a_layer(cx: &mut TestAppContext) {
     if !require_plugins("latex_on_occupied_track_creates_a_layer") {
         return;

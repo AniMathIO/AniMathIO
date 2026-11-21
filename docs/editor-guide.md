@@ -16,8 +16,19 @@ search, cards and buttons. Every tab retains its own search when switching away.
 | **Media** | Imported assets only. Search names, filter All/Video/Images/Audio, switch grid/list, import using the Library + button, click to place or drag to the timeline. |
 | **Elements** | Text & formulas (LaTeX, Text), Shapes & geometry (points, lines, vectors, polygons, circles, ellipses), Graphs & grids (plots, Cartesian and polar grids). Click a card or press Enter/Space to configure; + adds defaults; drag its preview to the timeline. More shapes retains the generic Shapes source for rectangles, stars and arrows. Third-party clip sources appear under Plugins in this tab. |
 | **Titles** | Title compositions and caption presets. Double-click or Enter/Space adds at the playhead; drag to place on the timeline. Linked text fields remain editable in the inspector. |
-| **Effects** | Video effects, audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
+| **Effects** | Video effects (including Clipped slide), audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
 | **Plugins** | Installed first-party and community plugins, the Community plugins switch, live Enable/Remove controls, Install from file, and Browse with search, verified installs and explicit updates. First-party plugins stay enabled. Load failures are listed here too. |
+
+Animation presets read the **Preset options** row above their buttons (inspector →
+Animations, and the top of Effects → Animations): click an option such as Direction (left,
+right, top, bottom), Mask each character or Easing to cycle it, then apply the preset. The
+choice applies to every preset that has that option. **Clipped slide In/Out** works on any
+clip and slides it from its own edge, hidden outside its bounds; **Character slide In/Out**
+does the same for text one character at a time, keeping the wrapped layout. Clipped slide adds a Clipped slide effect to the clip (Effects → Video effects; its
+direction, progress and clip parameters stay editable in the inspector); Character slide
+animates the text clip's own Character slide parameters instead. Both apply in one undoable
+step. An option button reads "default" until you pick a value, so each preset keeps its own
+default (an entrance slides in from the left, an exit leaves to the right).
 
 Media filters and view controls appear only on Media. Generated clips have one
 creation home in Elements; Plugins lists their installation metadata. See the

@@ -9,13 +9,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use animathio_core::{
-    Clip, ClipId, ClipKind, Command, Interpolation, Keyframe, ParamValue, Project, Rounding,
-    Target, Time, Transform, TransformProperty,
+    Clip, ClipId, ClipKind, Command, EffectId, EffectInstance, Interpolation, Keyframe, ParamValue,
+    Project, Rounding, Target, Time, Transform, TransformProperty,
 };
 use wasmtime::Store;
 use wasmtime::component::{Component, Linker};
 
 use crate::compat::Pre;
+use crate::effects::EffectDescriptor;
 use crate::preset_world::exports::animathio::plugin::animation_presets as wit;
 use crate::{HostError, HostState, wit_types};
 
@@ -437,9 +438,104 @@ fn rest_values(clip: &Clip, time: Time, schema: &[wit_types::ParamSpec]) -> Vec<
     rest
 }
 
-fn parse_target(clip: &Clip, target: &str) -> Result<Target, String> {
+/// Effects a preset needs that the clip's chain lacks yet; they are added in the same
+/// batch as the keyframes, so one undo removes both.
+struct EffectPlan<'a> {
+    descriptors: &'a [EffectDescriptor],
+    next_id: u64,
+    /// `(plugin, effect)` to the instance created for it, in creation order.
+    added: Vec<((String, String), EffectInstance)>,
+    /// Existing instances the preset animates that are bypassed, re-enabled in the batch.
+    reenabled: Vec<EffectId>,
+}
+
+impl<'a> EffectPlan<'a> {
+    fn new(clip: &Clip, descriptors: &'a [EffectDescriptor]) -> Self {
+        let next_id = clip
+            .effects
+            .iter()
+            .chain(&clip.audio_effects)
+            .map(|effect| effect.id.0)
+            .max()
+            .map_or(0, |max| max.saturating_add(1));
+        Self {
+            descriptors,
+            next_id,
+            added: Vec::new(),
+            reenabled: Vec::new(),
+        }
+    }
+
+    /// Resolve `effect:<plugin>:<effect>:<param>` to the instance parameter it animates,
+    /// reusing the clip's first instance of that filter or planning a new one with the
+    /// plugin's default parameters.
+    fn resolve(&mut self, clip: &Clip, spec: &str) -> Result<Target, String> {
+        let mut parts = spec.splitn(3, ':');
+        let (Some(plugin), Some(effect), Some(param)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err(format!(
+                "effect target must look like effect:<plugin>:<effect>:<param>, got {spec:?}"
+            ));
+        };
+        // Prefer an instance that is on; a bypassed one is re-enabled by the same batch (the
+        // animation would otherwise run on an effect that does nothing).
+        let matching =
+            |instance: &&EffectInstance| instance.plugin == plugin && instance.effect == effect;
+        let existing = clip
+            .effects
+            .iter()
+            .find(|instance| matching(instance) && !instance.bypass)
+            .or_else(|| clip.effects.iter().find(matching))
+            .or_else(|| {
+                self.added
+                    .iter()
+                    .find(|((p, e), _)| p == plugin && e == effect)
+                    .map(|(_, instance)| instance)
+            });
+        let instance = if let Some(instance) = existing {
+            if instance.bypass && !self.reenabled.contains(&instance.id) {
+                self.reenabled.push(instance.id);
+            }
+            instance.id
+        } else {
+            let descriptor = self
+                .descriptors
+                .iter()
+                .find(|d| d.plugin_id == plugin && d.effect_id == effect)
+                .ok_or_else(|| {
+                    format!("effect {plugin}/{effect} is not provided by a loaded effect plugin")
+                })?;
+            let id = EffectId(self.next_id);
+            self.next_id = self.next_id.saturating_add(1);
+            let instance = descriptor.instance(id);
+            self.added
+                .push(((plugin.to_owned(), effect.to_owned()), instance));
+            id
+        };
+        let known = clip
+            .effects
+            .iter()
+            .chain(self.added.iter().map(|(_, instance)| instance))
+            .find(|candidate| candidate.id == instance)
+            .is_some_and(|candidate| candidate.params.contains_key(param));
+        if !known {
+            return Err(format!(
+                "effect {plugin}/{effect} has no parameter {param:?}"
+            ));
+        }
+        Ok(Target::Effect {
+            effect: instance,
+            param: param.to_owned(),
+        })
+    }
+}
+
+fn parse_target(clip: &Clip, target: &str, effects: &mut EffectPlan<'_>) -> Result<Target, String> {
     if let Some((_, property)) = TRANSFORM_TARGETS.iter().find(|(id, _)| *id == target) {
         return Ok(Target::Transform(*property));
+    }
+    if let Some(spec) = target.strip_prefix("effect:") {
+        return effects.resolve(clip, spec);
     }
     let Some(name) = target.strip_prefix("param:") else {
         return Err(format!("unknown curve target {target:?}"));
@@ -478,6 +574,7 @@ fn curves_to_command(
     window: (Time, Time),
     curves: Vec<wit::Curve>,
     max_keys: usize,
+    effects: &[EffectDescriptor],
 ) -> Result<Command, String> {
     if curves.is_empty() {
         return Err("preset produced no keyframes".into());
@@ -498,8 +595,9 @@ fn curves_to_command(
     let mut removals = Vec::new();
     let mut additions = Vec::new();
     let mut targets = BTreeSet::new();
+    let mut plan = EffectPlan::new(clip, effects);
     for curve in curves {
-        let target = parse_target(clip, &curve.target)?;
+        let target = parse_target(clip, &curve.target, &mut plan)?;
         if !targets.insert(target.clone()) {
             return Err(format!("duplicate curve target {:?}", curve.target));
         }
@@ -553,8 +651,57 @@ fn curves_to_command(
             });
         }
     }
-    removals.extend(additions);
-    Ok(batch(removals))
+    let mut commands: Vec<Command> = plan
+        .added
+        .into_iter()
+        .enumerate()
+        .map(|(offset, (_, effect))| Command::AddEffect {
+            id: clip.id,
+            index: clip.effects.len() + offset,
+            effect,
+        })
+        .collect();
+    commands.extend(
+        plan.reenabled
+            .into_iter()
+            .map(|effect| Command::SetEffectBypass {
+                id: clip.id,
+                effect,
+                bypass: false,
+            }),
+    );
+    commands.extend(removals);
+    commands.extend(additions);
+    Ok(batch(commands))
+}
+
+/// Curve targets of the text plugin's per-character slide.
+const CHAR_SLIDE_PREFIX: &str = "param:char_slide";
+
+/// A text clip with a caption style set (`caption_style` other than `off`, Classic
+/// included) draws its own motion and ignores the `char_slide*` parameters, so keyframing
+/// them would silently do nothing. Refuse that instead.
+fn refuse_styled_caption(clip: &Clip, curves: &[wit::Curve]) -> Result<(), String> {
+    let styled = matches!(
+        &clip.kind,
+        ClipKind::Plugin { params, .. }
+            if params
+                .get("caption_style")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|style| style != "off")
+    );
+    if styled
+        && curves
+            .iter()
+            .any(|curve| curve.target.starts_with(CHAR_SLIDE_PREFIX))
+    {
+        return Err(
+            "a caption with a caption style animates itself: the character slide is \
+            ignored there; set the caption style to off first"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 impl crate::PluginHost {
@@ -650,7 +797,15 @@ impl crate::PluginHost {
             .map_err(|e| HostError::Trapped(e.to_string()))?;
         let curves =
             result.map_err(|e| HostError::InvalidOutput(format!("{}: {}", e.code, e.message)))?;
-        curves_to_command(clip, window, curves, self.limits.max_preset_keys).map_err(invalid)
+        refuse_styled_caption(clip, &curves).map_err(invalid)?;
+        curves_to_command(
+            clip,
+            window,
+            curves,
+            self.limits.max_preset_keys,
+            &self.effects(),
+        )
+        .map_err(invalid)
     }
 }
 
@@ -747,6 +902,7 @@ mod tests {
                 },
             ],
             100,
+            &[],
         )
         .unwrap();
         let inverse = command.apply(&mut project).unwrap();
@@ -800,13 +956,13 @@ mod tests {
                 },
             ],
         ] {
-            assert!(curves_to_command(clip, window, curves, 100).is_err());
+            assert!(curves_to_command(clip, window, curves, 100, &[]).is_err());
         }
         let many = vec![wit::Curve {
             target: "x".into(),
             keys: (0..=200).map(|t| key(t, 0.0)).collect(),
         }];
-        assert!(curves_to_command(clip, window, many, 100).is_err());
+        assert!(curves_to_command(clip, window, many, 100, &[]).is_err());
     }
 
     #[test]
@@ -854,5 +1010,110 @@ mod tests {
         }
         assert!(descriptor.applies_to_kind("video"));
         assert!(!descriptor.applies_to_kind("audio"));
+    }
+
+    fn slide_descriptor() -> EffectDescriptor {
+        let param = |id: &str, default: f64| crate::EffectParam {
+            id: id.into(),
+            label: id.into(),
+            min: 0.0,
+            max: 4.0,
+            default,
+            step: 0.01,
+        };
+        EffectDescriptor {
+            plugin_id: "org.example.fx".into(),
+            effect_id: "slide".into(),
+            name: "Slide".into(),
+            description: String::new(),
+            params: vec![param("progress", 1.0), param("direction", 1.0)],
+        }
+    }
+
+    #[test]
+    fn effect_targets_add_the_effect_once_and_undo_with_the_keys() {
+        let mut project = project();
+        let before = project.clone();
+        let descriptors = [slide_descriptor()];
+        let curves = || {
+            vec![
+                wit::Curve {
+                    target: "effect:org.example.fx:slide:progress".into(),
+                    keys: vec![key(0, 0.0), key(200, 1.0)],
+                },
+                wit::Curve {
+                    target: "effect:org.example.fx:slide:direction".into(),
+                    keys: vec![key(0, 2.0), key(200, 2.0)],
+                },
+            ]
+        };
+        let command = curves_to_command(
+            clip(&project),
+            (Time(0), Time(200)),
+            curves(),
+            100,
+            &descriptors,
+        )
+        .unwrap();
+        let Command::Batch { commands } = &command else {
+            panic!("a batch")
+        };
+        let adds = commands
+            .iter()
+            .filter(|c| matches!(c, Command::AddEffect { .. }))
+            .count();
+        assert_eq!(adds, 1, "both curves share one instance");
+        let inverse = command.apply(&mut project).unwrap();
+        assert_eq!(clip(&project).effects.len(), 1);
+        assert_eq!(clip(&project).animations.len(), 2);
+        inverse.apply(&mut project).unwrap();
+        assert_eq!(project, before, "one undo removes the keys and the effect");
+        // Applying again after the effect exists reuses it instead of stacking another one.
+        command.apply(&mut project).unwrap();
+        let again = curves_to_command(
+            clip(&project),
+            (Time(0), Time(200)),
+            curves(),
+            100,
+            &descriptors,
+        )
+        .unwrap();
+        again.apply(&mut project).unwrap();
+        assert_eq!(clip(&project).effects.len(), 1);
+    }
+
+    #[test]
+    fn effect_targets_reject_unknown_filters_and_parameters() {
+        let project = project();
+        let window = (Time(0), Time(200));
+        let curve = |target: &str| {
+            vec![wit::Curve {
+                target: target.into(),
+                keys: vec![key(0, 0.0), key(200, 1.0)],
+            }]
+        };
+        let descriptors = [slide_descriptor()];
+        for target in [
+            "effect:org.example.fx:missing:progress",
+            "effect:org.example.fx:slide:nope",
+            "effect:org.example.fx",
+        ] {
+            assert!(
+                curves_to_command(clip(&project), window, curve(target), 100, &descriptors)
+                    .is_err(),
+                "{target}"
+            );
+        }
+        assert!(
+            curves_to_command(
+                clip(&project),
+                window,
+                curve("effect:org.example.fx:slide:progress"),
+                100,
+                &[],
+            )
+            .is_err(),
+            "no effect plugin loaded"
+        );
     }
 }
