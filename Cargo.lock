@@ -445,6 +445,7 @@ dependencies = [
  "kurbo 0.13.1",
  "log",
  "lru",
+ "parley",
  "rustix 1.1.6",
  "serde",
  "serde_json",

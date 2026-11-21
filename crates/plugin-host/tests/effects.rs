@@ -520,7 +520,7 @@ fn bench_1080p() {
 const W: usize = 40;
 const H: usize = 12;
 
-fn slide(direction: f64, characters: f64, clip: f64, progress: f64) -> EffectInstance {
+fn slide(direction: f64, clip: f64, progress: f64) -> EffectInstance {
     EffectInstance::new(
         EffectId(1),
         PLUGIN,
@@ -528,7 +528,6 @@ fn slide(direction: f64, characters: f64, clip: f64, progress: f64) -> EffectIns
         BTreeMap::from([
             ("progress".to_owned(), progress),
             ("direction".to_owned(), direction),
-            ("characters".to_owned(), characters),
             ("clip".to_owned(), clip),
         ]),
     )
@@ -575,20 +574,15 @@ fn ink_rows(pixels: &[u8]) -> Vec<usize> {
 fn slide_at_rest_is_the_input_and_fully_slid_shows_nothing() {
     let frame = blocks(&[(10, 30, 3, 9)]);
     for direction in 1..=4 {
-        for characters in [0.0, 1.0] {
-            assert_eq!(
-                run(&slide(f64::from(direction), characters, 1.0, 1.0), &frame),
-                frame
-            );
-            let hidden = run(&slide(f64::from(direction), characters, 1.0, 0.0), &frame);
-            assert!(
-                hidden.as_chunks::<4>().0.iter().all(|p| p[3] == 0),
-                "direction {direction}"
-            );
-        }
+        assert_eq!(run(&slide(f64::from(direction), 1.0, 1.0), &frame), frame);
+        let hidden = run(&slide(f64::from(direction), 1.0, 0.0), &frame);
+        assert!(
+            hidden.as_chunks::<4>().0.iter().all(|p| p[3] == 0),
+            "direction {direction}"
+        );
     }
     let empty = vec![0; W * H * 4];
-    assert_eq!(run(&slide(1.0, 1.0, 1.0, 0.3), &empty), empty);
+    assert_eq!(run(&slide(1.0, 1.0, 0.3), &empty), empty);
 }
 
 #[test]
@@ -596,15 +590,15 @@ fn clipped_slide_emerges_from_the_clip_bounds_in_every_direction() {
     let frame = blocks(&[(10, 30, 3, 9)]);
     // Half way: the 20x6 block has moved half its own size toward its start side, and
     // the part that left its bounds is cut off.
-    let left = run(&slide(1.0, 0.0, 1.0, 0.5), &frame);
+    let left = run(&slide(1.0, 1.0, 0.5), &frame);
     assert_eq!(ink_columns(&left), (10..20).collect::<Vec<_>>());
     assert_eq!(ink_rows(&left), (3..9).collect::<Vec<_>>());
-    let right = run(&slide(2.0, 0.0, 1.0, 0.5), &frame);
+    let right = run(&slide(2.0, 1.0, 0.5), &frame);
     assert_eq!(ink_columns(&right), (20..30).collect::<Vec<_>>());
-    let top = run(&slide(3.0, 0.0, 1.0, 0.5), &frame);
+    let top = run(&slide(3.0, 1.0, 0.5), &frame);
     assert_eq!(ink_rows(&top), (3..6).collect::<Vec<_>>());
     assert_eq!(ink_columns(&top), (10..30).collect::<Vec<_>>());
-    let bottom = run(&slide(4.0, 0.0, 1.0, 0.5), &frame);
+    let bottom = run(&slide(4.0, 1.0, 0.5), &frame);
     assert_eq!(ink_rows(&bottom), (6..9).collect::<Vec<_>>());
     // The visible pixels are the original colours, not smeared.
     assert_eq!(
@@ -616,66 +610,59 @@ fn clipped_slide_emerges_from_the_clip_bounds_in_every_direction() {
 #[test]
 fn unclipped_slide_moves_the_content_past_its_bounds() {
     let frame = blocks(&[(10, 30, 3, 9)]);
-    let moved = run(&slide(1.0, 0.0, 0.0, 0.5), &frame);
+    let moved = run(&slide(1.0, 0.0, 0.5), &frame);
     assert_eq!(ink_columns(&moved), (0..20).collect::<Vec<_>>());
 }
 
 #[test]
-fn character_slide_staggers_glyph_units_in_reading_order() {
-    // Three glyph-like units on one line, separated by gaps.
+fn the_slide_moves_everything_as_one_block_whatever_the_gaps() {
+    // Three separate blocks: the effect has no notion of glyphs, so they stay together and
+    // keep their spacing (per-character slides are the text plugin's job).
     let frame = blocks(&[(4, 10, 3, 9), (16, 22, 3, 9), (28, 34, 3, 9)]);
-    let whole = run(&slide(2.0, 0.0, 1.0, 0.4), &frame);
-    let staggered = run(&slide(2.0, 1.0, 1.0, 0.4), &frame);
-    assert_ne!(whole, staggered);
-    // Sliding in from the right over the 30 px wide bounds at progress 0.4. As one unit the
-    // whole line has moved 18 px: only the first block is inside the bounds.
-    assert_eq!(ink_columns(&whole), (22..28).collect::<Vec<_>>());
-    // Per glyph the first unit is 60 % of the way (12 px to go) while the others are still
-    // outside the bounds: the stagger shows the first glyph well ahead of the rest.
-    assert_eq!(ink_columns(&staggered), (16..22).collect::<Vec<_>>());
-    // Later the second glyph arrives too, still behind the first.
-    let later = run(&slide(2.0, 1.0, 1.0, 0.7), &frame);
-    let columns = ink_columns(&later);
-    assert!(columns.iter().any(|&x| x < 10 + 8), "{columns:?}");
-    assert!(
-        columns.len() > 6,
-        "more than one glyph is visible: {columns:?}"
-    );
-    // Units never jump into one another: the rest layout is exact when every unit is home.
-    let almost = run(&slide(2.0, 1.0, 1.0, 1.0), &frame);
-    assert_eq!(almost, frame);
-}
-
-#[test]
-fn touching_glyphs_travel_together_and_lines_stagger_separately() {
-    // The first two blocks touch (a ligature) and form one unit; the second line is its own.
-    let frame = blocks(&[(4, 10, 1, 4), (10, 16, 1, 4), (4, 12, 7, 10)]);
-    let units_at_half = run(&slide(2.0, 1.0, 1.0, 0.25), &frame);
-    // With three units (ligature, then the second line) the touching pair moves as one:
-    // both of its blocks show the same number of columns.
-    let columns = |x0: usize, x1: usize, y: usize| {
-        (x0..x1)
-            .filter(|&x| alpha_at(&units_at_half, x, y) > 0)
-            .count()
-    };
-    let first = columns(4, 10, 2);
-    let second = columns(10, 16, 2);
-    assert!(first + second <= 12);
+    let half = run(&slide(2.0, 1.0, 0.5), &frame);
+    // 30 px wide bounds starting at x = 4: half way the block has moved 15 px right and only
+    // what is still inside the bounds (x < 34) shows.
     assert_eq!(
-        ink_rows(&run(&slide(1.0, 1.0, 1.0, 1.0), &frame)),
-        vec![1, 2, 3, 7, 8, 9]
+        ink_columns(&half),
+        (19..25).chain(31..34).collect::<Vec<_>>()
     );
 }
 
 #[test]
 fn slide_is_deterministic_and_validates_its_parameters() {
     let frame = blocks(&[(4, 10, 3, 9), (16, 22, 3, 9)]);
-    let effect = slide(3.0, 1.0, 1.0, 0.37);
+    let effect = slide(3.0, 1.0, 0.37);
     assert_eq!(run(&effect, &frame), run(&effect, &frame));
     // The host clamps stored values to the declared range, so an out-of-range direction
     // behaves like the nearest valid one.
     assert_eq!(
-        run(&slide(9.0, 0.0, 1.0, 0.5), &frame),
-        run(&slide(4.0, 0.0, 1.0, 0.5), &frame)
+        run(&slide(9.0, 1.0, 0.5), &frame),
+        run(&slide(4.0, 1.0, 0.5), &frame)
     );
+}
+
+#[test]
+fn the_manifest_declares_when_a_slide_is_an_identity() {
+    let processor = test_support::effect_processor();
+    assert!(processor.is_identity(&slide(1.0, 1.0, 1.0)), "arrived");
+    assert!(
+        !processor.is_identity(&slide(1.0, 1.0, 0.99)),
+        "still moving"
+    );
+    assert!(!processor.is_identity(&slide(1.0, 1.0, 0.0)), "hidden");
+    // An out-of-range stored value is clamped before the check, like when it is applied.
+    assert!(processor.is_identity(&slide(1.0, 1.0, 7.0)));
+    // Filters declare nothing, so they always run, and so does a missing plugin.
+    let grayscale = EffectInstance::new(
+        EffectId(2),
+        PLUGIN,
+        "grayscale",
+        BTreeMap::from([("amount".to_owned(), 0.0)]),
+    );
+    assert!(!processor.is_identity(&grayscale));
+    let unknown = EffectInstance::new(EffectId(3), "org.example.nope", "slide", BTreeMap::new());
+    assert!(!processor.is_identity(&unknown));
+    // The identity claim is true: applying an identity slide returns the pixels untouched.
+    let frame = blocks(&[(10, 30, 3, 9)]);
+    assert_eq!(run(&slide(2.0, 1.0, 1.0), &frame), frame);
 }

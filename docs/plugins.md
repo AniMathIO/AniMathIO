@@ -127,7 +127,7 @@ installing and enabling are deliberately not part of the control protocol.
 The contract is `crates/plugin-api/wit/plugin.wit`:
 
 ```wit
-package animathio:plugin@1.2.0;
+package animathio:plugin@1.3.0;
 
 interface types { /* shared vector + schema types, see below */ }
 
@@ -192,6 +192,15 @@ world colored-source-plugin {
 }
 ```
 
+ABI 1.3 adds another, for sources that animate glyphs one by one:
+
+```wit
+world text-layout-source-plugin {
+    include source-plugin;
+    import text-layout;
+}
+```
+
 A clip-source component implements the two exports of `world source-plugin`.
 Effects implement their separate worlds; no unused stubs are required in 1.0.
 The legacy adapter retains the old source world's reserved vector-effect and
@@ -199,8 +208,9 @@ curve hooks, without making them part of the frozen 1.0 contract.
 
 ### API versions and compatibility policy
 
-The current contract is `animathio:plugin@1.2.0`. ABI 1.2 adds the separate
-`math-colors` interface and opt-in `colored-source-plugin` world; all 1.0/1.1
+The current contract is `animathio:plugin@1.3.0`. ABI 1.3 adds the separate
+`text-layout` interface and opt-in `text-layout-source-plugin` world. ABI 1.2 added the
+`math-colors` interface and opt-in `colored-source-plugin` world; all 1.0/1.1/1.2
 records, functions and existing worlds retain their layouts and behavior.
 ABI 1.1 added two
 worlds (`animation-preset-plugin`, `importer-plugin`) and one new interface that only
@@ -213,12 +223,12 @@ its workspace version; `API_VERSION` identifies the component ABI. Its
 host-side kind and error enums are non-exhaustive so SDK callers handle future
 host classifications/errors with a fallback. Package `api_version` is
 an exact stable semantic version naming the **minimum host ABI required**, not a
-Cargo-style range. This host supports `1.0.0`, `1.1.0` and `1.2.0` and explicitly adapts legacy
+Cargo-style range. This host supports `1.0.0`, `1.1.0`, `1.2.0` and `1.3.0` and explicitly adapts legacy
 `0.2.0`, `0.2.1`, `0.2.2`. It rejects malformed versions, prereleases, build
 metadata, unknown majors and requirements newer than its implemented ABI before
 compiling the component. Merely changing `plugin.toml` cannot upgrade a component.
 A 1.x component imports and exports interfaces at the minor its WIT came from; the
-host's linker satisfies `@1.0.0`/`@1.1.0` imports with its `@1.2.0` definitions (Wasmtime
+host's linker satisfies `@1.0.0`/`@1.1.0`/`@1.2.0` imports with its `@1.3.0` definitions (Wasmtime
 semver matching) and looks up exports at every implemented 1.x minor, newest first.
 The `animation-preset` and `importer` kinds require `api_version = "1.1.0"` and, like
 `effect`/`audio-effect`, must be a package's only kind.
@@ -282,7 +292,7 @@ To rebuild a legacy component against the current ABI:
    string code, a fallback message and empty metadata when no details are needed.
 3. Return string kind IDs from `describe`, including the real `audio-effect` kind,
    and initialize its `metadata` field (an empty list is fine).
-4. Set package `api_version = "1.2.0"` (or `"1.0.0"`/`"1.1.0"` for binaries built against
+4. Set package `api_version = "1.3.0"` (or `"1.0.0"`/`"1.1.0"`/`"1.2.0"` for binaries built against
    those frozen WIT contracts); keep the plugin's own version consistent
    between package and `describe`. Preserve existing parameter IDs, units and
    enum values when retaining compatibility with saved projects.
@@ -295,6 +305,7 @@ To rebuild a legacy component against the current ABI:
 | `shape-text` | `(text, font_size) -> result<list<path>, diagnostic>` | Text shaping with the host's embedded DejaVu Sans (never a system font, so layout is identical on every machine); returns glyph outline paths. Keeps plugins small (no bundled fonts). |
 | `typeset-math` | `(source, mode, font_size) -> result<typeset-result, diagnostic>` | Typeset LaTeX or Typst math via the host (Typst + MiTeX); returns outline paths plus a tight bbox. |
 | `typeset-math-colored` | `(source, mode, font_size) -> result<colored-typeset-result, diagnostic>` | ABI 1.2, `math-colors` interface in `colored-source-plugin` only: ordered glyph/rule outlines with optional solid RGBA paint and a tight bbox. |
+| `layout-text` | `(text, font_size, canvas, align) -> result<list<text-line>, diagnostic>` | ABI 1.3, `text-layout` interface in `text-layout-source-plugin` only: the renderer's own wrapped, block-centred text layout (the one a normalized `text-run` is drawn with) split into lines and grapheme clusters. Each `glyph-cluster` has the filled `outline` contours of all its glyphs in canvas pixels plus its horizontal `left`/`right` advance box; a ligature, a letter with its dot or combining accent and each CJK character are one cluster, whitespace has no outline. Clusters are in visual order (logical order for left-to-right text). Each `text-line` has its `top`/`bottom` line box. |
 | `svg-to-paths` | `(svg_xml) -> result<list<path>, diagnostic>` | Parse an SVG XML string into vector paths. |
 | `log` | `(message)` | Host logging for diagnostics. |
 | `limits` | `() -> list<tuple<string, u64>>` | Configured sandbox policy and tick frequency; unique keys, unknown keys ignored. |
@@ -534,21 +545,30 @@ builtin implementation by `crates/plugin-host/tests/effects.rs` and by the rende
 
 Since 1.1.0 it also provides `slide`, a clipped slide reveal for any clip. The effect sees
 the clip's rasterized layer, so it works on media, text, shapes and math alike. The clip's
-*bounds* are the tight box around every pixel with nonzero alpha; the content moves by up
-to its own width (left/right) or height (top/bottom) and, with `clip` on, is masked to
-those bounds, so it emerges from (or retreats behind) its own edge. Parameters (all
-numbers, so all keyframeable): `progress` (0..1, 1 is at rest and returns the input
-untouched), `direction` (1 left, 2 right, 3 top, 4 bottom: the side the clip hides on),
-`characters` (1 staggers glyph units) and `clip` (1 masks to the bounds). With
-`characters` on, the ink is split into glyph units, the columns of ink inside one text
-line, and each unit gets its own progress in reading order (the last unit starts at half
-way through the progress, every unit takes the rest). Because the units come from the
-pixels the text plugin already laid out, wrapping, alignment, multiple lines, captions and
-the host's shaping are preserved exactly at rest; glyphs that touch or overlap
-horizontally (tight kerning, italic overhang) and the dot of an `i` travel together, and
-content without gaps (an image) is one unit. Everything is a pure function of the pixels
-and parameters, so preview, export and tests agree. The clipped and character slide
-animation presets add and animate this effect (see Animation-preset plugins below).
+*bounds* are the tight box around every pixel with nonzero alpha; the whole layer moves as
+one block by up to its own width (left/right) or height (top/bottom) and, with `clip` on, is
+masked to those bounds, so it emerges from (or retreats behind) its own edge. Parameters
+(all numbers, so all keyframeable): `progress` (0..1, 1 is at rest and returns the input
+untouched), `direction` (1 left, 2 right, 3 top, 4 bottom: the side the clip hides on)
+and `clip` (1 masks to the bounds). Everything is a pure function of the pixels and
+parameters, so preview, export and tests agree. Per-character slides are not done here:
+pixels carry no glyph boundaries, so they are the text plugin's `char_slide*` parameters
+(see the text plugin above). The clipped slide animation presets add and animate this effect
+(see Animation-preset plugins below).
+
+### Declaring an identity
+
+A resting effect should cost nothing. A plugin lists, in its manifest `metadata`, the
+parameter values at which an effect returns its input untouched, under the key
+`effect.<effect-id>.identity`: rules separated by `;`, each `<param><op><number>` with
+`op` one of `>=`, `<=` or `==`; the effect is an identity while any rule holds (so the
+slide declares `effect.slide.identity = "progress>=1"`). Malformed rules are ignored. The
+host answers `EffectProcessor::is_identity` from them (on the parameters clamped to the
+declared range, as when applying), and the renderer then skips the instance and, when no other
+effect of the clip runs, keeps the clip on the direct drawing path instead of rasterizing it
+into a layer and copying that through the sandbox. No WIT change: metadata is advisory and
+unknown keys are ignored, so hosts without this support simply run the effect (which must
+still return the pixels untouched). An `is_identity` claim must therefore always be true.
 
 ## Audio-effect plugins
 
@@ -662,7 +682,11 @@ interface animation-presets {
   `effect:<plugin-id>:<effect-id>:<param>` for a parameter of a clip effect. For an
   effect target the host reuses the clip's first instance of that filter or, when the
   clip has none, adds one with the plugin's default parameters as part of the same
-  batch; an unknown effect plugin, filter or parameter is rejected.
+  batch (preferring an instance that is not bypassed; if every instance is bypassed, the
+  batch also re-enables the first one); an unknown effect plugin, filter or parameter is
+  rejected. The `effect:` target needs application 2.3.0 or later: it is a host feature,
+  not an ABI change (no WIT item changed), so an older host loads such a preset plugin but
+  rejects its curves as an unknown target when the preset is applied.
 - It returns curves with window-relative key times (`0..=window-ticks`, strictly
   increasing per curve), finite values and core interpolations. Easings that core
   keyframes cannot express are the plugin's job to sample into linear segments. The host
@@ -678,7 +702,7 @@ options after the colon):
 
 | Role | Presets |
 | --- | --- |
-| In / Out | clipped-slide (clipped-slide-in, clipped-slide-out: any clip, direction, easing; animates the `slide` effect, so the clip emerges from its own edge); character-slide (character-slide-in, character-slide-out: text clips only, direction, clip, easing; the same effect with per-glyph stagger); fade (fade-in, fade-out: easing); slide (slide-in, slide-out: direction, distance, fade, easing); zoom (zoom-in, zoom-out: scale, fade, easing); pop (pop-in, pop-out: intensity overshoot); spin (spin-in, spin-out: turns, rotation, easing); bounce (bounce-in, bounce-out: from); wipe (wipe-in, wipe-out: direction, easing; an edge-anchored stretch reveal, not a mask); typewriter (typewriter-in, typewriter-out: text clips only, keyframes the text plugin's `reveal`) |
+| In / Out | clipped-slide (clipped-slide-in, clipped-slide-out: any clip, direction, easing; animates the `slide` effect, so the clip emerges from its own edge); character-slide (character-slide-in, character-slide-out: text clips only, direction, stagger, clip, fade, easing; keyframes the text plugin's `char_slide*` parameters, no effect is added); fade (fade-in, fade-out: easing); slide (slide-in, slide-out: direction, distance, fade, easing); zoom (zoom-in, zoom-out: scale, fade, easing); pop (pop-in, pop-out: intensity overshoot); spin (spin-in, spin-out: turns, rotation, easing); bounce (bounce-in, bounce-out: from); wipe (wipe-in, wipe-out: direction, easing; an edge-anchored stretch reveal, not a mask); typewriter (typewriter-in, typewriter-out: text clips only, keyframes the text plugin's `reveal`) |
 | Emphasis | breathe (v1's breathe: intensity, period), shake, spin, hop and flash (intensity, period; spin: turns, rotation, easing) |
 
 Exits mirror their entrance in time. Easing choices are linear, ease-in, ease-out,
@@ -892,7 +916,7 @@ wit-bindgen = "0.40.0"
 **`plugins/examples/hello/plugin.toml`**
 
 ```toml
-api_version = "1.2.0"
+api_version = "1.3.0"
 id = "com.example.hello"
 name = "Hello"
 version = "1.0.0"
@@ -1109,6 +1133,25 @@ expressed as fractions of the full canvas. In that mode the plugin emits normali
 glyph outlines sized for a clip with the matching width/height scale, centres explicit
 lines in the box, and shrinks long text to fit. Title presets use this mode to keep
 edited fields and transform handles inside safe areas.
+Text plugin 1.3.0 adds the per-character slide (ABI 1.3, `text-layout-source-plugin`). Its
+numeric, keyframeable parameters are `char_slide` (progress, 1 is at rest and renders the
+ordinary text, 0 shows nothing), `char_slide_direction` (1 left, 2 right, 3 top, 4 bottom: the
+side the glyphs come from), `char_slide_stagger` (the fraction of the progress spent
+staggering, 0 to 1; negative starts with the last glyph, which is how the exit preset makes the
+first glyph leave first), `char_slide_clip` (1 masks each glyph to its own cell on the travel
+axis, its line band for top/bottom and its advance box for left/right, so it emerges without
+stacking on its neighbours) and `char_slide_fade` (0 to 1, how much alpha ramps with each
+glyph's own progress). The units are the shaped glyphs themselves, not pixels: a letter keeps
+its dot or accent (combining marks belong to the letter before them), a ligature is one unit,
+each CJK character is one unit and lines are separate; units run in reading order (the visual
+order of the line for right-to-left text). Wrapped normalized text takes its units from the
+host `layout-text` import (the renderer's own layout, so glyphs sit where the plain text puts
+them); fitted titles and single-line pixel text split the host's `shape-text` contours per
+character. Captions (`caption_style`) ignore the parameters. A glyph starts after
+`|stagger| * u` of the progress, with `u` its index over the glyph count, and then takes the rest;
+it travels one line height, so timing and geometry follow normalized positions and agree at
+every resolution. Only the frames that are mid-animation are redrawn as filled glyph paths; at
+rest the plain text is drawn, so a resting clip costs nothing extra.
 Text plugin 1.2.0 fills shaped glyph contours together with their original winding,
 preserving counters in canvas text, fitted titles and Classic captions. Normalized
 text runs use the renderer’s shared embedded-font shaping on CPU and GPU.
@@ -1144,10 +1187,11 @@ scale with it. Normalized shapes remain static unless their parameters are keyfr
 `[{"MoveTo":[0,0]},{"QuadTo":[[0.5,1],[1,0]]},"Close"]`.
 `CurveTo` carries three points (two controls and endpoint).
 
-All first-party components and the example are built against ABI 1.2.0 and declare
-`api_version = "1.2.0"`. LaTeX selects `colored-source-plugin`; other source
-plugins retain `source-plugin`. Effects-basic, import-manim and the example are version
-1.0.0; text, shapes, animations and audio-basic are 1.1.0. LaTeX is 1.3.0
+All first-party components and the example are built against ABI 1.3.0 and declare
+`api_version = "1.2.0"` except the text plugin and the example, which declare `"1.3.0"` (the text plugin for the glyph layout import).
+LaTeX selects `colored-source-plugin` and text `text-layout-source-plugin`; other source
+plugins retain `source-plugin`. Effects-basic is 1.1.0 (the clipped slide), import-manim and the example are version
+1.0.0; text is 1.3.0 (per-character slide), shapes and audio-basic are 1.1.0, animations 1.2.0. LaTeX is 1.3.0
 (per-path inline color, normalized sizing, strict validation and preserved glyph holes), and graph is
 1.3.0 (parametric curves, styling and explicit axis scaling). The frozen 1.0
 fixture and the explicit 0.2.x adapter retain older binaries; 0.1 packages are rejected.

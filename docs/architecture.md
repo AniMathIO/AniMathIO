@@ -493,12 +493,15 @@ result is ordinary keyframes, so rendering, export and saved projects never depe
 on the plugin, and one undo restores the previous keys exactly. Easings that core
 keyframes cannot interpolate natively (ease-in/out, back, bounce, elastic) are
 sampled by the plugin into linear segments. The typewriter presets keyframe the
-text plugin's `reveal` parameter (the fraction of characters shown). The clipped and
-character slides animate the `progress`, `direction`, `characters` and `clip` parameters
+text plugin's `reveal` parameter (the fraction of characters shown). The clipped slide animates the `progress`, `direction` and `clip` parameters
 of the first-party `slide` effect: a curve target `effect:<plugin>:<effect>:<param>`
 names an effect parameter, and when the clip's chain has no such effect the host adds it
 (with the plugin's default parameters) in the same batch, so one undo removes the keys
-and the effect together. The control
+and the effect together (a bypassed instance is re-enabled in the batch instead of
+animated silently). The character slide keyframes the text plugin's `char_slide*`
+parameters, because only the text plugin knows the shaped glyphs (ABI 1.3 `layout-text`
+host import). `EffectProcessor::is_identity` lets a resting effect skip the layer path
+(plugins declare it in manifest metadata `effect.<id>.identity`). The control
 methods `animations.list`/`animations.apply`, the MCP tool `apply_animation_preset`,
 the CLI `animations` subcommand and the editor's inspector section all go through
 this one function (`animathio_control::animation_preset_command`).

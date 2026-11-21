@@ -2,11 +2,14 @@
 
 wit_bindgen::generate!({
     path: "../../crates/plugin-api/wit",
-    world: "source-plugin",
+    world: "text-layout-source-plugin",
 });
 
 use animathio::plugin::host;
+use animathio::plugin::text_layout;
 use animathio::plugin::types::*;
+
+mod glyph_slide;
 
 struct TextPlugin;
 
@@ -106,7 +109,9 @@ fn fitted_text(
     height: f32,
     color: Color,
     size: Size,
+    slide: Option<&glyph_slide::Slide>,
 ) -> Result<Scene, Diagnostic> {
+    let slide = slide.filter(|_| text.chars().count() <= glyph_slide::MAX_GLYPHS);
     let box_width = width * size.width as f32;
     let box_height = height * size.height as f32;
     let lines: Vec<_> = text.lines().collect();
@@ -123,8 +128,17 @@ fn fitted_text(
     let line_height = font * 1.5;
     let top = (box_height - count * line_height) / 2.0;
     let mut elements = Vec::new();
+    let mut layout = glyph_slide::Layout {
+        lines: Vec::new(),
+        glyphs: Vec::new(),
+    };
     for (line, text) in lines.iter().enumerate() {
         let contours = host::shape_text(text, font)?;
+        let band_top = top + line as f32 * line_height;
+        layout.lines.push(glyph_slide::Band {
+            top: band_top,
+            bottom: band_top + line_height,
+        });
         let min_x = contours
             .iter()
             .flatten()
@@ -144,6 +158,24 @@ fn fitted_text(
             x: (p.x + ox) / box_width,
             y: (p.y + oy) / box_height,
         };
+        if slide.is_some() {
+            let units = glyph_slide::split_contours(text, &contours, |s| host::shape_text(s, font));
+            let units = units.unwrap_or_else(|| vec![contours.clone()]);
+            for unit in units {
+                let shifted: Vec<Vec<PathVerb>> = unit
+                    .iter()
+                    .map(|c| c.iter().map(|v| offset_verb(v, ox, oy)).collect())
+                    .collect();
+                let (left, right) = glyph_slide::ink_cell(&shifted);
+                layout.glyphs.push(glyph_slide::Glyph {
+                    contours: shifted,
+                    line,
+                    left,
+                    right,
+                });
+            }
+            continue;
+        }
         let paths = contours.into_iter().map(|contour| {
             contour
                 .into_iter()
@@ -159,6 +191,13 @@ fn fitted_text(
                 .collect()
         });
         elements.push(fill_contours(paths, color));
+    }
+    if let Some(slide) = slide {
+        let point = |p: Point| Point {
+            x: p.x / box_width,
+            y: p.y / box_height,
+        };
+        elements = glyph_slide::draw(&layout, slide, color, point);
     }
     Ok(Scene {
         coordinate_space: CoordinateSpace::Normalized,
@@ -726,9 +765,9 @@ impl Guest for TextPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "text".to_string(),
-            version: "1.2.0".to_string(),
+            version: "1.3.0".to_string(),
             description:
-                "Host-shaped text with size, colour, alignment and animated caption styles"
+                "Host-shaped text with size, colour, alignment, animated caption styles and per-character slides"
                     .to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -868,6 +907,56 @@ impl Guest for TextPlugin {
                     }),
                 },
                 ParamSpec {
+                    id: "char_slide".into(),
+                    label: "Character slide (1 is at rest)".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 1.0,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
+                    id: "char_slide_direction".into(),
+                    label: "Character slide direction (1 left, 2 right, 3 top, 4 bottom)".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 1.0,
+                        max: 4.0,
+                        default: 1.0,
+                        step: 1.0,
+                    }),
+                },
+                ParamSpec {
+                    id: "char_slide_stagger".into(),
+                    label: "Character slide stagger (negative starts with the last)".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: -1.0,
+                        max: 1.0,
+                        default: 0.5,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
+                    id: "char_slide_clip".into(),
+                    label: "Character slide mask (0 off, 1 on)".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 1.0,
+                        step: 1.0,
+                    }),
+                },
+                ParamSpec {
+                    id: "char_slide_fade".into(),
+                    label: "Character slide fade".into(),
+                    kind: ParamKind::Number(NumberRange {
+                        min: 0.0,
+                        max: 1.0,
+                        default: 0.0,
+                        step: 0.01,
+                    }),
+                },
+                ParamSpec {
                     id: "align".to_string(),
                     label: "Alignment".to_string(),
                     kind: ParamKind::EnumChoice(EnumParam {
@@ -904,6 +993,14 @@ impl Guest for TextPlugin {
             },
         );
         let align = get_string(&params, "align", "center");
+        let slide = glyph_slide::Slide::from_params(
+            get_number(&params, "char_slide", 1.0),
+            get_number(&params, "char_slide_direction", 1.0),
+            get_number(&params, "char_slide_stagger", 0.5),
+            get_number(&params, "char_slide_clip", 1.0),
+            get_number(&params, "char_slide_fade", 0.0),
+        )
+        .filter(|_| text.chars().count() <= glyph_slide::MAX_GLYPHS);
 
         if get_string(&params, "units", "pixels") == "normalized" {
             let fit_width = get_number(&params, "fit_width", 0.0) as f32;
@@ -916,7 +1013,18 @@ impl Guest for TextPlugin {
                         size,
                     );
                 }
-                return fitted_text(&text, font_size, fit_width, fit_height, color, size);
+                return fitted_text(
+                    &text,
+                    font_size,
+                    fit_width,
+                    fit_height,
+                    color,
+                    size,
+                    slide.as_ref(),
+                );
+            }
+            if let Some(slide) = &slide {
+                return wrapped_slide(&text, font_size, &align, color, size, slide);
             }
             // Generic TextRun uses the host's wrapped, embedded-font layout.
             // Keep coordinates and font size relative to the unscaled canvas.
@@ -956,6 +1064,19 @@ impl Guest for TextPlugin {
         } - min_x;
         let y_offset = size.height as f32 * 0.5;
 
+        if let Some(slide) = &slide {
+            return Ok(Scene {
+                coordinate_space: CoordinateSpace::Canvas,
+                elements: pixel_slide(
+                    &text,
+                    font_size,
+                    &contours,
+                    (x_offset, y_offset),
+                    color,
+                    slide,
+                ),
+            });
+        }
         let paths = contours.into_iter().map(|contour| {
             contour
                 .iter()
@@ -969,6 +1090,100 @@ impl Guest for TextPlugin {
             elements,
         })
     }
+}
+
+/// DejaVu Sans line box (ascent and descent) in em, for the single-line pixel layout.
+const ASCENT: f32 = 0.93;
+const DESCENT: f32 = 0.24;
+
+/// Per-glyph slide of a wrapped, normalized text: the glyph units come from the host's
+/// layout (the same one a `text-run` is drawn with), so glyphs sit where the plain text
+/// puts them.
+fn wrapped_slide(
+    text: &str,
+    font_size: f32,
+    align: &str,
+    color: Color,
+    size: Size,
+    slide: &glyph_slide::Slide,
+) -> Result<Scene, Diagnostic> {
+    let pixels = font_size * size.height as f32;
+    let lines = text_layout::layout_text(
+        text,
+        pixels,
+        size,
+        match align {
+            "center" => TextAlignment::Center,
+            "right" => TextAlignment::Right,
+            _ => TextAlignment::Left,
+        },
+    )?;
+    let mut layout = glyph_slide::Layout {
+        lines: Vec::new(),
+        glyphs: Vec::new(),
+    };
+    for (line, row) in lines.into_iter().enumerate() {
+        layout.lines.push(glyph_slide::Band {
+            top: row.top,
+            bottom: row.bottom,
+        });
+        for cluster in row.clusters {
+            if cluster.outline.is_empty() {
+                continue;
+            }
+            layout.glyphs.push(glyph_slide::Glyph {
+                contours: cluster.outline,
+                line,
+                left: cluster.left,
+                right: cluster.right,
+            });
+        }
+    }
+    let (width, height) = (size.width as f32, size.height as f32);
+    let elements = glyph_slide::draw(&layout, slide, color, |p| Point {
+        x: p.x / width,
+        y: p.y / height,
+    });
+    Ok(Scene {
+        coordinate_space: CoordinateSpace::Normalized,
+        elements,
+    })
+}
+
+/// Per-glyph slide of the single-line pixel layout.
+fn pixel_slide(
+    text: &str,
+    font_size: f32,
+    contours: &[Vec<PathVerb>],
+    (ox, oy): (f32, f32),
+    color: Color,
+    slide: &glyph_slide::Slide,
+) -> Vec<DrawCommand> {
+    let units = glyph_slide::split_contours(text, contours, |s| host::shape_text(s, font_size))
+        .unwrap_or_else(|| vec![contours.to_vec()]);
+    let layout = glyph_slide::Layout {
+        lines: vec![glyph_slide::Band {
+            top: oy - ASCENT * font_size,
+            bottom: oy + DESCENT * font_size,
+        }],
+        glyphs: units
+            .into_iter()
+            .map(|unit| {
+                let contours: Vec<Vec<PathVerb>> = unit
+                    .iter()
+                    .map(|c| c.iter().map(|v| offset_verb(v, ox, oy)).collect())
+                    .collect();
+                let (left, right) = glyph_slide::ink_cell(&contours);
+                glyph_slide::Glyph {
+                    contours,
+                    line: 0,
+                    left,
+                    right,
+                }
+            })
+            .collect(),
+    };
+    glyph_slide::draw(&layout, slide, color, |p| p)
 }
 
 /// The first `reveal` fraction of the characters (typewriter presets keyframe it).

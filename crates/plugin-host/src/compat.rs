@@ -174,7 +174,7 @@ impl Bindings {
         let versions: &[&str] = if self.legacy {
             &["0.2.2"]
         } else {
-            &["1.2.0", "1.1.0", "1.0.0"]
+            &["1.3.0", "1.2.0", "1.1.0", "1.0.0"]
         };
         let name = format!("animathio:plugin/{interface}@{}", versions[0]);
         let parent = versions

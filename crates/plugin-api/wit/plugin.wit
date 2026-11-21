@@ -1,4 +1,4 @@
-package animathio:plugin@1.2.0;
+package animathio:plugin@1.3.0;
 
 /// Shared data types for vector graphics, parameter schemas and plugin manifests.
 interface types {
@@ -197,7 +197,9 @@ interface types {
     /// Keys are unique; values are UTF-8, never executable content. Reserved
     /// conventions: label-key, description-key, param.<id>.unit,
     /// param.<id>.label-key and param.<id>.option.<value>.label-key;
-    /// prefix with effect.<id>. for effect descriptors. No localization service
+    /// prefix with effect.<id>. for effect descriptors; effect.<id>.identity
+    /// lists parameter values (`param>=1;other==0`) at which the effect leaves its input
+    /// untouched, so the host may skip it. No localization service
     /// is implied: plain labels/messages remain mandatory fallbacks.
     type metadata = list<tuple<string, string>>;
 
@@ -603,4 +605,40 @@ interface math-colors {
 world colored-source-plugin {
     include source-plugin;
     import math-colors;
+}
+
+/// ABI 1.3: the renderer's own text layout, split into glyph clusters.
+interface text-layout {
+    use types.{path, size, text-alignment, diagnostic};
+
+    /// One grapheme cluster of laid-out text. A ligature is one cluster; a base letter with its
+    /// dot or accent (including combining marks) is one cluster; each CJK character is one.
+    record glyph-cluster {
+        /// Filled outline contours of every glyph of the cluster, in canvas pixels, y down,
+        /// at the position a `text-run` of the same text draws them (block centred on the canvas).
+        outline: list<path>,
+        /// Horizontal extent of the cluster's advance box, in canvas pixels.
+        left: f32,
+        right: f32,
+    }
+
+    record text-line {
+        /// Vertical extent of the line box, in canvas pixels, y down.
+        top: f32,
+        bottom: f32,
+        /// Clusters in visual (left to right) order; logical order for left-to-right text.
+        clusters: list<glyph-cluster>,
+    }
+
+    /// Lay out `text` exactly as a `text-run` with this pixel font size, alignment and canvas
+    /// is laid out (wrapped to the canvas width, block centred), grouped by line and cluster.
+    /// Whitespace-only clusters have no outline. Errors with `limit-exceeded` past the text
+    /// length or path verb limits.
+    layout-text: func(text: string, font-size: f32, canvas: size, align: text-alignment) -> result<list<text-line>, diagnostic>;
+}
+
+/// ABI 1.3 source plugins that animate glyphs individually.
+world text-layout-source-plugin {
+    include source-plugin;
+    import text-layout;
 }

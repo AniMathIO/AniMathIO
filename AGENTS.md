@@ -184,12 +184,17 @@ runtime cannot target `wasm32-wasip2` here) and is linked only into that plugin;
 `org.animathio.latex` for inline `\color`/`\textcolor`. Keep 1.0 and 1.1 components loading
 unchanged (`hello-1.0.0` fixture); never edit frozen WIT records, add a new world/interface instead.
 
-Clipped and per-character slides need no ABI change: `org.animathio.effects-basic` 1.1.0 has a `slide`
-pixel effect (bounds = alpha bounding box of the clip's layer; per-glyph units = ink columns inside a text
-line, so any text layout is preserved) and the animation presets `clipped-slide-*`/`character-slide-*`
-animate it through the curve target `effect:<plugin>:<effect>:<param>`, which `presets.rs` resolves to an
-existing or newly added (`Command::AddEffect`, same batch) effect instance. `import-v1` maps `useClipPath`
-and `textType: "character"` to the same effect. Never add text-plugin parameters for animation.
+Clipped slides are the `org.animathio.effects-basic` 1.1.0 `slide` pixel effect (block only: bounds = alpha
+bounding box of the clip's layer, no glyph splitting from pixels) and the presets `clipped-slide-*` animate
+it through the curve target `effect:<plugin>:<effect>:<param>`, which `presets.rs` resolves to an existing
+(preferably not bypassed; a bypassed one is re-enabled in the batch) or newly added (`Command::AddEffect`,
+same batch) effect instance. The effect declares in its manifest metadata (`effect.slide.identity`) when it
+is an identity, `EffectProcessor::is_identity` reads that, and the renderer then skips the instance and the
+layer path. Per-character slides live in the text plugin (1.3.0, ABI 1.3): the `char_slide*` parameters,
+keyframed by the `character-slide-*` presets, use exact glyph units (the `text-layout` host import for wrapped
+text, per-character `shape-text` for fitted/pixel text), stagger by normalized position and are drawn as
+filled paths only mid-animation. `import-v1` maps `useClipPath` to the effect and `textType: "character"` on
+text to those parameters.
 
 Community plugins (`crates/plugin-host/src/community.rs`) are the third-party `.amplugin` files in the
 per-user folder (`ANIMATHIO_USER_PLUGIN_DIR` overrides it). They are off by default: nothing in that folder

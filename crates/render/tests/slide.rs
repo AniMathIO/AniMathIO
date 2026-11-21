@@ -1,10 +1,10 @@
-//! The clipped / per-character slide effect through the real renderer: any source slides
-//! out of its own bounds, per-character slides keep the layout the text plugin produced,
-//! and both are pure functions of the scene.
+//! The clipped slide effect and the text plugin's per-character slide through the real
+//! renderer: any source slides out of its own bounds, per-character slides keep the layout the
+//! text plugin produced, and both are pure functions of the scene.
 mod common;
 use animathio_core::{
-    AssetId, ClipId, ClipKind, EffectId, EffectInstance, Fit, Scene, SceneClip, Time, TrackId,
-    Transform,
+    AssetId, ClipId, ClipKind, EffectId, EffectInstance, Fit, ParamValue, Scene, SceneClip, Time,
+    TrackId, Transform,
 };
 use animathio_render::{Frame, RenderCtx};
 use serde_json::json;
@@ -13,7 +13,7 @@ use std::path::Path;
 
 const SIZE: (u32, u32) = (480, 270);
 
-fn slide(direction: f64, characters: bool, progress: f64) -> EffectInstance {
+fn slide(direction: f64, progress: f64) -> EffectInstance {
     EffectInstance::new(
         EffectId(1),
         "org.animathio.effects-basic",
@@ -21,7 +21,6 @@ fn slide(direction: f64, characters: bool, progress: f64) -> EffectInstance {
         BTreeMap::from([
             ("progress".to_owned(), progress),
             ("direction".to_owned(), direction),
-            ("characters".to_owned(), f64::from(u8::from(characters))),
             ("clip".to_owned(), 1.0),
         ]),
     )
@@ -62,14 +61,38 @@ fn text(effects: Vec<EffectInstance>) -> Scene {
     )
 }
 
+/// The text with the per-character slide parameters (the way the presets animate them).
+fn char_text(progress: f64, direction: f64, clip: bool) -> Scene {
+    let mut scene = text(Vec::new());
+    scene.clips[0].params = BTreeMap::from([
+        ("char_slide".to_owned(), ParamValue::Number(progress)),
+        (
+            "char_slide_direction".to_owned(),
+            ParamValue::Number(direction),
+        ),
+        ("char_slide_stagger".to_owned(), ParamValue::Number(0.5)),
+        (
+            "char_slide_clip".to_owned(),
+            ParamValue::Number(f64::from(u8::from(clip))),
+        ),
+        ("char_slide_fade".to_owned(), ParamValue::Number(1.0)),
+    ]);
+    scene
+}
+
+/// The test image drawn at 60 % size in the middle, so its own edge is well inside the
+/// canvas and the cut at that edge is visible.
 fn image(effects: Vec<EffectInstance>) -> (Scene, Vec<u8>) {
     let bytes =
         std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/effects.png"))
             .unwrap();
-    (
-        clip(ClipKind::Image(AssetId::of(&bytes)), Fit::Stretch, effects),
-        bytes,
-    )
+    let mut scene = clip(ClipKind::Image(AssetId::of(&bytes)), Fit::Stretch, effects);
+    scene.clips[0].transform = Transform {
+        scale_x: 0.6,
+        scale_y: 0.6,
+        ..Transform::default()
+    };
+    (scene, bytes)
 }
 
 fn render(scene: &Scene) -> Frame {
@@ -115,51 +138,82 @@ fn ink(frame: &Frame) -> usize {
 }
 
 #[test]
-fn character_slide_at_rest_keeps_the_exact_wrapped_layout() {
+fn a_resting_slide_is_free_and_leaves_the_frame_bit_identical() {
+    // The slide declares itself an identity at progress 1, so the clip never takes the
+    // rasterize-and-filter layer path: the frame is exactly the plain one.
     let plain = render(&text(Vec::new()));
     assert!(ink(&plain) > 0);
     for direction in [1.0, 2.0, 3.0, 4.0] {
-        let rest = render(&text(vec![slide(direction, true, 1.0)]));
-        // The effect path rasterizes into a layer first, so compare premultiplied values.
-        let premult = |p: &[u8; 4], c: usize| u16::from(p[c]) * u16::from(p[3]) / 255;
-        let worst = rest
-            .pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .zip(plain.pixels.as_chunks::<4>().0)
-            .map(|(a, b)| {
-                (0..3)
-                    .map(|c| premult(a, c).abs_diff(premult(b, c)))
-                    .chain([u16::from(a[3].abs_diff(b[3]))])
-                    .max()
-                    .unwrap()
-            })
-            .max()
-            .unwrap();
-        assert!(worst <= 2, "direction {direction}: off by {worst}");
+        let rest = render(&text(vec![slide(direction, 1.0)]));
+        assert_eq!(rest.pixels, plain.pixels, "direction {direction}");
     }
 }
 
 #[test]
 fn slides_start_hidden_and_grow_toward_the_resting_frame() {
     let plain = ink(&render(&text(Vec::new())));
-    for characters in [false, true] {
-        assert_eq!(ink(&render(&text(vec![slide(1.0, characters, 0.0)]))), 0);
-        let some = ink(&render(&text(vec![slide(1.0, characters, 0.5)])));
-        assert!(
-            some > 0 && some < plain,
-            "characters {characters}: {some} of {plain}"
-        );
-    }
+    assert_eq!(ink(&render(&text(vec![slide(1.0, 0.0)]))), 0);
+    let some = ink(&render(&text(vec![slide(1.0, 0.5)])));
+    assert!(some > 0 && some < plain, "{some} of {plain}");
+    // The text plugin's per-character slide: hidden at 0, part way at 0.5, the plain
+    // text at rest (up to anti-aliasing of the same outlines).
+    assert_eq!(ink(&render(&char_text(0.0, 1.0, true))), 0);
+    let part = ink(&render(&char_text(0.5, 1.0, true)));
+    assert!(part > 0 && part < plain, "{part} of {plain}");
+    assert_eq!(
+        render(&char_text(1.0, 1.0, true)).pixels,
+        render(&text(Vec::new())).pixels
+    );
 }
 
 #[test]
-fn character_slide_goes_glyph_by_glyph_where_a_plain_slide_moves_the_block() {
-    let block = render(&text(vec![slide(1.0, false, 0.5)]));
-    let letters = render(&text(vec![slide(1.0, true, 0.5)]));
+fn glyphs_in_place_match_the_plain_text_layout() {
+    // Just short of rest every glyph is within a hair of its resting position, so the
+    // per-glyph outlines must reproduce the renderer's own text layout.
+    let plain = render(&text(Vec::new()));
+    let near = render(&char_text(0.999_999, 1.0, true));
+    // Compare premultiplied values: the colour of fully transparent pixels is meaningless.
+    let premult = |p: &[u8; 4], c: usize| u16::from(p[c]) * u16::from(p[3]) / 255;
+    let (mut worst, mut total) = (0_u16, 0_u64);
+    for (a, b) in near
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(plain.pixels.as_chunks::<4>().0)
+    {
+        let d = (0..3)
+            .map(|c| premult(a, c).abs_diff(premult(b, c)))
+            .chain([u16::from(a[3].abs_diff(b[3]))])
+            .max()
+            .unwrap();
+        worst = worst.max(d);
+        total += u64::from(d);
+    }
+    // Same outlines, rasterized as paths instead of glyph runs: edge pixels may differ by
+    // a fraction of coverage, and the mean difference stays tiny.
+    assert!(
+        worst <= 128,
+        "per-glyph outlines drift from the layout by {worst}"
+    );
+    assert!(total < 40 * ink(&plain) as u64, "mean drift {total}");
+    assert!(
+        ink(&near).abs_diff(ink(&plain)) * 100 < ink(&plain),
+        "{} vs {}",
+        ink(&near),
+        ink(&plain)
+    );
+}
+
+#[test]
+fn character_slide_rises_glyph_by_glyph_where_the_clipped_slide_moves_the_block() {
+    let block = render(&text(vec![slide(1.0, 0.5)]));
+    let letters = render(&char_text(0.55, 4.0, true));
+    let sideways = render(&char_text(0.55, 1.0, true));
     assert_ne!(block.pixels, letters.pixels);
-    golden(&letters, "slide-text-characters-left-half");
+    assert_ne!(letters.pixels, sideways.pixels);
+    golden(&letters, "slide-text-characters-rise");
+    golden(&sideways, "slide-text-characters-left");
     golden(&block, "slide-text-block-left-half");
 }
 
@@ -171,7 +225,7 @@ fn clipped_slide_works_on_media_and_is_cut_at_the_bounds() {
         .insert(AssetId::of(&bytes), bytes.clone())
         .unwrap();
     let plain = common::render(&rest, &mut ctx, SIZE).unwrap();
-    let (half, _) = image(vec![slide(3.0, false, 0.5)]);
+    let (half, _) = image(vec![slide(3.0, 0.5)]);
     let mut ctx = RenderCtx::default();
     ctx.resources.insert(AssetId::of(&bytes), bytes).unwrap();
     let frame = common::render(&half, &mut ctx, SIZE).unwrap();
@@ -190,4 +244,34 @@ fn clipped_slide_works_on_media_and_is_cut_at_the_bounds() {
     assert_eq!(rows.first(), plain_rows.first());
     assert!(rows.last().unwrap() < plain_rows.last().unwrap());
     golden(&frame, "slide-image-clipped-top-half");
+}
+
+/// Cost of a clip that carries a resting effect, at 4K. Run with
+/// `cargo test -p animathio-render --release --test slide -- --ignored --nocapture`.
+/// "slide at rest" is declared an identity (direct path); "opacity 1" is an effect the plugin
+/// does not declare an identity, so it pays the layer round trip the resting slide used to.
+#[test]
+#[ignore = "timing measurement"]
+fn resting_effect_cost_at_4k() {
+    const UHD: (u32, u32) = (3840, 2160);
+    let opacity_one = EffectInstance::new(
+        EffectId(2),
+        "org.animathio.effects-basic",
+        "opacity",
+        BTreeMap::from([("amount".to_owned(), 1.0)]),
+    );
+    let time = |label: &str, scene: Scene| {
+        let mut ctx = RenderCtx::default();
+        common::render(&scene, &mut ctx, UHD).unwrap();
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let start = std::time::Instant::now();
+            common::render(&scene, &mut ctx, UHD).unwrap();
+            best = best.min(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        println!("{label:<28} {best:8.1} ms");
+    };
+    time("no effect", text(Vec::new()));
+    time("slide at rest (identity)", text(vec![slide(1.0, 1.0)]));
+    time("opacity 1 (layer + wasm)", text(vec![opacity_one]));
 }

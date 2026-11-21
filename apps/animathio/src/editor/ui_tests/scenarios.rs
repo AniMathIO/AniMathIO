@@ -746,13 +746,17 @@ fn clipped_slide_options_choose_the_edge_and_apply_as_one_undoable_batch(cx: &mu
         let fitting: Vec<_> = presets.iter().collect();
         let controls = crate::editor::animations::option_controls(&fitting);
         assert_eq!(controls[0].id(), "direction");
-        // left -> right -> top
+        // default -> left -> right -> top
         let direction = controls[0].clone();
+        assert!(e.option_label(&direction).ends_with("default"));
+        e.cycle_preset_option(&direction, cx);
+        assert!(e.option_label(&direction).ends_with("left"));
         e.cycle_preset_option(&direction, cx);
         e.cycle_preset_option(&direction, cx);
+        assert!(e.option_label(&direction).ends_with("top"));
         e.apply_animation_preset("org.animathio.animations", "clipped-slide-in", cx);
     });
-    let (effect, direction_keys) = ui.read(|e| {
+    let direction_keys = ui.read(|e| {
         let clip = e.find_clip(id).unwrap();
         let effect = clip
             .effects
@@ -760,8 +764,7 @@ fn clipped_slide_options_choose_the_edge_and_apply_as_one_undoable_batch(cx: &mu
             .find(|f| f.effect == "slide")
             .expect("slide effect added")
             .id;
-        let keys = clip
-            .animations
+        clip.animations
             .iter()
             .find(|a| {
                 a.target
@@ -775,10 +778,8 @@ fn clipped_slide_options_choose_the_edge_and_apply_as_one_undoable_batch(cx: &mu
             .keys()
             .values()
             .map(|k| k.value.as_number().unwrap())
-            .collect::<Vec<_>>();
-        (effect, keys)
+            .collect::<Vec<_>>()
     });
-    let _ = effect;
     assert_eq!(direction_keys, [3.0, 3.0], "direction top");
     ui.dispatch(Undo);
     assert_eq!(ui.read(|e| e.project.clone()), before);

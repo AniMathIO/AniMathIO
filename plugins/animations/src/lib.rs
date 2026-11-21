@@ -36,6 +36,8 @@ const TEXT: &str = "plugin:org.animathio.text";
 /// Curve-target prefix of the clipped slide effect. The host adds the effect to the
 /// clip's chain when it is missing and animates its parameters.
 const SLIDE: &str = "effect:org.animathio.effects-basic:slide";
+/// Parameter prefix of the text plugin's per-character slide.
+const CHAR_SLIDE: &str = "param:char_slide";
 
 struct Animations;
 
@@ -165,7 +167,9 @@ fn catalog() -> Vec<PresetDescriptor> {
                 &[TEXT],
                 vec![
                     direction(if role == Entrance { "left" } else { "right" }),
-                    toggle("clip", "Clip to text bounds", true),
+                    number("stagger", "Stagger", 0.0, 0.95, 0.5, 0.05),
+                    toggle("clip", "Mask each character", true),
+                    toggle("fade", "Fade characters", true),
                     easing(if role == Entrance {
                         "ease-out"
                     } else {
@@ -623,16 +627,8 @@ fn generate(
             }
             curves
         }
-        "clipped-slide" | "character-slide" => {
+        "clipped-slide" => {
             let side = o.choice("direction", if exit { "right" } else { "left" });
-            let direction = match side {
-                "right" => 2.0,
-                "top" => 3.0,
-                "bottom" => 4.0,
-                _ => 1.0,
-            };
-            let characters = if base == "character-slide" { 1.0 } else { 0.0 };
-            let clip = if o.flag("clip", true) { 1.0 } else { 0.0 };
             let easing = mirrored(o.choice("easing", if exit { "ease-in" } else { "ease-out" }), exit);
             // The choices hold for the whole window; only the progress is eased.
             let held = |name: &str, value: f64| Curve {
@@ -644,9 +640,30 @@ fn generate(
             };
             vec![
                 w.tween(&format!("{SLIDE}:progress"), 0.0, 1.0, easing, 0.0, full),
-                held("direction", direction),
-                held("characters", characters),
-                held("clip", clip),
+                held("direction", slide_direction(side)),
+                held("clip", 1.0),
+            ]
+        }
+        "character-slide" => {
+            let side = o.choice("direction", if exit { "right" } else { "left" });
+            let easing = mirrored(o.choice("easing", if exit { "ease-in" } else { "ease-out" }), exit);
+            // Exits play the entrance backwards, so a negative stagger makes the first
+            // character leave first.
+            let stagger = o.number("stagger", 0.5).clamp(0.0, 0.95);
+            let stagger = if exit { -stagger } else { stagger };
+            let held = |name: &str, value: f64| Curve {
+                target: format!("{CHAR_SLIDE}_{name}"),
+                keys: vec![
+                    key(0, value, CurveInterpolation::Hold),
+                    key(window, value, CurveInterpolation::Hold),
+                ],
+            };
+            vec![
+                w.tween(CHAR_SLIDE, 0.0, 1.0, easing, 0.0, full),
+                held("direction", slide_direction(side)),
+                held("stagger", stagger),
+                held("clip", if o.flag("clip", true) { 1.0 } else { 0.0 }),
+                held("fade", if o.flag("fade", true) { 1.0 } else { 0.0 }),
             ]
         }
         "zoom" => {
@@ -778,6 +795,16 @@ fn generate(
         _ => return Err(invalid(format!("unknown preset {preset:?}"))),
     };
     Ok(curves)
+}
+
+/// The numeric direction of the slide parameters (1 left, 2 right, 3 top, 4 bottom).
+fn slide_direction(side: &str) -> f64 {
+    match side {
+        "right" => 2.0,
+        "top" => 3.0,
+        "bottom" => 4.0,
+        _ => 1.0,
+    }
 }
 
 /// A reversed curve plays its easing backwards; swap in/out so an exit with

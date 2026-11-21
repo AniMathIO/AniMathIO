@@ -82,16 +82,16 @@ where they matter.
   top-left corner; the importer warns and uses the element center.
 - **`fontWeight` is dropped** — the v2 text component has no weight
   equivalent.
-- **Slide options become the `slide` effect.** A `slideIn`/`slideOut` with `useClipPath`
-  ("Use Mask") or `textType: "character"` is imported as a keyframed
-  `org.animathio.effects-basic` `slide` effect on the clip instead of the whole-element
-  position slide (the effect already moves the content, so keeping both would move it
-  twice); `useClipPath` masks the slide to the clip's own bounds and `character` staggers
-  the glyphs of a text clip. v1 never rendered the mask, and its per-character slide
+- **Slide options become the `slide` effect or the text glyph slide.** A
+  `slideIn`/`slideOut` with `useClipPath` ("Use Mask") is imported as a keyframed
+  `org.animathio.effects-basic` `slide` effect on the clip, and `textType: "character"` on a
+  text clip as keyframes of the text plugin's `char_slide*` parameters, instead of the
+  whole-element position slide (that already moves the content, so keeping both would move
+  it twice); every such animation adds a warning that the look differs. v1 never rendered the mask, and its per-character slide
   existed for slide-in on text only, travelled from beyond the canvas edge and faded the
   letters in; v2 slides within the element's own bounds, supports slide-out too and does
-  not fade. A character slide on a non-text element is ignored with a warning (the mask
-  still applies); a direction other than left/right/top/bottom imports as the plain slide.
+  not fade. A character slide on a non-text element is ignored with a warning (a mask, if set,
+  still applies, otherwise the ordinary slide imports); a direction other than left/right/top/bottom imports as the plain slide.
 - **`mafsReveal` is a fallback.** It becomes an opacity fade, not a path reveal.
 - **Animations with no `targetId`, unknown types, or invalid durations are
   skipped**, as are animations targeting missing elements. A slide/fade whose

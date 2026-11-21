@@ -913,11 +913,12 @@ fn import_animation(
     Ok(())
 }
 
-/// v1's slide options. `useClipPath` ("Use Mask") and `textType: "character"` become one
-/// keyframed `org.animathio.effects-basic` `slide` effect on the clip, which replaces the
-/// whole-element position slide: the effect already moves the content, so keeping both
-/// would move it twice. Returns `false` when the slide has neither option (or an
-/// unsupported direction), so the plain transform slide imports instead.
+/// v1's slide options. `useClipPath` ("Use Mask") becomes one keyframed
+/// `org.animathio.effects-basic` `slide` effect on the clip and `textType: "character"` on a
+/// text element becomes the text plugin's keyframed per-glyph slide parameters
+/// (`char_slide*`); either replaces the whole-element position slide: it already moves the
+/// content, so keeping both would move it twice. Returns `false` when the slide has neither
+/// option (or an unsupported direction), so the plain transform slide imports instead.
 fn import_slide_effect(
     animation: &V1Animation,
     meta: &ElementMeta,
@@ -930,19 +931,6 @@ fn import_slide_effect(
     if !masked && !character {
         return Ok(false);
     }
-    let direction = match animation.properties.direction.as_deref().unwrap_or("left") {
-        "left" => 1.0,
-        "right" => 2.0,
-        "top" => 3.0,
-        "bottom" => 4.0,
-        other => {
-            report.warn(format!(
-                "animation {}: slide direction {other:?} has no clipped or per-character form; imported as a whole-element slide",
-                animation.id
-            ));
-            return Ok(false);
-        }
-    };
     let clip_id = meta.clip_id;
     let is_text = project
         .tracks()
@@ -958,6 +946,22 @@ fn import_slide_effect(
             animation.id
         ));
     }
+    if !masked && !characters {
+        return Ok(false);
+    }
+    let direction = match animation.properties.direction.as_deref().unwrap_or("left") {
+        "left" => 1.0,
+        "right" => 2.0,
+        "top" => 3.0,
+        "bottom" => 4.0,
+        other => {
+            report.warn(format!(
+                "animation {}: slide direction {other:?} has no clipped or per-character form; imported as a whole-element slide",
+                animation.id
+            ));
+            return Ok(false);
+        }
+    };
     let exit = animation.kind == "slideOut";
     let (start, end) = if exit {
         (
@@ -967,31 +971,51 @@ fn import_slide_effect(
     } else {
         (0, duration_ticks)
     };
-    let effect = slide_effect_id(project, clip_id)?;
     let (from, to) = if exit { (1.0, 0.0) } else { (0.0, 1.0) };
-    for (name, first, last, interpolation) in [
-        ("progress", from, to, Interpolation::Linear),
-        ("direction", direction, direction, Interpolation::Hold),
+    let hold = Interpolation::Hold;
+    let (driver, fixed): (Target, Vec<(Target, f64)>) = if characters {
+        report.warn(format!(
+            "animation {}: per-character slide imported as the text plugin's per-glyph slide; \
+             1.x only slid in (from beyond the canvas edge, with a fade), so the 2.x look differs",
+            animation.id
+        ));
+        let param = |name: &str| Target::Param(format!("char_slide{name}"));
         (
-            "characters",
-            f64::from(u8::from(characters)),
-            f64::from(u8::from(characters)),
-            Interpolation::Hold,
-        ),
+            param(""),
+            vec![
+                (param("_direction"), direction),
+                // An exit plays the entrance backwards; negative starts with the first glyph.
+                (param("_stagger"), if exit { -0.5 } else { 0.5 }),
+                (param("_clip"), f64::from(u8::from(masked))),
+                (param("_fade"), 1.0),
+            ],
+        )
+    } else {
+        report.warn(format!(
+            "animation {}: \"Use Mask\" slide imported as the clipped slide effect; 1.x never \
+             rendered the mask (it was only a UI outline), so the 2.x look differs",
+            animation.id
+        ));
+        let effect = slide_effect_id(project, clip_id)?;
+        let param = |name: &str| Target::Effect {
+            effect,
+            param: name.into(),
+        };
         (
-            "clip",
-            f64::from(u8::from(masked)),
-            f64::from(u8::from(masked)),
-            Interpolation::Hold,
-        ),
-    ] {
+            param("progress"),
+            vec![(param("direction"), direction), (param("clip"), 1.0)],
+        )
+    };
+    let tracks = std::iter::once((driver, from, to, Interpolation::Linear)).chain(
+        fixed
+            .into_iter()
+            .map(|(target, value)| (target, value, value, hold)),
+    );
+    for (target, first, last, interpolation) in tracks {
         for (time, value) in [(start, first), (end, last)] {
             Command::AddKeyframe {
                 id: clip_id,
-                target: Target::Effect {
-                    effect,
-                    param: name.into(),
-                },
+                target: target.clone(),
                 time: Time(time),
                 keyframe: Keyframe {
                     value: value.into(),
@@ -1030,7 +1054,6 @@ fn slide_effect_id(project: &mut Project, clip_id: ClipId) -> Result<EffectId, I
     let params = BTreeMap::from([
         ("progress".to_owned(), 1.0),
         ("direction".to_owned(), 1.0),
-        ("characters".to_owned(), 0.0),
         ("clip".to_owned(), 1.0),
     ]);
     Command::AddEffect {

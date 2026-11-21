@@ -14,6 +14,7 @@ animathio-typeset = { path = "../typeset" }
 wasmtime = { version = "50.0.1", features = ["component-model"] }
 wasmtime-wasi = "50.0.1"
 skrifa = "0.49.0"
+parley = { version = "0.12", default-features = false, features = ["std"] }
 kurbo = "0.13.1"
 blake3 = { version = "1.8", default-features = false }
 getrandom = "0.3"
@@ -62,3 +63,7 @@ required-features = ["test-support"]
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[[test]]
+name = "char_slide"
+required-features = ["test-support"]

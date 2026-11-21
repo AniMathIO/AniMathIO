@@ -208,29 +208,56 @@ impl Editor {
         self.execute(&command, cx);
     }
 
-    fn option_value(&self, control: &OptionControl) -> Value {
-        self.preset_options
-            .get(&control.id)
-            .cloned()
-            .unwrap_or_else(|| control.default.clone())
+    /// The user's choice for a shared option, or `None` while every preset keeps its own
+    /// default (the defaults differ: an entrance slides in from the left, an exit leaves to
+    /// the right).
+    fn option_value(&self, control: &OptionControl) -> Option<&Value> {
+        self.preset_options.get(&control.id)
     }
 
-    /// Advance one shared preset option to its next choice (or flip the switch).
+    /// What the option's button shows: `default` until a value is picked.
+    pub(super) fn option_label(&self, control: &OptionControl) -> String {
+        let value = match self.option_value(control) {
+            None => "default".to_owned(),
+            Some(Value::Bool(true)) => "on".to_owned(),
+            Some(Value::Bool(false)) => "off".to_owned(),
+            Some(Value::String(text)) => text.clone(),
+            Some(other) => other.to_string(),
+        };
+        format!("{}: {value}", control.label)
+    }
+
+    /// Advance one shared preset option to its next choice (or flip the switch). The cycle
+    /// is default, then each choice, then back to default.
     pub(super) fn cycle_preset_option(&mut self, control: &OptionControl, cx: &mut Context<Self>) {
         let next = match self.option_value(control) {
-            Value::Bool(on) => Value::Bool(!on),
-            Value::String(current) => {
-                let at = control.choices.iter().position(|c| *c == current);
-                let next = control
-                    .choices
-                    .get(at.map_or(0, |i| (i + 1) % control.choices.len().max(1)))
-                    .cloned()
-                    .unwrap_or(current);
-                Value::String(next)
+            None if control.toggle => {
+                Some(Value::Bool(!control.default.as_bool().unwrap_or(false)))
             }
-            other => other,
+            None => control.choices.first().cloned().map(Value::String),
+            // A switch: default, then the other value, then the default value explicitly,
+            // then back to "default" (unset).
+            Some(Value::Bool(on)) if Some(*on) != control.default.as_bool() => {
+                Some(control.default.clone())
+            }
+            Some(Value::String(current)) => control
+                .choices
+                .iter()
+                .position(|c| c == current)
+                .and_then(|i| control.choices.get(i + 1))
+                .cloned()
+                .map(Value::String),
+            // A switch already back on its default value, or anything unexpected: unset.
+            Some(_) => None,
         };
-        self.preset_options.insert(control.id.clone(), next);
+        match next {
+            Some(value) => {
+                self.preset_options.insert(control.id.clone(), value);
+            }
+            None => {
+                self.preset_options.remove(&control.id);
+            }
+        }
         cx.notify();
     }
 
@@ -246,12 +273,7 @@ impl Editor {
             return None;
         }
         let buttons = controls.iter().map(|control| {
-            let value = match self.option_value(control) {
-                Value::Bool(true) => "on".to_owned(),
-                Value::Bool(false) => "off".to_owned(),
-                Value::String(text) => text,
-                other => other.to_string(),
-            };
+            let label = self.option_label(control);
             let target = control.clone();
             Button::new(SharedString::from(format!(
                 "anim-option-{scope}-{}",
@@ -259,7 +281,7 @@ impl Editor {
             )))
             .ghost()
             .compact()
-            .label(format!("{}: {value}", control.label))
+            .label(label)
             .tooltip("Click to change; applies to the next preset you apply")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.cycle_preset_option(&target, cx);

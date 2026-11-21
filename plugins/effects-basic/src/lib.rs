@@ -33,7 +33,8 @@ impl Guest for BasicEffects {
             version: "1.1.0".to_owned(),
             description: "Color and blur filters and the clipped slide reveal".to_owned(),
             kinds: vec!["effect".into()],
-            metadata: vec![],
+            // An arrived slide does nothing, so the host skips the layer round trip.
+            metadata: vec![("effect.slide.identity".to_owned(), "progress>=1".to_owned())],
             params: Vec::new(),
         }
     }
@@ -183,7 +184,7 @@ impl FrameEffects for BasicEffects {
                 return Err("frame size does not match the pixel buffer".to_owned());
             }
             if effect == "slide" {
-                return slide::apply(&pixels, width, height, &params);
+                return slide::apply(pixels, width, height, &params);
             }
             let spec = SPECS
                 .iter()
@@ -258,7 +259,7 @@ fn slide_descriptor() -> EffectDescriptor {
         id: "slide".to_owned(),
         name: "Clipped slide".to_owned(),
         description:
-            "Slide the clip in or out of its own bounds, optionally one glyph at a time"
+            "Slide the clip in or out of its own bounds, optionally hidden outside them"
                 .to_owned(),
         params: vec![
             param("progress", "Progress (1 is at rest)", 0.0, 1.0, 1.0, 0.01),
@@ -270,7 +271,6 @@ fn slide_descriptor() -> EffectDescriptor {
                 1.0,
                 1.0,
             ),
-            param("characters", "Stagger characters (0 off, 1 on)", 0.0, 1.0, 0.0, 1.0),
             param("clip", "Clip to bounds (0 off, 1 on)", 0.0, 1.0, 1.0, 1.0),
         ],
     }

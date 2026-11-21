@@ -6,22 +6,16 @@
 //! (top/bottom) and, when `clip` is on, is masked to those bounds, so it emerges from
 //! (or retreats behind) its own edge instead of sweeping across the canvas.
 //!
-//! With `characters` on, the ink is split into glyph units and each unit gets its own
-//! progress, staggered in reading order. A unit is a run of columns that contain ink
-//! inside one text line, which keeps the layout the renderer already produced
-//! (wrapping, alignment, kerning, ligatures, captions): glyphs that touch or overlap
-//! horizontally (ligatures, tight kerning, italic overhang) travel together, and the
-//! dot of an `i` stays with its stem. Content without gaps (an image, a video frame)
-//! is a single unit and slides as a whole.
+//! The whole layer moves as one block. Per-character slides are not done here: pixels
+//! carry no glyph boundaries, so they live in the text plugin (`char_slide*` parameters),
+//! which knows the shaped glyphs.
 //!
 //! Everything is a pure function of the pixels and parameters. `progress = 1` returns
-//! the input untouched, and `progress = 0` leaves nothing visible inside the bounds.
+//! the input untouched (and the host skips the call altogether, see the manifest's
+//! `effect.slide.identity`), and `progress = 0` leaves nothing visible inside the bounds.
 
 use super::number;
 use super::animathio::plugin::types::ParamEntry;
-
-/// Upper bound on glyph units; past it the content slides as one unit.
-const MAX_UNITS: usize = 4096;
 
 /// An inclusive pixel rectangle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +37,7 @@ impl Rect {
 }
 
 pub fn apply(
-    pixels: &[u8],
+    pixels: Vec<u8>,
     width: usize,
     height: usize,
     params: &[ParamEntry],
@@ -54,14 +48,13 @@ pub fn apply(
         return Err("effect direction must be 1 (left), 2 (right), 3 (top) or 4 (bottom)".into());
     }
     let direction = direction.round() as u8;
-    let characters = unit_param(params, "characters", 0.0)? > 0.5;
     let clip = unit_param(params, "clip", 1.0)? > 0.5;
 
     if progress >= 1.0 {
-        return Ok(pixels.to_vec());
+        return Ok(pixels);
     }
-    let Some(bounds) = ink_bounds(pixels, width, height) else {
-        return Ok(pixels.to_vec());
+    let Some(bounds) = ink_bounds(&pixels, width, height) else {
+        return Ok(pixels);
     };
     let vertical = direction >= 3;
     let sign = if direction % 2 == 1 { -1.0_f32 } else { 1.0 };
@@ -70,12 +63,6 @@ pub fn apply(
     } else {
         bounds.width()
     } as f32;
-
-    let units = if characters {
-        glyph_units(pixels, width, bounds)
-    } else {
-        vec![bounds]
-    };
     let mask = if clip {
         bounds
     } else {
@@ -88,21 +75,8 @@ pub fn apply(
     };
 
     let mut out = vec![0_u8; pixels.len()];
-    let count = units.len();
-    // The last unit starts after `span` of the progress and every unit takes the rest, so
-    // one unit uses the whole range and many units overlap in the second half.
-    let span = 0.5 * (1.0 - 1.0 / count as f32);
-    let each = 1.0 - span;
-    for (index, unit) in units.iter().enumerate() {
-        let start = if count > 1 {
-            span * index as f32 / (count - 1) as f32
-        } else {
-            0.0
-        };
-        let local = ((progress as f32 - start) / each).clamp(0.0, 1.0);
-        let offset = sign * (1.0 - local) * extent;
-        blit(pixels, &mut out, width, *unit, offset, vertical, mask);
-    }
+    let offset = sign * (1.0 - progress as f32) * extent;
+    blit(&pixels, &mut out, width, bounds, offset, vertical, mask);
     Ok(out)
 }
 
@@ -113,10 +87,6 @@ fn unit_param(params: &[ParamEntry], id: &str, default: f64) -> Result<f64, Stri
     } else {
         Err(format!("effect {id} must be in [0, 1]"))
     }
-}
-
-fn alpha(pixels: &[u8], width: usize, x: usize, y: usize) -> u8 {
-    pixels[(y * width + x) * 4 + 3]
 }
 
 /// Tight box around every pixel with nonzero alpha.
@@ -143,52 +113,6 @@ fn ink_bounds(pixels: &[u8], width: usize, height: usize) -> Option<Rect> {
         });
     }
     bounds
-}
-
-/// Runs of consecutive `true` values as inclusive `(first, last)` pairs.
-fn runs(flags: impl Iterator<Item = bool>) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let mut start = None;
-    let mut len = 0;
-    for (index, flag) in flags.enumerate() {
-        len = index + 1;
-        match (flag, start) {
-            (true, None) => start = Some(index),
-            (false, Some(first)) => {
-                out.push((first, index - 1));
-                start = None;
-            }
-            _ => {}
-        }
-    }
-    if let Some(first) = start {
-        out.push((first, len - 1));
-    }
-    out
-}
-
-/// Glyph units in reading order: lines top to bottom, columns of ink left to right.
-fn glyph_units(pixels: &[u8], width: usize, bounds: Rect) -> Vec<Rect> {
-    let row_ink = (bounds.y0..=bounds.y1)
-        .map(|y| (bounds.x0..=bounds.x1).any(|x| alpha(pixels, width, x, y) > 0));
-    let mut units = Vec::new();
-    for (first, last) in runs(row_ink) {
-        let (y0, y1) = (bounds.y0 + first, bounds.y0 + last);
-        let column_ink = (bounds.x0..=bounds.x1)
-            .map(|x| (y0..=y1).any(|y| alpha(pixels, width, x, y) > 0));
-        for (a, b) in runs(column_ink) {
-            units.push(Rect {
-                x0: bounds.x0 + a,
-                y0,
-                x1: bounds.x0 + b,
-                y1,
-            });
-            if units.len() > MAX_UNITS {
-                return vec![bounds];
-            }
-        }
-    }
-    units
 }
 
 /// Premultiplied RGBA (0..=255 scale) of one pixel of `unit`; transparent outside it.

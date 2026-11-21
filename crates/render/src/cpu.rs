@@ -107,7 +107,7 @@ impl Backend for CpuBackend {
                 _ => unit_transform(clip.transform, size)?,
             };
             ctx.set_transform(transform);
-            if clip.has_active_effects() {
+            if pool.runs_effects(clip) {
                 // Rasterize the clip into its own layer, apply the effect chain
                 // there, then composite. Effects must not see other clips.
                 let mut layer = self.render_effect_layer(clip, pool, video, size, transform)?;

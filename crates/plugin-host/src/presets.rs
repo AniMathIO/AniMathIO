@@ -445,6 +445,8 @@ struct EffectPlan<'a> {
     next_id: u64,
     /// `(plugin, effect)` to the instance created for it, in creation order.
     added: Vec<((String, String), EffectInstance)>,
+    /// Existing instances the preset animates that are bypassed, re-enabled in the batch.
+    reenabled: Vec<EffectId>,
 }
 
 impl<'a> EffectPlan<'a> {
@@ -460,6 +462,7 @@ impl<'a> EffectPlan<'a> {
             descriptors,
             next_id,
             added: Vec::new(),
+            reenabled: Vec::new(),
         }
     }
 
@@ -474,10 +477,15 @@ impl<'a> EffectPlan<'a> {
                 "effect target must look like effect:<plugin>:<effect>:<param>, got {spec:?}"
             ));
         };
+        // Prefer an instance that is on; a bypassed one is re-enabled by the same batch (the
+        // animation would otherwise run on an effect that does nothing).
+        let matching =
+            |instance: &&EffectInstance| instance.plugin == plugin && instance.effect == effect;
         let existing = clip
             .effects
             .iter()
-            .find(|instance| instance.plugin == plugin && instance.effect == effect)
+            .find(|instance| matching(instance) && !instance.bypass)
+            .or_else(|| clip.effects.iter().find(matching))
             .or_else(|| {
                 self.added
                     .iter()
@@ -485,6 +493,9 @@ impl<'a> EffectPlan<'a> {
                     .map(|(_, instance)| instance)
             });
         let instance = if let Some(instance) = existing {
+            if instance.bypass && !self.reenabled.contains(&instance.id) {
+                self.reenabled.push(instance.id);
+            }
             instance.id
         } else {
             let descriptor = self
@@ -650,6 +661,15 @@ fn curves_to_command(
             effect,
         })
         .collect();
+    commands.extend(
+        plan.reenabled
+            .into_iter()
+            .map(|effect| Command::SetEffectBypass {
+                id: clip.id,
+                effect,
+                bypass: false,
+            }),
+    );
     commands.extend(removals);
     commands.extend(additions);
     Ok(batch(commands))
