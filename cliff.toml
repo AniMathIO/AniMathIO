@@ -71,7 +71,8 @@ commit_parsers = [
   # Build, CI and developer-tooling scopes are noise for users, whatever the type.
   { message = "^[a-z]+\\((ci|dev|spikes|package|deps)\\)", skip = true },
   # Lint-appeasement fixes (`fix: use X for newer clippy`) are not user-facing.
-  { message = "(?i)\\bclippy\\b", skip = true },
+  # Subject line only: squash bodies list "chore: satisfy clippy" sub-commits.
+  { message = "(?i)^[^\\n]*\\bclippy\\b", skip = true },
   # The HTML comment fixes the order of the groups; the template strips it.
   { message = "^[a-z]+(\\([^)]*\\))?!:", group = "<!-- 0 -->Breaking changes" },
   { message = "^(feat|fix)\\(security\\)", group = "<!-- 1 -->Security" },
