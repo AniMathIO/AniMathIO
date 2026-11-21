@@ -232,6 +232,19 @@ fn opus_audio_round_trip_level_alignment_and_duration() {
     let decoded = decoder.samples(Time(0), SAMPLE_RATE * 2).unwrap();
     assert_eq!(decoded.len(), SAMPLE_RATE * 2 * 2);
 
+    // The encoder is flushed: the tone is still there in the last 2 ms (the pre-skip lag would
+    // otherwise drop the final ~2.5 ms of audio).
+    for channel in 0..2 {
+        let tail = &decoded[(SAMPLE_RATE * 2 - 96) * 2..];
+        let energy: f64 = tail
+            .iter()
+            .skip(channel)
+            .step_by(2)
+            .map(|s| f64::from(*s) * f64::from(*s))
+            .sum();
+        assert!(energy > 0.1, "channel {channel}: silent tail ({energy})");
+    }
+
     // The first 0.5 s are silent and the tone starts where it was written (the pre-skip is
     // honoured): the first loud sample is within 3 ms of the onset, on both channels.
     for channel in 0..2 {
@@ -305,7 +318,8 @@ fn packets_are_interleaved_in_presentation_order_with_opus_timing() {
         }
     }
     assert_eq!(video, 30);
-    assert_eq!(opus, 50, "one 20 ms packet per 960 samples");
+    // One 20 ms packet per 960 samples, plus one that flushes the 120-sample pre-skip lag.
+    assert_eq!(opus, 51, "one 20 ms packet per 960 samples plus the flush");
     assert_eq!(first_audio, Some(-2_500_000));
 }
 

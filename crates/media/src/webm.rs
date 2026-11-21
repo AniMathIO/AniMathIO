@@ -52,6 +52,9 @@ pub struct WebmEncoder {
     audio_track: Option<usize>,
     /// Opus decoder delay in nanoseconds; the first packet is presented that long before zero.
     opus_delay_ns: i64,
+    /// Opus pre-skip in frames: the encoder lags its input by this much, so `finish` feeds that
+    /// much silence to flush the end of the audio.
+    opus_pre_skip: usize,
     frame_index: u64,
     opus_packets: u64,
     audio_buf: Vec<f32>,
@@ -83,6 +86,7 @@ impl WebmEncoder {
         let audio_channels = config.audio.map_or(0, |a| a.channels);
         let mut opus = None;
         let mut opus_delay_ns = 0;
+        let mut opus_pre_skip = 0;
         if let Some(audio) = config.audio {
             crate::limits::audio(audio.sample_rate, audio.channels, 0)?;
             if audio.sample_rate != OPUS_RATE {
@@ -102,6 +106,7 @@ impl WebmEncoder {
                 })?;
             let encoder = OpusEncoder::new(channels, audio.bitrate_bps);
             opus_delay_ns = i64::from(encoder.pre_skip()) * 1_000_000_000 / i64::from(OPUS_RATE);
+            opus_pre_skip = usize::from(encoder.pre_skip());
             let mut spec = TrackSpec::new(TrackKind::Audio, "A_OPUS");
             spec.codec_private = encoder.opus_head();
             spec.audio = Some((f64::from(OPUS_RATE), u64::from(channels), None));
@@ -131,6 +136,7 @@ impl WebmEncoder {
             video_track: 0,
             audio_track,
             opus_delay_ns,
+            opus_pre_skip,
             frame_index: 0,
             opus_packets: 0,
             audio_buf: Vec::new(),
@@ -205,14 +211,20 @@ impl WebmEncoder {
         self.drain(false)
     }
 
-    /// Flush the encoders and finish the file, returning the WebM bytes. A trailing partial Opus
-    /// packet is padded with silence, so the audio can run up to 20 ms past the last video frame.
+    /// Flush the encoders and finish the file, returning the WebM bytes. The encoder lags its
+    /// input by the pre-skip, so that much silence is fed after the last sample (otherwise the
+    /// final ~2.5 ms of audio never leaves the encoder), and the last partial Opus packet is
+    /// padded with silence, so the audio can run up to 20 ms past the last video frame.
     pub fn finish(mut self) -> Result<Vec<u8>> {
         let _timer = animathio_core::timing::Timer::new("encode-flush-mux");
-        if self.opus.is_some() && !self.audio_buf.is_empty() {
-            let mut chunk = std::mem::take(&mut self.audio_buf);
-            chunk.resize(self.audio_channels * OPUS_FRAME, 0.0);
-            self.encode_opus_packet(&chunk)?;
+        if self.opus.is_some() && (self.opus_packets > 0 || !self.audio_buf.is_empty()) {
+            let packet_len = self.audio_channels * OPUS_FRAME;
+            let mut tail = std::mem::take(&mut self.audio_buf);
+            tail.resize(tail.len() + self.opus_pre_skip * self.audio_channels, 0.0);
+            tail.resize(tail.len().div_ceil(packet_len) * packet_len, 0.0);
+            for chunk in tail.chunks_exact(packet_len) {
+                self.encode_opus_packet(chunk)?;
+            }
         }
         self.drain(true)?;
         let cursor = self
