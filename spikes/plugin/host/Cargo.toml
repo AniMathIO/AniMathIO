@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 wasmtime = { version = "50.0.0", features = ["component-model"] }
-wasmtime-wasi = "50.0.0"
+wasmtime-wasi = "51.0.0"
 vello_cpu = "0.4.0"
 kurbo = "0.13.1"
 peniko = "0.6.1"
