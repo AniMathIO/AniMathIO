@@ -192,6 +192,160 @@ fn split_trim_merge_keep_ramp_phase_and_source_samples() {
         );
     }
 }
+fn units(percent: u32) -> ClipSpeed {
+    ClipSpeed::new(percent, 100).unwrap()
+}
+
+#[test]
+fn speed_at_curve_interpolates_exactly_in_millionths() {
+    let map = ClipTimeMap {
+        ramps: vec![
+            SpeedPoint {
+                time: Time(100),
+                speed: ClipSpeed::from_millionths(500_000).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(400),
+                speed: ClipSpeed::from_millionths(2_000_000).unwrap(),
+            },
+        ],
+        ..Default::default()
+    };
+    assert_eq!(
+        map.speed_at_curve(Time(0)),
+        units(50),
+        "held before the keys"
+    );
+    assert_eq!(map.speed_at_curve(Time(100)), units(50));
+    // 0.5 + 1.5 * (t - 100) / 300, to the nearest millionth.
+    assert_eq!(map.speed_at_curve(Time(200)).millionths(), 1_000_000);
+    assert_eq!(map.speed_at_curve(Time(250)).millionths(), 1_250_000);
+    assert_eq!(map.speed_at_curve(Time(101)).millionths(), 505_000);
+    assert_eq!(map.speed_at_curve(Time(400)), units(200));
+    assert_eq!(
+        map.speed_at_curve(Time(900)),
+        units(200),
+        "held after the keys"
+    );
+    // Odd thirds round to the nearest unit rather than to a whole percent.
+    let third = ClipTimeMap {
+        ramps: vec![
+            SpeedPoint {
+                time: Time(0),
+                speed: units(100),
+            },
+            SpeedPoint {
+                time: Time(3),
+                speed: ClipSpeed::from_millionths(1_000_001).unwrap(),
+            },
+        ],
+        ..Default::default()
+    };
+    assert_eq!(third.speed_at_curve(Time(2)).millionths(), 1_000_001);
+    // Without keys the constant speed holds.
+    assert_eq!(ClipTimeMap::default().speed_at_curve(Time(5)), units(100));
+}
+
+#[test]
+fn local_ramps_rebase_a_phased_curve_onto_the_clip() {
+    let key = |time: i64, percent: u32| SpeedPoint {
+        time: Time(time),
+        speed: units(percent),
+    };
+    let map = ClipTimeMap {
+        ramps: vec![key(0, 100), key(400, 300), key(800, 100)],
+        phase: Time(100),
+        ..Default::default()
+    };
+    // A 500-tick clip sees curve ticks 100..600: the key at 0 is cut away (the curve
+    // enters at the interpolated 150%), the key at 400 becomes local 300, and the curve
+    // leaves at the interpolated 200% where the key at 800 is cut away.
+    let local = map.local_ramps(500);
+    assert_eq!(
+        local,
+        [key(0, 150), key(300, 300), key(500, 200)],
+        "{local:?}"
+    );
+    for t in 0..=500 {
+        let rebased = ClipTimeMap {
+            ramps: local.clone(),
+            ..Default::default()
+        };
+        let (a, b) = (
+            map.speed_at_curve(Time(t + 100)).millionths(),
+            rebased.speed_at_curve(Time(t)).millionths(),
+        );
+        assert!(a.abs_diff(b) <= 1, "tick {t}: {a} vs {b}");
+    }
+    // Keys that are all inside need no extra vertices; an empty map stays empty.
+    let inside = ClipTimeMap {
+        ramps: vec![key(120, 100), key(500, 200)],
+        phase: Time(100),
+        ..Default::default()
+    };
+    assert_eq!(inside.local_ramps(500), [key(20, 100), key(400, 200)]);
+    assert_eq!(ClipTimeMap::default().local_ramps(500), []);
+    // A key exactly on the cut is kept as is.
+    let cut = ClipTimeMap {
+        ramps: vec![key(100, 150), key(700, 50)],
+        phase: Time(100),
+        ..Default::default()
+    };
+    assert_eq!(cut.local_ramps(300), [key(0, 150), key(300, 100)]);
+}
+
+#[test]
+fn rebased_ramps_reproduce_a_head_trimmed_clip_through_set_clip_speed() {
+    let mut p = project(false, false);
+    let key = |time: i64, percent: u32| SpeedPoint {
+        time: Time(time),
+        speed: units(percent),
+    };
+    Command::SetClipSpeed {
+        id: ClipId(1),
+        speed: ClipSpeed::default(),
+        reverse: false,
+        ramps: vec![key(0, 100), key(500, 300), key(900, 100)],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let full = clip(&p, 1).clone();
+    // Head-trim, then re-apply the clip's own curve as the editor does after a handle
+    // gesture: nothing may change, though the clock's phase is rebuilt from zero.
+    Command::TrimClip {
+        id: ClipId(1),
+        range: range(250, full.range.end.0),
+        source_offset: full.source_time(Time(250)),
+    }
+    .apply(&mut p)
+    .unwrap();
+    let trimmed = clip(&p, 1).clone();
+    assert_eq!(trimmed.time_map.phase, Time(250));
+    let length = trimmed.range.end.0 - trimmed.range.start.0;
+    Command::SetClipSpeed {
+        id: ClipId(1),
+        speed: trimmed.time_map.speed,
+        reverse: false,
+        ramps: trimmed.time_map.local_ramps(length),
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let again = clip(&p, 1);
+    assert_eq!(again.time_map.phase, Time(0));
+    assert!(
+        (again.range.end.0 - trimmed.range.end.0).abs() <= 1,
+        "duration {} vs {}",
+        again.range.end.0,
+        trimmed.range.end.0
+    );
+    for t in (0..length).step_by(7) {
+        let (a, b) = (trimmed.source_time(Time(t)).0, again.source_time(Time(t)).0);
+        assert!((a - b).abs() <= 1, "tick {t}: {a} vs {b}");
+    }
+}
+
 #[test]
 fn frame_hold_is_a_single_batch_with_exact_undo_and_continuous_tail() {
     let mut p = project(true, true);
@@ -342,4 +496,178 @@ fn retiming_keeps_automation_at_its_original_timeline_ticks() {
     exact(&mut p, &speed(2, 1, true, false));
     assert_eq!(clip(&p, 1).animations, original);
     assert!(clip(&p, 1).range.end < Time(800));
+}
+
+#[test]
+fn maintain_pitch_is_serializable_linked_invertible_and_lock_safe() {
+    let mut p = project(true, false);
+    assert!(clip(&p, 1).maintain_pitch);
+    let command = Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: false,
+    };
+    let command: Command = serde_json::from_slice(&serde_json::to_vec(&command).unwrap()).unwrap();
+    exact(&mut p, &command);
+    assert!(!clip(&p, 1).maintain_pitch);
+    assert!(!clip(&p, 2).maintain_pitch);
+    speed(2, 1, false, false).apply(&mut p).unwrap();
+    assert!(!clip(&p, 1).maintain_pitch);
+    Command::SetTrackLocked {
+        id: TrackId(2),
+        locked: true,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let before = p.clone();
+    assert!(
+        Command::SetClipMaintainPitch {
+            id: ClipId(1),
+            maintain_pitch: true
+        }
+        .apply(&mut p)
+        .is_err()
+    );
+    assert_eq!(p, before);
+}
+
+fn video_project(n: u32, d: u32, reverse: bool) -> Project {
+    // A 30 fps project (the default) with one video second.
+    let mut p = Project::default();
+    for (name, media_type) in [(&b"video"[..], "video/mp4"), (&b"still"[..], "image/png")] {
+        Command::AddAsset {
+            id: AssetId::of(name),
+            asset: Asset {
+                name: "media".into(),
+                media_type: media_type.into(),
+            },
+        }
+        .apply(&mut p)
+        .unwrap();
+    }
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "video"),
+        index: 0,
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(
+            ClipId(1),
+            ClipKind::Video(AssetId::of(b"video")),
+            range(0, TICKS_PER_SECOND),
+        ),
+    }
+    .apply(&mut p)
+    .unwrap();
+    speed(n, d, reverse, false).apply(&mut p).unwrap();
+    p
+}
+
+#[test]
+fn fast_video_frames_carry_box_filter_taps_that_cover_the_source_span() {
+    let frame = TICKS_PER_SECOND / 30;
+    // 3x forward: three taps centred on the output frame's own source time, one per source
+    // frame of the span (the average sits where the single point sample lies).
+    let p = video_project(3, 1, false);
+    let at = |frames: i64| evaluate(&p, Time(frames * frame)).clips[0].clone();
+    let clip = at(2);
+    assert_eq!(clip.source_time, Time(6 * frame));
+    assert_eq!(clip.source_taps, [5, 6, 7].map(|n| Time(n * frame)));
+    // Reversed taps walk backwards through the same span.
+    let p = video_project(2, 1, true);
+    let clip = evaluate(&p, Time(frame)).clips[0].clone();
+    assert_eq!(clip.source_taps.len(), 2);
+    assert!(clip.source_taps[0] > clip.source_taps[1]);
+    // The 16x limit averages at most 16 frames.
+    let p = video_project(16, 1, false);
+    assert_eq!(evaluate(&p, Time(0)).clips[0].source_taps.len(), 16);
+    // Every tap is a valid source time, even in the clip's last output frame.
+    let last = Time(p.tracks()[0].clips()[&ClipId(1)].range.end.0 - 1);
+    assert!(
+        evaluate(&p, last).clips[0]
+            .source_taps
+            .iter()
+            .all(|t| t.0 >= 0 && t.0 < TICKS_PER_SECOND)
+    );
+}
+
+#[test]
+fn point_samples_remain_for_normal_slow_still_and_held_video() {
+    let frame = TICKS_PER_SECOND / 30;
+    for (n, d) in [(1, 1), (1, 2), (5, 4)] {
+        let p = video_project(n, d, false);
+        let scene = evaluate(&p, Time(3 * frame));
+        assert!(scene.clips[0].source_taps.is_empty(), "{n}/{d}");
+    }
+    // An image or audio clip never filters, even when retimed.
+    let mut p = video_project(4, 1, false);
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(
+            ClipId(2),
+            ClipKind::Image(AssetId::of(b"still")),
+            range(TICKS_PER_SECOND, 2 * TICKS_PER_SECOND),
+        ),
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::SetClipSpeed {
+        id: ClipId(2),
+        speed: ClipSpeed::new(4, 1).unwrap(),
+        reverse: false,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(
+        evaluate(&p, Time(TICKS_PER_SECOND + frame / 2)).clips[0]
+            .source_taps
+            .len(),
+        0
+    );
+    // A frame hold shows one frame; the segments around it still filter.
+    let mut p = video_project(2, 1, false);
+    Command::InsertFrameHold {
+        id: ClipId(1),
+        at: Time(3 * frame),
+        frames: 4,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(evaluate(&p, Time(frame)).clips[0].source_taps.len(), 2);
+    assert_eq!(evaluate(&p, Time(5 * frame)).clips[0].source_taps.len(), 0);
+    assert_eq!(evaluate(&p, Time(9 * frame)).clips[0].source_taps.len(), 2);
+}
+
+#[test]
+fn ramps_filter_only_where_the_speed_exceeds_the_frame_rate() {
+    let frame = TICKS_PER_SECOND / 30;
+    let mut p = video_project(1, 1, false);
+    Command::SetClipSpeed {
+        id: ClipId(1),
+        speed: ClipSpeed::default(),
+        reverse: false,
+        ramps: vec![
+            SpeedPoint {
+                time: Time(0),
+                speed: ClipSpeed::new(1, 1).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(TICKS_PER_SECOND / 2),
+                speed: ClipSpeed::new(4, 1).unwrap(),
+            },
+        ],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let end = p.tracks()[0].clips()[&ClipId(1)].range.end.0;
+    assert!(
+        evaluate(&p, Time(0)).clips[0].source_taps.is_empty(),
+        "starts at 1x"
+    );
+    let late = evaluate(&p, Time(end - 2 * frame));
+    assert!(late.clips[0].source_taps.len() >= 3);
 }

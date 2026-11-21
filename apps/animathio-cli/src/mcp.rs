@@ -103,6 +103,9 @@ struct SetClipSpeed {
     denominator: u32,
     #[serde(default)]
     reverse: bool,
+    /// Preserve audio pitch; omitted keeps the clip setting (on for new clips).
+    #[serde(default)]
+    maintain_pitch: Option<bool>,
     /// Linear speed keys in local timeline ticks; empty means constant speed.
     #[serde(default)]
     ramps: Vec<RampPoint>,
@@ -1457,7 +1460,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Set clip speed, reverse and linear speed ramps, preserving the source range. Linked audio follows (pitch-shifting varispeed). Optional ripple shifts trailing clips on unlocked tracks. One undo step."
+        description = "Set clip speed, reverse and linear speed ramps, preserving the source range. Linked audio follows; maintain_pitch selects pitch preservation (on for new clips). Optional ripple shifts trailing clips on unlocked tracks. One undo step."
     )]
     async fn set_clip_speed(
         &self,
@@ -1476,16 +1479,23 @@ impl McpServer {
                 })
             })
             .collect::<Result<Vec<_>, McpError>>()?;
+        let mut commands = vec![Command::SetClipSpeed {
+            id: parse_clip_id(&p.clip_id)?,
+            speed,
+            reverse: p.reverse,
+            ramps,
+            ripple: p.ripple,
+        }];
+        if let Some(maintain_pitch) = p.maintain_pitch {
+            commands.push(Command::SetClipMaintainPitch {
+                id: parse_clip_id(&p.clip_id)?,
+                maintain_pitch,
+            });
+        }
         self.backend
             .lock()
             .await
-            .command_apply(Command::SetClipSpeed {
-                id: parse_clip_id(&p.clip_id)?,
-                speed,
-                reverse: p.reverse,
-                ramps,
-                ripple: p.ripple,
-            })
+            .command_apply(Command::Batch { commands })
             .map_err(mcp_error)?;
         tool_text(json!({"clip_id":p.clip_id}))
     }
@@ -2946,13 +2956,14 @@ mod retime_tests {
         server
             .set_clip_speed(Parameters(
                 serde_json::from_value(
-                    json!({"clip_id":1,"numerator":2,"denominator":1,"reverse":true}),
+                    json!({"clip_id":1,"numerator":2,"denominator":1,"reverse":true,"maintain_pitch":false}),
                 )
                 .unwrap(),
             ))
             .await
             .unwrap();
         let retimed = server.backend.lock().await.project_get().unwrap().project;
+        assert!(!retimed.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
         assert_eq!(
             retimed.tracks()[0].clips()[&ClipId(1)].range.end,
             Time(TICKS_PER_SECOND / 2)

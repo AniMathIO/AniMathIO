@@ -86,11 +86,24 @@ project, release builds with the first-party plugins on a private Xvfb display):
 Select a clip and open **Clip → Speed/Duration…** (Ctrl+R in the timeline), or the
 inspector's **Speed** section. Set 6.25–1600%, reverse, duration in project frames,
 or linear ramp keys (`frame:percent, frame:percent`). Source ranges stay fixed;
-linked audio follows using pitch-shifting varispeed. Optional ripple shifts
+linked audio follows. **Maintain pitch**, next to Speed/Duration in the inspector
+and in the dialog, preserves audio pitch while changing speed (including ramps
+and reverse). It is on for new clips; turn it off for pitch-shifting varispeed.
+Older projects (before schema 8) retain their previous sound with the option off. Basic time
+stretching can soften transients or produce artifacts at extreme rates. Optional ripple shifts
 trailing clips on unlocked tracks; without ripple, overlapping results fail.
 **Insert frame hold segment…** splits at the playhead and inserts a held picture
 with silent companion audio as one undo step. CLI: `animathio-cli set-clip-speed`
 and `animathio-cli freeze-frame`; MCP: `set_clip_speed` and `freeze_frame`.
+CLI speed edits accept `--maintain-pitch true` or `--maintain-pitch false`; MCP
+accepts `maintain_pitch`. Omission keeps the clip setting. Shuttle playback still
+changes pitch with transport speed.
+Select a clip to see its 100% guide on the timeline, and with ramp keys its speed curve:
+drag a square handle to change a key's time and speed (one undo step per drag), Alt-click
+a handle to remove it, Alt-click the clip or press **Add speed key at playhead** in the
+inspector to add a key. Pressing a clip edge always trims, so a key sitting right on an
+edge is changed from the Speed/Duration dialog. Video above 1x speed is filtered over time
+(frames averaged across each output frame) instead of dropping frames.
 See [retiming rules and limits](architecture.md#clip-retiming).
 
 ## Auto-reframe

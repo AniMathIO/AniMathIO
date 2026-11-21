@@ -133,3 +133,12 @@ inputs remain accepted).
 This is not yet the complete M4 corpus: actual DOM-rasterized LaTeX/graph
 captures, historical serializers and user-authored projects remain to be added.
 The fixture README records provenance and regeneration instructions.
+
+## Pitch preservation and project schema
+
+Schema 8 stores a per-clip `maintain_pitch` boolean. Projects saved with schema
+1–7 and imported v1 clips keep it off, preserving the previous varispeed sound.
+New clips default to on; the option has no effect at normal playback speed.
+Enable **Maintain pitch** in the Speed inspector or Speed/Duration dialog to
+opt an older clip into time stretching. The change follows linked companions
+and is undoable. Saving writes schema 8; older editors reject that schema.

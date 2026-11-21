@@ -240,3 +240,24 @@ pub(super) fn migrate_fit(mut value: serde_json::Value) -> Result<serde_json::Va
     value["schemaVersion"] = serde_json::json!(6);
     Ok(value)
 }
+
+/// Schema 8 adds per-clip pitch preservation, on by default. Older files were rendered
+/// with varispeed, so every clip is written out with it off.
+pub(super) fn migrate_pitch(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(tracks) = value
+        .get_mut("tracks")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for clip in tracks
+            .iter_mut()
+            .filter_map(|track| track.get_mut("clips")?.as_object_mut())
+            .flat_map(|clips| clips.values_mut())
+        {
+            if let Some(clip) = clip.as_object_mut() {
+                clip.entry("maintain_pitch").or_insert(false.into());
+            }
+        }
+    }
+    value["schemaVersion"] = serde_json::json!(8);
+    value
+}

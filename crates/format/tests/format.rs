@@ -515,7 +515,7 @@ fn schema_five_template_fit_is_promoted_without_changing_placement() {
 }
 
 #[test]
-fn schema_six_migrates_to_identity_speed_and_seven_roundtrips() {
+fn schema_six_migrates_to_identity_speed_and_current_schema_roundtrips() {
     use animathio_core::{ClipSpeed, ClipTimeMap, SpeedPoint};
     let mut project = Project::default();
     Command::AddTrack {
@@ -542,8 +542,21 @@ fn schema_six_migrates_to_identity_speed_and_seven_roundtrips() {
         .as_object_mut()
         .unwrap()
         .remove("time_map");
+    // A schema-6 file predates pitch preservation too: it must load with it off.
+    json["tracks"][0]["clips"]["1"]
+        .as_object_mut()
+        .unwrap()
+        .remove("maintain_pitch");
     let migrated = read_json(serde_json::to_vec(&json).unwrap().as_slice()).unwrap();
-    assert_eq!(migrated, project);
+    assert!(!migrated.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
+    let mut legacy = project.clone();
+    Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: false,
+    }
+    .apply(&mut legacy)
+    .unwrap();
+    assert_eq!(migrated, legacy);
     assert_eq!(
         migrated.tracks()[0].clips()[&ClipId(1)].time_map,
         ClipTimeMap::default()
@@ -570,7 +583,7 @@ fn schema_six_migrates_to_identity_speed_and_seven_roundtrips() {
     write_json(&mut bytes, &project).unwrap();
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["schemaVersion"],
-        7
+        SCHEMA_VERSION
     );
     assert_eq!(read_json(bytes.as_slice()).unwrap(), project);
 }
@@ -721,4 +734,96 @@ fn effect_parameters_cannot_contain_typed_asset_references() {
     let mut value = serde_json::to_value(&project).unwrap();
     value["tracks"][1]["audio_effects"] = json!([effect]);
     assert!(serde_json::from_value::<Project>(value).is_err());
+}
+
+#[test]
+fn schema_seven_keeps_legacy_pitch_and_schema_eight_roundtrips_the_option() {
+    let (project, _) = fixture(b"pitch migration");
+    assert!(project.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
+    let mut value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    value["schemaVersion"] = json!(7);
+    for track in value["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_object_mut().unwrap().values_mut() {
+            clip.as_object_mut().unwrap().remove("maintain_pitch");
+        }
+    }
+    let mut migrated = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+    assert!(!migrated.tracks()[0].clips()[&ClipId(1)].maintain_pitch);
+    Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: true,
+    }
+    .apply(&mut migrated)
+    .unwrap();
+    assert_eq!(
+        read_json(json_bytes(&migrated).as_slice()).unwrap(),
+        migrated
+    );
+}
+
+#[test]
+fn checked_in_schema_seven_project_loads_with_pitch_preservation_off() {
+    // The fixture is a real schema-7 file: no `maintain_pitch` key anywhere.
+    let text = include_str!("fixtures/v7-retimed-audio.json");
+    assert!(!text.contains("maintain_pitch"));
+    let project = read_json(text.as_bytes()).unwrap();
+    let clip = &project.tracks()[0].clips()[&ClipId(1)];
+    assert!(
+        !clip.maintain_pitch,
+        "old projects keep their varispeed sound"
+    );
+    assert_eq!(
+        clip.time_map.speed,
+        animathio_core::ClipSpeed::new(3, 2).unwrap()
+    );
+    // Saving writes the current schema with the explicit flag, and it round-trips.
+    let written: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    assert_eq!(written["schemaVersion"], SCHEMA_VERSION);
+    assert_eq!(written["tracks"][0]["clips"]["1"]["maintain_pitch"], false);
+    assert_eq!(read_json(json_bytes(&project).as_slice()).unwrap(), project);
+}
+
+#[test]
+fn schema_eight_clips_without_the_field_default_to_pitch_preservation_like_new_clips() {
+    let (project, _) = fixture(b"pitch default");
+    let mut value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    assert_eq!(value["schemaVersion"], SCHEMA_VERSION);
+    for track in value["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_object_mut().unwrap().values_mut() {
+            clip.as_object_mut().unwrap().remove("maintain_pitch");
+        }
+    }
+    let loaded = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+    assert!(
+        loaded
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .all(|clip| clip.maintain_pitch),
+        "serde default must match Clip::new"
+    );
+    assert_eq!(loaded, project);
+}
+
+#[test]
+fn schema_seven_migration_writes_pitch_off_into_every_clip_and_keeps_explicit_values() {
+    let (project, _) = fixture(b"pitch migration all clips");
+    let mut value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    value["schemaVersion"] = json!(7);
+    let mut clips = 0;
+    for track in value["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_object_mut().unwrap().values_mut() {
+            clip.as_object_mut().unwrap().remove("maintain_pitch");
+            clips += 1;
+        }
+    }
+    assert!(clips > 0);
+    let migrated = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+    assert!(
+        migrated
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .all(|clip| !clip.maintain_pitch)
+    );
 }

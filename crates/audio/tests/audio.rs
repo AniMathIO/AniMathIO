@@ -1,5 +1,12 @@
 //! Contracts shared by preview and export, independent of any audio device.
-#![allow(clippy::float_cmp, clippy::cast_precision_loss)]
+#![allow(
+    clippy::float_cmp,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::chunks_exact_to_as_chunks
+)]
 use animathio_audio::{AudioPool, AudioSource, DecodeLimits, Error, Pcm, Player, SymphoniaSource};
 use animathio_core::*;
 use proptest::prelude::*;
@@ -531,6 +538,12 @@ fn clip_varispeed_length_alignment_reverse_and_block_independence() {
         for (n, d) in [(1, 2), (2, 1)] {
             for reverse in [false, true] {
                 let (mut p, pool) = project(&pcm, 0, TICKS_PER_SECOND);
+                Command::SetClipMaintainPitch {
+                    id: ClipId(0),
+                    maintain_pitch: false,
+                }
+                .apply(&mut p)
+                .unwrap();
                 Command::SetClipSpeed {
                     id: ClipId(0),
                     speed: ClipSpeed::new(n, d).unwrap(),
@@ -611,6 +624,12 @@ fn retimed_audio_aligns_at_long_timeline_and_trimmed_source_offsets() {
             }
             .apply(&mut p)
             .unwrap();
+            Command::SetClipMaintainPitch {
+                id: ClipId(0),
+                maintain_pitch: false,
+            }
+            .apply(&mut p)
+            .unwrap();
             Command::SetClipSpeed {
                 id: ClipId(0),
                 speed: ClipSpeed::new(n, d).unwrap(),
@@ -639,5 +658,567 @@ fn retimed_audio_aligns_at_long_timeline_and_trimmed_source_offsets() {
                 assert!((f64::from(*sample) - expected).abs() < 0.00001);
             }
         }
+    }
+}
+
+#[test]
+fn maintained_pitch_sine_and_seek_order_are_stable() {
+    for rate in [44_100, 48_000] {
+        let tick = TICKS_PER_SECOND / i64::from(rate);
+        let pcm = Pcm::new(
+            rate,
+            2,
+            (0..rate * 2)
+                .flat_map(|i| {
+                    let sample =
+                        (i as f32 * std::f32::consts::TAU * 440.0 / rate as f32).sin() * 0.2;
+                    [sample, -sample]
+                })
+                .collect(),
+        )
+        .unwrap();
+        for (n, d) in [(1, 2), (2, 1)] {
+            for reverse in [false, true] {
+                let (mut p, pool) = project(&pcm, 0, 2 * TICKS_PER_SECOND);
+                Command::SetClipSpeed {
+                    id: ClipId(0),
+                    speed: ClipSpeed::new(n, d).unwrap(),
+                    reverse,
+                    ramps: vec![],
+                    ripple: false,
+                }
+                .apply(&mut p)
+                .unwrap();
+                let end = p.tracks()[0].clips()[&ClipId(0)].range.end;
+                let mixer = pool.prepare(rate, 2).unwrap();
+                let output = mixer.mix(&p, range(0, end.0)).unwrap();
+                assert_eq!(output.len(), (rate * 2 * d / n) as usize * 2);
+                let mono: Vec<_> = output
+                    .chunks_exact(2)
+                    .map(|frame| {
+                        assert_eq!(frame[0], -frame[1]);
+                        frame[0]
+                    })
+                    .collect();
+                // Count positive crossings across segment resets, excluding edge transients.
+                let signal = &mono[rate as usize / 10..mono.len() - rate as usize / 10];
+                let crossings: Vec<_> = signal
+                    .windows(2)
+                    .enumerate()
+                    .filter(|(_, s)| s[0] <= 0.0 && s[1] > 0.0)
+                    .map(|(i, _)| i)
+                    .collect();
+                let frequency = (crossings.len() - 1) as f64 * f64::from(rate)
+                    / (crossings.last().unwrap() - crossings[0]) as f64;
+                assert!(
+                    (frequency - 440.0).abs() < 3.0,
+                    "{rate} {n}/{d} reverse={reverse}: {frequency} Hz"
+                );
+                // Cold, out-of-order seeks cross effect blocks and WSOLA segment/reset fades.
+                let hop = rate as usize / 100;
+                for (a, b) in [
+                    (2041, 4099),
+                    (63 * hop, 66 * hop),
+                    (rate as usize / 3, rate as usize / 3 + 911),
+                    (0, 93),
+                ] {
+                    let cold = pool.prepare(rate, 2).unwrap();
+                    let part = cold
+                        .mix(&p, range(a as i64 * tick, b as i64 * tick))
+                        .unwrap();
+                    assert_eq!(part, output[a * 2..b * 2]);
+                    assert_eq!(
+                        mixer
+                            .mix(&p, range(a as i64 * tick, b as i64 * tick))
+                            .unwrap(),
+                        part
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn maintained_pitch_ramp_is_seek_independent_and_bypasses_identity() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let (mut p, pool) = project(&sine(rate), 0, TICKS_PER_SECOND);
+    let original = pool.mix(&p, range(0, TICKS_PER_SECOND), rate, 1).unwrap();
+    Command::SetClipMaintainPitch {
+        id: ClipId(0),
+        maintain_pitch: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(
+        pool.mix(&p, range(0, TICKS_PER_SECOND), rate, 1).unwrap(),
+        original
+    );
+    Command::SetClipMaintainPitch {
+        id: ClipId(0),
+        maintain_pitch: true,
+    }
+    .apply(&mut p)
+    .unwrap();
+    Command::SetClipSpeed {
+        id: ClipId(0),
+        speed: ClipSpeed::default(),
+        reverse: false,
+        ramps: vec![
+            SpeedPoint {
+                time: Time(0),
+                speed: ClipSpeed::new(1, 2).unwrap(),
+            },
+            SpeedPoint {
+                time: Time(TICKS_PER_SECOND / 2),
+                speed: ClipSpeed::new(2, 1).unwrap(),
+            },
+        ],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let end = p.tracks()[0].clips()[&ClipId(0)].range.end;
+    let output = pool.mix(&p, range(0, end.0), rate, 1).unwrap();
+    let cut = 2137;
+    let mut pieces = pool.mix(&p, range(0, cut * tick), rate, 1).unwrap();
+    pieces.extend(pool.mix(&p, range(cut * tick, end.0), rate, 1).unwrap());
+    assert_eq!(pieces, output);
+    assert!(output.iter().all(|s| s.is_finite()));
+}
+
+#[test]
+fn stretching_keeps_split_phase_and_long_timeline_offsets() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let start = 10_000_000 * TICKS_PER_SECOND + 17 * tick;
+    let (mut p, pool) = project(&sine(rate), start, start + TICKS_PER_SECOND);
+    Command::SetClipSpeed {
+        id: ClipId(0),
+        speed: ClipSpeed::new(1, 2).unwrap(),
+        reverse: true,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let end = p.tracks()[0].clips()[&ClipId(0)].range.end.0;
+    let mixer = pool.prepare(rate, 1).unwrap();
+    let whole = mixer.mix(&p, range(start, end)).unwrap();
+    let at = Time(start + 12347 * tick + 17);
+    Command::SplitClip {
+        id: ClipId(0),
+        right_id: ClipId(1),
+        at,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(pool.mix(&p, range(start, end), rate, 1).unwrap(), whole);
+    // Gain/pitch edits invalidate the shared cache rather than reusing old output.
+    Command::SetClipMaintainPitch {
+        id: ClipId(1),
+        maintain_pitch: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    assert_eq!(
+        mixer.mix(&p, range(at.0, end)).unwrap(),
+        pool.mix(&p, range(at.0, end), rate, 1).unwrap()
+    );
+}
+
+fn set_speed(p: &mut Project, id: u64, n: u32, d: u32, reverse: bool) {
+    Command::SetClipSpeed {
+        id: ClipId(id),
+        speed: ClipSpeed::new(n, d).unwrap(),
+        reverse,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(p)
+    .unwrap();
+}
+/// Frequency from positive zero crossings, excluding 10% at each end.
+fn frequency(mono: &[f32], rate: u32) -> f64 {
+    let edge = mono.len() / 10;
+    let signal = &mono[edge..mono.len() - edge];
+    let crossings: Vec<_> = signal
+        .windows(2)
+        .enumerate()
+        .filter(|(_, s)| s[0] <= 0.0 && s[1] > 0.0)
+        .map(|(i, _)| i)
+        .collect();
+    (crossings.len() - 1) as f64 * f64::from(rate)
+        / (crossings.last().unwrap() - crossings[0]) as f64
+}
+fn tone(rate: u32, seconds: u32, hz: f32) -> Pcm {
+    Pcm::new(
+        rate,
+        1,
+        (0..rate * seconds)
+            .map(|i| (i as f32 * std::f32::consts::TAU * hz / rate as f32).sin() * 0.2)
+            .collect(),
+    )
+    .unwrap()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(24))]
+    #[test]
+    fn stretched_adjacent_ranges_are_identical_to_one_mix(a in 0_i64..300_000_000, width in 1_i64..200_000_000, tail in 1_i64..200_000_000, output_rate in prop_oneof![Just(44_100_u32), Just(48_000_u32), Just(47_999_u32)], reverse in any::<bool>()) {
+        let pcm = sine(44_100);
+        let (mut project, pool) = project(&pcm, 17_321, 17_321 + TICKS_PER_SECOND);
+        set_speed(&mut project, 0, 3, 4, reverse);
+        let mixer = pool.prepare(output_rate, 2).unwrap();
+        let (b, c) = (a + width, a + width + tail);
+        let mut parts = mixer.mix(&project, range(a, b)).unwrap();
+        parts.extend(mixer.mix(&project, range(b, c)).unwrap());
+        prop_assert_eq!(parts, mixer.mix(&project, range(a, c)).unwrap());
+    }
+}
+
+#[test]
+fn stretching_survives_extreme_rates() {
+    let rate = 48_000;
+    for (n, d, seconds, reverse) in [
+        (1, 16, 1, false),
+        (16, 1, 16, false),
+        (1, 16, 1, true),
+        (16, 1, 16, true),
+    ] {
+        let pcm = tone(rate, seconds, 1000.0);
+        let (mut p, pool) = project(&pcm, 0, i64::from(seconds) * TICKS_PER_SECOND);
+        set_speed(&mut p, 0, n, d, reverse);
+        let end = p.tracks()[0].clips()[&ClipId(0)].range.end;
+        let mixer = pool.prepare(rate, 1).unwrap();
+        let out = mixer.mix(&p, range(0, end.0)).unwrap();
+        assert_eq!(
+            out.len() as u64,
+            u64::from(rate) * u64::from(seconds) * u64::from(d) / u64::from(n)
+        );
+        assert!(out.iter().all(|s| s.is_finite() && s.abs() < 0.5));
+        let hz = frequency(&out, rate);
+        assert!(
+            (hz - 1000.0).abs() < 30.0,
+            "{n}/{d} reverse={reverse}: {hz} Hz"
+        );
+        // Cold seek into the middle reproduces the same samples.
+        let (a, b) = (out.len() / 3, out.len() / 3 + 5000);
+        let tick = TICKS_PER_SECOND / i64::from(rate);
+        let cold = pool.prepare(rate, 1).unwrap();
+        assert_eq!(
+            cold.mix(&p, range(a as i64 * tick, b as i64 * tick))
+                .unwrap(),
+            out[a..b]
+        );
+    }
+}
+
+#[test]
+fn maintained_pitch_at_unit_speed_reverse_keeps_exact_sampling() {
+    // 1x reverse never uses the stretcher: it already preserves pitch, so the output
+    // equals the pitch-shifting path (and the source read backwards), bit for bit.
+    let rate = 48_000;
+    let pcm = Pcm::new(rate, 1, (0..rate).map(|i| i as f32 / rate as f32).collect()).unwrap();
+    let (mut p, pool) = project(&pcm, 0, TICKS_PER_SECOND);
+    set_speed(&mut p, 0, 1, 1, true);
+    assert!(p.tracks()[0].clips()[&ClipId(0)].maintain_pitch);
+    let kept = pool.mix(&p, range(0, TICKS_PER_SECOND), rate, 1).unwrap();
+    Command::SetClipMaintainPitch {
+        id: ClipId(0),
+        maintain_pitch: false,
+    }
+    .apply(&mut p)
+    .unwrap();
+    let varispeed = pool.mix(&p, range(0, TICKS_PER_SECOND), rate, 1).unwrap();
+    assert_eq!(kept, varispeed);
+    let source: Vec<f32> = (0..rate).map(|i| i as f32 / rate as f32).collect();
+    assert_eq!(kept[0], source[rate as usize - 1]);
+    assert_eq!(kept[rate as usize - 1], source[0]);
+}
+
+/// Per-hop RMS of `mono` (hops of `hop` frames), skipping `edge` frames at each end.
+fn hop_rms(mono: &[f32], hop: usize, edge: usize) -> Vec<f32> {
+    mono[edge..mono.len() - edge]
+        .chunks_exact(hop)
+        .map(|h| (h.iter().map(|s| s * s).sum::<f32>() / hop as f32).sqrt())
+        .collect()
+}
+
+/// A deterministic test signal: a pure tone, a rising chirp or a burst of white noise,
+/// all of constant amplitude so the loudness of every hop of the stretched result should
+/// match.
+fn signal(kind: &str, rate: u32, seconds: u32) -> Pcm {
+    let frames = (rate * seconds) as usize;
+    let mut noise = 0x2545_f491_4f6c_dd1d_u64;
+    let samples = (0..frames)
+        .map(|i| {
+            let t = i as f64 / f64::from(rate);
+            let value = match kind {
+                "sine" => (std::f64::consts::TAU * 440.0 * t).sin(),
+                // 300 Hz to about 3 kHz over the clip: always at least two cycles per hop.
+                "chirp" => {
+                    let span = f64::from(seconds);
+                    (std::f64::consts::TAU * (300.0 * t + 0.5 * (2_700.0 / span) * t * t)).sin()
+                }
+                _ => {
+                    noise ^= noise << 13;
+                    noise ^= noise >> 7;
+                    noise ^= noise << 17;
+                    (noise >> 11) as f64 / (1_u64 << 52) as f64 - 1.0
+                }
+            };
+            (value * 0.2) as f32
+        })
+        .collect();
+    Pcm::new(rate, 1, samples).unwrap()
+}
+
+#[test]
+fn stretched_loudness_holds_steady_across_segment_resets() {
+    let rate = 48_000_u32;
+    let hop = rate as usize / 100;
+    let segment = hop * 64;
+    for kind in ["sine", "chirp", "noise"] {
+        let pcm = signal(kind, rate, 4);
+        for (n, d) in [(1, 2), (2, 1)] {
+            for reverse in [false, true] {
+                let (mut p, pool) = project(&pcm, 0, 4 * TICKS_PER_SECOND);
+                set_speed(&mut p, 0, n, d, reverse);
+                let end = p.tracks()[0].clips()[&ClipId(0)].range.end.0;
+                let out = pool.mix(&p, range(0, end), rate, 1).unwrap();
+                let rms = hop_rms(&out, hop, rate as usize / 10);
+                let mut sorted = rms.clone();
+                sorted.sort_by(f32::total_cmp);
+                let median = sorted[sorted.len() / 2];
+                assert!(median > 0.05, "{kind}: median {median}");
+                // Tonal material stays near the median in every hop, including each of the
+                // hops where a segment resets and two independent reconstructions meet.
+                // Noise has no phase to cancel but WSOLA itself varies its loudness by
+                // up to about a third from hop to hop, so only its reset hops are held
+                // (to a wider band): a reset must not dip below its neighbours.
+                let tolerance = if kind == "noise" { 0.25 } else { 0.2 };
+                for (i, level) in rms.iter().enumerate() {
+                    let at = rate as usize / 10 + i * hop;
+                    let reset = at % segment < hop;
+                    if kind == "noise" && !reset {
+                        continue;
+                    }
+                    assert!(
+                        (level / median - 1.0).abs() <= tolerance,
+                        "{kind} {n}/{d} reverse={reverse}: hop {i} (frame {at}, segment offset {}) \
+                         rms {level} vs median {median}",
+                        at % segment
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_stretched_clip_is_not_faded_in_at_its_start_wherever_that_falls_in_a_segment() {
+    let rate = 48_000_u32;
+    let span = i64::from(rate) / 100 * 64; // frames per stretch segment
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let hop = rate as usize / 100;
+    let rms = |x: &[f32]| (x.iter().map(|s| s * s).sum::<f32>() / x.len() as f32).sqrt();
+    for start_frames in [
+        3 * span,
+        3 * span + hop as i64 / 2,
+        3 * span + hop as i64 + 7,
+        // A start a few frames before a segment boundary: the first hop of the clip
+        // coincides with a reset, where a spurious fade would hide.
+        4 * span - 5,
+    ] {
+        let start = start_frames * tick;
+        let (mut p, pool) = project(&tone(rate, 2, 440.0), start, start + 2 * TICKS_PER_SECOND);
+        set_speed(&mut p, 0, 3, 2, false);
+        let end = p.tracks()[0].clips()[&ClipId(0)].range.end.0;
+        let out = pool.mix(&p, range(start, end), rate, 1).unwrap();
+        // The clip's first hop is already at full level: a linear fade from silence over
+        // it would make this ratio about 0.58, and its first half would be far quieter
+        // than its second.
+        let (first, later) = (rms(&out[..hop]), rms(&out[4 * hop..8 * hop]));
+        assert!(first > 0.85 * later, "{start_frames}: {first} vs {later}");
+        let (a, b) = (rms(&out[..hop / 2]), rms(&out[hop / 2..hop]));
+        assert!(a > 0.75 * b, "{start_frames}: {a} vs {b}");
+    }
+}
+
+#[test]
+fn stretch_cache_is_keyed_by_the_source_end_a_tail_trim_moves() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let (mut p, pool) = project(&signal("noise", rate, 2), 0, TICKS_PER_SECOND);
+    // A retimed clock that never recorded its source span (a hand-written project):
+    // the source end the stretcher may read follows the clip's end.
+    Command::RestoreClips {
+        track: TrackId(0),
+        ids: vec![ClipId(0)],
+        clips: vec![{
+            let mut clip = p.tracks()[0].clips()[&ClipId(0)].clone();
+            clip.time_map = ClipTimeMap {
+                speed: ClipSpeed::new(3, 2).unwrap(),
+                ..ClipTimeMap::default()
+            };
+            clip
+        }],
+    }
+    .apply(&mut p)
+    .unwrap();
+    let clip = p.tracks()[0].clips()[&ClipId(0)].clone();
+    assert!(clip.time_map.source_length.is_none());
+    let mixer = pool.prepare(rate, 1).unwrap();
+    let end = clip.range.end.0;
+    let cut = end - 20_000 * tick;
+    // Warm the cache on the clip trimmed short, then drag its tail back out: the source
+    // end the stretcher may read grows with it, so segments of the short clip (whose
+    // last grains read silence past the old end) must not be reused.
+    let mut short = p.clone();
+    Command::TrimClip {
+        id: ClipId(0),
+        range: range(0, cut),
+        source_offset: clip.source_offset,
+    }
+    .apply(&mut short)
+    .unwrap();
+    assert!(
+        short.tracks()[0].clips()[&ClipId(0)]
+            .time_map
+            .source_length
+            .is_none()
+    );
+    mixer.mix(&short, range(0, cut)).unwrap();
+    let warm = mixer.mix(&p, range(0, end)).unwrap();
+    let cold = pool
+        .prepare(rate, 1)
+        .unwrap()
+        .mix(&p, range(0, end))
+        .unwrap();
+    let diff = warm.iter().zip(&cold).filter(|(a, b)| a != b).count();
+    assert!(warm == cold, "{diff} samples reused from the shorter clip");
+}
+
+#[test]
+fn stretching_follows_trim_and_merge() {
+    let rate = 48_000;
+    let tick = TICKS_PER_SECOND / i64::from(rate);
+    let (mut p, pool) = project(&tone(rate, 2, 500.0), 0, 2 * TICKS_PER_SECOND);
+    set_speed(&mut p, 0, 3, 2, false);
+    let end = p.tracks()[0].clips()[&ClipId(0)].range.end.0;
+    let mixer = pool.prepare(rate, 1).unwrap();
+    let whole = mixer.mix(&p, range(0, end)).unwrap();
+    let clip = p.tracks()[0].clips()[&ClipId(0)].clone();
+
+    // Trimming the tail keeps every remaining sample.
+    let mut tail = p.clone();
+    let cut = end - 9_001 * tick;
+    Command::TrimClip {
+        id: ClipId(0),
+        range: range(0, cut),
+        source_offset: clip.source_offset,
+    }
+    .apply(&mut tail)
+    .unwrap();
+    assert_eq!(
+        mixer.mix(&tail, range(0, cut)).unwrap(),
+        whole[..(cut / tick) as usize]
+    );
+
+    // Trimming the head moves the clock phase, not the sound: from one segment after the
+    // new start (the first hop of the new first segment has no predecessor to blend with)
+    // the samples are those of the untrimmed clip.
+    let mut head = p.clone();
+    let head_ticks = 12_345 * tick;
+    Command::TrimClip {
+        id: ClipId(0),
+        range: range(head_ticks, end),
+        source_offset: Time(clip.source_offset.0 + head_ticks),
+    }
+    .apply(&mut head)
+    .unwrap();
+    let trimmed = mixer.mix(&head, range(head_ticks, end)).unwrap();
+    let skip = 48_000 / 100 * 64 + 2_000;
+    assert_eq!(trimmed[skip..], whole[12_345 + skip..]);
+
+    // Split then merge restores the clip, bit for bit.
+    let mut merged = p.clone();
+    Command::SplitClip {
+        id: ClipId(0),
+        right_id: ClipId(1),
+        at: Time(31_337 * tick + 5),
+    }
+    .apply(&mut merged)
+    .unwrap();
+    assert_eq!(mixer.mix(&merged, range(0, end)).unwrap(), whole);
+    Command::MergeClip {
+        left: ClipId(0),
+        right: ClipId(1),
+    }
+    .apply(&mut merged)
+    .unwrap();
+    assert_eq!(merged, p);
+    assert_eq!(mixer.mix(&merged, range(0, end)).unwrap(), whole);
+}
+
+#[test]
+fn cross_dissolve_on_a_stretched_clip_is_equal_power_and_range_independent() {
+    let rate = 8000;
+    let second = TICKS_PER_SECOND;
+    let pcm = Pcm::new(rate, 1, vec![1.0; 4 * rate as usize]).unwrap();
+    let (mut project, pool) = project(&pcm, 0, 2 * second);
+    set_speed(&mut project, 0, 2, 1, false); // 2 s of source -> 1 s, stretched
+    let asset = AssetId::of(b"tone");
+    let mut incoming = Clip::new(ClipId(1), ClipKind::Audio(asset), range(second, 2 * second));
+    incoming.source_offset = Time(second); // one second of handle before the cut
+    for command in [
+        Command::AddClip {
+            track: TrackId(0),
+            clip: incoming,
+        },
+        Command::AddTransition {
+            track: TrackId(0),
+            transition: Transition {
+                id: TransitionId(0),
+                kind: TransitionKind::CrossDissolve,
+                duration: Time(second * 2 / 5),
+                from: ClipId(0),
+                to: ClipId(1),
+            },
+        },
+    ] {
+        command.apply(&mut project).unwrap();
+    }
+    let mixer = pool.prepare(rate, 1).unwrap();
+    let whole = mixer.mix(&project, range(0, 2 * second)).unwrap();
+    assert_eq!(whole.len(), 2 * rate as usize);
+    assert!(whole.iter().all(|s| s.is_finite()));
+    // Before the window the stretched clip plays alone at unity.
+    assert!((whole[2000] - 1.0).abs() < 1e-4);
+    // Inside the window, before the stretched clip ends at 1 s, both clips overlap with equal-power gains.
+    for (frame, progress) in [
+        (6400, 0.0),
+        (6720, 0.1),
+        (7040, 0.2),
+        (7360, 0.3),
+        (7680, 0.4),
+    ] {
+        let (out, inc) = equal_power(progress);
+        assert!(
+            (f64::from(whole[frame]) - (out + inc)).abs() < 1e-3,
+            "{frame}: {}",
+            whole[frame]
+        );
+    }
+    // After the window the incoming clip plays alone.
+    assert!((whole[9700] - 1.0).abs() < 1e-6);
+    // Arbitrary splits of the dissolve window reproduce the one-shot mix.
+    let tick = second / i64::from(rate);
+    for cut in [6_401, 7_003, 7_777] {
+        let mut parts = mixer.mix(&project, range(0, cut * tick)).unwrap();
+        parts.extend(mixer.mix(&project, range(cut * tick, 2 * second)).unwrap());
+        assert_eq!(parts, whole);
     }
 }

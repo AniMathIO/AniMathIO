@@ -4,6 +4,13 @@ use super::*;
 
 impl Editor {
     pub(super) fn edit_tool_feedback(&self) -> String {
+        if let Some(TimelineGesture::Ramp(drag)) = &self.gesture {
+            return format!(
+                "Speed key {:.0}% at {}",
+                drag.speed.percent(),
+                timecode::format_timecode(drag.time, self.project.frame_rate())
+            );
+        }
         let Some(TimelineGesture::Trim(t)) = &self.gesture else {
             return String::new();
         };
@@ -197,9 +204,16 @@ impl Editor {
             cx.notify();
             return;
         }
-        self.selected_keyframe = None;
         let secondary = event.modifiers.secondary(cx);
         let extend = secondary || event.modifiers.shift;
+        // Speed handles come after the trim edges, fades and keyframes: a press within a
+        // trim edge zone always trims, so a key drawn at a clip edge never steals it.
+        let on_trim_edge =
+            !extend && timeline::hit_trim_edge(&layout, &self.project, x, y).is_some();
+        if !edge_tool && !on_trim_edge && self.ramp_press(&layout, x, y, event.modifiers.alt, cx) {
+            return;
+        }
+        self.selected_keyframe = None;
         if !extend
             && let Some((hit, edge)) = timeline::hit_trim_edge(&layout, &self.project, x, y)
             && let Some(clip) = self.find_clip(hit.clip).cloned()
@@ -561,6 +575,7 @@ impl Editor {
                 }
                 cx.notify();
             }
+            Some(TimelineGesture::Ramp(_)) => self.ramp_drag_to(&layout, x, y, cx),
             Some(TimelineGesture::Fade(fade)) => {
                 let Some(clip) = self
                     .project
@@ -715,6 +730,7 @@ impl Editor {
                 }
                 cx.notify();
             }
+            Some(TimelineGesture::Ramp(drag)) => self.ramp_release(&drag, cx),
             Some(TimelineGesture::Fade(fade)) => {
                 if let Some(command) = self
                     .find_clip(fade.clip_id)
@@ -981,6 +997,12 @@ impl Editor {
                         }
                     }
                 }
+                let ramp_lane = single && self.selected == Some(clip.id) && !clip.time_map.hold;
+                let ramp_keys = if ramp_lane {
+                    self.ramp_paints(clip, start)
+                } else {
+                    Vec::new()
+                };
                 let (mut fade_in, mut fade_out) = (
                     fades::fade_len(clip, FadeEdge::In),
                     fades::fade_len(clip, FadeEdge::Out),
@@ -1069,6 +1091,8 @@ impl Editor {
                     kind: clip.kind.clone(),
                     icon: icons::kind_icon(&clip.kind),
                     keyframes,
+                    ramp_keys,
+                    ramp_lane,
                     waveform,
                     source_offset,
                     fade_levels: [FadeEdge::In, FadeEdge::Out].map(|edge| {

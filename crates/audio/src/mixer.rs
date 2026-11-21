@@ -111,6 +111,7 @@ impl AudioPool {
             lenient: false,
             warnings: EffectWarnings::default(),
             cache: Arc::default(),
+            stretch_cache: Arc::default(),
         })
     }
     /// Convenience offline entry point; reuse `prepare` for repeated calls.
@@ -184,6 +185,7 @@ pub struct Mixer {
     lenient: bool,
     warnings: EffectWarnings,
     cache: Arc<Mutex<EffectCache>>,
+    stretch_cache: Arc<Mutex<crate::stretch::Cache>>,
 }
 impl Mixer {
     /// Total processing latency a chain's active effects declare, in frames. The mixer
@@ -371,12 +373,14 @@ impl Mixer {
             }
             return Ok(());
         }
+        let mut stretched = self.stretch_reader(clip, clip_start);
         let mut samples = Vec::with_capacity(channels);
         for frame in from..to {
             let timeline = frame as i128 * i128::from(TICKS_PER_SECOND);
             let local = timeline - i128::from(clip.range.start.0) * i128::from(self.rate);
+            // Floor division: a dissolve-extended window starts before the clip.
             let time = Time(
-                i64::try_from(local / i128::from(self.rate))
+                i64::try_from(local.div_euclid(i128::from(self.rate)))
                     .map_err(|e| Error::Invalid(e.to_string()))?,
             );
             if param(clip, "muted", time, 0.0) != 0.0 {
@@ -393,7 +397,11 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            if let Some(reader) = stretched.as_mut() {
+                reader.frame(frame, &mut cursor, &mut samples)?;
+            } else {
+                source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            }
             for (channel, sample) in samples.iter().enumerate() {
                 out[(frame - out_first) * channels + channel] += (f64::from(*sample) * gain) as f32;
             }
@@ -417,12 +425,13 @@ impl Mixer {
         let mut cursor: Cursor<'_> = source.cursor();
         let (clip_start, clip_end) = sample_bounds(play, self.rate)?;
         let ticks = i128::from(TICKS_PER_SECOND);
+        let mut stretched = self.stretch_reader(clip, clip_start);
         let mut samples = Vec::with_capacity(channels);
         for frame in base.max(clip_start)..(base + EFFECT_BLOCK_FRAMES).min(clip_end) {
             let local =
                 frame as i128 * ticks - i128::from(clip.range.start.0) * i128::from(self.rate);
             let time = Time(
-                i64::try_from(local / i128::from(self.rate))
+                i64::try_from(local.div_euclid(i128::from(self.rate)))
                     .map_err(|e| Error::Invalid(e.to_string()))?,
             );
             if param(clip, "muted", time, 0.0) != 0.0 {
@@ -432,12 +441,36 @@ impl Mixer {
             if !gain.is_finite() || gain < 0.0 {
                 return Err(Error::Invalid("nonfinite/negative gain".into()));
             }
-            source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            if let Some(reader) = stretched.as_mut() {
+                reader.frame(frame, &mut cursor, &mut samples)?;
+            } else {
+                source_samples(clip, time, local, self.rate, &mut cursor, &mut samples)?;
+            }
             for (channel, sample) in samples.iter().enumerate() {
                 input[(frame - base) * channels + channel] = (f64::from(*sample) * gain) as f32;
             }
         }
         Ok(input)
+    }
+
+    /// The WSOLA reader for `clip`, or `None` when it plays through the sampling path.
+    /// The cache key is computed once per call, not per frame.
+    fn stretch_reader<'a>(
+        &'a self,
+        clip: &'a Clip,
+        first_frame: usize,
+    ) -> Option<crate::stretch::Reader<'a>> {
+        crate::stretch::active(clip).then(|| {
+            let channels = usize::from(self.channels);
+            crate::stretch::Reader::new(
+                clip,
+                self.rate,
+                channels,
+                crate::stretch::key(self.rate, channels, clip),
+                first_frame,
+                &self.stretch_cache,
+            )
+        })
     }
 
     /// Processed block `block` of a clip's effect chain.

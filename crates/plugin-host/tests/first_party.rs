@@ -16,6 +16,7 @@ fn clip(kind: ClipKind) -> Scene {
             track: TrackId(1),
             kind,
             source_time: Time(0),
+            source_taps: Vec::new(),
             fit: animathio_core::Fit::Stretch,
             transform: Transform::default(),
             params: BTreeMap::new(),

@@ -962,9 +962,14 @@ impl Editor {
             window,
             cx,
         );
-        let ramp_text = clip
+        let maintain_pitch = std::rc::Rc::new(std::cell::Cell::new(clip.maintain_pitch));
+        // Keys on the clip's own clock (a clip cut into the middle of a ramp keeps the
+        // curve's clock running ahead of it): the Apply command rebuilds the clock from
+        // the clip start, so show and compare them rebased.
+        let local_ramps = clip
             .time_map
-            .ramps
+            .local_ramps(clip.range.end.0 - clip.range.start.0);
+        let ramp_text = local_ramps
             .iter()
             .map(|p| {
                 format!(
@@ -976,7 +981,7 @@ impl Editor {
             .collect::<Vec<_>>()
             .join(", ");
         let ramps = input(ramp_text.clone(), window, cx);
-        let original_ramps = clip.time_map.ramps.clone();
+        let original_ramps = local_ramps;
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let (percent, duration, mode, reverse, ripple, ramps) = (
@@ -987,6 +992,7 @@ impl Editor {
                 ripple.clone(),
                 ramps.clone(),
             );
+            let maintain_pitch = maintain_pitch.clone();
             let editor = editor.clone();
             let ramp_text = ramp_text.clone();
             let original_ramps = original_ramps.clone();
@@ -999,6 +1005,18 @@ impl Editor {
                 ))
                 .child(field("Duration (frames)", Input::new(&duration)))
                 .child(field("Direction", Select::new(&reverse)))
+                .child(field(
+                    "Maintain pitch",
+                    gpui_component::checkbox::Checkbox::new("speed-maintain-pitch")
+                        .checked(maintain_pitch.get())
+                        .on_change({
+                            let value = maintain_pitch.clone();
+                            move |checked, window, _| {
+                                value.set(*checked);
+                                window.refresh();
+                            }
+                        }),
+                ))
                 .child(field("Ripple", Select::new(&ripple)))
                 .child(field("Ramp keys (frame:percent, …)", Input::new(&ramps)));
             let submit: Submit = std::rc::Rc::new(move |cx: &mut App| {
@@ -1040,13 +1058,35 @@ impl Editor {
                     } else {
                         retime::ramps(&ramps.read(cx).value(), rate)?
                     };
-                    Ok(Command::SetClipSpeed {
-                        id,
-                        speed,
-                        reverse: selected(&reverse, cx) == "Reverse",
-                        ramps: keys,
-                        ripple: selected(&ripple, cx) == "Ripple trailing clips",
-                    })
+                    // Only edit what changed: a locked linked companion must not reject an
+                    // edit that leaves its own setting alone.
+                    let reverse = selected(&reverse, cx) == "Reverse";
+                    let ripple = selected(&ripple, cx) == "Ripple trailing clips";
+                    let mut commands = Vec::new();
+                    if speed != clip.time_map.speed
+                        || reverse != clip.time_map.reverse
+                        || keys != original_ramps
+                        || ripple
+                    {
+                        commands.push(Command::SetClipSpeed {
+                            id,
+                            speed,
+                            reverse,
+                            ramps: keys,
+                            ripple,
+                        });
+                    }
+                    if maintain_pitch.get() != clip.maintain_pitch {
+                        commands.push(Command::SetClipMaintainPitch {
+                            id,
+                            maintain_pitch: maintain_pitch.get(),
+                        });
+                    }
+                    match commands.len() {
+                        0 => Err("Nothing to change".to_string()),
+                        1 => Ok(commands.remove(0)),
+                        _ => Ok(Command::Batch { commands }),
+                    }
                 })();
                 editor.update(cx, |this, cx| match &result {
                     Ok(command) => this.try_execute(command, cx),
@@ -1058,7 +1098,7 @@ impl Editor {
                 })
             });
             let dialog = dialog.title(heading(IconName::SlidersHorizontal,"Speed/Duration")).width(px(540.)).child(form)
-                .child(div().text_size(style::type_size::SM).child("Ramp keys override constant speed. Clear keys for constant speed or duration. Linked audio follows; pitch shifts. Keyframes keep their timeline times. Overlaps are rejected."));
+                .child(div().text_size(style::type_size::SM).child("Ramp keys override constant speed. Clear keys for constant speed or duration. Linked audio follows the Maintain pitch setting. Keyframes keep their timeline times. Overlaps are rejected."));
             form_dialog(dialog, "Apply", cx, submit)
         });
     }

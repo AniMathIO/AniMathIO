@@ -617,3 +617,7 @@ Export and PNG output guards compare filesystem identity, including hard links a
 symlinks, and resolve missing path tails. Case handling follows the volume rather
 than the operating system. Concurrent filesystem changes after validation (TOCTOU)
 remain outside this guard. PNG outputs also refuse the open project path.
+
+`set_clip_speed` accepts optional `maintain_pitch` (boolean). Omission preserves
+the clip setting: on for new clips, off for migrated projects. A supplied value
+and the speed edit apply to linked companions in one undo step.

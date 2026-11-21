@@ -168,6 +168,7 @@ fn vector_clip(scene: VectorScene) -> SceneClip {
         id: ClipId(1),
         kind: ClipKind::Vector(scene),
         source_time: Time(0),
+        source_taps: Vec::new(),
         fit: animathio_core::Fit::Stretch,
         transform: Transform::default(),
         params: BTreeMap::new(),

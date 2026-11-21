@@ -804,7 +804,9 @@ Options:
 
 Retimes a clip and linked companions while keeping their source ranges. Speed is
 an exact decimal or rational multiplier, 1/16–16x at millionth precision. Optional
-linear ramp keys use local timeline ticks. Audio uses pitch-shifting varispeed.
+linear ramp keys use local timeline ticks. Audio follows the clip pitch setting
+(on for new clips, off for migrated projects). Pass `--maintain-pitch true` or
+`--maintain-pitch false` to change it with the speed edit in one undo step.
 Without ripple, overlapping results fail; ripple shifts unlocked trailing clips.
 
 ```sh
@@ -822,14 +824,24 @@ Arguments:
   <PROJECT>  Input .amio project archive
 
 Options:
-      --clip <CLIP>      Clip identity
-      --speed <SPEED>    Exact multiplier: 0.5, 2 or 3/2 (1/16..16, millionth precision)
-      --reverse          Play the source interval backwards
-      --ramps <RAMPS>    JSON array of {"time": ticks, "speed": {"numerator": n, "denominator": d}}
-      --ripple           Shift trailing clips on all unlocked tracks. Otherwise reject overlaps
-  -o, --output <OUTPUT>  Destination .amio archive
-      --overwrite        Replace an existing output archive
-  -h, --help             Print help
+      --clip <CLIP>
+          Clip identity
+      --speed <SPEED>
+          Exact multiplier: 0.5, 2 or 3/2 (1/16..16, millionth precision)
+      --maintain-pitch <MAINTAIN_PITCH>
+          Preserve audio pitch (true/false); omitted keeps the clip setting [possible values: true, false]
+      --reverse
+          Play the source interval backwards
+      --ramps <RAMPS>
+          JSON array of {"time": ticks, "speed": {"numerator": n, "denominator": d}}
+      --ripple
+          Shift trailing clips on all unlocked tracks. Otherwise reject overlaps
+  -o, --output <OUTPUT>
+          Destination .amio archive
+      --overwrite
+          Replace an existing output archive
+  -h, --help
+          Print help
 ```
 <!-- /help:set-clip-speed -->
 

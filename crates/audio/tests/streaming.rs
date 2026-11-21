@@ -778,3 +778,82 @@ fn fuzz_adts_frame_count_overflow_is_a_clean_error() {
         std::panic::catch_unwind(|| animathio_audio::SymphoniaSource::from_bytes(bytes.to_vec()));
     assert!(result.expect("must not panic").is_err());
 }
+
+// ---------------------------------------------------------------------------------------------
+// Pitch-preserving stretch streams like every other read
+// ---------------------------------------------------------------------------------------------
+#[test]
+fn stretched_clips_over_a_streaming_decoder_equal_the_decoded_asset() {
+    for name in ["tone.wav", "long.flac"] {
+        let bytes = fixture(name);
+        let source = SymphoniaSource::from_bytes(bytes.clone()).unwrap();
+        let decoded = source.decode_all().unwrap();
+        let id = AssetId::of(name.as_bytes());
+        let ticks =
+            (decoded.frames() as u64 * TICKS_PER_SECOND as u64 / u64::from(decoded.rate())) as i64;
+        let mut project = audio_project(&id, ticks);
+        for (n, d, reverse) in [(3, 2, false), (1, 2, true)] {
+            Command::SetClipSpeed {
+                id: ClipId(0),
+                speed: ClipSpeed::new(n, d).unwrap(),
+                reverse,
+                ramps: vec![],
+                ripple: false,
+            }
+            .apply(&mut project)
+            .unwrap();
+            let end = project.tracks()[0].clips()[&ClipId(0)].range.end.0;
+            let mut streaming = AudioPool::default();
+            streaming.insert(id.clone(), &source).unwrap();
+            let mut eager = AudioPool::default();
+            eager.insert(id.clone(), &decoded).unwrap();
+            let rate = decoded.rate();
+            let a = streaming
+                .prepare(rate, 2)
+                .unwrap()
+                .mix(&project, range(0, end))
+                .unwrap();
+            let b = eager
+                .prepare(rate, 2)
+                .unwrap()
+                .mix(&project, range(0, end))
+                .unwrap();
+            assert!(a.iter().any(|s| s.abs() > 0.01), "{name}: silence");
+            assert_eq!(bits(&a), bits(&b), "{name} {n}/{d} reverse={reverse}");
+            // A cold mixer reading the middle of the stretched clip agrees too.
+            let tick = TICKS_PER_SECOND / i64::from(rate);
+            let frames = a.len() / 2;
+            let (from, to) = (frames / 4, (frames / 4 + 4_000).min(frames));
+            let cold = streaming.prepare(rate, 2).unwrap();
+            let part = cold
+                .mix(&project, range(from as i64 * tick, to as i64 * tick))
+                .unwrap();
+            assert_eq!(bits(&part), bits(&a[from * 2..to * 2]), "{name} cold");
+        }
+    }
+}
+
+#[test]
+fn stretching_inside_a_one_hour_asset_reads_only_what_it_needs() {
+    let (pool, _, stats, mut project) = synthetic_pool(48_000, 1);
+    Command::SetClipSpeed {
+        id: ClipId(0),
+        speed: ClipSpeed::new(2, 1).unwrap(),
+        reverse: false,
+        ramps: vec![],
+        ripple: false,
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mixer = pool.prepare(48_000, 2).unwrap();
+    // The stretched clip is half an hour long; mix three seconds from the middle.
+    let from = seconds(900.0);
+    let mixed = mixer
+        .mix(&project, range(from, from + seconds(3.0)))
+        .unwrap();
+    assert_eq!(mixed.len(), 3 * 48_000 * 2);
+    assert!(mixed.iter().all(|s| s.is_finite()) && mixed.iter().any(|s| s.abs() > 0.01));
+    assert!(stats.max_request.load(Ordering::Relaxed) <= 1 << 17);
+    // Roughly six seconds of source plus block rounding, never the hour.
+    assert!(stats.served.load(Ordering::Relaxed) < 12 * 48_000 + 8 * (1 << 17));
+}

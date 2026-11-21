@@ -378,6 +378,16 @@ struct FadeDrag {
     current: i64,
 }
 
+/// Dragging a speed-ramp key of the selected clip: `time` is clip-local ticks and
+/// `speed` the value under the pointer; the release applies one `SetClipSpeed`.
+struct RampDrag {
+    clip_id: ClipId,
+    index: usize,
+    time: Time,
+    speed: animathio_core::ClipSpeed,
+    lane: crate::speed_ramp::Lane,
+}
+
 enum TimelineGesture {
     Pan { x: f32, scroll: f32 },
     Overview,
@@ -385,6 +395,7 @@ enum TimelineGesture {
     Drag(ClipDrag),
     Trim(TrimDrag),
     Fade(FadeDrag),
+    Ramp(RampDrag),
     Marquee(MarqueeDrag),
     Marker(MarkerDrag),
 }
@@ -416,6 +427,16 @@ struct KeyframePaint {
     selected: bool,
 }
 
+/// A speed-ramp key as painted: timeline position (any drag applied) and speed.
+struct RampKeyPaint {
+    time: Time,
+    speed: animathio_core::ClipSpeed,
+    /// The key being dragged.
+    active: bool,
+    /// A real key with a handle; `false` for a curve vertex interpolated at a clip edge.
+    handle: bool,
+}
+
 struct ClipPaint {
     id: ClipId,
     time_map: animathio_core::ClipTimeMap,
@@ -430,6 +451,10 @@ struct ClipPaint {
     kind: animathio_core::ClipKind,
     icon: IconName,
     keyframes: Vec<KeyframePaint>,
+    /// Speed-ramp handles, for the selected clip when it has speed keys.
+    ramp_keys: Vec<RampKeyPaint>,
+    /// The clip is the one selected clip, so the speed lane (100% guide) is drawn.
+    ramp_lane: bool,
     /// Downsampled peaks for audio clips, once the asset is decoded.
     waveform: Option<Arc<Waveform>>,
     thumbnails: Vec<Option<timeline_thumbnails::Thumbnail>>,

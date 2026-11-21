@@ -38,6 +38,7 @@ fn scene(style: &str, extra: &serde_json::Value, time_ms: i64) -> Scene {
                 params,
             },
             source_time: Time(time_ms * MS),
+            source_taps: Vec::new(),
             fit: animathio_core::Fit::Stretch,
             transform: Transform {
                 y: 0.6,

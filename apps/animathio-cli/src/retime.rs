@@ -12,6 +12,9 @@ pub(crate) struct SpeedArgs {
     /// Exact multiplier: 0.5, 2 or 3/2 (1/16..16, millionth precision).
     #[arg(long)]
     speed: ClipSpeed,
+    /// Preserve audio pitch (true/false); omitted keeps the clip setting.
+    #[arg(long, action = clap::ArgAction::Set)]
+    maintain_pitch: Option<bool>,
     /// Play the source interval backwards.
     #[arg(long)]
     reverse: bool,
@@ -55,17 +58,24 @@ pub(crate) fn speed(args: &SpeedArgs) -> Result<()> {
         .map(serde_json::from_str)
         .transpose()?
         .unwrap_or_default();
+    let mut commands = vec![Command::SetClipSpeed {
+        id: ClipId(args.clip),
+        speed: args.speed,
+        reverse: args.reverse,
+        ramps,
+        ripple: args.ripple,
+    }];
+    if let Some(maintain_pitch) = args.maintain_pitch {
+        commands.push(Command::SetClipMaintainPitch {
+            id: ClipId(args.clip),
+            maintain_pitch,
+        });
+    }
     edit(
         &args.project,
         &args.output,
         args.overwrite,
-        &Command::SetClipSpeed {
-            id: ClipId(args.clip),
-            speed: args.speed,
-            reverse: args.reverse,
-            ramps,
-            ripple: args.ripple,
-        },
+        &Command::Batch { commands },
     )
 }
 pub(crate) fn hold(args: &HoldArgs) -> Result<()> {
