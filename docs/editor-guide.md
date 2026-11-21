@@ -345,16 +345,21 @@ the same on 16:9 and 9:16.
 **Viewer, inspector and Media library.** The selected visual clip shows an on-canvas
 transform gizmo: drag inside to move (snapping to the canvas centre and edges, with
 accent guide lines), drag a corner or edge handle to scale (Shift keeps the aspect
-ratio), drag the handle above the box to rotate (Shift snaps to 15 degrees). A small
+ratio), drag the handle above the box to rotate (Shift snaps to 15 degrees). For text, formulas
+and shapes the box hugs what the clip draws, not the whole canvas. A small
 pill shows the live values. A drag previews without touching the history and lands as
 one undo step on release. The viewer header has the zoom menu, safe-area, rule-of-thirds
 and checkerboard toggles. The transport shows a large timecode (click it to type one),
 prev/next edit, frame step, the circular play button, loop, the shuttle-speed badge,
 the duration and a monitor-only volume (it never changes export). Inspector sections are
 collapsible cards with a reset button each; text, formulas, shapes and graphs show their own
-content first, while video and audio lead with Speed. Drag a field label (Shift = fine, Ctrl =
+content first, video leads with Speed and audio with its Audio section (gain, mute, effects), then
+Speed. Rotation is shown in degrees with one decimal and font sizes as a percentage of the short
+canvas edge, whatever unit the clip stores them in; colors read `#rrggbb` (the alpha byte is added
+only when it is not `ff`). Drag a field label (Shift = fine, Ctrl =
 coarse) or the grip beside a value to scrub it as one undo step; 0 to 1 parameters also get a slider;
-every animatable property has a keyframe diamond with previous/next-key arrows. The
+every animatable property (numbers, colors, points) has a keyframe diamond with previous/next-key
+arrows; text, choices and switches have none. The
 Media tab of the Library offers a grid or list, a search field, kind filter chips, per-card type
 badges, duration and resolution, audio waveforms, and hover-scrubbing of video posters.
 
@@ -385,9 +390,14 @@ and Ctrl/Cmd+G groups (links) a multi-selection. The full Premiere-style table l
 Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
 tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
 waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
-clip to show its keyframe diamonds. Track headers have mute/solo/lock buttons and
+clip to show its keyframe diamonds. Tracks that carry sound have mute/solo/lock buttons and
 a horizontal gain slider (drag to adjust, double-click to reset to unity); a drag
-is one undo step. Use large tracks for the most detailed clip previews.
+is one undo step. Tracks of text, formulas, shapes and images get a lock button and an eye
+toggle (hide the track) instead. The S/M/L group in the timeline toolbar sets the track height; use
+large tracks for the most detailed clip previews. In a window shorter than 800 px the timeline
+drops its overview strip, the transport gets slimmer, and a first run (no saved layout) starts
+with small tracks. Library, Inspector and Timeline show a thin scrollbar whenever they overflow;
+when the Library is too narrow for tab labels, its header names the active tab.
 
 Export opens a form with an MP4 path chooser, whole/in-out/custom range and shared
 `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` and `portrait` presets (30 fps, CRF 18).
@@ -539,7 +549,7 @@ The library's **Elements** tab provides grouped preview cards for LaTeX, text, p
 vectors, polygons, plots, circles, ellipses and Cartesian/polar grids. Click a
 card for typed fields and a live preview, use its plus button for defaults, or
 drag it onto the timeline. Double-click an existing object to edit it. LaTeX has
-snippets, formula templates and a Write on preset. In its dialog, Colour and Write on sit
+snippets, formula templates and a Write on preset. In its dialog, Color and Write on sit
 beside the source (above the palette); a window at least 960 px wide puts the Snippets and
 Templates palette in a second column, so nothing is below a scroll at 1280 × 720. See the
 [math workflow](architecture.md#mathematical-object-workflow) and the

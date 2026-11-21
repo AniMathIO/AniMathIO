@@ -43,7 +43,8 @@ colour-coded clips, crisp monospace timecode and subtle motion. All values live 
   Fades are smooth curves with handles, transitions a violet to cyan gradient over
   the overlap, keyframes rotated-square diamonds on the selected clip. Track headers
   carry a kind-colour stripe, a kind icon, compact mute/solo/lock pills (tinted when
-  active) and a horizontal gain slider (drag to change, double-click for unity). The
+  active) and a horizontal gain slider (drag to change, double-click for unity); tracks that
+  hold only text, formulas, shapes or images show an eye (hide) toggle and the lock instead. The
   playhead is a `PLAYHEAD` pentagon head with a 1px glowing line and a timecode pill
   while scrubbing; the in/out range is shaded with the accent and an engaged snap
   draws an accent line with a magnet icon.
@@ -95,7 +96,7 @@ chip, and the drop zone is dashed and lights up while files are dragged over it.
 ## Viewer, inspector and timeline follow-ups
 
 - **Rotation** is shown and typed in degrees everywhere in the UI (inspector rows,
-  numeric scrubbing, multi-selection, the gizmo pill). Transforms and keyframes still
+  numeric scrubbing, multi-selection, the gizmo pill), with one decimal and a degree suffix. Transforms and keyframes still
   store radians; conversion lives in `field_display_value` / `field_model_value`.
 - **Click-to-pick:** clicking the preview selects the topmost visible clip under the
   pointer, Alt-click cycles through the stack, and a click on empty canvas clears the

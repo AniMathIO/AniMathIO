@@ -825,7 +825,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "grid_color".into(),
-                    label: "Grid colour".into(),
+                    label: "Grid color".into(),
                     kind: ParamKind::Color(ColorParam {
                         default: Color {
                             r: 120,
@@ -837,7 +837,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "axis_color".into(),
-                    label: "Axes and labels colour".into(),
+                    label: "Axes and labels color".into(),
                     kind: ParamKind::Color(ColorParam {
                         default: Color {
                             r: 200,
@@ -849,7 +849,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "x_min".to_string(),
-                    label: "X Min".to_string(),
+                    label: "X min".to_string(),
                     kind: ParamKind::Number(NumberRange {
                         min: -1000.0,
                         max: 1000.0,
@@ -859,7 +859,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "x_max".to_string(),
-                    label: "X Max".to_string(),
+                    label: "X max".to_string(),
                     kind: ParamKind::Number(NumberRange {
                         min: -1000.0,
                         max: 1000.0,
@@ -869,7 +869,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "y_min".to_string(),
-                    label: "Y Min".to_string(),
+                    label: "Y min".to_string(),
                     kind: ParamKind::Number(NumberRange {
                         min: -1000.0,
                         max: 1000.0,
@@ -879,7 +879,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "y_max".to_string(),
-                    label: "Y Max".to_string(),
+                    label: "Y max".to_string(),
                     kind: ParamKind::Number(NumberRange {
                         min: -1000.0,
                         max: 1000.0,
@@ -904,7 +904,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "scale_mode".into(),
-                    label: "Coordinate Scale".into(),
+                    label: "Coordinate scale".into(),
                     kind: ParamKind::EnumChoice(EnumParam {
                         options: vec!["uniform".into(), "stretch".into()],
                         default: "uniform".into(),
@@ -934,7 +934,7 @@ impl Guest for GraphPlugin {
                 },
                 ParamSpec {
                     id: "stroke_width".into(),
-                    label: "Plot Stroke Width (540p px)".into(),
+                    label: "Plot stroke width (540p px)".into(),
                     kind: ParamKind::Number(NumberRange {
                         min: 0.1,
                         max: 64.0,

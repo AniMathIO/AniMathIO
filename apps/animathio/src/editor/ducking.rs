@@ -458,9 +458,9 @@ impl Editor {
                     ))
                     .compact()
                     .icon(icons::icon(if on {
-                        IconName::Check
+                        IconName::SquareCheck
                     } else {
-                        IconName::Minus
+                        IconName::Square
                     }))
                     .label(name.clone())
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -490,7 +490,7 @@ impl Editor {
                 )
                 .child(row)
         };
-        panel = chips(panel, "1. Voice: tracks", false, cx);
+        panel = chips(panel, "1. Voice source", false, cx);
         let selected_audio = self.selected.is_some_and(|id| {
             self.find_clip(id).is_some_and(|c| {
                 matches!(
@@ -505,9 +505,9 @@ impl Editor {
                 .compact()
                 .disabled(!selected_audio && !clip_voice)
                 .icon(icons::icon(if clip_voice {
-                    IconName::Check
+                    IconName::SquareCheck
                 } else {
-                    IconName::Minus
+                    IconName::Square
                 }))
                 .label("Use the selected clip as the voice")
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -550,9 +550,9 @@ impl Editor {
                         .label(duck_clip_label(&self.project, track, clip))
                         .tooltip(format!("Clip {}", id.0))
                         .icon(icons::icon(if on {
-                            IconName::Check
+                            IconName::SquareCheck
                         } else {
-                            IconName::Minus
+                            IconName::Square
                         }))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(r) = this.duck_review.as_mut() {
@@ -618,9 +618,9 @@ impl Editor {
             Button::new("duck-replace")
                 .compact()
                 .icon(icons::icon(if replace {
-                    IconName::Check
+                    IconName::SquareCheck
                 } else {
-                    IconName::Minus
+                    IconName::Square
                 }))
                 .label("Replace existing gain keyframes")
                 .on_click(cx.listener(|this, _, _, cx| {

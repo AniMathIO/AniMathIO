@@ -261,7 +261,11 @@ impl Editor {
                 .rounded(px(style::radius::CONTROL))
                 .cursor_text()
                 .font_family(mono.clone())
-                .text_size(crate::style::type_size::LG)
+                .text_size(if self.compact_height {
+                    crate::style::type_size::SM
+                } else {
+                    crate::style::type_size::LG
+                })
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(hex(color::TEXT))
                 .hover(|this| this.bg(hexa(color::HOVER, 0.7)))
@@ -287,8 +291,9 @@ impl Editor {
         };
         let speed_active = self.playing && speed != "1x";
         let muted = self.viewer_state.volume == 0.;
+        let compact = self.compact_height;
         div()
-            .h(gpui::rems(4.0))
+            .h(gpui::rems(if compact { 3.0 } else { 4.0 }))
             .w_full()
             .flex_shrink_0()
             .flex()
@@ -329,8 +334,8 @@ impl Editor {
                         div().px_1().child(
                             style::primary_button("play", cx)
                                 .rounded_full()
-                                .w(gpui::rems(2.8))
-                                .h(gpui::rems(2.8))
+                                .w(gpui::rems(if compact { 2.2 } else { 2.8 }))
+                                .h(gpui::rems(if compact { 2.2 } else { 2.8 }))
                                 .shadow_md()
                                 .icon(
                                     icons::icon(if self.playing {

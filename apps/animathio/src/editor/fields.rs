@@ -19,6 +19,10 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::switch::Switch;
 use gpui_component::{Disableable, IndexPath};
 
+use super::inspector_units::{
+    SizeUnits, format_degrees, format_hex, framed_swatch, is_animatable, is_font_size_param,
+    size_to_display, size_to_model,
+};
 use super::*;
 use crate::style::{color, hex};
 
@@ -221,6 +225,21 @@ pub(super) fn format_number(value: f64) -> String {
     }
 }
 
+/// How a number input shows `value`: rotation with one decimal, everything else compactly.
+fn format_for_target(target: &InputTarget, value: f64) -> String {
+    match target {
+        InputTarget::Field {
+            field: Field::Transform(TransformProperty::Rotation),
+            ..
+        }
+        | InputTarget::SelectionField {
+            field: Field::Transform(TransformProperty::Rotation),
+            ..
+        } => format_degrees(value),
+        _ => format_number(value),
+    }
+}
+
 /// Whether `text` could still become a number while the user is typing it.
 fn is_numeric_prefix(text: &str) -> bool {
     text.chars()
@@ -380,7 +399,7 @@ impl Editor {
             StepAction::Increment => field.step,
             StepAction::Decrement => -field.step,
         };
-        let text = format_number(current + delta);
+        let text = format_for_target(&field.target, current + delta);
         field
             .state
             .update(cx, |state, cx| state.set_value(text.clone(), window, cx));
@@ -399,6 +418,8 @@ impl Editor {
         cx: &mut Context<Self>,
     ) -> Div {
         let scrub_target = target.clone();
+        let suffix = self.number_suffix(&target);
+        let text = format_for_target(&target, value);
         let slider = matches!(
             &target,
             InputTarget::Field {
@@ -409,7 +430,7 @@ impl Editor {
                 ..
             }
         );
-        let state = self.input_state(key, target, format_number(value), step, window, cx);
+        let state = self.input_state(key, target, text, step, window, cx);
         let slider_control = slider.then(|| {
             self.slider_control(
                 key,
@@ -456,14 +477,65 @@ impl Editor {
                             ),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(NumberInput::new(&state).small()),
+                        div().flex_1().min_w_0().child(match suffix {
+                            Some(suffix) => NumberInput::new(&state).small().suffix(
+                                div()
+                                    .pr_1()
+                                    .text_size(crate::style::type_size::XS)
+                                    .text_color(hex(color::TEXT_MUTED))
+                                    .child(suffix),
+                            ),
+                            None => NumberInput::new(&state).small(),
+                        }),
                     ),
             )
             // Align the slider with the input, past the 14px scrub grip and the gap.
             .children(slider_control.map(|slider| div().pl(px(18.)).pb_1().child(slider)))
+    }
+
+    /// The unit shown after a number input: degrees for rotation, percent for font sizes.
+    fn number_suffix(&self, target: &InputTarget) -> Option<&'static str> {
+        match target {
+            InputTarget::Field {
+                field: Field::Transform(TransformProperty::Rotation),
+                ..
+            }
+            | InputTarget::SelectionField {
+                field: Field::Transform(TransformProperty::Rotation),
+                ..
+            } => Some("\u{b0}"),
+            InputTarget::PluginNumber { id, name } => self.font_size_units(*id, name).map(|_| "%"),
+            _ => None,
+        }
+    }
+
+    /// The stored unit of a plugin font size parameter, when `name` is one.
+    pub(super) fn font_size_units(&self, id: ClipId, name: &str) -> Option<SizeUnits> {
+        let ClipKind::Plugin { plugin_id, .. } = &self.find_clip(id)?.kind else {
+            return None;
+        };
+        if !is_font_size_param(plugin_id, name) {
+            return None;
+        }
+        let units = self.plugin_text_value(id, "units", "pixels");
+        Some(SizeUnits::parse(&units))
+    }
+
+    /// The stored value for what the inspector shows or the user typed (font sizes are
+    /// presented as a percentage of the short edge).
+    pub(super) fn plugin_number_from_display(&self, id: ClipId, name: &str, value: f64) -> f64 {
+        match self.font_size_units(id, name) {
+            Some(units) => size_to_model(value, units, project_size(&self.project)),
+            None => value,
+        }
+    }
+
+    pub(super) fn plugin_number_display_value(&self, id: ClipId, name: &str) -> f64 {
+        let value = self.plugin_number_value(id, name);
+        match self.font_size_units(id, name) {
+            Some(units) => size_to_display(value, units, project_size(&self.project)),
+            None => value,
+        }
     }
 
     pub(super) fn slider_control(
@@ -561,7 +633,10 @@ impl Editor {
             InputTarget::VideoEffectParam { id, effect, name } => {
                 self.video_effect_param_command(id, effect, &name, value)
             }
-            InputTarget::PluginNumber { id, name } => self.plugin_number_command(id, &name, value),
+            InputTarget::PluginNumber { id, name } => {
+                let value = self.plugin_number_from_display(id, &name, value);
+                self.plugin_number_command(id, &name, value)
+            }
             InputTarget::PluginPoint { id, name, axis } => {
                 let mut point = self.plugin_point_value(id, &name);
                 point[axis] = value as f32;
@@ -742,7 +817,7 @@ impl Editor {
                 .state
                 .update(cx, |state, cx| state.set_value(to_hsla(color), window, cx));
         }
-        div().child(ColorPicker::new(&field.state))
+        framed_swatch(ColorPicker::new(&field.state), color[3] < 255, cx)
     }
 
     fn color_control(
@@ -810,17 +885,15 @@ impl Editor {
                 .state
                 .update(cx, |state, cx| state.set_value(to_hsla(color), window, cx));
         }
-        let hex = format!(
-            "#{:02x}{:02x}{:02x}{:02x}",
-            color[0], color[1], color[2], color[3]
-        );
+        let hex = format_hex(color);
+        let swatch = framed_swatch(ColorPicker::new(&field.state), color[3] < 255, cx);
         div()
             .w(px(CONTROL_W))
             .flex()
             .flex_row()
             .items_center()
             .gap_2()
-            .child(ColorPicker::new(&field.state))
+            .child(swatch)
             .child(
                 div()
                     .text_size(crate::style::type_size::XS)
@@ -1173,10 +1246,7 @@ impl Editor {
             (Field::Transform(TransformProperty::Y), "Position Y"),
             (Field::Transform(TransformProperty::ScaleX), "Scale X"),
             (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
-            (
-                Field::Transform(TransformProperty::Rotation),
-                "Rotation (deg)",
-            ),
+            (Field::Transform(TransformProperty::Rotation), "Rotation"),
         ];
         let mut rows: Vec<Div> = transform
             .into_iter()
@@ -1335,11 +1405,18 @@ impl Editor {
         cx: &mut Context<Self>,
     ) -> Div {
         let name = model.id().to_owned();
-        let diamond = self.row_diamond(id, &Target::Param(name.clone()), cx);
+        // Only values that interpolate get keyframe controls; text, choices and switches do not.
+        let diamond =
+            is_animatable(model).then(|| self.row_diamond(id, &Target::Param(name.clone()), cx));
         let mut label = model.label().to_owned().into_any_element();
         let control = match model {
             ParamModel::Number { step, min, max, .. } => {
-                let value = self.plugin_number_value(id, &name);
+                let value = self.plugin_number_display_value(id, &name);
+                let step = if self.font_size_units(id, &name).is_some() {
+                    &0.5
+                } else {
+                    step
+                };
                 let unit = (*min - 0.).abs() < f64::EPSILON && (*max - 1.).abs() < f64::EPSILON;
                 label = Self::scrub_label(
                     &format!("c{}:pn:{name}", id.0),
@@ -1397,7 +1474,7 @@ impl Editor {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(Self::param_row(Some(diamond), label, div(), cx))
+                        .child(Self::param_row(diamond, label, div(), cx))
                         .child(div().px_2().pb_1().w_full().child(editor));
                 }
                 self.text_control(
@@ -1449,7 +1526,7 @@ impl Editor {
                 .w(px(CONTROL_W))
                 .child(self.plugin_asset_control(id, name.clone(), media_type, window, cx)),
         };
-        Self::param_row(Some(diamond), label, control, cx)
+        Self::param_row(diamond, label, control, cx)
     }
 
     /// Inspector for several selected clips: a read-only summary plus the
@@ -1534,10 +1611,7 @@ impl Editor {
             (Field::Transform(TransformProperty::Y), "Position Y"),
             (Field::Transform(TransformProperty::ScaleX), "Scale X"),
             (Field::Transform(TransformProperty::ScaleY), "Scale Y"),
-            (
-                Field::Transform(TransformProperty::Rotation),
-                "Rotation (deg)",
-            ),
+            (Field::Transform(TransformProperty::Rotation), "Rotation"),
             (Field::Transform(TransformProperty::Opacity), "Opacity"),
         ];
         let all_audio = clips
@@ -1590,8 +1664,9 @@ impl Editor {
             .collect();
         let body = div()
             .id("inspector-scroll")
-            .flex_1()
+            .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.inspector_scroll)
             .flex()
             .flex_col()
             .child(self.section("selection", "Selection", details, cx))
@@ -1601,7 +1676,14 @@ impl Editor {
                 div().flex().flex_col().children(rows),
                 cx,
             ));
-        pane.child(header).child(body)
+        pane.child(header).child(self.scrolled(body))
+    }
+
+    /// An inspector scroll body with an always-visible scrollbar, so overflow is discoverable.
+    fn scrolled(&self, body: Stateful<Div>) -> Div {
+        div().flex_1().min_h_0().relative().child(body).child(
+            gpui_component::scroll::Scrollbar::vertical(&self.inspector_scroll),
+        )
     }
 
     /// Inspector panel: header, collapsible sections and widgets for the
@@ -1703,8 +1785,9 @@ impl Editor {
         let visual = !matches!(clip.kind, ClipKind::Audio(_));
         let mut body = div()
             .id("inspector-scroll")
-            .flex_1()
+            .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.inspector_scroll)
             .flex()
             .flex_col()
             .p_1()
@@ -1742,7 +1825,19 @@ impl Editor {
                 ));
             }
         }
-        if timed_media {
+        let is_audio = matches!(clip.kind, ClipKind::Audio(_));
+        if is_audio {
+            // Audio clips lead with what matters for them: gain, mute and effects.
+            let mut rows = self.audio_rows(id, window, cx);
+            rows.extend(self.audio_effect_rows(id, window, cx));
+            body = body.child(self.section(
+                "audio",
+                "Audio",
+                div().flex().flex_col().children(rows),
+                cx,
+            ));
+            body = body.child(speed.take().expect("speed section"));
+        } else if timed_media {
             body = body.child(speed.take().expect("speed section"));
         } else {
             if let Some(rows) = title_rows.take() {
@@ -1789,16 +1884,6 @@ impl Editor {
         }
         if let Some(speed) = speed.take() {
             body = body.child(speed);
-        }
-        if matches!(clip.kind, ClipKind::Audio(_)) {
-            let mut rows = self.audio_rows(id, window, cx);
-            rows.extend(self.audio_effect_rows(id, window, cx));
-            body = body.child(self.section(
-                "audio",
-                "Audio",
-                div().flex().flex_col().children(rows),
-                cx,
-            ));
         }
         if visual {
             let mut rows = self.video_effect_rows(id, window, cx);
@@ -1873,7 +1958,7 @@ impl Editor {
                 ),
             );
         }
-        pane.child(body)
+        pane.child(self.scrolled(body))
     }
 }
 

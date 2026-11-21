@@ -45,7 +45,11 @@ impl Editor {
                                 .flex_col()
                                 .child(style::panel_header(
                                     IconName::Library,
-                                    "Library",
+                                    if self.dock.left_width >= LIBRARY_TABS_LABEL_WIDTH {
+                                        "Library"
+                                    } else {
+                                        self.left_tab.header()
+                                    },
                                     // The + follows the tab: Plugins installs a .amplugin file,
                                     // everything else imports media.
                                     if self.left_tab == LeftTab::Plugins {

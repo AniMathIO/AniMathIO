@@ -924,8 +924,12 @@ impl Render for MathEditor {
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(div().text_color(hex(color::TEXT_SECONDARY)).child("Colour"))
-                        .child(ColorPicker::new(&self.color))
+                        .child(div().text_color(hex(color::TEXT_SECONDARY)).child("Color"))
+                        .child(super::inspector_units::framed_swatch(
+                            ColorPicker::new(&self.color),
+                            false,
+                            cx,
+                        ))
                         .child(
                             div()
                                 .text_xs()

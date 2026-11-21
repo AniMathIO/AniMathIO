@@ -123,7 +123,7 @@ impl Guest for LatexPlugin {
                 },
                 ParamSpec {
                     id: "size".to_string(),
-                    label: "Font Size".to_string(),
+                    label: "Font size".to_string(),
                     kind: ParamKind::Number(NumberRange {
                         min: 0.0001,
                         max: 400.0,

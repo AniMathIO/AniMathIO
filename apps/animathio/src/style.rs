@@ -174,6 +174,8 @@ pub fn install_theme(cx: &mut gpui::App, compact: bool, reduce_motion: bool) {
         theme.radius = px(radius::CONTROL);
         theme.radius_lg = px(radius::PANEL);
         theme.shadow = true;
+        // Thin scrollbars that stay visible, so a panel that overflows says so.
+        theme.scrollbar_mode = gpui_component::scroll::ScrollbarMode::Always;
         theme.motion.duration_fast =
             std::time::Duration::from_millis(if reduce_motion { 0 } else { motion::FAST_MS });
         theme.motion.duration_normal =

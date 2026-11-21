@@ -53,6 +53,9 @@ pub(crate) struct EditorEnv {
     /// Whether this environment may check for a newer release at startup
     /// (`update_check`); the headless test harness never touches the network.
     pub(crate) updates: bool,
+    /// Whether a first run in a short window starts with small track rows. Off in the headless
+    /// harness so every scenario sees the same default layout.
+    pub(crate) adaptive_density: bool,
     /// The AI assist client behind the Math dialog's Convert button. Production uses the real
     /// HTTP client; tests inject a mock, and the headless default never touches the network.
     pub(crate) assist: Arc<dyn Converter>,
@@ -88,6 +91,7 @@ impl EditorEnv {
             plugins: PluginSource::Discover,
             config_dir: None,
             updates: true,
+            adaptive_density: true,
             assist: Arc::new(HttpConverter::new()),
         }
     }
@@ -102,6 +106,7 @@ impl EditorEnv {
             plugins,
             config_dir: Some(config_dir),
             updates: false,
+            adaptive_density: false,
             assist: Arc::new(OfflineConverter),
         }
     }

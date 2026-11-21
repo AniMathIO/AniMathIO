@@ -4141,5 +4141,5 @@ fn inspector_leads_with_content_for_generated_clips_and_speed_for_media(cx: &mut
     ui.update(|_, window, _| window.refresh());
     let speed = top(&mut ui, "speed").expect("an audio clip shows Speed");
     let audio = top(&mut ui, "audio").expect("and its Audio section");
-    assert!(speed < audio, "timed media still leads with Speed");
+    assert!(audio < speed, "audio clips lead with their Audio section");
 }

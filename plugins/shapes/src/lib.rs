@@ -204,7 +204,7 @@ impl Guest for ShapesPlugin {
                 },
                 ParamSpec {
                     id: "path".into(),
-                    label: "Path (JSON verbs)".into(),
+                    label: "Path (JSON)".into(),
                     kind: ParamKind::String(StringParam {
                         default: "[]".into(),
                     }),
@@ -278,7 +278,7 @@ impl Guest for ShapesPlugin {
                 },
                 ParamSpec {
                     id: "points".to_string(),
-                    label: "Points / Sides".to_string(),
+                    label: "Points or sides".to_string(),
                     kind: ParamKind::Number(NumberRange {
                         min: 3.0,
                         max: 64.0,
@@ -298,7 +298,7 @@ impl Guest for ShapesPlugin {
                 },
                 ParamSpec {
                     id: "fill".to_string(),
-                    label: "Fill Color".to_string(),
+                    label: "Fill color".to_string(),
                     kind: ParamKind::Color(ColorParam {
                         default: Color {
                             r: 90,
@@ -310,7 +310,7 @@ impl Guest for ShapesPlugin {
                 },
                 ParamSpec {
                     id: "stroke".to_string(),
-                    label: "Stroke Color".to_string(),
+                    label: "Stroke color".to_string(),
                     kind: ParamKind::Color(ColorParam {
                         default: Color {
                             r: 255,
@@ -322,7 +322,7 @@ impl Guest for ShapesPlugin {
                 },
                 ParamSpec {
                     id: "stroke_width".to_string(),
-                    label: "Stroke Width".to_string(),
+                    label: "Stroke width".to_string(),
                     kind: ParamKind::Number(NumberRange {
                         min: 0.0,
                         max: 64.0,

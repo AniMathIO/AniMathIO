@@ -36,6 +36,17 @@ impl TrackHeight {
     }
 }
 
+/// The track height a first run starts with: small rows in a short window, so more than a few
+/// tracks fit, unless a layout was already saved (then the user's choice stands).
+#[must_use]
+pub fn first_run_track_height(current: TrackHeight, compact: bool, saved: bool) -> TrackHeight {
+    if compact && !saved {
+        TrackHeight::Small
+    } else {
+        current
+    }
+}
+
 /// Sizes (logical pixels) and open/closed flags for the dockable panels.
 /// Sizes are clamped on load so a hand-edited or stale file cannot produce a
 /// degenerate layout.
@@ -144,6 +155,14 @@ mod tests {
         };
         let parsed = DockLayout::from_json(&layout.to_json());
         assert_eq!(parsed, layout);
+    }
+
+    #[test]
+    fn short_first_runs_start_with_small_tracks_but_saved_layouts_win() {
+        use TrackHeight::{Large, Medium, Small};
+        assert_eq!(first_run_track_height(Medium, true, false), Small);
+        assert_eq!(first_run_track_height(Medium, false, false), Medium);
+        assert_eq!(first_run_track_height(Large, true, true), Large);
     }
 
     #[test]

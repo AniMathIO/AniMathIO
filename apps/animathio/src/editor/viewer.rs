@@ -5,6 +5,8 @@ use crate::style::{color, hex, hexa};
 pub(super) struct ViewerState {
     bounds: Bounds<Pixels>,
     source_sizes: BTreeMap<AssetId, Option<(u32, u32)>>,
+    /// Ink bounds of the selected generated clip, keyed by what determines them.
+    content: Option<ContentCache>,
     pub grid: bool,
     pub checker: bool,
     drag: Option<GizmoDrag>,
@@ -13,11 +15,23 @@ pub(super) struct ViewerState {
     pub focus_timecode: bool,
 }
 
+impl ViewerState {
+    /// Offset of the clip's ink from its own centre, in unit-box fractions (zero without bounds).
+    fn content_offset(&self, id: ClipId) -> [f64; 2] {
+        self.content
+            .as_ref()
+            .filter(|cache| cache.id == id)
+            .and_then(|cache| cache.rect)
+            .map_or([0.; 2], |rect| rect.offset)
+    }
+}
+
 impl Default for ViewerState {
     fn default() -> Self {
         Self {
             bounds: Bounds::default(),
             source_sizes: BTreeMap::new(),
+            content: None,
             grid: false,
             checker: false,
             drag: None,
@@ -26,6 +40,21 @@ impl Default for ViewerState {
             focus_timecode: false,
         }
     }
+}
+
+/// The ink bounds last computed for one clip and the key they were computed for.
+struct ContentCache {
+    id: ClipId,
+    key: u64,
+    rect: Option<ContentRect>,
+}
+
+/// Where a generated clip actually draws, inside its own unit box (which spans -0.5..0.5 on both
+/// axes): the centre offset and the size, both as fractions of that box.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ContentRect {
+    offset: [f64; 2],
+    size: [f64; 2],
 }
 
 struct GizmoDrag {
@@ -149,6 +178,81 @@ fn fitted_transform(
         t.scale_y *= h;
     }
     t
+}
+
+/// The transform of the box around what a generated clip draws: `t` narrowed to the ink bounds,
+/// with the centre moved by the bounds' offset from the clip's own centre.
+fn content_transform(t: Transform, canvas: (u32, u32), rect: ContentRect) -> Transform {
+    let w = f64::from(canvas.0.max(1));
+    let h = f64::from(canvas.1.max(1));
+    let (sin, cos) = t.rotation.sin_cos();
+    let dx = rect.offset[0] * t.scale_x * w;
+    let dy = rect.offset[1] * t.scale_y * h;
+    Transform {
+        x: t.x + (dx * cos - dy * sin) / w,
+        y: t.y + (dx * sin + dy * cos) / h,
+        scale_x: t.scale_x * rect.size[0],
+        scale_y: t.scale_y * rect.size[1],
+        ..t
+    }
+}
+
+/// Render `clip` alone, centred and unrotated at preview-thumbnail size, and return the box its
+/// non-transparent pixels span. `None` when the clip draws nothing or cannot be rendered.
+fn content_rect_of(
+    host: &mut Option<PluginHost>,
+    clip: &animathio_core::SceneClip,
+    project_size: (u32, u32),
+) -> Option<ContentRect> {
+    const LONG_EDGE: f32 = 480.;
+    let (width, height) = project_size;
+    let scale = LONG_EDGE / width.max(height).max(1) as f32;
+    let size = (
+        ((width as f32 * scale).round() as u32).max(1),
+        ((height as f32 * scale).round() as u32).max(1),
+    );
+    let mut single = clip.clone();
+    single.effects.clear();
+    single.transition = None;
+    single.transform = Transform::default();
+    let mut scene = Scene {
+        canvas: project_size,
+        background: [0; 4],
+        clips: vec![single],
+    };
+    if let Some(host) = host {
+        scene = host.resolve(&scene, size);
+    }
+    let frame =
+        animathio_render::render(&scene, &mut animathio_render::RenderCtx::default(), size).ok()?;
+    let (w, h) = (size.0 as usize, size.1 as usize);
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if frame.pixels[(y * w + x) * 4 + 3] > 8 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x + 1);
+                y1 = y1.max(y + 1);
+            }
+        }
+    }
+    if x0 >= x1 || y0 >= y1 {
+        return None;
+    }
+    // One pixel of breathing room so the box never cuts through the outline of a stroke.
+    let (fx0, fx1) = (
+        ((x0 as f64 - 1.) / w as f64).max(0.),
+        ((x1 as f64 + 1.) / w as f64).min(1.),
+    );
+    let (fy0, fy1) = (
+        ((y0 as f64 - 1.) / h as f64).max(0.),
+        ((y1 as f64 + 1.) / h as f64).min(1.),
+    );
+    Some(ContentRect {
+        offset: [f64::midpoint(fx0, fx1) - 0.5, f64::midpoint(fy0, fy1) - 0.5],
+        size: [fx1 - fx0, fy1 - fy0],
+    })
 }
 
 /// Visible clips under `pointer`, topmost first. Media clips hit anywhere inside
@@ -358,7 +462,7 @@ pub(super) const EMPTY_CANVAS_HINT: &str =
     "This project is empty. Import media, or add text, a formula or a shape from the Library.";
 
 impl Editor {
-    fn selected_visual(&mut self) -> Option<(ClipId, Transform, Transform)> {
+    pub(super) fn selected_visual(&mut self) -> Option<(ClipId, Transform, Transform)> {
         let id = self.selected?;
         let clip = evaluate(&self.project, self.position)
             .clips
@@ -369,11 +473,48 @@ impl Editor {
             &self.assets,
             &mut self.viewer_state.source_sizes,
         );
-        Some((
-            id,
-            clip.transform,
-            fitted_transform(&clip, project_size(&self.project), source),
-        ))
+        let canvas = project_size(&self.project);
+        let mut fitted = fitted_transform(&clip, canvas, source);
+        if matches!(clip.kind, ClipKind::Plugin { .. } | ClipKind::Vector(_))
+            && let Some(rect) = self.content_rect(&clip, canvas)
+        {
+            fitted = content_transform(clip.transform, canvas, rect);
+        }
+        Some((id, clip.transform, fitted))
+    }
+
+    /// Forget the cached ink bounds so the next selection box is computed from scratch.
+    #[cfg(test)]
+    pub(super) fn drop_content_cache(&mut self) {
+        self.viewer_state.content = None;
+    }
+
+    /// The ink bounds of a generated clip, recomputed only when what it draws changes (and not
+    /// at all while playing, when the last bounds stay).
+    fn content_rect(
+        &mut self,
+        clip: &animathio_core::SceneClip,
+        canvas: (u32, u32),
+    ) -> Option<ContentRect> {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        serde_json::to_string(&(&clip.kind, &clip.params, clip.source_time, canvas))
+            .unwrap_or_default()
+            .hash(&mut hasher);
+        let key = hasher.finish();
+        if let Some(cache) = &self.viewer_state.content
+            && cache.id == clip.id
+            && (cache.key == key || self.playing)
+        {
+            return cache.rect;
+        }
+        let rect = content_rect_of(&mut self.plugin_host, clip, canvas);
+        self.viewer_state.content = Some(ContentCache {
+            id: clip.id,
+            key,
+            rect,
+        });
+        rect
     }
 
     pub(super) fn move_gizmo(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -489,10 +630,20 @@ impl Editor {
                             origin: event.position,
                             transform,
                             handle: match handle {
-                                Handle::Scale(x, y) => Handle::Scale(
-                                    x * fitted.scale_x / transform.scale_x,
-                                    y * fitted.scale_y / transform.scale_y,
-                                ),
+                                Handle::Scale(x, y) => {
+                                    let offset = this.viewer_state.content_offset(id);
+                                    let along = |handle: f64, offset: f64, visible: f64| {
+                                        if handle == 0. {
+                                            0.
+                                        } else {
+                                            offset + handle * visible
+                                        }
+                                    };
+                                    Handle::Scale(
+                                        along(x, offset[0], fitted.scale_x / transform.scale_x),
+                                        along(y, offset[1], fitted.scale_y / transform.scale_y),
+                                    )
+                                }
                                 other => other,
                             },
                             visible_scale: [
