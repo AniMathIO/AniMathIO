@@ -190,7 +190,7 @@ fn band_estimator_separates_noise_from_a_tone() {
         .collect();
     let bands = noise_bands(&tone).unwrap();
     // 3 kHz is band 6; everything above band 8 stays near zero.
-    let peak = bands.iter().cloned().fold(0.0_f64, f64::max);
+    let peak = bands.iter().copied().fold(0.0_f64, f64::max);
     assert_eq!(bands[6], peak);
     assert!(bands[12] < peak * 1e-3);
     let flat = noise_bands(&noise(8000, 0.1, &mut seed)).unwrap();

@@ -1477,6 +1477,11 @@ fn auto_duck_suggests_the_other_audio_tracks_and_previews_before_applying(cx: &m
         );
     });
     assert!(ui.cx.debug_bounds("duck-summary").is_some());
+    // Attack, release, gap and threshold sit behind one toggle so the preview stays in view.
+    assert!(!ui.read(|e| e.duck_review.as_ref().unwrap().timing_open));
+    let timing = ui.cx.debug_bounds("duck-timing").unwrap();
+    ui.click(timing.center(), gpui::Modifiers::default());
+    assert!(ui.read(|e| e.duck_review.as_ref().unwrap().timing_open));
     // Nothing is written until Apply, and a single Undo reverts it.
     assert_eq!(ui.read(|e| e.project.clone()), before);
     ui.update(|e, _, cx| e.apply_duck(cx));
@@ -1501,7 +1506,10 @@ fn auto_duck_does_not_suggest_locked_music_tracks(cx: &mut TestAppContext) {
     });
     ui.read(|e| {
         let review = e.duck_review.as_ref().unwrap();
-        assert!(review.params.music_tracks.is_empty());
+        assert_eq!(
+            review.params.music_tracks,
+            Vec::<animathio_core::TrackId>::new()
+        );
         assert!(review.proposal.is_none());
     });
 }

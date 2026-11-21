@@ -91,6 +91,8 @@ pub(super) struct DuckReview {
     generation: u64,
     busy: bool,
     error: Option<String>,
+    /// Whether the attack, release, gap and threshold sliders are shown.
+    pub(super) timing_open: bool,
 }
 
 fn ticks(seconds: f64) -> Time {
@@ -188,6 +190,7 @@ impl Editor {
             generation: 0,
             busy: false,
             error: None,
+            timing_open: false,
         });
         self.analyse_duck(cx);
     }
@@ -466,10 +469,36 @@ impl Editor {
             format!("Minimum gap to merge: {}", timecode(review.params.min_gap)),
             format!("Voice threshold: {:.0} dBFS", review.params.threshold_db),
         ];
-        for (label, state) in labels.into_iter().zip(&review.sliders) {
-            panel = panel
-                .child(div().text_size(crate::style::type_size::XS).child(label))
-                .child(Slider::new(state).horizontal());
+        let timing_open = review.timing_open;
+        for (index, (label, state)) in labels.into_iter().zip(&review.sliders).enumerate() {
+            if index == 1 {
+                panel = panel.child(
+                    Button::new("duck-timing")
+                        .debug_selector(|| "duck-timing".into())
+                        .ghost()
+                        .compact()
+                        .icon(
+                            icons::icon(if timing_open {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .xsmall(),
+                        )
+                        .label("Timing and voice threshold")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(r) = this.duck_review.as_mut() {
+                                r.timing_open = !r.timing_open;
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            if index == 0 || timing_open {
+                panel = panel
+                    .child(div().text_size(crate::style::type_size::XS).child(label))
+                    .child(Slider::new(state).horizontal());
+            }
         }
         let replace = review.params.replace_existing;
         panel = panel.child(
@@ -536,6 +565,7 @@ impl Editor {
                 );
             let mut list = div()
                 .id("duck-list")
+                .flex_shrink_0()
                 .max_h(px(120.))
                 .overflow_y_scroll()
                 .flex()

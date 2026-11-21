@@ -137,7 +137,7 @@ fn classic_caption_counters_stay_open() {
         .fold((u32::MAX, 0), |(l, r), g| (l.min(g.1), r.max(g.1)));
     // The first glyph `O`: its centre pixel is not part of the glyph.
     let letter_width = (max_x - min_x) / 7;
-    let (cx, cy) = (min_x + letter_width / 2, (min_y + max_y) / 2);
+    let (cx, cy) = (min_x + letter_width / 2, u32::midpoint(min_y, max_y));
     assert!(
         pixel(&frame, cx, cy)[0] < 100,
         "counter of O is filled: {:?}",

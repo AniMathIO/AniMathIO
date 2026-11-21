@@ -739,6 +739,8 @@ impl Editor {
                     self.clear_selection(cx);
                 }
                 self.open_duck(cx);
+                // Audio rows sit below the visual tracks: show them so the shaded spans are seen.
+                self.timeline_scroll_handle.scroll_to_bottom();
             }
             // The Library's Plugins tab (Installed), optionally with Browse opened. Browse
             // fetches the index only when the Community plugins switch is already on.
