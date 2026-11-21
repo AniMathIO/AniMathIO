@@ -283,8 +283,18 @@ impl Mixer {
                     *out += (f64::from(sample) * track.gain()) as f32;
                 }
             } else {
+                let stretch_keys = StretchKeys::default();
                 for clip in track.clips().values() {
-                    self.add_clip(track, clip, track.gain(), first, end, &mut output, first)?;
+                    self.add_clip(
+                        track,
+                        clip,
+                        track.gain(),
+                        first,
+                        end,
+                        &mut output,
+                        first,
+                        &stretch_keys,
+                    )?;
                 }
             }
         }
@@ -312,7 +322,9 @@ impl Mixer {
 
     /// Add one clip's contribution for global frames `[first, end)` into `out`, whose first
     /// element is global frame `out_first`. `track_gain` is the linear fader applied to it
-    /// (`1.0` when the track fader is applied after a track chain).
+    /// (`1.0` when the track fader is applied after a track chain). `stretch_keys` holds the
+    /// stretch-cache fingerprints (see [`StretchKeys`]); `add_clip` fills one only when the
+    /// clip actually reaches the stretch reader.
     #[allow(clippy::too_many_arguments, clippy::cast_possible_truncation)]
     fn add_clip(
         &self,
@@ -323,6 +335,7 @@ impl Mixer {
         end: usize,
         out: &mut [f32],
         out_first: usize,
+        stretch_keys: &StretchKeys,
     ) -> Result<(), Error> {
         if clip.time_map.hold {
             return Ok(());
@@ -353,7 +366,7 @@ impl Mixer {
             let block_frames = EFFECT_BLOCK_FRAMES;
             let shift = self.chain_latency(clip.audio_effects.iter().filter(|e| !e.bypass));
             for block in (from + shift) / block_frames..=(to - 1 + shift) / block_frames {
-                let entry = self.clip_chain_block(clip, source, play, key, block)?;
+                let entry = self.clip_chain_block(clip, source, play, key, block, stretch_keys)?;
                 let base = block * block_frames;
                 for position in (from + shift).max(base)..(to + shift).min(base + block_frames) {
                     let frame = position - shift;
@@ -373,7 +386,7 @@ impl Mixer {
             }
             return Ok(());
         }
-        let mut stretched = self.stretch_reader(clip, clip_start);
+        let mut stretched = self.stretch_reader(clip, clip_start, stretch_keys);
         let mut samples = Vec::with_capacity(channels);
         for frame in from..to {
             let timeline = frame as i128 * i128::from(TICKS_PER_SECOND);
@@ -412,11 +425,13 @@ impl Mixer {
     /// The clip's signal before its effect chain for global frames `[base, base + len)`:
     /// source samples scaled by the clip `gain` parameter, muted frames silent, zero outside
     /// the play window.
+    #[allow(clippy::too_many_arguments)]
     fn clip_chain_input(
         &self,
         clip: &Clip,
         source: &PreparedSource,
         play: TimeRange,
+        stretch_keys: &StretchKeys,
         block: usize,
     ) -> Result<Vec<f32>, Error> {
         let channels = usize::from(self.channels);
@@ -425,7 +440,7 @@ impl Mixer {
         let mut cursor: Cursor<'_> = source.cursor();
         let (clip_start, clip_end) = sample_bounds(play, self.rate)?;
         let ticks = i128::from(TICKS_PER_SECOND);
-        let mut stretched = self.stretch_reader(clip, clip_start);
+        let mut stretched = self.stretch_reader(clip, clip_start, stretch_keys);
         let mut samples = Vec::with_capacity(channels);
         for frame in base.max(clip_start)..(base + EFFECT_BLOCK_FRAMES).min(clip_end) {
             let local =
@@ -454,26 +469,26 @@ impl Mixer {
     }
 
     /// The WSOLA reader for `clip`, or `None` when it plays through the sampling path.
-    /// The cache key is computed once per call, not per frame.
+    /// The fingerprint comes from `keys`, so it is built at most once per clip per call.
     fn stretch_reader<'a>(
         &'a self,
         clip: &'a Clip,
         first_frame: usize,
+        keys: &StretchKeys,
     ) -> Option<crate::stretch::Reader<'a>> {
-        crate::stretch::active(clip).then(|| {
-            let channels = usize::from(self.channels);
-            crate::stretch::Reader::new(
-                clip,
-                self.rate,
-                channels,
-                crate::stretch::key(self.rate, channels, clip),
-                first_frame,
-                &self.stretch_cache,
-            )
-        })
+        let key = keys.get(self, clip)?;
+        Some(crate::stretch::Reader::new(
+            clip,
+            self.rate,
+            usize::from(self.channels),
+            key,
+            first_frame,
+            &self.stretch_cache,
+        ))
     }
 
     /// Processed block `block` of a clip's effect chain.
+    #[allow(clippy::too_many_arguments)]
     fn clip_chain_block(
         &self,
         clip: &Clip,
@@ -481,6 +496,7 @@ impl Mixer {
         play: TimeRange,
         key: u64,
         block: usize,
+        stretch_keys: &StretchKeys,
     ) -> Result<Arc<BlockEntry>, Error> {
         let (clip_start, _) = sample_bounds(play, self.rate)?;
         let chain_len = clip.audio_effects.iter().filter(|e| !e.bypass).count();
@@ -493,7 +509,7 @@ impl Mixer {
             block,
             clip_start / EFFECT_BLOCK_FRAMES,
             chain_len,
-            &|block| self.clip_chain_input(clip, source, play, block),
+            &|block| self.clip_chain_input(clip, source, play, stretch_keys, block),
             &|block| Ok(clip.audio_effects_at(Time(start_time(block)?.0.max(0)))),
             &start_time,
         )
@@ -505,6 +521,9 @@ impl Mixer {
         let channels = usize::from(self.channels);
         let chain_len = track.audio_effects().iter().filter(|e| !e.bypass).count();
         let key = track_key(self, track);
+        // One fingerprint per clip per call, filled lazily: `input` only runs on a
+        // block-cache miss, so a warm track pays no key work at all.
+        let stretch_keys = StretchKeys::default();
         let input = |block: usize| -> Result<Vec<f32>, Error> {
             let base = block * EFFECT_BLOCK_FRAMES;
             let mut sum = vec![0.0_f32; EFFECT_BLOCK_FRAMES * channels];
@@ -517,6 +536,7 @@ impl Mixer {
                     base + EFFECT_BLOCK_FRAMES,
                     &mut sum,
                     base,
+                    &stretch_keys,
                 )?;
             }
             Ok(sum)
@@ -711,6 +731,24 @@ fn clip_key(mixer: &Mixer, clip: &Clip, play: TimeRange) -> u64 {
     (mixer.rate, mixer.channels, play.start.0, play.end.0).hash(&mut hasher);
     format!("{clip:?}").hash(&mut hasher);
     hasher.finish()
+}
+
+/// Lazily filled stretch-cache fingerprints, one per clip id for the lifetime of one `mix`
+/// or `track_chain` call. [`crate::stretch::key`] hashes the whole clip clock, so it is built
+/// only when a clip reaches the stretch reader (after the hold/kind/overlap checks, and on a
+/// track chain only on a block-cache miss) and then reused for every block of the call.
+/// Clip ids are unique within a track, and a call never mixes tracks.
+#[derive(Default)]
+struct StretchKeys(std::cell::RefCell<BTreeMap<u64, Option<u64>>>);
+
+impl StretchKeys {
+    /// The fingerprint of `clip`, or `None` when it never takes the stretch path.
+    fn get(&self, mixer: &Mixer, clip: &Clip) -> Option<u64> {
+        *self.0.borrow_mut().entry(clip.id.0).or_insert_with(|| {
+            crate::stretch::active(clip)
+                .then(|| crate::stretch::key(mixer.rate, usize::from(mixer.channels), clip))
+        })
+    }
 }
 
 /// Hash of everything that determines a track chain's output: its clips (and their chains),

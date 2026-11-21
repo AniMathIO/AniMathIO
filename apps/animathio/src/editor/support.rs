@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::style::{self, color as colors};
+use std::collections::HashMap;
 
 /// Paint-ready waveform paths, shared by snapshots; bounded independently of PCM.
 pub(super) type WavePathCache =
@@ -1049,10 +1050,70 @@ pub(super) fn clip_color(kind: &animathio_core::ClipKind, _theme: &gpui_componen
 }
 
 /// Width of one line of label text as [`paint_clip_label`] would draw it.
+///
+/// The ruler measures every marker name plate and every major tick label on every
+/// repaint — including every frame of playback — so widths are cached per (font, size,
+/// text) in a small table private to the paint thread. The measurement only changes
+/// when the label text, the theme fonts or the UI scale change, and each of those
+/// changes the key. Cleared wholesale once it outgrows its bound: the visible label
+/// set at any one zoom level is small, so the bound is only reached after many edits
+/// across zoom levels, where clearing is cheaper than bounding per font.
 pub(super) fn label_width(label: &str, label_font: Font, window: &mut Window) -> Pixels {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static WIDTHS: RefCell<LabelWidths> = RefCell::new(LabelWidths::default());
+    }
     if label.is_empty() {
         return px(0.);
     }
+    let font_size = window.rem_size() * 0.8;
+    WIDTHS.with(|widths| {
+        widths
+            .borrow_mut()
+            .get(label, label_font, font_size, window)
+    })
+}
+
+/// Bounded cache of measured label widths; see [`label_width`].
+#[derive(Default)]
+struct LabelWidths {
+    entries: usize,
+    widths: HashMap<(Font, u32), HashMap<String, Pixels>>,
+}
+
+impl LabelWidths {
+    /// Measured widths kept before the table is cleared wholesale.
+    const MAX_ENTRIES: usize = 1024;
+
+    fn get(&mut self, label: &str, font: Font, font_size: Pixels, window: &mut Window) -> Pixels {
+        let size = f32::from(font_size).to_bits();
+        if let Some(by_text) = self.widths.get(&(font.clone(), size))
+            && let Some(width) = by_text.get(label)
+        {
+            return *width;
+        }
+        let width = shape_label_width(label, font.clone(), font_size, window);
+        if self.entries >= Self::MAX_ENTRIES {
+            self.entries = 0;
+            self.widths.clear();
+        }
+        self.entries += 1;
+        self.widths
+            .entry((font, size))
+            .or_default()
+            .insert(label.to_owned(), width);
+        width
+    }
+}
+
+/// Shape `label` once at `font_size` and return the width of the line.
+fn shape_label_width(
+    label: &str,
+    label_font: Font,
+    font_size: Pixels,
+    window: &mut Window,
+) -> Pixels {
     let run = TextRun {
         len: label.len(),
         font: label_font,
@@ -1065,7 +1126,7 @@ pub(super) fn label_width(label: &str, label_font: Font, window: &mut Window) ->
         .text_system()
         .shape_line(
             SharedString::from(label.to_owned()),
-            window.rem_size() * 0.8,
+            font_size,
             &[run],
             None,
         )

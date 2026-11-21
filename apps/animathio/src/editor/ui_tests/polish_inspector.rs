@@ -2,7 +2,7 @@
 //! short-window density: scenarios for the UI polish pass.
 
 use animathio_control::MathObjectKind;
-use animathio_core::ClipKind;
+use animathio_core::{ClipKind, ClipSpeed, Rounding};
 use gpui::{px, size};
 
 use super::fixtures::*;
@@ -85,6 +85,82 @@ fn content_bounds_are_deterministic(cx: &mut gpui::TestAppContext) {
         .expect("selected")
         .2;
     assert_eq!(first, second);
+}
+
+/// A pop caption's active word grows with the source clock, so a clip slowed to 0.25x
+/// draws a bigger word on every output frame even though the source frame advances only
+/// every fourth one: the ink bounds must be recomputed per output frame (the content cache
+/// quantises the playhead to the output frame index, not to the slower source clock).
+#[gpui::test]
+fn slowed_generated_clips_recompute_their_bounds_every_output_frame(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("slowed_generated_clips_recompute_their_bounds_every_output_frame") {
+        return;
+    }
+    let mut project = animathio_core::Project::default();
+    Command::Batch {
+        commands: vec![
+            Command::AddTrack {
+                track: Track::new(TrackId(1), "Pop"),
+                index: 0,
+            },
+            Command::AddClip {
+                track: TrackId(1),
+                clip: Clip::new(
+                    ClipId(1),
+                    ClipKind::Plugin {
+                        plugin_id: "org.animathio.text".into(),
+                        params: serde_json::json!({
+                            "text": "AniMathIO",
+                            "font_size": 0.1,
+                            "color": [255, 255, 255, 255],
+                            "units": "normalized",
+                            "align": "center",
+                            "fit_width": 0.8,
+                            "fit_height": 0.2,
+                            "caption_style": "pop",
+                            // One word, active for two seconds of source time.
+                            "words": "0:1411200000",
+                        }),
+                    },
+                    TimeRange::new(Time(0), Time(8 * TICKS_PER_SECOND)).unwrap(),
+                ),
+            },
+        ],
+    }
+    .apply(&mut project)
+    .expect("add a pop caption clip");
+    let mut ui = Ui::open(cx, project, std::collections::BTreeMap::new());
+    ui.update(|e, _, cx| e.select_only(ClipId(1), cx));
+    // Slow to 0.25x, keeping the source interval (the timeline range grows fourfold).
+    ui.update(|e, _, cx| {
+        assert!(e.try_execute(
+            &Command::SetClipSpeed {
+                id: ClipId(1),
+                speed: ClipSpeed::new(1, 4).expect("0.25x"),
+                reverse: false,
+                ramps: Vec::new(),
+                ripple: false,
+            },
+            cx
+        ));
+    });
+    let frame = ui
+        .read(|e| e.project.frame_rate().frame_to_time(1, Rounding::Nearest))
+        .expect("frame width");
+    let mut boxes = Vec::new();
+    for n in 0..6_i64 {
+        ui.update(|e, _, cx| e.seek_to(Time(n * frame.0), cx));
+        let (_, _, fitted) = ui
+            .update(|e, _, _| e.selected_visual())
+            .expect("the caption is selected and visible");
+        boxes.push((fitted.scale_x, fitted.scale_y));
+    }
+    for pair in boxes.windows(2) {
+        assert!(
+            pair[1].0 > pair[0].0 && pair[1].1 > pair[0].1,
+            "bounds must update every output frame at 0.25x: {boxes:?}"
+        );
+    }
 }
 
 /// A text clip shows its font size as a percentage of the short canvas edge, and a typed

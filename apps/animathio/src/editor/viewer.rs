@@ -501,7 +501,13 @@ impl Editor {
     }
 
     /// The ink bounds of a generated clip, recomputed only when what it draws changes (and not
-    /// at all while playing, when the last bounds stay).
+    /// at all while playing, when the last bounds stay). The key quantises the playhead to
+    /// the *output* frame index: plugin clips draw at the retimed `source_time`, which below
+    /// 1x speed advances by less than one source frame per output frame, so a source-time
+    /// key served stale bounds across several frames. Scrubbing inside one output frame
+    /// draws (sub-tick) the same frame and hits; any other output frame, a param edit, a
+    /// retime or move (the placement and retiming clock are in the key, so either at a
+    /// paused playhead misses without a frame step) or a plugin reload misses.
     fn content_rect(
         &mut self,
         clip: &animathio_core::SceneClip,
@@ -510,10 +516,19 @@ impl Editor {
         use std::hash::{Hash as _, Hasher as _};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         let generation = self.plugin_host.as_ref().map_or(0, PluginHost::generation);
+        let output_frame = self
+            .project
+            .frame_rate()
+            .time_to_frame(self.position, Rounding::Floor)
+            .unwrap_or(i64::MAX);
+        let retime = self
+            .find_clip(clip.id)
+            .map(|c| (c.range, c.time_map.clone(), c.source_offset));
         serde_json::to_string(&(
             &clip.kind,
             &clip.params,
-            clip.source_time,
+            output_frame,
+            retime,
             canvas,
             generation,
         ))
