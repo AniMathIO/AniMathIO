@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::style::{self, color};
+use gpui_component::Disableable as _;
 use gpui_component::resizable::{h_resizable, resizable_panel, v_resizable};
 
 impl Editor {
@@ -32,32 +33,49 @@ impl Editor {
             },
         ));
         if self.dock.left_open {
-            middle = middle.child(
-                resizable_panel()
-                    .size(px(self.dock.left_width * style::ui_scale()))
-                    .size_range(px(160. * style::ui_scale())..px(640. * style::ui_scale()))
-                    .child(style::panel(
-                        div()
-                            .size_full()
-                            .flex()
-                            .flex_col()
-                            .child(style::panel_header(
-                                IconName::Library,
-                                "Library",
-                                Button::new("library-import")
-                                    .ghost()
-                                    .compact()
-                                    .icon(icons::icon(IconName::Plus))
-                                    .tooltip("Import media")
-                                    .on_click(cx.listener(|this, _, _, cx| this.import_media(cx))),
-                            ))
-                            .child(
-                                div().flex_1().min_h_0().child(
+            middle =
+                middle.child(
+                    resizable_panel()
+                        .size(px(self.dock.left_width * style::ui_scale()))
+                        .size_range(px(160. * style::ui_scale())..px(640. * style::ui_scale()))
+                        .child(style::panel(
+                            div()
+                                .size_full()
+                                .flex()
+                                .flex_col()
+                                .child(style::panel_header(
+                                    IconName::Library,
+                                    "Library",
+                                    // The + follows the tab: Plugins installs a .amplugin file,
+                                    // everything else imports media.
+                                    if self.left_tab == LeftTab::Plugins {
+                                        Button::new("library-install-plugin")
+                                            .debug_selector(|| "library-install-plugin".into())
+                                            .ghost()
+                                            .compact()
+                                            .icon(icons::icon(IconName::Plus))
+                                            .tooltip("Install plugin from file...")
+                                            .disabled(self.community.busy)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.install_community_file(cx);
+                                            }))
+                                    } else {
+                                        Button::new("library-import")
+                                            .debug_selector(|| "library-import".into())
+                                            .ghost()
+                                            .compact()
+                                            .icon(icons::icon(IconName::Plus))
+                                            .tooltip("Import media")
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| this.import_media(cx)),
+                                            )
+                                    },
+                                ))
+                                .child(div().flex_1().min_h_0().child(
                                     self.media_pool(window, cx).bg(style::hex(color::PANEL)),
-                                ),
-                            ),
-                    )),
-            );
+                                )),
+                        )),
+                );
         }
         middle = middle.child(
             resizable_panel()

@@ -46,7 +46,7 @@ columns at the default width and three in a wide dock.
 | **Elements** | Text & formulas (LaTeX, Text), Shapes & geometry (points, lines, vectors, polygons, circles, ellipses), Graphs & grids (plots, Cartesian and polar grids). Click a card or press Enter/Space to configure; + adds defaults; drag its preview to the timeline. More shapes retains the generic Shapes source for rectangles, stars and arrows. Third-party clip sources appear under Plugins in this tab. |
 | **Titles** | Title compositions and caption presets. Double-click or Enter/Space adds at the playhead; drag to place on the timeline. Linked text fields remain editable in the inspector. |
 | **Effects** | While no clip is selected a hint says to select one first. Video effects (including Clipped slide), audio effects, one-second transitions/fades, animation presets grouped by In/Out/Emphasis, and Write on for a selected LaTeX clip. Effects still drag onto clips; clicking or Enter/Space applies to the selection. Transition buttons apply to selected clips. |
-| **Plugins** | Installed first-party and community plugins, the Community plugins switch, live Enable/Remove controls, Install from file, and Browse with search, verified installs and explicit updates. First-party plugins stay enabled. Load failures are listed here too. |
+| **Plugins** | Installed first-party and community plugins, the Community plugins switch, live Enable/Remove controls, Install from file (the + button), and Browse with search, verified installs and explicit updates. First-party plugins stay enabled. Load failures are listed here too. |
 
 Animation presets read the **Preset options** row above their buttons (inspector →
 Animations, and the top of Effects → Animations): click an option such as Direction (left,
@@ -83,13 +83,16 @@ Library are laid out so that their key controls are visible there without scroll
 
 ### Community plugins
 
-Open **Library → Plugins**. Community plugins start off; the same switch is in
-Preferences. The first time you turn it on, an explanation states that third-party
-plugins run sandboxed with memory and time limits and are not audited by AniMathIO.
+Open **Library → Plugins**. Community plugins start off. This is the only place the switch
+lives (Preferences reports its state and links here). A permanent caption under it reads
+"Third-party · sandboxed · not audited": community plugins run sandboxed with memory and time
+limits and are not audited by AniMathIO. While the switch is off only the first-party plugins
+are listed; turning it on adds a trust card and the **Installed** and **Browse** tabs.
 
 **Installed** lists bundled plugins (always enabled) and installed community plugins.
-Turn the **Enabled** switch on to load an installed plugin, or off to unload it. **Remove**
-deletes the community bundle. These actions update the preview without restarting;
+Community cards match the first-party ones (icon, name, version, id, kinds, author, Source
+link). Turn the **Enabled** switch on to load an installed plugin, or off to unload it.
+**Remove** (red) asks for confirmation, then deletes the community bundle. These actions update the preview without restarting;
 project clips retain their plugin reference and show a placeholder while it is missing.
 A missing-plugin notice above the workspace names the ids and opens plugin management;
 a matching fetched registry entry also offers **Install**.
@@ -105,15 +108,20 @@ Network failures show a Retry action and keep installed plugins usable.
 Browse also offers **Update available** when the latest indexed version is newer than
 an installed version. Updates require a click and preserve the enabled setting. A
 delisted installed plugin shows the registry's reason and is never removed silently.
-**Install from file...** uses the native file picker for a local `.amplugin` bundle;
-local files are validated but have no registry checksum to compare.
+**Install** is the primary button on a Browse card; after a registry install the card shows
+"SHA-256 verified". The **+** at the top of the Library, while the Plugins tab is open,
+picks a local `.amplugin` bundle with the native file picker; local files are validated but
+have no registry checksum to compare.
 
-| Installed (Code Snippets, disabled) | Browse (live community index) |
+The flow with the live registry, step by step:
+
+| 1. Switch off (caption only) | 2. Switch on (trust card, tabs) | 3. Browse (live index) |
+| --- | --- | --- |
+| ![Community plugins off](../docs/screenshots/community-off.png) | ![Community plugins on](../docs/screenshots/community-on.png) | ![Browse community plugins](../docs/screenshots/community-browse.png) |
+
+| 4. Installed, SHA-256 verified | 5. Enabled |
 | --- | --- |
-| ![Installed community plugins](../docs/screenshots/editor-community-installed.png) | ![Browse community plugins](../docs/screenshots/editor-community-browse.png) |
-
-The [earlier loaded-plugin inventory](../docs/screenshots/editor-library-plugins.png)
-predates community installation controls.
+| ![Installed and verified](../docs/screenshots/community-installed.png) | ![Enabled community plugin](../docs/screenshots/community-enabled.png) |
 
 Before and after the reorganization (2.1.0 on the left of each pair, same sample
 project, release builds with the first-party plugins on a private Xvfb display):

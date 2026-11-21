@@ -7,10 +7,10 @@
 //! and clips of a newly loaded one render, all without a restart.
 
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{self, color, hex};
 use animathio_plugin_host::{CommunityStore, InstalledPlugin};
 use gpui_component::Disableable;
-mod registry;
+pub(in crate::editor) mod registry;
 use registry::{Downloader, Entry, Index, IndexFetcher};
 
 pub(super) struct Browser {
@@ -21,7 +21,12 @@ pub(super) struct Browser {
     pub busy: bool,
     inventory_revision: u64,
     pub error: Option<String>,
-    pub explanation: bool,
+    /// Plugin whose Remove is waiting for the user's confirmation.
+    pub confirm_remove: Option<String>,
+    /// Plugins installed from the registry in this session: their SHA-256 was verified.
+    pub verified: BTreeSet<String>,
+    /// Registry entries of plugins installed in this session (author, source link).
+    pub origins: BTreeMap<String, Entry>,
     pub fetch: IndexFetcher,
     pub download: Downloader,
     pub store: Option<CommunityStore>,
@@ -36,7 +41,9 @@ impl Default for Browser {
             busy: false,
             inventory_revision: 0,
             error: None,
-            explanation: false,
+            confirm_remove: None,
+            verified: BTreeSet::new(),
+            origins: BTreeMap::new(),
             fetch: registry::fetcher(),
             download: registry::downloader(),
             store: None,
@@ -58,20 +65,9 @@ impl Editor {
             .community_store()
             .ok_or("no per-user directory is available for community plugins")?;
         store.set_enabled(enabled).map_err(|e| e.to_string())?;
-        if enabled {
-            let acknowledged = crate::editor_env::config_file("community-plugin-explanation");
-            if !acknowledged.as_ref().is_some_and(|p| p.exists()) {
-                self.community.explanation = true;
-                self.notices.push(crate::style::Toast::info("Community plugins are sandboxed third-party code, with memory and time limits. AniMathIO does not audit them."));
-                if let Some(path) = acknowledged {
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::write(path, b"shown");
-                }
-            }
-        } else {
+        if !enabled {
             self.community.browsing = false;
+            self.community.confirm_remove = None;
         }
         self.sync_community_plugins(cx);
         self.refresh_community_inventory(cx);
@@ -164,6 +160,15 @@ impl Editor {
         job: impl FnOnce(CommunityStore) -> Result<String, String> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.community_job_then(job, |_| {}, cx);
+    }
+    /// Run `job` on a worker; `on_ok` updates the panel state when it succeeded.
+    fn community_job_then(
+        &mut self,
+        job: impl FnOnce(CommunityStore) -> Result<String, String> + Send + 'static,
+        on_ok: impl FnOnce(&mut Browser) + 'static,
+        cx: &mut Context<Self>,
+    ) {
         if self.community.busy {
             return;
         }
@@ -185,7 +190,10 @@ impl Editor {
                 this.community.busy = false;
                 this.community.installed = result.1;
                 match result.0 {
-                    Ok(message) => this.notices.push(crate::style::Toast::info(message)),
+                    Ok(message) => {
+                        on_ok(&mut this.community);
+                        this.notices.push(crate::style::Toast::info(message));
+                    }
                     Err(error) => this.community.error = Some(error),
                 }
                 this.sync_community_plugins(cx);
@@ -201,17 +209,25 @@ impl Editor {
         }
         let download = self.community.download.clone();
         let update = self.community.installed.iter().any(|p| p.id == entry.id);
-        self.community_job(
+        let origin = entry.clone();
+        self.community_job_then(
             move |store| {
                 let installed = entry.install(&store, &download, update)?;
                 Ok(if installed.replaced.is_some() {
-                    format!("Updated {} {}.", installed.name, installed.version)
+                    format!(
+                        "Updated {} {} (SHA-256 verified).",
+                        installed.name, installed.version
+                    )
                 } else {
                     format!(
-                        "Installed {} {}. Choose Enable when ready.",
+                        "Installed {} {} (SHA-256 verified). Choose Enable when ready.",
                         installed.name, installed.version
                     )
                 })
+            },
+            move |browser| {
+                browser.verified.insert(origin.id.clone());
+                browser.origins.insert(origin.id.clone(), origin);
             },
             cx,
         );
@@ -239,15 +255,24 @@ impl Editor {
         );
     }
     pub(super) fn remove_community_plugin(&mut self, id: String, cx: &mut Context<Self>) {
-        self.community_job(
+        self.community.confirm_remove = None;
+        let forget = id.clone();
+        self.community_job_then(
             move |store| {
                 store.uninstall(&id).map_err(|e| e.to_string())?;
-                Ok(format!("Removed {id}"))
+                Ok(format!(
+                    "Removed {id}. Clips that use it show a placeholder until it is installed again."
+                ))
+            },
+            move |browser| {
+                browser.verified.remove(&forget);
+                browser.origins.remove(&forget);
             },
             cx,
         );
     }
-    fn install_community_file(&mut self, cx: &mut Context<Self>) {
+    /// Pick a local `.amplugin` and install it (reached from the Library's + button).
+    pub(super) fn install_community_file(&mut self, cx: &mut Context<Self>) {
         self.community_job(
             move |store| {
                 let Some(path) = rfd::FileDialog::new()
@@ -425,6 +450,36 @@ fn card(id: String) -> Stateful<Div> {
         .flex_col()
         .gap_2()
 }
+/// The one-line trust notice for third-party plugins (wraps instead of clipping).
+fn trust_line() -> Div {
+    div()
+        .flex()
+        .items_start()
+        .gap_1()
+        .text_color(hex(color::TEXT_SECONDARY))
+        .child(
+            div().pt_px().child(
+                icons::icon(IconName::ShieldAlert)
+                    .small()
+                    .text_color(hex(color::WARNING)),
+            ),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child("Third-party · sandboxed · not audited"),
+        )
+}
+
+/// The permanent caption under the Community plugins switch.
+fn trust_caption(id: &'static str) -> Stateful<Div> {
+    trust_line()
+        .id(id)
+        .debug_selector(move || id.into())
+        .text_size(crate::style::type_size::XS)
+}
+
 impl Editor {
     pub(super) fn plugin_inventory(&self, cx: &mut Context<Self>) -> Div {
         let enabled = self.community_enabled();
@@ -440,7 +495,12 @@ impl Editor {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_1().child("Community plugins"))
+                    .child(
+                        div()
+                            .flex_1()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Community plugins"),
+                    )
                     .child(
                         gpui_component::switch::Switch::new("community-switch")
                             .checked(enabled)
@@ -454,46 +514,46 @@ impl Editor {
                                 cx.notify();
                             })),
                     ),
-            );
-        if self.community.explanation && enabled {
-            body = body.child(card("community-explanation".into())
-                .child("Community plugins run sandboxed with memory and time limits. They are third-party code and are not audited by AniMathIO.")
-                .child(Button::new("dismiss-plugin-explanation").small().ghost().label("Got it")
-                    .on_click(cx.listener(|this, _, _, cx| { this.community.explanation = false; cx.notify(); }))));
-        }
-        let mut navigation = div().flex().flex_wrap().gap_2().child(
-            Button::new("community-installed")
-                .small()
-                .ghost()
-                .label("Installed")
-                .selected(!self.community.browsing)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.community.browsing = false;
-                    this.refresh_community_inventory(cx);
-                    cx.notify();
-                })),
-        );
+            )
+            .child(trust_caption("community-trust-caption"));
         if enabled {
-            navigation = navigation.child(
-                Button::new("community-browse")
-                    .small()
-                    .ghost()
-                    .label("Browse")
-                    .debug_selector(|| "community-browse".into())
-                    .selected(self.community.browsing)
-                    .disabled(self.community.fetching)
-                    .on_click(cx.listener(|this, _, _, cx| this.browse_community(cx))),
+            // Installed | Browse only make sense while community plugins are on.
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        Button::new("community-installed")
+                            .debug_selector(|| "community-installed".into())
+                            .small()
+                            .ghost()
+                            .label("Installed")
+                            .selected(!self.community.browsing)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.community.browsing = false;
+                                this.refresh_community_inventory(cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("community-browse")
+                            .small()
+                            .ghost()
+                            .label("Browse")
+                            .debug_selector(|| "community-browse".into())
+                            .selected(self.community.browsing)
+                            .disabled(self.community.fetching)
+                            .on_click(cx.listener(|this, _, _, cx| this.browse_community(cx))),
+                    ),
             );
+            if !self.community.browsing {
+                body = body.child(card("community-explanation".into()).child(
+                    "Runs sandboxed with memory and time limits, and is not audited by AniMathIO. \
+                     Check the Source link before you install.",
+                ));
+            }
         }
-        body = body.child(navigation).child(
-            Button::new("community-install-file")
-                .small()
-                .ghost()
-                .icon(icons::icon(IconName::FolderOpen))
-                .label("Install from file...")
-                .disabled(busy)
-                .on_click(cx.listener(|this, _, _, cx| this.install_community_file(cx))),
-        );
         if busy {
             body = body.child("Installing or updating plugin settings...");
         }
@@ -526,16 +586,19 @@ impl Editor {
             if enabled {
                 if let Some(entry) = entry {
                     row = row.child(
-                        Button::new(SharedString::from(format!("missing-install-{id}")))
-                            .small()
-                            .label("Install")
-                            .disabled(
-                                busy || entry.compatible().is_err()
-                                    || self.community.installed.iter().any(|p| p.id == id),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.install_community_entry(entry.clone(), cx);
-                            })),
+                        style::primary_button(
+                            SharedString::from(format!("missing-install-{id}")),
+                            cx,
+                        )
+                        .small()
+                        .label("Install")
+                        .disabled(
+                            busy || entry.compatible().is_err()
+                                || self.community.installed.iter().any(|p| p.id == id),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.install_community_entry(entry.clone(), cx);
+                        })),
                     );
                 } else {
                     row = row.child(
@@ -552,7 +615,22 @@ impl Editor {
         if self.community.browsing && enabled {
             return body.child(self.community_catalog(cx));
         }
-        body = body.child(div().font_weight(FontWeight::SEMIBOLD).child("Installed"));
+        if enabled {
+            body = body.child(div().font_weight(FontWeight::SEMIBOLD).child("Installed"));
+            if self.community.installed.is_empty() {
+                body = body.child(
+                    div()
+                        .id("community-empty")
+                        .debug_selector(|| "community-empty".into())
+                        .text_size(crate::style::type_size::XS)
+                        .text_color(hex(color::TEXT_SECONDARY))
+                        .child(
+                            "No community plugins yet. Choose Browse to find some, or use + at \
+                             the top of the Library to install a .amplugin file.",
+                        ),
+                );
+            }
+        }
         for plugin in &self.community.installed {
             if !self.library_matches(
                 LeftTab::Plugins,
@@ -563,84 +641,209 @@ impl Editor {
             ) {
                 continue;
             }
-            let id = plugin.id.clone();
-            let remove = id.clone();
-            let on = plugin.enabled;
-            let mut row = card(format!("installed-{id}"))
-                .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(format!("{} · v{}", plugin.name, plugin.version)),
-                )
-                .child(plugin.id.clone())
-                .child(plugin.description.clone())
-                .child(format!(
-                    "Community · ABI {} · {}",
-                    plugin.api_version,
-                    if on && enabled { "Enabled" } else { "Disabled" }
-                ))
-                .child(
-                    // Same layout as the "Community plugins" row: label left, switch right.
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(div().flex_1().child("Enabled"))
-                        .child(
-                            gpui_component::switch::Switch::new(SharedString::from(format!(
-                                "enable-{id}"
-                            )))
-                            .checked(on)
-                            .disabled(busy || !enabled)
-                            .accessibility_label(format!("Enable {}", plugin.name))
-                            .on_click(cx.listener(
-                                move |this, checked: &bool, _, cx| {
-                                    this.toggle_community_plugin(id.clone(), *checked, cx);
-                                },
-                            )),
-                        ),
-                )
-                .child(
-                    div().flex().child(
-                        Button::new(SharedString::from(format!("remove-{remove}")))
-                            .small()
-                            .ghost()
-                            .label("Remove")
-                            .disabled(busy)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove_community_plugin(remove.clone(), cx);
-                            })),
-                    ),
-                );
-            if let Some(index) = &self.community.index {
-                if let Some(entry) = index
-                    .plugins
-                    .iter()
-                    .find(|e| e.id == plugin.id && e.newer_than(&plugin.version))
-                {
-                    let entry = entry.clone();
-                    row = row.child(
-                        Button::new(SharedString::from(format!("update-{}", entry.id)))
-                            .small()
-                            .label(format!("Update available · {}", entry.version))
-                            .disabled(busy || !enabled || entry.compatible().is_err())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.install_community_entry(entry.clone(), cx);
-                            })),
-                    );
-                }
-                if let Some(delisted) = index.delisted.iter().find(|d| d.id == plugin.id) {
-                    row = row.child(
-                        div()
-                            .text_color(hex(color::WARNING))
-                            .child(format!("Delisted: {}", delisted.reason)),
-                    );
-                }
-            }
-            body = body.child(row);
+            body = body.child(self.community_installed_card(plugin, enabled, cx));
         }
         body.child(self.bundled_inventory(cx))
     }
+
+    /// An installed community plugin, laid out like the first-party cards: icon, name, version,
+    /// id, kinds, author and Source link, then its own controls.
+    fn community_installed_card(
+        &self,
+        plugin: &InstalledPlugin,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let busy = self.community.busy;
+        let id = plugin.id.clone();
+        let remove = id.clone();
+        let on = plugin.enabled;
+        let origin = self.community.origins.get(&plugin.id).or_else(|| {
+            self.community
+                .index
+                .as_ref()
+                .and_then(|i| i.plugins.iter().find(|e| e.id == plugin.id))
+        });
+        let verified = self.community.verified.contains(&plugin.id);
+        let kinds = plugin.kinds.join(", ");
+        let mut details = format!("{kinds} · Community · ABI {}", plugin.api_version);
+        if let Some(origin) = origin {
+            details = format!("{details} · by {}", origin.author);
+        }
+        let mut row = card(format!("installed-{id}"))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .items_center()
+                    .child(icons::icon(IconName::Puzzle).small())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(plugin.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_color(hex(color::TEXT_SECONDARY))
+                            .child(format!("v{}", plugin.version)),
+                    ),
+            )
+            .child(div().truncate().child(plugin.id.clone()))
+            .child(plugin.description.clone())
+            .child(div().text_color(hex(color::TEXT_SECONDARY)).child(details))
+            .child(if verified {
+                div()
+                    .id(SharedString::from(format!("verified-{id}")))
+                    .debug_selector({
+                        let id = id.clone();
+                        move || format!("verified-{id}")
+                    })
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_color(hex(color::SUCCESS))
+                    .child(icons::icon(IconName::ShieldCheck).small())
+                    .child("SHA-256 verified")
+                    .into_any_element()
+            } else {
+                trust_line().into_any_element()
+            })
+            .child(
+                // One state control: the switch labels itself Enabled/Disabled.
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(if on && enabled { "Enabled" } else { "Disabled" }),
+                    )
+                    .child(
+                        gpui_component::switch::Switch::new(SharedString::from(format!(
+                            "enable-{id}"
+                        )))
+                        .checked(on)
+                        .disabled(busy || !enabled)
+                        .accessibility_label(format!("Enable {}", plugin.name))
+                        .on_click(cx.listener(
+                            move |this, checked: &bool, _, cx| {
+                                this.toggle_community_plugin(id.clone(), *checked, cx);
+                            },
+                        )),
+                    ),
+            );
+        let source = origin
+            .map(|e| e.source_url.clone())
+            .filter(|url| url.starts_with("https://github.com/"));
+        if self.community.confirm_remove.as_deref() == Some(plugin.id.as_str()) {
+            let cancel_id = remove.clone();
+            row = row.child(
+                div()
+                    .id(SharedString::from(format!("confirm-remove-{remove}")))
+                    .debug_selector({
+                        let id = remove.clone();
+                        move || format!("confirm-remove-{id}")
+                    })
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(format!(
+                        "Remove {}? Clips that use it show a placeholder until you install it \
+                         again.",
+                        plugin.name
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                Button::new(SharedString::from(format!("remove-confirm-{remove}")))
+                                    .small()
+                                    .danger()
+                                    .icon(icons::icon(IconName::Trash))
+                                    .label("Remove plugin")
+                                    .disabled(busy)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_community_plugin(remove.clone(), cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(SharedString::from(format!(
+                                    "remove-cancel-{cancel_id}"
+                                )))
+                                .small()
+                                .ghost()
+                                .label("Cancel")
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        this.community.confirm_remove = None;
+                                        cx.notify();
+                                    },
+                                )),
+                            ),
+                    ),
+            );
+        } else {
+            row = row.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .when_some(source, |actions, url| {
+                        actions.child(
+                            Button::new(SharedString::from(format!("source-{}", plugin.id)))
+                                .small()
+                                .ghost()
+                                .icon(icons::icon(IconName::ExternalLink))
+                                .label("Source")
+                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                        )
+                    })
+                    .child(
+                        Button::new(SharedString::from(format!("remove-{remove}")))
+                            .small()
+                            .danger()
+                            .icon(icons::icon(IconName::Trash))
+                            .label("Remove")
+                            .disabled(busy)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.community.confirm_remove = Some(remove.clone());
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+        if let Some(index) = &self.community.index {
+            if let Some(entry) = index
+                .plugins
+                .iter()
+                .find(|e| e.id == plugin.id && e.newer_than(&plugin.version))
+            {
+                let entry = entry.clone();
+                row = row.child(
+                    style::primary_button(SharedString::from(format!("update-{}", entry.id)), cx)
+                        .small()
+                        .label(format!("Update available · {}", entry.version))
+                        .disabled(busy || !enabled || entry.compatible().is_err())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.install_community_entry(entry.clone(), cx);
+                        })),
+                );
+            }
+            if let Some(delisted) = index.delisted.iter().find(|d| d.id == plugin.id) {
+                row = row.child(
+                    div()
+                        .text_color(hex(color::WARNING))
+                        .child(format!("Delisted: {}", delisted.reason)),
+                );
+            }
+        }
+        row
+    }
+
     fn community_catalog(&self, cx: &mut Context<Self>) -> Div {
         let mut body = div()
             .flex()
@@ -672,12 +875,34 @@ impl Editor {
             let mut row = card(format!("catalog-{}", entry.id))
                 .child(
                     div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(entry.name.clone()),
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .child(icons::icon(IconName::Puzzle).small())
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(entry.name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_color(hex(color::TEXT_SECONDARY))
+                                .child(format!("v{}", entry.version)),
+                        ),
                 )
-                .child(format!("by {} · v{}", entry.author, entry.version))
+                .child(
+                    div()
+                        .text_color(hex(color::TEXT_SECONDARY))
+                        .child(format!("by {}", entry.author)),
+                )
                 .child(entry.description.clone())
-                .child(format!("{} · ABI {}", entry.license, entry.min_abi));
+                .child(
+                    div()
+                        .text_color(hex(color::TEXT_SECONDARY))
+                        .child(format!("{} · ABI {}", entry.license, entry.min_abi)),
+                );
             if let Err(reason) = &compatibility {
                 row = row.child(
                     div()
@@ -685,36 +910,49 @@ impl Editor {
                         .child(format!("Incompatible: {reason}")),
                 );
             }
-            if entry.source_url.starts_with("https://github.com/") {
-                let source = entry.source_url.clone();
-                row = row.child(
-                    Button::new(SharedString::from(format!("source-{}", entry.id)))
-                        .small()
-                        .ghost()
-                        .icon(icons::icon(IconName::ExternalLink))
-                        .label("Source")
-                        .on_click(move |_, _, cx| cx.open_url(&source)),
-                );
-            }
-            row = row.child(
-                Button::new(SharedString::from(format!("install-{}", entry.id)))
-                    .small()
+            let verified = installed.is_some() && self.community.verified.contains(&entry.id);
+            row = row.child(if verified {
+                div()
+                    .id(SharedString::from(format!("catalog-verified-{}", entry.id)))
                     .debug_selector({
                         let id = entry.id.clone();
-                        move || format!("install-{id}")
+                        move || format!("catalog-verified-{id}")
                     })
-                    .label(if update {
-                        "Update available"
-                    } else if installed.is_some() {
-                        "Installed"
-                    } else {
-                        "Install"
-                    })
-                    .disabled(
-                        self.community.busy
-                            || compatibility.is_err()
-                            || (installed.is_some() && !update),
-                    )
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_color(hex(color::SUCCESS))
+                    .child(icons::icon(IconName::ShieldCheck).small())
+                    .child("SHA-256 verified")
+                    .into_any_element()
+            } else {
+                trust_line().into_any_element()
+            });
+            let mut actions = div().flex().flex_wrap().gap_2();
+            let install_label = if update {
+                "Update available"
+            } else if installed.is_some() {
+                "Installed"
+            } else {
+                "Install"
+            };
+            let install_disabled =
+                self.community.busy || compatibility.is_err() || (installed.is_some() && !update);
+            let install_id = SharedString::from(format!("install-{}", entry.id));
+            let install_selector = format!("install-{}", entry.id);
+            // Install is the primary action while it can be taken; afterwards it is a plain
+            // disabled "Installed" label.
+            let install = if install_disabled {
+                Button::new(install_id)
+            } else {
+                style::primary_button(install_id, cx)
+            };
+            actions = actions.child(
+                install
+                    .small()
+                    .debug_selector(move || install_selector.clone())
+                    .label(install_label)
+                    .disabled(install_disabled)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.install_community_entry(action.clone(), cx);
                     })),
@@ -722,8 +960,8 @@ impl Editor {
             if installed.is_some_and(|p| !p.enabled && p.version == entry.version) {
                 let id = entry.id.clone();
                 let selector = format!("catalog-enable-{id}");
-                row = row.child(
-                    Button::new(SharedString::from(selector.clone()))
+                actions = actions.child(
+                    style::primary_button(SharedString::from(selector.clone()), cx)
                         .debug_selector(move || selector.clone())
                         .small()
                         .label("Enable")
@@ -733,7 +971,18 @@ impl Editor {
                         })),
                 );
             }
-            body = body.child(row);
+            if entry.source_url.starts_with("https://github.com/") {
+                let source = entry.source_url.clone();
+                actions = actions.child(
+                    Button::new(SharedString::from(format!("source-{}", entry.id)))
+                        .small()
+                        .ghost()
+                        .icon(icons::icon(IconName::ExternalLink))
+                        .label("Source")
+                        .on_click(move |_, _, cx| cx.open_url(&source)),
+                );
+            }
+            body = body.child(row.child(actions));
         }
         if count == 0 {
             body = body.child("No community plugins match your search.");

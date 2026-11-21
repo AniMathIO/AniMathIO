@@ -3,7 +3,6 @@
 use super::actions::*;
 use super::*;
 use crate::style::{self, color};
-use gpui_component::Disableable as _;
 use gpui_component::{
     TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar, status_bar::StatusBar,
 };
@@ -98,14 +97,15 @@ fn clip_menu_entries() -> Vec<ClipMenuEntry> {
 impl Editor {
     pub(super) fn refresh_menus(&mut self, cx: &mut Context<Self>) {
         let signature = format!(
-            "{:?}/{:?}/{:?}/{:?}/{:?}/{:?}/{}",
+            "{:?}/{:?}/{:?}/{:?}/{:?}/{:?}/{}/{}",
             self.recent.paths,
             self.selected_ids(),
             self.ripple_scope,
             self.clipboard.is_some(),
             self.dock,
             self.preview.gpu,
-            self.export_queue_open
+            self.export_queue_open,
+            self.is_start_screen()
         );
         if self.menu_signature == signature {
             return;
@@ -120,7 +120,7 @@ impl Editor {
             }))
             .disabled(self.recent.paths.is_empty());
         let none_selected = self.selected.is_none();
-        let menus = vec![
+        let mut menus = vec![
             Menu::new("File").items([
                 MenuItem::action("New project", NewProject),
                 MenuItem::action("Open…", OpenProject),
@@ -229,21 +229,43 @@ impl Editor {
                 MenuItem::action("About AniMathIO", About),
             ]),
         ];
+        if self.is_start_screen() {
+            // No project is open yet: Playback, Tools and Clip have nothing to act on.
+            menus.retain(|menu| !matches!(menu.name.as_ref(), "Playback" | "Tools" | "Clip"));
+        }
         GlobalState::global_mut(cx).set_app_menus(menus.into_iter().map(Menu::owned).collect());
         self.app_menu.update(cx, AppMenuBar::reload);
     }
 
-    pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> TitleBar {
-        let title = self.path.as_ref().and_then(|p| p.file_stem()).map_or_else(
+    /// The project name shown in the title bar and the window title.
+    fn project_title(&self) -> String {
+        self.path.as_ref().and_then(|p| p.file_stem()).map_or_else(
             || {
                 if self.is_start_screen() {
-                    "Creative workspace".to_owned()
+                    "AniMathIO".to_owned()
                 } else {
                     "Untitled project".to_owned()
                 }
             },
             |n| n.to_string_lossy().into_owned(),
-        );
+        )
+    }
+
+    /// The window title: the project name, a bullet while there are unsaved changes, then the
+    /// app name (`AniMathIO` alone on the launcher).
+    pub(super) fn window_title(&self) -> String {
+        if self.is_start_screen() {
+            return "AniMathIO".to_owned();
+        }
+        format!(
+            "{}{} - AniMathIO",
+            if self.dirty { "• " } else { "" },
+            self.project_title()
+        )
+    }
+
+    pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> TitleBar {
+        let title = self.project_title();
         let close_view = cx.entity().downgrade();
         TitleBar::new()
             .h(gpui::rems(3.067))
@@ -282,12 +304,20 @@ impl Editor {
                                 .gap_2()
                                 .text_size(crate::style::type_size::SM)
                                 .text_color(style::hex(color::TEXT_SECONDARY))
-                                .when(self.dirty, |title| {
+                                .when(self.dirty && !self.is_start_screen(), |title| {
                                     title.child(
                                         div()
+                                            .id("title-unsaved")
+                                            .debug_selector(|| "title-unsaved".into())
                                             .size(px(5.))
                                             .rounded_full()
-                                            .bg(style::hex(color::ACCENT)),
+                                            .bg(style::hex(color::ACCENT))
+                                            .tooltip(|window, cx| {
+                                                gpui_component::tooltip::Tooltip::new(
+                                                    "Unsaved changes",
+                                                )
+                                                .build(window, cx)
+                                            }),
                                     )
                                 })
                                 .child(div().truncate().child(title)),
@@ -335,18 +365,20 @@ impl Editor {
                                 },
                             ),
                     )
-                    .child(
-                        style::primary_button("title-export", cx)
-                            .small()
-                            .mr_2()
-                            .icon(icons::icon(IconName::Upload))
-                            .label("Export")
-                            .disabled(self.is_start_screen())
-                            .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_export_dialog(window, cx);
-                            })),
-                    ),
+                    .when(!self.is_start_screen(), |row| {
+                        row.child(
+                            style::primary_button("title-export", cx)
+                                .debug_selector(|| "title-export".into())
+                                .small()
+                                .mr_2()
+                                .icon(icons::icon(IconName::Upload))
+                                .label("Export")
+                                .tooltip_with_action("Export video", &ExportVideo, Some("Editor"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_export_dialog(window, cx);
+                                })),
+                        )
+                    }),
             )
     }
 
@@ -560,6 +592,7 @@ impl Editor {
                 .child(icons::icon(icon).small())
                 .child(label)
         };
+        let start_screen = self.is_start_screen();
         let autosave = if self.preferences.autosave_seconds == 0 {
             "Autosave off".to_owned()
         } else if self.save_pending {
@@ -583,29 +616,55 @@ impl Editor {
                         .child(chip(IconName::Clock, duration)),
                 );
         }
-        status
-            .right(
+        if !start_screen {
+            // Autosave and the export queue belong to an open project.
+            status = status.right(
                 div()
                     .flex()
                     .items_center()
                     .gap_2()
                     .child(icons::icon(IconName::ShieldCheck).small())
                     .child(autosave),
-            )
-            .right(chip(
-                IconName::Cpu,
-                if self.preview.gpu {
-                    "GPU requested"
-                } else {
-                    "CPU preview"
-                }
-                .to_owned(),
-            ))
-            .right(self.export_queue_button(cx))
-            .right(
+            );
+        }
+        status = status.right(self.renderer_chip(chip));
+        if !start_screen {
+            status = status.right(self.export_queue_button(cx)).right(
                 self.subtitle_status_button(cx)
                     .map_or_else(|| div().into_any_element(), IntoElement::into_any_element),
-            )
+            );
+        }
+        status
+    }
+
+    /// The renderer actually used for the preview, not just the one requested.
+    pub(super) fn renderer_label(&self) -> &'static str {
+        use crate::render_worker::ActiveBackend;
+        match (self.preview.gpu, self.worker.active_backend()) {
+            (true, ActiveBackend::CpuFallback) => "CPU preview (fallback)",
+            (true, _) => "GPU preview",
+            (false, _) => "CPU preview",
+        }
+    }
+
+    fn renderer_chip(&self, chip: impl Fn(IconName, String) -> Div) -> Stateful<Div> {
+        let label = self.renderer_label();
+        let tooltip = match label {
+            "GPU preview" => {
+                "The preview is drawn on the GPU. Export always uses the CPU renderer."
+            }
+            "CPU preview (fallback)" => {
+                "The GPU was requested but is unavailable, so the preview is drawn on the CPU."
+            }
+            _ => "The preview is drawn on the CPU. Switch to the GPU in Preferences or View.",
+        };
+        div()
+            .id("status-renderer")
+            .debug_selector(|| "status-renderer".into())
+            .child(chip(IconName::Cpu, label.to_owned()))
+            .tooltip(move |window, cx| {
+                gpui_component::tooltip::Tooltip::new(tooltip).build(window, cx)
+            })
     }
 }
 

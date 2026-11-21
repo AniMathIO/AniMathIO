@@ -30,7 +30,7 @@ enabled explicitly.
 
 ### Trust model
 
-1. **Global switch.** "Community plugins" (Preferences in the editor, or
+1. **Global switch.** "Community plugins" (Library → Plugins in the editor, or
    `animathio-cli plugins community on|off`) is off by default. While it is off no community
    component is loaded or executed; Installed can still display bundle metadata.
 2. **Per-plugin flag.** An installed plugin starts **disabled**. It loads only when the
@@ -49,10 +49,14 @@ the control handler all read the same file. `ANIMATHIO_PLUGIN_SETTINGS` override
 
 ### Browse and install in the editor
 
-The Library's Plugins tab shares the global switch with Preferences and shows a one-time
-sandbox/trust explanation. Installed community plugins have an Enabled toggle and Remove;
-first-party plugins remain on and cannot be removed here. Browse appears only while the
-switch is on. Search by name, author, description or id; inspect the licence, version,
+The Library's Plugins tab holds the one global switch (Preferences only reports it and links
+there). A permanent caption under the switch says "Third-party · sandboxed · not audited";
+turning the switch on adds a trust card, and the Installed and Browse tabs appear. Installed
+community plugins use the same card layout as first-party ones (icon, name, version, id,
+kinds, author, Source link) with one Enabled switch and a danger-styled Remove that asks for
+confirmation first. A registry install shows "SHA-256 verified". Install from a local file
+is the + button at the top of the Library while the Plugins tab is open. First-party plugins
+remain on and cannot be removed here. Search by name, author, description or id; inspect the licence, version,
 minimum ABI, incompatibility reason and source link before installing. Installs start
 disabled, then Enable on the Browse card or in Installed loads them live. Updates are offered when the fetched version is
 newer, never installed automatically. Delisted installed plugins retain their files and
@@ -74,9 +78,9 @@ offline development/screenshots. It is read only when Browse is clicked; downloa
 use the indexed HTTPS release URLs. UI tests inject both transports and use the frozen
 hello package, so no network is needed.
 
-| Installed | Browse (local index fixture) |
+| Installed (SHA-256 verified) | Browse (live registry) |
 | --- | --- |
-| ![Installed plugins](../docs/screenshots/editor-community-installed.png) | ![Community registry](../docs/screenshots/editor-community-browse.png) |
+| ![Installed plugins](../docs/screenshots/community-installed.png) | ![Community registry](../docs/screenshots/community-browse.png) |
 
 ### Folders
 
@@ -110,8 +114,8 @@ handler) load the enabled community plugins like any other plugin.
 
 ### In the editor: no restart
 
-The editor applies the switch live. Turning "Community plugins" on or off in Preferences
-(saving the dialog also re-reads the settings, so changes made with the CLI while the editor
+The editor applies the switch live. Turning "Community plugins" on or off in Library → Plugins
+(saving Preferences also re-reads the settings, so changes made with the CLI while the editor
 runs are picked up) loads or unloads plugins in place: `PluginHost::sync_community_plugins`
 registers newly enabled plugins and drops disabled ones (clip sources, effects, audio
 effects, animation presets and importers), the inspector's plugin list refreshes and the

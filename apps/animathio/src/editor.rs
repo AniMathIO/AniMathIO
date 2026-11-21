@@ -663,6 +663,8 @@ pub(crate) struct Editor {
     preset_hover_changed: Instant,
     app_menu: Entity<gpui_component::menu::AppMenuBar>,
     menu_signature: String,
+    /// The title last handed to the window, so it is only set when it changes.
+    window_title: String,
     panel_focus: [FocusHandle; 4],
     timeline_scroll_handle: ScrollHandle,
     launcher_scroll: ScrollHandle,
@@ -959,6 +961,7 @@ impl Editor {
                 .unwrap_or_else(Instant::now),
             app_menu: gpui_component::menu::AppMenuBar::new(cx),
             menu_signature: String::new(),
+            window_title: String::new(),
             panel_focus: std::array::from_fn(|_| cx.focus_handle()),
             timeline_scroll_handle: ScrollHandle::new(),
             launcher_scroll: ScrollHandle::new(),
@@ -1185,6 +1188,11 @@ impl Render for Editor {
         }
 
         self.refresh_menus(cx);
+        let title = self.window_title();
+        if self.window_title != title {
+            window.set_window_title(&title);
+            self.window_title = title;
+        }
         let workspace = if self.is_start_screen() {
             self.start_screen(cx)
         } else {

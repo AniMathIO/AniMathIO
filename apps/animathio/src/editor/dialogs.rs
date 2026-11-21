@@ -208,6 +208,31 @@ impl Editor {
     }
 }
 
+/// Shorten `text` to at most `max` characters by replacing the middle with an ellipsis, so the
+/// start of a path and its file name both stay visible.
+pub(super) fn middle_truncate(text: &str, max: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max || max < 5 {
+        return text.to_owned();
+    }
+    let keep = max - 1;
+    let tail = (keep * 2).div_ceil(3);
+    let head = keep - tail;
+    let start: String = chars[..head].iter().collect();
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    format!("{start}…{end}")
+}
+
+/// The one-line outcome of the export choices: `640×360 · 30 fps · MP4 · chapters on`.
+pub(super) fn export_summary(size: (u32, u32), frame_rate: &str, markers: usize) -> String {
+    let chapters = if markers == 0 {
+        "no chapters (no markers)"
+    } else {
+        "chapters on"
+    };
+    format!("{}×{} · {frame_rate} · MP4 · {chapters}", size.0, size.1)
+}
+
 /// Outcome of submitting the Export dialog.
 pub(super) enum Submitted {
     Invalid,
@@ -252,6 +277,27 @@ impl Editor {
             window,
             cx,
         );
+        // The dialog re-renders when a choice changes: Custom start/end appear only for the
+        // Custom range, and the summary and path caption follow the preset and output.
+        for select in [&preset, &range] {
+            cx.subscribe_in(
+                select,
+                window,
+                |_, _, _: &gpui_component::select::SelectEvent<Vec<String>>, window, _| {
+                    window.refresh();
+                },
+            )
+            .detach();
+        }
+        cx.subscribe_in(
+            &output,
+            window,
+            |_, _, _: &gpui_component::input::InputEvent, window, _| window.refresh(),
+        )
+        .detach();
+        let project_resolution = project_size(&self.project);
+        let project_rate = frame_rate_label(rate);
+        let markers = self.project.markers().len();
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let path_input = output.clone();
@@ -288,6 +334,34 @@ impl Editor {
             };
             let (queue_submit, now_submit) = (submit.clone(), submit);
             let enter_submit = now_submit.clone();
+            let chosen_preset = ExportPreset::ALL
+                .into_iter()
+                .find(|p| p.label() == selected(&preset, cx));
+            let custom_range = selected(&range, cx) == "Custom";
+            let (size, rate_label) = chosen_preset.map_or_else(
+                || (project_resolution, project_rate.clone()),
+                |p| (p.resolution(), "30 fps".to_owned()),
+            );
+            let secondary = style::hex(style::color::TEXT_SECONDARY);
+            let note = chosen_preset.map_or_else(
+                || {
+                    format!(
+                        "Project settings: export at this project's own size and frame rate \
+                         ({}×{}, {project_rate}). Pick a preset to deliver at another size \
+                         without changing the project.",
+                        project_resolution.0, project_resolution.1
+                    )
+                },
+                |p| {
+                    format!(
+                        "Delivery preset: {}×{} at 30 fps, high quality. Applied to the export \
+                         only; the project keeps its settings.",
+                        p.resolution().0,
+                        p.resolution().1
+                    )
+                },
+            );
+            let output_text = path_input.read(cx).value().to_string();
             let dialog = dialog
                 .title(heading(IconName::Clapperboard, "Export video"))
                 .width(px(560.))
@@ -300,40 +374,94 @@ impl Editor {
                 )
                 .child(
                     Form::new()
-                        .child(field("Preset", Select::new(&preset)))
+                        .child(field(
+                            "Preset",
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(Select::new(&preset))
+                                .child(
+                                    div()
+                                        .id("export-preset-note")
+                                        .debug_selector(|| "export-preset-note".into())
+                                        .text_size(crate::style::type_size::XS)
+                                        .text_color(secondary)
+                                        .child(note.clone()),
+                                ),
+                        ))
                         .child(field(
                             "MP4 output",
                             div()
                                 .flex()
-                                .gap_2()
-                                .child(tagged_input("export-output", Input::new(&output)))
-                                .child(Button::new("export-browse").label("Browse…").on_click(
-                                    move |_, window, cx| {
-                                        let current =
-                                            PathBuf::from(path_input.read(cx).value().to_string());
-                                        let mut picker = rfd::FileDialog::new()
-                                            .add_filter("MP4 video", &["mp4"])
-                                            .set_file_name("video.mp4");
-                                        if let Some(parent) =
-                                            current.parent().filter(|p| !p.as_os_str().is_empty())
-                                        {
-                                            picker = picker.set_directory(parent);
-                                        }
-                                        if let Some(path) = picker.save_file() {
-                                            path_input.update(cx, |state, cx| {
-                                                state.set_value(
-                                                    path.to_string_lossy().into_owned(),
-                                                    window,
-                                                    cx,
-                                                );
-                                            });
-                                        }
-                                    },
-                                )),
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(tagged_input("export-output", Input::new(&output)))
+                                        .child(
+                                            Button::new("export-browse").label("Browse…").on_click(
+                                                move |_, window, cx| {
+                                                    let current = PathBuf::from(
+                                                        path_input.read(cx).value().to_string(),
+                                                    );
+                                                    let mut picker = rfd::FileDialog::new()
+                                                        .add_filter("MP4 video", &["mp4"])
+                                                        .set_file_name("video.mp4");
+                                                    if let Some(parent) = current
+                                                        .parent()
+                                                        .filter(|p| !p.as_os_str().is_empty())
+                                                    {
+                                                        picker = picker.set_directory(parent);
+                                                    }
+                                                    if let Some(path) = picker.save_file() {
+                                                        path_input.update(cx, |state, cx| {
+                                                            state.set_value(
+                                                                path.to_string_lossy().into_owned(),
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                },
+                                            ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id("export-output-caption")
+                                        .debug_selector(|| "export-output-caption".into())
+                                        .text_size(crate::style::type_size::XS)
+                                        .text_color(secondary)
+                                        .child(middle_truncate(&output_text, 80)),
+                                ),
                         ))
                         .child(field("Range", Select::new(&range)))
-                        .child(field("Custom start (HH:MM:SS:FF)", Input::new(&from)))
-                        .child(field("Custom end, exclusive", Input::new(&to))),
+                        .when(custom_range, |form| {
+                            form.child(field(
+                                "Custom start (HH:MM:SS:FF)",
+                                div()
+                                    .flex()
+                                    .child(tagged_input("export-custom-start", Input::new(&from))),
+                            ))
+                            .child(field(
+                                "Custom end, exclusive",
+                                div()
+                                    .flex()
+                                    .child(tagged_input("export-custom-end", Input::new(&to))),
+                            ))
+                        }),
+                )
+                .child(
+                    div()
+                        .id("export-summary")
+                        .debug_selector(|| "export-summary".into())
+                        .mt_2()
+                        .text_size(crate::style::type_size::SM)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(export_summary(size, &rate_label, markers)),
                 )
                 .footer(
                     div()
@@ -741,14 +869,23 @@ impl Editor {
 
     pub(super) fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let autosave = input(self.preferences.autosave_seconds.to_string(), window, cx);
-        let folder = input(
-            self.preferences
+        let folder = {
+            let value = self
+                .preferences
                 .export_folder
                 .to_string_lossy()
-                .into_owned(),
-            window,
-            cx,
-        );
+                .into_owned();
+            let placeholder = if self.path.is_some() {
+                "Blank: next to the project".to_owned()
+            } else {
+                "Blank: your Videos folder".to_owned()
+            };
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(placeholder)
+                    .default_value(value)
+            })
+        };
         let gpu = choices(
             vec!["GPU".into(), "CPU".into()],
             usize::from(!self.preview.gpu),
@@ -776,9 +913,7 @@ impl Editor {
             cx,
         );
         let check_updates = std::rc::Rc::new(std::cell::Cell::new(self.preferences.check_updates));
-        let community = std::rc::Rc::new(std::cell::Cell::new(
-            crate::editor_env::community_plugins_enabled(),
-        ));
+        let community_on = crate::editor_env::community_plugins_enabled();
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let scale_submit = scale.clone();
@@ -788,8 +923,9 @@ impl Editor {
             let gpu_submit = gpu.clone();
             let density_submit = density.clone();
             let check_submit = check_updates.clone();
-            let community_submit = community.clone();
             let editor = editor.clone();
+            let open_plugins = editor.clone();
+            let folder_browse = folder.clone();
             let submit = std::rc::Rc::new(move |cx: &mut App| {
                 let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
                     editor.update(cx, |this, cx| {
@@ -804,7 +940,6 @@ impl Editor {
                 let compact = selected(&density_submit, cx) == "Compact";
                 let reduce_motion = selected(&motion_submit, cx) == "Reduce motion";
                 let check_updates = check_submit.get();
-                let community = community_submit.get();
                 editor.update(cx, |this, cx| {
                     let preferences = crate::preferences::Preferences {
                         autosave_seconds: seconds,
@@ -825,9 +960,7 @@ impl Editor {
                     this.preferences = preferences;
                     // Saving also re-reads the plugin settings, so changes made with
                     // `animathio-cli plugins` while the editor runs are picked up.
-                    if let Err(error) = this.set_community_plugins_enabled(community, cx) {
-                        this.error = Some(error);
-                    }
+                    this.sync_community_plugins(cx);
                     if gpu != this.preview.gpu {
                         this.toggle_gpu_preview(cx);
                     }
@@ -865,13 +998,50 @@ impl Editor {
                                 .debug_selector(|| "preferences-autosave".into())
                                 .child(NumberInput::new(&autosave)),
                         ))
-                        .child(field("Default export folder", Input::new(&folder)))
+                        .child(field(
+                            "Default export folder",
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(tagged_input(
+                                    "preferences-export-folder",
+                                    Input::new(&folder),
+                                ))
+                                .child(
+                                    Button::new("preferences-export-folder-browse")
+                                        .debug_selector(|| {
+                                            "preferences-export-folder-browse".into()
+                                        })
+                                        .label("Browse…")
+                                        .on_click(move |_, window, cx| {
+                                            let mut picker = rfd::FileDialog::new();
+                                            let current = PathBuf::from(
+                                                folder_browse.read(cx).value().trim().to_owned(),
+                                            );
+                                            if current.is_dir() {
+                                                picker = picker.set_directory(current);
+                                            }
+                                            if let Some(path) = picker.pick_folder() {
+                                                folder_browse.update(cx, |state, cx| {
+                                                    state.set_value(
+                                                        path.to_string_lossy().into_owned(),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                });
+                                            }
+                                        }),
+                                ),
+                        ))
                         .child(field("Interface: UI scale", Select::new(&scale)))
                         .child(field("Theme density", Select::new(&density)))
                         .child(field("Motion", Select::new(&motion)))
-                        .child(field(
-                            "Check for updates",
-                            gpui_component::checkbox::Checkbox::new("preferences-check-updates")
+                        .child(
+                            FormField::new().child(
+                                gpui_component::checkbox::Checkbox::new(
+                                    "preferences-check-updates",
+                                )
+                                .label("Check for updates on startup")
                                 .checked(check_updates.get())
                                 .accessibility_label("Check for updates")
                                 .on_change({
@@ -881,22 +1051,52 @@ impl Editor {
                                         window.refresh();
                                     }
                                 }),
-                        ))
-                        .child(field(
-                            "Community plugins (third-party, sandboxed, not audited)",
-                            gpui_component::checkbox::Checkbox::new(
-                                "preferences-community-plugins",
-                            )
-                            .checked(community.get())
-                            .accessibility_label("Community plugins")
-                            .on_change({
-                                let community = community.clone();
-                                move |checked, window, _| {
-                                    community.set(*checked);
-                                    window.refresh();
-                                }
-                            }),
-                        )),
+                            ),
+                        )
+                        .child(
+                            // One switch, one source of truth (CommunityStore): it lives in
+                            // Library > Plugins, and this row only reports it and links there.
+                            FormField::new().child(
+                                div()
+                                    .id("preferences-community-plugins")
+                                    .debug_selector(|| "preferences-community-plugins".into())
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .child(div().child(format!(
+                                                "Community plugins: {}",
+                                                if community_on { "on" } else { "off" }
+                                            )))
+                                            .child(
+                                                div()
+                                                    .text_size(crate::style::type_size::XS)
+                                                    .text_color(style::hex(
+                                                        style::color::TEXT_SECONDARY,
+                                                    ))
+                                                    .child(
+                                                        "Third-party, sandboxed, not audited. \
+                                                         Manage them in Library > Plugins.",
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        Button::new("preferences-open-plugins")
+                                            .debug_selector(|| "preferences-open-plugins".into())
+                                            .label("Open Plugins")
+                                            .on_click(move |_, window, cx| {
+                                                window.close_dialog(cx);
+                                                open_plugins.update(cx, |this, cx| {
+                                                    this.dock.left_open = true;
+                                                    this.select_left_tab(LeftTab::Plugins, cx);
+                                                });
+                                            }),
+                                    ),
+                            ),
+                        ),
                 );
             form_dialog(dialog, "Save", cx, submit)
         });
