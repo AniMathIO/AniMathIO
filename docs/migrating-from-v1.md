@@ -24,7 +24,7 @@ This describes authoring in 2.x; importing saved 1.x projects has the limitation
 | 1.x feature | Where it lives in 2.x | Status |
 | --- | --- | --- |
 | Video / image / audio resources, upload | Library → Media; Import media; kind filters, grid/list and drag to timeline | Moved |
-| Microphone audio recorder | Import recorded audio files in Media; no in-app recording ([#299](https://github.com/AniMathIO/AniMathIO/issues/299)) | Missing |
+| Microphone audio recorder | Library → Media → Record audio (microphone button, or File → Record audio…): choose the input, watch the level meter, Stop to add a WAV asset (and a clip at the playhead) as one undo step, Cancel to discard | Moved |
 | Plain text / Mafs text | Library → Elements → Text & formulas → Text; source and size in dialog/inspector | Moved |
 | Title, Subtitle, Body, Caption, Heading 1–6 typography | Library → Titles → Typography has all ten presets with the 1.x sizes (normalized to the shorter canvas edge) and weights, all in Inter; Font weight (100–900) and Font are inspector fields on any text clip | Moved |
 | LaTeX, matrix source, formula colour | Elements → Text & formulas → LaTeX; source, snippets, templates and colour in dialog/inspector | Moved |

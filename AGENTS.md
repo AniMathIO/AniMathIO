@@ -277,6 +277,14 @@ identical layouts copy, mono duplicates, stereo averages to mono, 5.1/7.1/quad a
 surround layouts fold to stereo with ITU-R BS.775 coefficients (centre and surrounds -3 dB, LFE
 dropped, no normalisation; both rear pairs of 7.1 at -6 dB) and to mono as the mean of that fold,
 and stereo to a wider layout fills the front pair; layouts without a rule are `Unsupported`.
+Microphone recording (`crates/audio/src/capture.rs`, `apps/animathio/src/editor/recording.rs`) is
+capture outside the project model: `CaptureSource` lists/opens inputs, `Recorder` polls one stream
+into 16-bit PCM with a live `Level`, and Stop turns the take into a WAV asset plus one undoable
+`Command::Batch` (asset, optional track and clip at the playhead). The editor reaches the source only
+through `EditorEnv::capture` (`CpalCapture`; `NullCapture` when `ANIMATHIO_AUDIO` is `none`/`off`/`0`
+and in `EditorEnv::headless`; `SyntheticCapture` for tests). Never open a real input device in
+tests or agent runs; the manual hardware test is separate. The screenshot hook
+`--screenshot-panel=record` uses a synthetic tone.
 Timeline waveforms come from `AudioPool::waveform` (a streaming pass; 4096 downsampled peaks per
 asset, cached by the editor and pruned with the pool). The export path wraps the media backend's
 audio decoder as an `AudioSource` too, so exporting a long track never holds it decoded.

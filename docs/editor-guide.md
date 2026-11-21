@@ -427,6 +427,17 @@ Foreground visual tracks appear above background tracks, with audio-only tracks 
 Track headers, drops, selection and reorder gestures use this same display order; the
 project file keeps its existing back-to-front layer order. The ruler and marker lane
 stay fixed while track rows scroll vertically.
+**Record audio** (the microphone button in Library → Media, or File → Record audio…) opens a
+recorder card. Pick an input (or leave "System default"), press **Record**, and watch the
+level meter: it turns red at full scale, which means the take is distorted. **Stop** saves the
+take as a WAV asset named "Recording N.wav" in the library and, with "Add to timeline at
+playhead" on, places an audio clip at the playhead on a free audio track (or a new one); both
+happen as one undo step. **Cancel** discards the take. The project changes only on Stop, and a
+take ends with the project it started in. If the microphone is missing, busy or blocked by
+your system's privacy settings, the card says so. Recording is off when `ANIMATHIO_AUDIO=none`.
+
+![The recorder mid-take, on a scripted tone](../docs/screenshots/editor-record-audio.png)
+
 Drop OS media files on the pool to import assets, or on a timeline track to import
 and place them at that position. Multiple files are placed consecutively. The Plugins
 tab's **Write on…** action replaces a selected LaTeX clip's reveal animation with

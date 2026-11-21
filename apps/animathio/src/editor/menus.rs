@@ -129,6 +129,7 @@ impl Editor {
                 MenuItem::action("Save as template…", SaveTemplate),
                 MenuItem::separator(),
                 MenuItem::action("Import media…", ImportMedia),
+                MenuItem::action("Record audio…", RecordAudio),
                 MenuItem::action("Import v1…", ImportV1),
                 MenuItem::action("Import Manim scene…", ImportManim),
                 MenuItem::action("Export…", ExportVideo),

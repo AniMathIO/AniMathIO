@@ -575,6 +575,7 @@ impl Editor {
             .debug_selector(|| "library-body".into())
             .overflow_y_scroll()
             .track_scroll(&self.library_scroll[self.left_tab as usize]);
+        let this_recording = self.record_panel.is_some();
         match self.left_tab {
             LeftTab::Elements => {
                 body = body
@@ -585,6 +586,9 @@ impl Editor {
                 body = body.child(self.title_cards(cx));
             }
             LeftTab::Media => {
+                if let Some(card) = self.record_panel_view(cx) {
+                    body = body.child(card);
+                }
                 let assets: Vec<_> = self
                     .project
                     .assets()
@@ -1068,6 +1072,15 @@ impl Editor {
                     )
                     .when(self.left_tab == LeftTab::Media, |row| {
                         row.child(
+                            icon_button(
+                                "pool-record",
+                                icons::icon(IconName::Mic),
+                                "Record audio from a microphone",
+                                cx.listener(|this, _, window, cx| this.open_recorder(window, cx)),
+                            )
+                            .selected(this_recording),
+                        )
+                        .child(
                             icon_button(
                                 "pool-grid",
                                 icons::icon(IconName::LayoutGrid),

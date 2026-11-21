@@ -72,6 +72,7 @@ actions!(
         OpenProject,
         SaveProject,
         ImportMedia,
+        RecordAudio,
         ExportVideo,
         ToggleExportQueue,
         ProjectSettings,
@@ -289,6 +290,9 @@ pub(super) fn attach(root: Div, cx: &mut Context<Editor>) -> Div {
     }))
     .on_action(cx.listener(|this, _: &ImportMedia, _window, cx| {
         this.import_media(cx);
+    }))
+    .on_action(cx.listener(|this, _: &RecordAudio, window, cx| {
+        this.open_recorder(window, cx);
     }))
     .on_action(cx.listener(|this, _: &ToggleExportQueue, _, cx| {
         this.export_queue_open = !this.export_queue_open;

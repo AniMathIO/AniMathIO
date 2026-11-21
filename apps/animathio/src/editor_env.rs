@@ -12,11 +12,11 @@ use std::sync::{Arc, OnceLock};
 #[cfg(test)]
 use animathio_assist::{AssistError, CancelToken, Endpoint};
 use animathio_assist::{Converter, HttpConverter};
-use animathio_audio::AudioPool;
+use animathio_audio::{AudioPool, CaptureSource, CpalCapture, NullCapture};
 use animathio_core::Project;
 use animathio_render::BackendKind;
 
-use crate::playback::{Clock, MonotonicClock, make_clock};
+use crate::playback::{Clock, MonotonicClock, audio_disabled, make_clock};
 
 /// Where playback audio goes.
 // `Null` and `Dir` are constructed by the headless test environment only.
@@ -59,6 +59,23 @@ pub(crate) struct EditorEnv {
     /// The AI assist client behind the Math dialog's Convert button. Production uses the real
     /// HTTP client; tests inject a mock, and the headless default never touches the network.
     pub(crate) assist: Arc<dyn Converter>,
+    /// Where microphone recordings come from. Production opens the real input devices unless
+    /// `ANIMATHIO_AUDIO` turns audio off; the headless default never opens one, and tests inject
+    /// a `SyntheticCapture`.
+    pub(crate) capture: Arc<dyn CaptureSource>,
+}
+
+/// Why an environment without audio has no microphone.
+const NO_INPUT_REASON: &str =
+    "Audio input is turned off (ANIMATHIO_AUDIO=none), so no microphone is opened.";
+
+/// The production capture source: the real devices, unless `ANIMATHIO_AUDIO` disables audio.
+fn production_capture() -> Arc<dyn CaptureSource> {
+    if audio_disabled(std::env::var_os("ANIMATHIO_AUDIO").as_deref()) {
+        Arc::new(NullCapture::new(NO_INPUT_REASON))
+    } else {
+        Arc::new(CpalCapture)
+    }
 }
 
 /// The headless default for [`EditorEnv::assist`]: every conversion fails as offline.
@@ -93,6 +110,7 @@ impl EditorEnv {
             updates: true,
             adaptive_density: true,
             assist: Arc::new(HttpConverter::new()),
+            capture: production_capture(),
         }
     }
 
@@ -108,6 +126,7 @@ impl EditorEnv {
             updates: false,
             adaptive_density: false,
             assist: Arc::new(OfflineConverter),
+            capture: Arc::new(NullCapture::new(NO_INPUT_REASON)),
         }
     }
 

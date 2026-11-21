@@ -199,7 +199,7 @@ pub(crate) fn make_clock(project: &Project, pool: &AudioPool) -> Box<dyn Clock> 
 }
 
 /// Whether `ANIMATHIO_AUDIO` asks for no audio output (`none`, `off` or `0`).
-fn audio_disabled(value: Option<&std::ffi::OsStr>) -> bool {
+pub(crate) fn audio_disabled(value: Option<&std::ffi::OsStr>) -> bool {
     value
         .and_then(std::ffi::OsStr::to_str)
         .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "none" | "off" | "0"))
