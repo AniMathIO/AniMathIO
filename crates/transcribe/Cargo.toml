@@ -17,7 +17,7 @@ whisper = ["dep:whisper-rs"]
 animathio-audio = { path = "../audio" }
 animathio-core.workspace = true
 directories = "6"
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror.workspace = true
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 whisper-rs = { version = "0.16", optional = true }
