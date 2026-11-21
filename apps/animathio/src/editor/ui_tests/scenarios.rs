@@ -2480,11 +2480,14 @@ fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
     ui.settle();
-    let store = crate::editor_env::community_store().expect("private community store");
-    assert!(
-        store.dir().starts_with(super::config_dir()),
-        "tests never touch the user's plugin folder"
+    // A private store of this test: the shared one in the test config directory also holds the
+    // `community-plugins.json` that other scenarios (Preferences) write concurrently.
+    let root = tempfile::tempdir().unwrap();
+    let store = animathio_plugin_host::CommunityStore::new(
+        root.path().join("plugins"),
+        root.path().join("community-plugins.json"),
     );
+    ui.update(|editor, _, _| editor.community.store = Some(store.clone()));
     let has_hello = |ui: &Ui| ui.read(|editor| editor.plugins.iter().any(|plugin| plugin.id == ID));
     assert!(!store.settings().enabled, "community plugins start off");
     assert!(!has_hello(&ui));

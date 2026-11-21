@@ -678,9 +678,20 @@ fn curves_to_command(
 /// Curve targets of the text plugin's per-character slide.
 const CHAR_SLIDE_PREFIX: &str = "param:char_slide";
 
-/// A text clip with a caption style set (`caption_style` other than `off`, Classic
-/// included) draws its own motion and ignores the `char_slide*` parameters, so keyframing
-/// them would silently do nothing. Refuse that instead.
+/// The `caption_style` values the text plugin draws a caption for (its `CaptionStyle::parse`);
+/// `off`, an empty string or an unknown name leave the clip a plain text clip.
+const CAPTION_STYLES: [&str; 6] = [
+    "classic",
+    "word-highlight",
+    "karaoke",
+    "pop",
+    "one-word",
+    "bold-outline",
+];
+
+/// A text clip with a caption style set (a known `caption_style`, Classic included) draws its
+/// own motion and ignores the `char_slide*` parameters, so keyframing them would silently do
+/// nothing. Refuse that instead. An empty or unknown style is off, as in the plugin.
 fn refuse_styled_caption(clip: &Clip, curves: &[wit::Curve]) -> Result<(), String> {
     let styled = matches!(
         &clip.kind,
@@ -688,7 +699,7 @@ fn refuse_styled_caption(clip: &Clip, curves: &[wit::Curve]) -> Result<(), Strin
             if params
                 .get("caption_style")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|style| style != "off")
+                .is_some_and(|style| CAPTION_STYLES.contains(&style))
     );
     if styled
         && curves
