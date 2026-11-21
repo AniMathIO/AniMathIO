@@ -54,6 +54,16 @@ impl ClipSpeed {
     pub fn percent(self) -> f64 {
         f64::from(self.0) / 10_000.0
     }
+    /// The speed in millionths of normal speed (`1_000_000` is 100%), the exact lattice
+    /// unit every speed is stored in.
+    #[must_use]
+    pub fn millionths(self) -> u32 {
+        self.0
+    }
+    /// A speed from millionths of normal speed (`62_500` through `16_000_000`).
+    pub fn from_millionths(units: u32) -> Result<Self, Error> {
+        Self::new(units, 1_000_000)
+    }
 }
 fn gcd(mut a: u32, mut b: u32) -> u32 {
     while b != 0 {
@@ -144,6 +154,87 @@ pub struct ClipTimeMap {
     pub source_length: Option<Time>,
 }
 impl ClipTimeMap {
+    /// Speed at `curve` time (ticks on the ramp's own clock: clip-local time plus
+    /// `phase`), interpolated linearly in millionth units with one rounding to the
+    /// nearest unit; the nearest key holds outside the keys, and a map without keys
+    /// is constant.
+    ///
+    /// # Panics
+    /// Never for a validated map: the result lies between two valid speeds.
+    #[must_use]
+    pub fn speed_at_curve(&self, curve: Time) -> ClipSpeed {
+        let (Some(first), Some(last)) = (self.ramps.first(), self.ramps.last()) else {
+            return self.speed;
+        };
+        if curve <= first.time {
+            return first.speed;
+        }
+        if curve >= last.time {
+            return last.speed;
+        }
+        for pair in self.ramps.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            if curve < b.time {
+                let (ta, tb) = (i128::from(a.time.0), i128::from(b.time.0));
+                let (ua, ub) = (i128::from(a.speed.0), i128::from(b.speed.0));
+                let width = tb - ta;
+                let numerator = ua * width + (ub - ua) * (i128::from(curve.0) - ta);
+                // Round half up; the result lies between two valid speeds.
+                let units = (numerator * 2 + width) / (2 * width);
+                return ClipSpeed(u32::try_from(units).expect("between two valid speeds"));
+            }
+        }
+        last.speed
+    }
+    /// The ramp keys on a clock that starts at the clip's first tick: curve time minus
+    /// `phase`, for a clip `length` ticks long. Keys outside `0..=length` are dropped
+    /// and exactly interpolated keys are inserted at the cut so the curve inside the
+    /// clip is unchanged. This is what `Command::SetClipSpeed` expects (it rebuilds the
+    /// map with phase zero), so a clip trimmed or split into the middle of a ramp keeps
+    /// its curve when it is edited.
+    #[must_use]
+    pub fn local_ramps(&self, length: i64) -> Vec<SpeedPoint> {
+        let (phase, end) = (self.phase.0, self.phase.0.saturating_add(length));
+        if self
+            .ramps
+            .iter()
+            .all(|k| k.time.0 >= phase && k.time.0 <= end)
+        {
+            return self
+                .ramps
+                .iter()
+                .map(|k| SpeedPoint {
+                    time: Time(k.time.0 - phase),
+                    speed: k.speed,
+                })
+                .collect();
+        }
+        let mut keys = Vec::new();
+        if self.ramps.iter().any(|k| k.time.0 < phase)
+            && self.ramps.iter().all(|k| k.time.0 != phase)
+        {
+            keys.push(SpeedPoint {
+                time: Time(0),
+                speed: self.speed_at_curve(self.phase),
+            });
+        }
+        keys.extend(
+            self.ramps
+                .iter()
+                .filter(|k| k.time.0 >= phase && k.time.0 <= end)
+                .map(|k| SpeedPoint {
+                    time: Time(k.time.0 - phase),
+                    speed: k.speed,
+                }),
+        );
+        if self.ramps.iter().any(|k| k.time.0 > end) && self.ramps.iter().all(|k| k.time.0 != end) {
+            keys.push(SpeedPoint {
+                time: Time(length),
+                speed: self.speed_at_curve(Time(end)),
+            });
+        }
+        keys
+    }
     /// Validate the bounded arithmetic domain.
     pub fn validate(&self, duration: i64) -> Result<(), Error> {
         if self == &Self::default() {

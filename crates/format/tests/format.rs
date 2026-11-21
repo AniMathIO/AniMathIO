@@ -782,3 +782,48 @@ fn checked_in_schema_seven_project_loads_with_pitch_preservation_off() {
     assert_eq!(written["tracks"][0]["clips"]["1"]["maintain_pitch"], false);
     assert_eq!(read_json(json_bytes(&project).as_slice()).unwrap(), project);
 }
+
+#[test]
+fn schema_eight_clips_without_the_field_default_to_pitch_preservation_like_new_clips() {
+    let (project, _) = fixture(b"pitch default");
+    let mut value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    assert_eq!(value["schemaVersion"], SCHEMA_VERSION);
+    for track in value["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_object_mut().unwrap().values_mut() {
+            clip.as_object_mut().unwrap().remove("maintain_pitch");
+        }
+    }
+    let loaded = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+    assert!(
+        loaded
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .all(|clip| clip.maintain_pitch),
+        "serde default must match Clip::new"
+    );
+    assert_eq!(loaded, project);
+}
+
+#[test]
+fn schema_seven_migration_writes_pitch_off_into_every_clip_and_keeps_explicit_values() {
+    let (project, _) = fixture(b"pitch migration all clips");
+    let mut value: serde_json::Value = serde_json::from_slice(&json_bytes(&project)).unwrap();
+    value["schemaVersion"] = json!(7);
+    let mut clips = 0;
+    for track in value["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_object_mut().unwrap().values_mut() {
+            clip.as_object_mut().unwrap().remove("maintain_pitch");
+            clips += 1;
+        }
+    }
+    assert!(clips > 0);
+    let migrated = read_json(serde_json::to_vec(&value).unwrap().as_slice()).unwrap();
+    assert!(
+        migrated
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .all(|clip| !clip.maintain_pitch)
+    );
+}

@@ -60,50 +60,107 @@ fn percent_speed(percent: f64) -> ClipSpeed {
     ClipSpeed::new(units, 1_000_000).expect("clamped to the valid speed range")
 }
 
-/// Speed of `clip` at clip-local `time`: the linearly interpolated ramp (the nearest key
-/// outside the keys), or the constant speed when there are no keys.
-pub(crate) fn speed_at(clip: &Clip, time: Time) -> ClipSpeed {
+/// Ticks the clip occupies on the timeline.
+fn length(clip: &Clip) -> i64 {
+    clip.range.end.0 - clip.range.start.0
+}
+
+/// The clip-local timeline position of `key`. Keys live on the ramp's own clock, which
+/// runs `time_map.phase` ticks ahead of the clip (a head trim or a split into the middle
+/// of a ramp leaves a phase), so this is `key.time - phase` and may lie outside the clip
+/// for a key the trim cut away.
+pub(crate) fn local_time(clip: &Clip, key: &SpeedPoint) -> i64 {
+    key.time.0 - clip.time_map.phase.0
+}
+
+/// Whether `key` lies inside the clip block (edges included) and so has a handle.
+fn is_visible(clip: &Clip, key: &SpeedPoint) -> bool {
+    (0..=length(clip)).contains(&local_time(clip, key))
+}
+
+/// A vertex of the painted speed curve, clip-local. `handle` is the key's index when the
+/// vertex is a real key; interpolated vertices at the clip edges (where the curve enters
+/// or leaves a cut-off part of the ramp) have none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Vertex {
+    pub(crate) index: Option<usize>,
+    pub(crate) time: Time,
+    pub(crate) speed: ClipSpeed,
+}
+
+/// The curve vertices inside the clip, in order: every key within the clip and an
+/// interpolated vertex at each clip edge the curve crosses into a cut-off part.
+pub(crate) fn vertices(clip: &Clip) -> Vec<Vertex> {
     let keys = &clip.time_map.ramps;
-    let (Some(first), Some(last)) = (keys.first(), keys.last()) else {
-        return clip.time_map.speed;
-    };
-    if time <= first.time {
-        return first.speed;
+    let mut out = Vec::new();
+    if keys.iter().any(|k| local_time(clip, k) < 0) && keys.iter().all(|k| local_time(clip, k) != 0)
+    {
+        out.push(Vertex {
+            index: None,
+            time: Time(0),
+            speed: speed_at(clip, Time(0)),
+        });
     }
-    if time >= last.time {
-        return last.speed;
+    out.extend(
+        keys.iter()
+            .enumerate()
+            .filter(|(_, key)| is_visible(clip, key))
+            .map(|(index, key)| Vertex {
+                index: Some(index),
+                time: Time(local_time(clip, key)),
+                speed: key.speed,
+            }),
+    );
+    let end = length(clip);
+    if keys.iter().any(|k| local_time(clip, k) > end)
+        && keys.iter().all(|k| local_time(clip, k) != end)
+    {
+        out.push(Vertex {
+            index: None,
+            time: Time(end),
+            speed: speed_at(clip, Time(end)),
+        });
     }
-    for pair in keys.windows(2) {
-        let (a, b) = (&pair[0], &pair[1]);
-        if time < b.time {
-            let t = (time.0 - a.time.0) as f64 / (b.time.0 - a.time.0) as f64;
-            let percent = a.speed.percent() + (b.speed.percent() - a.speed.percent()) * t;
-            return percent_speed(percent.round());
-        }
-    }
-    last.speed
+    out
+}
+
+/// Speed of `clip` at clip-local `time`: the linearly interpolated ramp (the nearest key
+/// outside the keys), or the constant speed when there are no keys. Interpolates exactly
+/// in millionth units (one rounding to the nearest unit), so a key inserted at this
+/// speed leaves the curve as it was.
+pub(crate) fn speed_at(clip: &Clip, time: Time) -> ClipSpeed {
+    clip.time_map
+        .speed_at_curve(Time(time.0.saturating_add(clip.time_map.phase.0)))
 }
 
 /// The clip-local time range key `index` may occupy: strictly between its neighbours,
 /// at least `gap` ticks from each, and inside the clip.
 pub(crate) fn time_bounds(clip: &Clip, index: usize, gap: i64) -> (i64, i64) {
     let keys = &clip.time_map.ramps;
-    let length = clip.range.end.0 - clip.range.start.0;
     let low = index
         .checked_sub(1)
-        .map_or(0, |i| keys[i].time.0.saturating_add(gap));
-    let high = keys
-        .get(index + 1)
-        .map_or(length, |next| next.time.0.saturating_sub(gap));
+        .map_or(0, |i| local_time(clip, &keys[i]).saturating_add(gap).max(0));
+    let high = keys.get(index + 1).map_or(length(clip), |next| {
+        local_time(clip, next).saturating_sub(gap).min(length(clip))
+    });
     (low, high.max(low))
 }
 
-fn with_keys(clip: &Clip, ramps: Vec<SpeedPoint>) -> Command {
+/// One `SetClipSpeed` that gives `clip` the curve `curve` (keys on the clip's current
+/// ramp clock). The command rebuilds the clip's clock from its own start, so the keys are
+/// rebased by the phase: those outside the clip are dropped and exactly interpolated
+/// keys are put at the cut, which keeps the curve inside the clip unchanged.
+fn with_keys(clip: &Clip, curve: Vec<SpeedPoint>) -> Command {
     // Removing the last key leaves a constant clip at that key's speed.
-    let speed = match (clip.time_map.ramps.as_slice(), ramps.is_empty()) {
+    let speed = match (clip.time_map.ramps.as_slice(), curve.is_empty()) {
         ([only], true) => only.speed,
         _ => clip.time_map.speed,
     };
+    let ramps = animathio_core::ClipTimeMap {
+        ramps: curve,
+        ..clip.time_map.clone()
+    }
+    .local_ramps(length(clip));
     Command::SetClipSpeed {
         id: clip.id,
         speed,
@@ -117,10 +174,14 @@ fn with_keys(clip: &Clip, ramps: Vec<SpeedPoint>) -> Command {
 pub(crate) fn move_key(clip: &Clip, index: usize, time: Time, speed: ClipSpeed) -> Option<Command> {
     let mut ramps = clip.time_map.ramps.clone();
     let key = ramps.get_mut(index)?;
-    if key.time == time && key.speed == speed {
+    let curve_time = Time(time.0.saturating_add(clip.time_map.phase.0));
+    if key.time == curve_time && key.speed == speed {
         return None;
     }
-    *key = SpeedPoint { time, speed };
+    *key = SpeedPoint {
+        time: curve_time,
+        speed,
+    };
     Some(with_keys(clip, ramps))
 }
 
@@ -128,21 +189,21 @@ pub(crate) fn move_key(clip: &Clip, index: usize, time: Time, speed: ClipSpeed) 
 /// curve does not change until the new handle is dragged. `None` when a key is already
 /// within `gap` ticks, the time is outside the clip or the clip is at the key limit.
 pub(crate) fn add_key(clip: &Clip, time: Time, gap: i64) -> Option<Command> {
-    let length = clip.range.end.0 - clip.range.start.0;
     let keys = &clip.time_map.ramps;
+    let curve_time = Time(time.0.saturating_add(clip.time_map.phase.0));
     if time.0 < 0
-        || time.0 > length
+        || time.0 > length(clip)
         || keys.len() >= MAX_KEYS
-        || keys.iter().any(|k| (k.time.0 - time.0).abs() < gap)
+        || keys.iter().any(|k| (k.time.0 - curve_time.0).abs() < gap)
     {
         return None;
     }
     let mut ramps = keys.clone();
-    let at = ramps.partition_point(|k| k.time < time);
+    let at = ramps.partition_point(|k| k.time < curve_time);
     ramps.insert(
         at,
         SpeedPoint {
-            time,
+            time: curve_time,
             speed: speed_at(clip, time),
         },
     );
@@ -312,6 +373,81 @@ mod tests {
                 time: Time(1500),
                 speed: speed(100)
             }]
+        );
+    }
+
+    #[test]
+    fn keys_of_a_head_trimmed_clip_are_handled_in_curve_time() {
+        let (mut project, id) = project_with_ramp(&[(1000, 50), (3000, 150)]);
+        let full = clip(&project, id);
+        let cut = Time(1500);
+        Command::TrimClip {
+            id,
+            range: TimeRange::new(cut, full.range.end).unwrap(),
+            // Retimed clips take their offset delta in timeline ticks.
+            source_offset: Time(full.source_offset.0 + cut.0),
+        }
+        .apply(&mut project)
+        .unwrap();
+        let trimmed = clip(&project, id);
+        assert_eq!(trimmed.time_map.phase, cut);
+        let length = trimmed.range.end.0 - trimmed.range.start.0;
+        // The key at curve 1000 is cut away, the one at 3000 is local 1500.
+        assert_eq!(local_time(&trimmed, &trimmed.time_map.ramps[0]), -500);
+        assert_eq!(local_time(&trimmed, &trimmed.time_map.ramps[1]), 1500);
+        let vertices = vertices(&trimmed);
+        assert_eq!(
+            vertices
+                .iter()
+                .map(|v| (v.index, v.time.0))
+                .collect::<Vec<_>>(),
+            [(None, 0), (Some(1), 1500)]
+        );
+        // The curve at the clip's first tick is the ramp at curve 1500: 50% + 100% * 1/4.
+        assert_eq!(speed_at(&trimmed, Time(0)), speed(75));
+        assert_eq!(vertices[0].speed, speed(75));
+        assert_eq!(time_bounds(&trimmed, 1, 10), (0, length));
+        // Nudging the speed of the visible key keeps its local time, and the clip's first
+        // tick plays the ramp as it now is at curve 1500 (50% to 300% between 1000 and
+        // 3000: 112.5%); the rebuilt clock starts at zero.
+        let command = move_key(&trimmed, 1, Time(1500), speed(300)).unwrap();
+        command.apply(&mut project).unwrap();
+        let nudged = clip(&project, id);
+        assert_eq!(nudged.time_map.phase, Time(0));
+        assert_eq!(
+            nudged.time_map.ramps,
+            [
+                SpeedPoint {
+                    time: Time(0),
+                    speed: ClipSpeed::from_millionths(1_125_000).unwrap()
+                },
+                SpeedPoint {
+                    time: Time(1500),
+                    speed: speed(300)
+                }
+            ]
+        );
+        // No-op moves are recognised in curve time as well.
+        assert!(move_key(&trimmed, 1, Time(1500), trimmed.time_map.ramps[1].speed).is_none());
+    }
+
+    #[test]
+    fn interpolation_is_exact_so_an_added_key_keeps_the_curve() {
+        let (mut project, id) = project_with_ramp(&[(1000, 50), (3000, 150)]);
+        let before = clip(&project, id);
+        // 50% + 100% * 1/3 is not a whole percent: the key takes the exact millionths.
+        let at = Time(1000 + 2000 / 3);
+        assert_ne!(speed_at(&before, at).millionths() % 10_000, 0);
+        add_key(&before, at, 10)
+            .unwrap()
+            .apply(&mut project)
+            .unwrap();
+        let after = clip(&project, id);
+        assert!(
+            (after.range.end.0 - before.range.end.0).abs() <= 1,
+            "duration {} vs {}",
+            after.range.end.0,
+            before.range.end.0
         );
     }
 }

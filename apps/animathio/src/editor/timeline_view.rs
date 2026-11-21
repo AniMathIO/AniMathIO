@@ -172,9 +172,6 @@ impl Editor {
         // Explicit edge tools take priority over the selected clip's fade and
         // keyframe handles, including at its upper and lower corners.
         let edge_tool = matches!(self.tool, Tool::RateStretch | Tool::Rolling);
-        if !edge_tool && self.ramp_press(&layout, x, y, event.modifiers.alt, cx) {
-            return;
-        }
         if !edge_tool && let Some((clip_id, edge)) = self.hit_fade_handle(&layout, x, y) {
             self.select_only(clip_id, cx);
             self.selected_field = None;
@@ -207,9 +204,16 @@ impl Editor {
             cx.notify();
             return;
         }
-        self.selected_keyframe = None;
         let secondary = event.modifiers.secondary(cx);
         let extend = secondary || event.modifiers.shift;
+        // Speed handles come after the trim edges, fades and keyframes: a press within a
+        // trim edge zone always trims, so a key drawn at a clip edge never steals it.
+        let on_trim_edge =
+            !extend && timeline::hit_trim_edge(&layout, &self.project, x, y).is_some();
+        if !edge_tool && !on_trim_edge && self.ramp_press(&layout, x, y, event.modifiers.alt, cx) {
+            return;
+        }
+        self.selected_keyframe = None;
         if !extend
             && let Some((hit, edge)) = timeline::hit_trim_edge(&layout, &self.project, x, y)
             && let Some(clip) = self.find_clip(hit.clip).cloned()
@@ -993,7 +997,8 @@ impl Editor {
                         }
                     }
                 }
-                let ramp_keys = if single && self.selected == Some(clip.id) {
+                let ramp_lane = single && self.selected == Some(clip.id) && !clip.time_map.hold;
+                let ramp_keys = if ramp_lane {
                     self.ramp_paints(clip, start)
                 } else {
                     Vec::new()
@@ -1087,6 +1092,7 @@ impl Editor {
                     icon: icons::kind_icon(&clip.kind),
                     keyframes,
                     ramp_keys,
+                    ramp_lane,
                     waveform,
                     source_offset,
                     fade_levels: [FadeEdge::In, FadeEdge::Out].map(|edge| {

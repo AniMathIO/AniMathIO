@@ -963,9 +963,13 @@ impl Editor {
             cx,
         );
         let maintain_pitch = std::rc::Rc::new(std::cell::Cell::new(clip.maintain_pitch));
-        let ramp_text = clip
+        // Keys on the clip's own clock (a clip cut into the middle of a ramp keeps the
+        // curve's clock running ahead of it): the Apply command rebuilds the clock from
+        // the clip start, so show and compare them rebased.
+        let local_ramps = clip
             .time_map
-            .ramps
+            .local_ramps(clip.range.end.0 - clip.range.start.0);
+        let ramp_text = local_ramps
             .iter()
             .map(|p| {
                 format!(
@@ -977,7 +981,7 @@ impl Editor {
             .collect::<Vec<_>>()
             .join(", ");
         let ramps = input(ramp_text.clone(), window, cx);
-        let original_ramps = clip.time_map.ramps.clone();
+        let original_ramps = local_ramps;
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let (percent, duration, mode, reverse, ripple, ramps) = (
@@ -1061,7 +1065,7 @@ impl Editor {
                     let mut commands = Vec::new();
                     if speed != clip.time_map.speed
                         || reverse != clip.time_map.reverse
-                        || keys != clip.time_map.ramps
+                        || keys != original_ramps
                         || ripple
                     {
                         commands.push(Command::SetClipSpeed {

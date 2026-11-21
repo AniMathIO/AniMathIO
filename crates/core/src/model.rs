@@ -311,8 +311,9 @@ pub struct Clip {
     /// Exact timeline-to-source playback mapping.
     #[serde(default)]
     pub time_map: crate::ClipTimeMap,
-    /// Preserve audio pitch while retiming. Missing fields retain legacy varispeed.
-    #[serde(default)]
+    /// Preserve audio pitch while retiming. On for new clips; the schema-7 to 8
+    /// migration writes `false` into older files so they keep their varispeed sound.
+    #[serde(default = "default_maintain_pitch")]
     pub maintain_pitch: bool,
     /// Base transform.
     pub transform: Transform,
@@ -332,6 +333,11 @@ pub struct Clip {
     /// Typed curves in clip-local time, sorted by unique target.
     pub animations: Vec<Animation>,
 }
+/// Serde default for [`Clip::maintain_pitch`], matching [`Clip::new`].
+fn default_maintain_pitch() -> bool {
+    true
+}
+
 impl Clip {
     /// Construct a draft clip with an identity transform and no automation. Image and
     /// video clips get [`Fit::Contain`]; every other kind ignores the fit mode.
@@ -849,9 +855,14 @@ pub fn evaluate(project: &Project, time: Time) -> Scene {
 const MAX_VIDEO_TAPS: i64 = 16;
 
 /// Source times that filter one output frame of a clip played faster than the project
-/// frame rate: `round(speed)` times spaced evenly through the output frame's interval,
-/// so each covers one output-frame-sized share of the source span (a box filter).
+/// frame rate: `round(speed)` times spaced evenly through the interval one output frame
+/// wide centred on the frame's own time, so each covers one output-frame-sized share of
+/// the source span (a box filter) and the average is centred where the single point
+/// sample at 1x lies (the picture does not jump when the tap count goes from 1 to 2).
 /// Empty (a point sample) at or near 1x, for slow motion, holds, stills and audio.
+/// The count comes from the speed against the project frame rate, not the source's own
+/// frame rate (the model does not hold one); the renderer weights taps that land on the
+/// same decoded frame once.
 fn video_taps(project: &Project, clip: &Clip, local: Time) -> Vec<Time> {
     if !matches!(clip.kind, ClipKind::Video(_))
         || clip.time_map.hold
@@ -874,7 +885,7 @@ fn video_taps(project: &Project, clip: &Clip, local: Time) -> Vec<Time> {
         return Vec::new();
     }
     (0..count)
-        .map(|i| Time(at(dt * (2 * i + 1) / (2 * count)).0.max(0)))
+        .map(|i| Time(at(dt * (2 * i + 1 - count) / (2 * count)).0.max(0)))
         .collect()
 }
 

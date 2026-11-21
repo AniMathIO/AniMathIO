@@ -245,7 +245,7 @@ pub(crate) fn import_with_report(
             Command::SetTrackGain { id: track_id, gain }.apply(&mut project)?;
         }
         let clip = Clip {
-            maintain_pitch: false,
+            maintain_pitch: true,
             link_group: None,
             id: clip_id,
             kind,

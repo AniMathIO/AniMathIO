@@ -131,8 +131,7 @@ fn decode_json(
             value["schemaVersion"] = Value::from(7);
             value // serde defaults supply the identity source clock.
         } else if version == 7 {
-            value["schemaVersion"] = Value::from(8);
-            value // Missing maintain_pitch defaults to false, preserving legacy sound.
+            legacy::migrate_pitch(value)
         } else {
             step(version, value)?
         };

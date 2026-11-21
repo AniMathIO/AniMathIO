@@ -433,6 +433,8 @@ struct RampKeyPaint {
     speed: animathio_core::ClipSpeed,
     /// The key being dragged.
     active: bool,
+    /// A real key with a handle; `false` for a curve vertex interpolated at a clip edge.
+    handle: bool,
 }
 
 struct ClipPaint {
@@ -451,6 +453,8 @@ struct ClipPaint {
     keyframes: Vec<KeyframePaint>,
     /// Speed-ramp handles, for the selected clip when it has speed keys.
     ramp_keys: Vec<RampKeyPaint>,
+    /// The clip is the one selected clip, so the speed lane (100% guide) is drawn.
+    ramp_lane: bool,
     /// Downsampled peaks for audio clips, once the asset is decoded.
     waveform: Option<Arc<Waveform>>,
     thumbnails: Vec<Option<timeline_thumbnails::Thumbnail>>,

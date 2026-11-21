@@ -800,7 +800,7 @@ fn paint_speed_ramp(
     let Some(lane) = crate::speed_ramp::lane(f32::from(y0), f32::from(y1)) else {
         return;
     };
-    if clip.ramp_keys.is_empty() || x1 - x0 < px(24.) {
+    if !clip.ramp_lane || x1 - x0 < px(24.) {
         return;
     }
     let guide_y = px(lane.y(animathio_core::ClipSpeed::default()));
@@ -811,6 +811,9 @@ fn paint_speed_ramp(
         ),
         style::hexa(colors::TEXT, 0.18),
     ));
+    if clip.ramp_keys.is_empty() {
+        return;
+    }
     let key_x =
         |time: Time| (bounds.origin.x + px(timeline::time_to_x(layout, time))).clamp(x0, x1);
     let mut curve = gpui::PathBuilder::stroke(px(1.5));
@@ -825,7 +828,7 @@ fn paint_speed_ramp(
     if let Ok(path) = curve.build() {
         window.paint_path(path, style::hexa(colors::TEXT, 0.85));
     }
-    for key in &clip.ramp_keys {
+    for key in clip.ramp_keys.iter().filter(|key| key.handle) {
         let kx = bounds.origin.x + px(timeline::time_to_x(layout, key.time));
         if kx < x0 || kx > x1 {
             continue;
