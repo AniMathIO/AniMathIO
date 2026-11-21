@@ -551,8 +551,9 @@ library; user cards have Delete. The CLI keeps `templates list` and
 `create_from_template`. Template card hover lifts use the shared surface tokens.
 
 The launcher, editor title bar and application icons use the restored original
-AniMathIO logo, preserved in `apps/animathio/assets/brand.svg`. UI actions keep
-the violet-to-cyan accent. See [the design guide](design.md).
+AniMathIO logo, preserved in `apps/animathio/assets/brand.svg`. UI actions use the
+logo's cyan (one accent; the 2.2 violet-to-cyan gradient is retired). See [the design
+guide](design.md).
 
 [Keyboard shortcuts](keyboard-shortcuts.md) — Premiere Pro defaults.
 

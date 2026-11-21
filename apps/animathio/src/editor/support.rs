@@ -1,7 +1,11 @@
 //! Shared pure helpers, drawing and resource adapters.
 
+// Paint helpers still name 2.2 tokens (the gradient start/end, the yellow snap
+// line) until the UI-rework timeline PR (4) retires them (see docs/design.md).
+#![allow(deprecated)]
+
 use super::*;
-use crate::style::{self, color as colors};
+use crate::style::{self, color as colors, tokens::TextRole as _};
 use std::collections::HashMap;
 
 /// Paint-ready waveform paths, shared by snapshots; bounded independently of PCM.
@@ -15,9 +19,10 @@ pub(super) fn icon_button(
     tooltip: impl Into<SharedString>,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Button {
+    // Panels and toolbars: `Size::Small` (the ROW_SM height, docs/design.md).
     let button = Button::new(id)
         .ghost()
-        .compact()
+        .small()
         .icon(icon)
         .on_click(listener);
     let binding: Option<(Box<dyn Action>, &str)> = match id {
@@ -51,8 +56,10 @@ pub(super) fn icon_button(
     }
 }
 
-/// Compact toggle pill for track headers: muted icon when off, tinted with
-/// `tint` (a style token) when active.
+/// Compact toggle pill for track headers (mute/solo/lock): muted icon when
+/// off, tinted with `tint` (a style token) at the subtle/edge alpha steps when
+/// active. Thin wrapper over `style::icon_toggle` keeping the (id, instance)
+/// id form its callers already use (PR 4 switches them over).
 pub(super) fn header_pill(
     id: (&'static str, u64),
     icon: IconName,
@@ -61,39 +68,14 @@ pub(super) fn header_pill(
     tint: u32,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    let tint_color = style::hex(tint);
-    let scale = style::ui_scale();
-    div()
-        .id(id)
-        .debug_selector(move || format!("{}-{}", id.0, id.1))
-        .w(px(22. * scale))
-        .h(px(20. * scale))
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(5.))
-        .cursor_pointer()
-        .border_1()
-        .border_color(if active {
-            style::hexa(tint, 0.55)
-        } else {
-            gpui::transparent_black()
-        })
-        .bg(if active {
-            style::hexa(tint, 0.20)
-        } else {
-            gpui::transparent_black()
-        })
-        .text_color(if active {
-            tint_color
-        } else {
-            style::hex(colors::TEXT_SECONDARY)
-        })
-        .hover(|s| s.bg(style::hex(colors::HOVER)))
-        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(tooltip).build(window, cx))
-        .on_click(listener)
-        .child(icons::icon(icon).xsmall())
+    style::icon_toggle(
+        format!("{}-{}", id.0, id.1),
+        icon,
+        tooltip,
+        active,
+        tint,
+        listener,
+    )
 }
 
 /// Which half of the timeline a paint call draws. The ruler and marker lane stay fixed
@@ -1303,20 +1285,21 @@ pub(super) fn context_item(
     shortcut: Option<&dyn Action>,
     listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     window: &Window,
-    cx: &mut Context<Editor>,
+    _cx: &mut Context<Editor>,
 ) -> Stateful<Div> {
     let binding = shortcut.and_then(|action| {
         gpui_component::kbd::Kbd::binding_for_action(action, Some("Timeline"), window)
     });
     div()
         .px_2()
-        .py_1()
+        .h(crate::style::size::ROW)
         .flex()
         .flex_row()
         .items_center()
         .gap_2()
         .cursor_pointer()
-        .hover(|this| this.bg(cx.theme().list_hover))
+        .text_role(crate::style::Role::Body)
+        .hover(|this| this.bg(style::hex(colors::HOVER)))
         .child(icons::icon(icon).small())
         .child(div().flex_1().child(label.to_owned()))
         .children(binding.map(|kbd| kbd.appearance(false)))
@@ -1325,14 +1308,10 @@ pub(super) fn context_item(
 }
 
 /// Dim placeholder text used for empty panels and unloaded viewports.
-pub(super) fn empty_state(label: &'static str, cx: &App) -> Div {
-    div()
-        .w_full()
-        .py_4()
-        .flex()
-        .justify_center()
-        .text_color(cx.theme().muted_foreground)
-        .child(label)
+/// Delegates to the shared `style::empty_state` (no icon, no action); PR 2
+/// switches its callers to the full form.
+pub(super) fn empty_state(label: &'static str, _cx: &App) -> Div {
+    crate::style::empty_state(None, label, None)
 }
 
 /// Paint a subtle checkerboard behind transparent viewer regions.

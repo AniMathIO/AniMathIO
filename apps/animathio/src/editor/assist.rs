@@ -9,6 +9,8 @@
 //! when the panel is built, because that can raise a keyring unlock prompt. The result replaces the formula field, so the live
 //! LaTeX preview validates it and the user edits it before **Add** inserts it as one undoable
 //! command, the same path as typing LaTeX. All provider logic is in `animathio-assist`.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

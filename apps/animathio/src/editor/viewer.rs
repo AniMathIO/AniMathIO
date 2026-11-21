@@ -1,4 +1,6 @@
 //! Canvas presentation and command-based transform gestures.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use crate::style::{color, hex, hexa};
 

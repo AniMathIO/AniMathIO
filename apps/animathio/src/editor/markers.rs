@@ -1,6 +1,8 @@
 //! Timeline markers and beat/marker sync: adding, jumping, editing and dragging markers,
 //! plus a panel that lists them and runs beat detection, "markers at beats" and cut sync.
 //! Every edit is one `Command` (or one `Command::Batch`), so each is a single undo step.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+
 use super::*;
 use crate::style;
 use animathio_control::{

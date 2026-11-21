@@ -8,6 +8,7 @@
 //! The widgets are stateful entities, so they live in a [`FieldPool`] keyed by
 //! `clip id + parameter`. A control is created the first time it is rendered and
 //! re-synchronised from the project on every frame it is not being edited.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{

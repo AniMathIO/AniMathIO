@@ -2553,6 +2553,18 @@ fn screenshot_panels_use_real_analysis(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn select_capture_hooks_pick_the_first_clip_of_a_kind(cx: &mut TestAppContext) {
+    let (project, assets) = voice_and_music();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, window, cx| editor.open_screenshot_panel("select-audio", window, cx));
+    ui.read(|editor| assert_eq!(editor.selected, Some(VOICE_CLIP)));
+    // No LaTeX clip in this project: the hook clears the selection, it does not
+    // fall back to another kind.
+    ui.update(|editor, window, cx| editor.open_screenshot_panel("select-latex", window, cx));
+    ui.read(|editor| assert_eq!(editor.selected, None));
+}
+
+#[gpui::test]
 fn maintain_pitch_inspector_handler_undoes(cx: &mut TestAppContext) {
     let (project, assets) = voice_pair();
     let mut ui = Ui::open(cx, project, assets);

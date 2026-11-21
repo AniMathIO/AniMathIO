@@ -1,5 +1,6 @@
 //! Generate subtitles: dialog, job queue slot, progress popover and control calls.
 //! Mirrors the export queue: a status-bar button opens a popover with progress and cancel.
+#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style;

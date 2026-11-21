@@ -91,6 +91,12 @@ playback clock, CPU preview, built plugins or no plugins, private settings/cache
 `editor/ui_tests` mounts the real editor in gpui's test window and exercises actions and
 shared panel handlers, asserting project and view state without devices or pixel snapshots.
 
+`apps/animathio/src/style/` holds the UI design tokens (`tokens.rs`: colour, radius, row
+height, type roles, alpha steps, dialog widths) and the shared components (`components.rs`:
+buttons, panel header, segmented control, tool panel, form rows, empty state, chips), as
+specified in [design.md](design.md). The `style_guard` test fails a source file that gains
+ad-hoc colour or size literals beyond its recorded baseline.
+
 
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
