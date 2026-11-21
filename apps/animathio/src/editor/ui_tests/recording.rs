@@ -7,6 +7,7 @@ use std::time::Duration;
 use animathio_audio::{SymphoniaSource, SyntheticCapture, SyntheticDevice};
 use animathio_core::{ClipKind, TICKS_PER_SECOND};
 use gpui::TestAppContext;
+use gpui_component::WindowExt;
 
 use super::fixtures::*;
 use super::{Editor, Time, Ui, actions, test_env};
@@ -112,9 +113,20 @@ fn record_meter_stop_adds_one_undoable_asset_and_clip(cx: &mut TestAppContext) {
     // Nothing touches the project until Stop.
     ui.read(|e| assert_eq!(e.project, before));
 
-    ui.update(|e, _, cx| e.stop_recording(cx));
-    assert_eq!(capture.live_streams(), 0, "Stop closes the device");
+    ui.update(|e, _, cx| {
+        e.stop_recording(cx);
+        // The encode, hash and decode check run off thread: nothing is registered yet, the
+        // card is in the "Saving recording…" state until the background task lands.
+        let panel = e.record_panel.as_ref().unwrap();
+        assert!(panel.saving.is_some() && panel.message.is_none());
+        assert_eq!(wav_assets(e), 0, "the WAV is not encoded on the UI thread");
+        assert_eq!(capture.live_streams(), 0, "Stop closes the device");
+    });
+    ui.settle();
+    assert_eq!(capture.live_streams(), 0);
     ui.read(|e| {
+        let panel = e.record_panel.as_ref().unwrap();
+        assert!(panel.saving.is_none(), "the save landed");
         assert_eq!(e.assets.len(), assets_before + 1);
         let (id, asset) = e
             .project
@@ -173,6 +185,7 @@ fn the_library_only_option_registers_just_the_asset(cx: &mut TestAppContext) {
     ui.update(|e, _, cx| e.start_recording(cx));
     ui.advance_clock(TICK);
     ui.update(|e, _, cx| e.stop_recording(cx));
+    ui.settle();
     ui.read(|e| {
         assert_eq!(wav_assets(e), 1);
         assert_eq!(audio_clips(e).len(), clips_before);
@@ -189,6 +202,7 @@ fn the_chosen_device_is_the_one_recorded(cx: &mut TestAppContext) {
     ui.update(|e, _, cx| e.start_recording(cx));
     ui.advance_clock(TICK);
     ui.update(|e, _, cx| e.stop_recording(cx));
+    ui.settle();
     ui.read(|e| {
         let (id, _) = e
             .project
@@ -236,6 +250,7 @@ fn a_device_that_stops_mid_take_keeps_the_audio_it_delivered(cx: &mut TestAppCon
     for _ in 0..4 {
         ui.advance_clock(TICK);
     }
+    ui.settle();
     ui.read(|e| {
         let panel = e.record_panel.as_ref().unwrap();
         assert!(!panel.is_recording(), "the failed take ended itself");
@@ -262,6 +277,146 @@ fn starting_a_new_project_cancels_the_take(cx: &mut TestAppContext) {
     ui.read(|e| {
         assert!(e.record_panel.is_none());
         assert_eq!(wav_assets(e), 0);
+    });
+}
+
+#[gpui::test]
+fn the_clip_lands_where_recording_started_not_where_the_playhead_moved(cx: &mut TestAppContext) {
+    let capture = desk_and_usb();
+    let mut ui = open_recorder(cx, &capture);
+    ui.update(|e, _, cx| e.seek_to(Time(TICKS_PER_SECOND), cx));
+    ui.update(|e, _, cx| e.start_recording(cx));
+    ui.advance_clock(TICK);
+    // The playhead moves during the take (playback, a click): the recorded clip stays put.
+    ui.update(|e, _, cx| e.seek_to(Time(5 * TICKS_PER_SECOND), cx));
+    ui.update(|e, _, cx| e.stop_recording(cx));
+    ui.settle();
+    ui.read(|e| {
+        let clips = audio_clips(e);
+        assert_eq!(clips.len(), 1);
+        assert_eq!(
+            clips[0].1,
+            Time(TICKS_PER_SECOND),
+            "where Record was pressed"
+        );
+        // One 0.1 s chunk from the tick poll plus the final one at Stop.
+        assert_eq!(clips[0].2, Time(TICKS_PER_SECOND + TICKS_PER_SECOND / 5));
+    });
+}
+
+#[gpui::test]
+fn a_stalled_interface_warns_about_dropped_audio(cx: &mut TestAppContext) {
+    // The device's buffer ran full while the app was busy: the stream reports dropped frames.
+    let capture = SyntheticCapture::new(vec![
+        SyntheticDevice::tone("Lossy mic", 48_000, 1, 2.0, 0.5, 4800).dropping(3),
+    ]);
+    let mut ui = open_recorder(cx, &capture);
+    ui.update(|e, _, cx| e.start_recording(cx));
+    ui.read(|e| {
+        let panel = e.record_panel.as_ref().unwrap();
+        assert_eq!(panel.dropped, 0);
+    });
+    assert!(ui.cx.debug_bounds("record-dropped").is_none());
+    ui.advance_clock(TICK);
+    ui.read(|e| {
+        let panel = e.record_panel.as_ref().unwrap();
+        assert_eq!(
+            panel.dropped, 3,
+            "the stream's dropped frames surface in the panel"
+        );
+    });
+    assert!(
+        ui.cx.debug_bounds("record-dropped").is_some(),
+        "the card warns about the lost audio"
+    );
+    ui.update(|e, _, cx| e.cancel_recording(cx));
+    ui.read(|e| assert_eq!(wav_assets(e), 0));
+}
+
+#[gpui::test]
+fn a_take_in_progress_asks_before_replacing_the_project(cx: &mut TestAppContext) {
+    let capture = desk_and_usb();
+    let mut ui = open_recorder(cx, &capture);
+    ui.update(|e, _, cx| e.start_recording(cx));
+    ui.advance_clock(TICK);
+    assert_eq!(capture.live_streams(), 1);
+    // The project is clean, but the take would be lost: New asks first.
+    ui.dispatch(actions::NewProject);
+    assert!(
+        ui.cx.update(WindowExt::has_active_dialog),
+        "a live take asks before the project is replaced"
+    );
+    ui.read(|e| {
+        assert!(e.record_panel.as_ref().unwrap().is_recording());
+        assert!(!e.dirty, "the project is still the clean one");
+        assert!(!e.project.tracks().is_empty(), "the take did not reset yet");
+    });
+    // Confirming discards the take and resets, like the unsaved-changes path.
+    ui.press("enter");
+    assert_eq!(
+        capture.live_streams(),
+        0,
+        "the device closed with the project"
+    );
+    ui.read(|e| {
+        assert!(e.record_panel.is_none());
+        assert_eq!(wav_assets(e), 0);
+    });
+}
+
+#[gpui::test]
+fn a_save_for_a_replaced_project_never_registers_the_wrong_take(cx: &mut TestAppContext) {
+    let capture = desk_and_usb();
+    let mut ui = open_recorder(cx, &capture);
+    ui.update(|e, _, cx| e.start_recording(cx));
+    ui.advance_clock(TICK);
+    ui.update(|e, window, cx| {
+        // Stop: the first take is saving off thread. It still counts as work in progress, so
+        // New, Open and closing the window ask before dropping it.
+        e.stop_recording(cx);
+        assert!(e.take_in_progress());
+        assert!(e.record_panel.as_ref().unwrap().saving.is_some());
+        // The project is replaced before the save lands (a new project drops the panel) and
+        // a second take is started and stopped in the new session.
+        e.record_panel = None;
+        e.open_recorder(window, cx);
+        e.start_recording(cx);
+        e.stop_recording(cx);
+        assert!(e.record_panel.as_ref().unwrap().saving.is_some());
+    });
+    ui.settle();
+    ui.read(|e| {
+        assert!(e.record_panel.as_ref().unwrap().saving.is_none());
+        assert_eq!(
+            wav_assets(e),
+            1,
+            "the late save of the first take is dropped"
+        );
+        let clips = audio_clips(e);
+        assert_eq!(clips.len(), 1);
+        // The second take polls once, at Stop: 0.1 s, not the first take's 0.2 s.
+        assert_eq!(clips[0].2, Time(clips[0].1.0 + TICKS_PER_SECOND / 10));
+    });
+}
+
+#[gpui::test]
+fn a_take_that_cannot_be_placed_leaves_nothing_behind(cx: &mut TestAppContext) {
+    let capture = desk_and_usb();
+    let mut ui = open_recorder(cx, &capture);
+    let assets_before = ui.read(|e| e.assets.len());
+    let pool_before = ui.read(|e| e.pool.len());
+    ui.update(|e, _, cx| e.start_recording(cx));
+    ui.advance_clock(TICK);
+    // A position at the end of time: the clip would run past the supported timeline.
+    ui.update(|e, _, _| e.record_panel.as_mut().unwrap().position = Time(i64::MAX - 1));
+    ui.update(|e, _, cx| e.stop_recording(cx));
+    ui.settle();
+    ui.read(|e| {
+        assert!(e.last_error.is_some(), "the failure is reported");
+        assert_eq!(e.assets.len(), assets_before, "no orphan asset bytes");
+        assert_eq!(e.pool.len(), pool_before, "no orphan pool entry");
+        assert_eq!(wav_assets(e), 0);
+        assert!(e.record_panel.as_ref().unwrap().saving.is_none());
     });
 }
 

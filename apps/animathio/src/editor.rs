@@ -1091,17 +1091,17 @@ impl Editor {
             }
         })
         .detach();
-        // A window-manager close asks before dropping unsaved work.
+        // A window-manager close asks before dropping unsaved work or a live recording.
         let close_view = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             close_view
                 .update(cx, |this, cx| {
                     this.window_tracker.observe_window(window, cx);
                     this.window_tracker.persist();
-                    if this.dirty {
+                    if this.dirty || this.take_in_progress() {
                         this.replace_project(ReplaceProject::CloseWindow, window, cx);
                     }
-                    !this.dirty
+                    !this.dirty && !this.take_in_progress()
                 })
                 .unwrap_or(true)
         });
