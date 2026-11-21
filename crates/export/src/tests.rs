@@ -1092,7 +1092,27 @@ fn webm_export_decodes_cleanly_with_libvpx_and_libopus_when_ffmpeg_is_installed(
         .output()
         .unwrap();
     assert!(decode.status.success());
-    if !decode.stderr.is_empty() {
+    let stderr = String::from_utf8_lossy(&decode.stderr);
+    // FFmpeg 8.0 (only that series; fixed upstream in 618fc15e65f5, first released in 9.1)
+    // prints exactly one spurious "[opus @ ..] Error parsing Opus packet header." when its
+    // Matroska demuxer flushes the Opus parser with a zero-length buffer at EOF
+    // (PARSER_FLAG_COMPLETE_FRAMES, FFmpeg ticket #20954). It prints the line for its own
+    // libopus-encoded WebM too, and the stream stats still show every packet read and
+    // decoded, so on 8.0.x that single line says nothing about our file. Anything else — or
+    // the same line on any other ffmpeg — still fails: a genuinely broken packet makes the
+    // parser log the message again ("Last message repeated N times") or the decoder log
+    // "Error parsing the packet header.", so the tolerance cannot hide real corruption.
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    let ff_8_0 = String::from_utf8_lossy(&version.stdout)
+        .split_whitespace()
+        .skip_while(|w| *w != "version")
+        .nth(1)
+        .is_some_and(|v| v.starts_with("8.0"));
+    let known_spurious_flush = ff_8_0
+        && lines.len() == 1
+        && lines[0].contains("[opus @ ")
+        && lines[0].contains("Error parsing Opus packet header.");
+    if !stderr.is_empty() && !known_spurious_flush {
         // Name the offending packets: index, timestamp, size and the first bytes (the Opus TOC).
         let mut demuxer = filmcraft_matroska::Demuxer::from_slice(&bytes).unwrap();
         let mut packets = Vec::new();
@@ -1114,10 +1134,6 @@ fn webm_export_decodes_cleanly_with_libvpx_and_libopus_when_ffmpeg_is_installed(
                 index += 1;
             }
         }
-        panic!(
-            "{}\naudio packets:\n{}",
-            String::from_utf8_lossy(&decode.stderr),
-            packets.join("\n")
-        );
+        panic!("{}\naudio packets:\n{}", stderr, packets.join("\n"));
     }
 }
