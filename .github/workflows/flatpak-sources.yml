@@ -1,0 +1,86 @@
+name: Flatpak sources
+
+# Keeps packaging/flatpak/cargo-sources.json in step with the lockfiles on bot
+# branches. ci.yml fails any PR whose lockfiles and that file disagree
+# (scripts/check-flatpak-sources.py), which would otherwise block every
+# Renovate lockfile PR (and its auto-merge). This workflow regenerates the file
+# with the pinned generator and pushes a github-actions[bot] commit.
+#
+# Only same-repository branches run: fork PRs never get a write token and
+# their branch names are never trusted. A push with the default GITHUB_TOKEN
+# does not start other workflows, so when the token is not a PAT the job
+# dispatches ci.yml on the branch itself (workflow_dispatch is exempt from that
+# rule), which reports the required `check` contexts on the new head commit.
+# With RELEASE_PLZ_TOKEN set the push triggers CI normally and no dispatch is
+# needed. Re-runs find no diff and skip, so the bot commit cannot loop.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/Cargo.lock"
+      - "packaging/flatpak/**"
+      - "scripts/check-flatpak-sources.py"
+      - ".github/workflows/flatpak-sources.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flatpak-sources-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    name: Regenerate cargo-sources.json
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.head_ref, 'renovate/') || startsWith(github.head_ref, 'release-plz-'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the regeneration commit to the PR branch
+      actions: write # dispatch ci.yml when the push used GITHUB_TOKEN
+    env:
+      PR_BRANCH: ${{ github.head_ref }}
+      GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+      HAS_PAT: ${{ secrets.RELEASE_PLZ_TOKEN != '' }}
+    steps:
+      - name: Checkout the PR branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Skip when already in sync
+        id: check
+        run: |
+          if python3 scripts/check-flatpak-sources.py; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Versions pinned as in docs/flatpak.md; tomlkit only parses the lockfiles.
+      - name: Regenerate cargo-sources.json
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet flatpak-cargo-generator==0.1.5 tomlkit==0.13.2
+          "$RUNNER_TEMP/venv/bin/python" packaging/flatpak/generate-sources.py
+          python3 scripts/check-flatpak-sources.py
+      - name: Commit and push
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          set -euo pipefail
+          git check-ref-format --branch "$PR_BRANCH" >/dev/null
+          if git diff --quiet -- packaging/flatpak/cargo-sources.json; then
+            echo "cargo-sources.json unchanged after regeneration"
+            exit 0
+          fi
+          git add -- packaging/flatpak/cargo-sources.json
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'chore(package): regenerate Flatpak cargo sources'
+          git push origin "HEAD:refs/heads/$PR_BRANCH"
+          if [[ "$HAS_PAT" != true ]]; then
+            # GITHUB_TOKEN pushes start no workflows: run CI on the new head.
+            gh workflow run ci.yml --ref "$PR_BRANCH"
+          fi

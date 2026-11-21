@@ -36,7 +36,7 @@ registry crate in those lockfiles with `cargo-sources.json` by name, version and
 checksum, and also flags crates no lockfile references any more. The `Flatpak cargo
 sources` step of the Rust CI workflow runs it on every pull request and push that is
 not docs-only, so a stale file fails there with the regeneration command rather
-than at the next Flatpak build. The source directory is the current
+than at the next Flatpak build. On Renovate and release-plz pull requests `.github/workflows/flatpak-sources.yml` regenerates the file automatically and pushes a bot commit. The source directory is the current
 checkout; Flathub submission must replace it with a pinned release source.
 
 The build installs both binaries and eight plugin bundles under

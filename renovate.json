@@ -5,6 +5,7 @@
   "automerge": false,
   "automergeType": "pr",
   "platformAutomerge": true,
+  "gitIgnoredAuthors": ["41898282+github-actions[bot]@users.noreply.github.com"],
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 5am on monday"]

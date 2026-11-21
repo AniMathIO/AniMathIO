@@ -73,6 +73,7 @@ once enabled.
 | **M4 exit:** every real v1 project in a fixture corpus imports and renders | Maintainer (supplies files), Agent (tests) | Tests yes, corpus no | Only synthetic fixtures |
 | Windows hands-on pass of the editor (CI covers build and tests only) | Maintainer | No | Not done |
 | Real-hardware listen test for the audio shuttle (#196 deferred) | Maintainer | No | Not done |
+| **Flatpak sources on Renovate PRs.** `.github/workflows/flatpak-sources.yml` regenerates `packaging/flatpak/cargo-sources.json` on `renovate/**` and `release-plz-*` PRs and pushes a `github-actions[bot]` commit. Without a PAT the commit starts no workflows, so the job dispatches `ci.yml` on the branch to report the required `check` contexts (works without any secret; the required checks must be the `check (ubuntu-latest)` / `check (windows-latest)` jobs of `ci.yml`). With `RELEASE_PLZ_TOKEN` (section 2) the push triggers CI itself and no dispatch happens. `renovate.json` ignores the bot in `gitIgnoredAuthors` so auto-merge is not blocked by a "modified" branch. | Agent (workflow) | Yes; the secret is optional | Done |
 | Baseline `v2.0.0` tag, `RELEASE_PLZ_TOKEN` secret, rulesets, Renovate app, "Allow auto-merge": see sections 2, 3 and 6 (all Maintainer, nothing is agent-doable without admin rights) | Maintainer | Partly | Open |
 | Fuzzing (`cargo-fuzz`) of the project parser, v1 importer and media probe (listed under "Quality bar" in #156) | Agent | Yes | In progress: standalone `fuzz/` workspace with five libFuzzer targets, manual CI job |
 
