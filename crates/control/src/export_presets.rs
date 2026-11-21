@@ -73,13 +73,15 @@ impl ExportPreset {
         }
     }
 
-    /// Encoder settings for this preset (H.264 CRF 18, the project frame rate).
+    /// Encoder settings for this preset (CRF 18, the project frame rate, MP4 unless the caller
+    /// picks another format).
     #[must_use]
     pub fn export_settings(self) -> animathio_export::Settings {
         animathio_export::Settings {
             frame_rate: None,
             crf: 18.0,
             embed_chapters: true,
+            format: animathio_export::Format::Mp4,
         }
     }
 

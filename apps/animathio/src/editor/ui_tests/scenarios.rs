@@ -263,6 +263,7 @@ fn export_dialog_refuses_the_open_project_file(cx: &mut TestAppContext) {
     let submitted = ui.update(|editor, _window, cx| {
         editor.submit_export(
             None,
+            animathio_export::Format::Mp4,
             "Whole project",
             None,
             None,
@@ -314,6 +315,7 @@ fn export_dialog_still_queues_other_paths_while_a_project_is_open(cx: &mut TestA
     let submitted = ui.update(|editor, _window, cx| {
         editor.submit_export(
             None,
+            animathio_export::Format::Mp4,
             "Whole project",
             None,
             None,
@@ -3767,6 +3769,7 @@ fn export_explains_an_empty_project_and_a_bad_range(cx: &mut TestAppContext) {
     let outcome = ui.update(|editor, _, cx| {
         editor.submit_export(
             None,
+            animathio_export::Format::Mp4,
             "Custom",
             Some(Time(10)),
             Some(Time(5)),

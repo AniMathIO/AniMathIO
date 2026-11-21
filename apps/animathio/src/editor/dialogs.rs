@@ -224,13 +224,35 @@ pub(super) fn middle_truncate(text: &str, max: usize) -> String {
 }
 
 /// The one-line outcome of the export choices: `640×360 · 30 fps · MP4 · chapters on`.
-pub(super) fn export_summary(size: (u32, u32), frame_rate: &str, markers: usize) -> String {
-    let chapters = if markers == 0 {
+pub(super) fn export_summary(
+    size: (u32, u32),
+    frame_rate: &str,
+    markers: usize,
+    format: animathio_export::Format,
+) -> String {
+    let chapters = if !format.supports_chapters() {
+        "no chapters (WebM)"
+    } else if markers == 0 {
         "no chapters (no markers)"
     } else {
         "chapters on"
     };
-    format!("{}×{} · {frame_rate} · MP4 · {chapters}", size.0, size.1)
+    let container = match format {
+        animathio_export::Format::Mp4 => "MP4",
+        animathio_export::Format::Webm => "WebM",
+    };
+    format!(
+        "{}×{} · {frame_rate} · {container} · {chapters}",
+        size.0, size.1
+    )
+}
+
+/// The format whose selector label is `label`; MP4 for anything else.
+pub(super) fn format_from_label(label: &str) -> animathio_export::Format {
+    animathio_export::Format::ALL
+        .into_iter()
+        .find(|format| format.label() == label)
+        .unwrap_or_default()
 }
 
 /// Outcome of submitting the Export dialog.
@@ -256,6 +278,14 @@ impl Editor {
         let mut presets = vec!["Project settings".to_owned()];
         presets.extend(ExportPreset::ALL.map(|preset| preset.label().to_owned()));
         let preset = choices(presets, 0, window, cx);
+        let format = choices(
+            animathio_export::Format::ALL
+                .map(|format| format.label().to_owned())
+                .to_vec(),
+            0,
+            window,
+            cx,
+        );
         let range = choices(
             vec!["Whole project".into(), "In/out".into(), "Custom".into()],
             usize::from(self.marks.marked()),
@@ -279,11 +309,44 @@ impl Editor {
         );
         // The dialog re-renders when a choice changes: Custom start/end appear only for the
         // Custom range, and the summary and path caption follow the preset and output.
-        for select in [&preset, &range] {
+        for select in [&preset, &range, &format] {
             cx.subscribe_in(
                 select,
                 window,
                 |_, _, _: &gpui_component::select::SelectEvent<Vec<String>>, window, _| {
+                    window.refresh();
+                },
+            )
+            .detach();
+        }
+        // Switching the container swaps a `.mp4`/`.webm` extension in the path with it, so the
+        // file name never contradicts the selector (other names are left alone).
+        {
+            let output = output.clone();
+            cx.subscribe_in(
+                &format,
+                window,
+                move |_,
+                      select,
+                      _: &gpui_component::select::SelectEvent<Vec<String>>,
+                      window,
+                      cx| {
+                    let chosen = format_from_label(&selected(select, cx));
+                    output.update(cx, |state, cx| {
+                        let current = PathBuf::from(state.value().trim());
+                        if animathio_export::Format::for_path(&current)
+                            .is_some_and(|other| other != chosen)
+                        {
+                            state.set_value(
+                                current
+                                    .with_extension(chosen.extension())
+                                    .to_string_lossy()
+                                    .into_owned(),
+                                window,
+                                cx,
+                            );
+                        }
+                    });
                     window.refresh();
                 },
             )
@@ -302,9 +365,10 @@ impl Editor {
         open_dialog(window, cx, move |dialog, _, cx| {
             let path_input = output.clone();
             let submit = {
-                let (editor, preset, range, from, to, output) = (
+                let (editor, preset, format, range, from, to, output) = (
                     editor.clone(),
                     preset.clone(),
+                    format.clone(),
                     range.clone(),
                     from.clone(),
                     to.clone(),
@@ -315,12 +379,13 @@ impl Editor {
                     let preset = ExportPreset::ALL
                         .into_iter()
                         .find(|p| p.label() == preset_name);
+                    let container = format_from_label(&selected(&format, cx));
                     let choice = selected(&range, cx);
                     let from = timecode::parse_timecode(&from.read(cx).value(), rate);
                     let to = timecode::parse_timecode(&to.read(cx).value(), rate);
                     let output = PathBuf::from(output.read(cx).value().trim());
                     let outcome = editor.update(cx, |this, cx| {
-                        this.submit_export(preset, &choice, from, to, output, front, cx)
+                        this.submit_export(preset, container, &choice, from, to, output, front, cx)
                     });
                     match outcome {
                         Submitted::Invalid => {}
@@ -337,6 +402,7 @@ impl Editor {
             let chosen_preset = ExportPreset::ALL
                 .into_iter()
                 .find(|p| p.label() == selected(&preset, cx));
+            let container = format_from_label(&selected(&format, cx));
             let custom_range = selected(&range, cx) == "Custom";
             let (size, rate_label) = chosen_preset.map_or_else(
                 || (project_resolution, project_rate.clone()),
@@ -361,6 +427,15 @@ impl Editor {
                     )
                 },
             );
+            let format_note = match container {
+                animathio_export::Format::Mp4 => {
+                    "H.264 video and AAC audio. Plays everywhere; timeline markers become chapters."
+                }
+                animathio_export::Format::Webm => {
+                    "VP9 video and Opus audio for the web. No chapters, and encoding is slower \
+                     than MP4."
+                }
+            };
             let output_text = path_input.read(cx).value().to_string();
             let dialog = dialog
                 .title(heading(IconName::Clapperboard, "Export video"))
@@ -391,7 +466,28 @@ impl Editor {
                                 ),
                         ))
                         .child(field(
-                            "MP4 output",
+                            "Format",
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .id("export-format-select")
+                                        .debug_selector(|| "export-format-select".into())
+                                        .child(Select::new(&format)),
+                                )
+                                .child(
+                                    div()
+                                        .id("export-format-note")
+                                        .debug_selector(|| "export-format-note".into())
+                                        .text_size(crate::style::type_size::XS)
+                                        .text_color(secondary)
+                                        .child(format_note),
+                                ),
+                        ))
+                        .child(field(
+                            "Output file",
                             div()
                                 .flex()
                                 .flex_col()
@@ -408,8 +504,21 @@ impl Editor {
                                                         path_input.read(cx).value().to_string(),
                                                     );
                                                     let mut picker = rfd::FileDialog::new()
-                                                        .add_filter("MP4 video", &["mp4"])
-                                                        .set_file_name("video.mp4");
+                                                        .add_filter(
+                                                            match container {
+                                                                animathio_export::Format::Mp4 => {
+                                                                    "MP4 video"
+                                                                }
+                                                                animathio_export::Format::Webm => {
+                                                                    "WebM video"
+                                                                }
+                                                            },
+                                                            &[container.extension()],
+                                                        )
+                                                        .set_file_name(format!(
+                                                            "video.{}",
+                                                            container.extension()
+                                                        ));
                                                     if let Some(parent) = current
                                                         .parent()
                                                         .filter(|p| !p.as_os_str().is_empty())
@@ -461,7 +570,7 @@ impl Editor {
                         .mt_2()
                         .text_size(crate::style::type_size::SM)
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(export_summary(size, &rate_label, markers)),
+                        .child(export_summary(size, &rate_label, markers, container)),
                 )
                 .footer(
                     div()
@@ -481,6 +590,7 @@ impl Editor {
                         )
                         .child(
                             style::primary_button("export-now", cx)
+                                .debug_selector(|| "export-now".into())
                                 .icon(icons::icon(IconName::Upload))
                                 .label("Export now")
                                 .on_click(move |_, window, cx| now_submit(true, window, cx)),
@@ -521,6 +631,7 @@ impl Editor {
     pub(super) fn submit_export(
         &mut self,
         preset: Option<ExportPreset>,
+        format: animathio_export::Format,
         choice: &str,
         from: Option<Time>,
         to: Option<Time>,
@@ -563,12 +674,18 @@ impl Editor {
             cx.notify();
             return Submitted::Invalid;
         }
+        // `clip.webm` with MP4 selected (or the reverse) would fail only after queueing.
+        if let Err(error) = format.check_path(&output) {
+            self.error = Some(error.to_string());
+            cx.notify();
+            return Submitted::Invalid;
+        }
         if self.export_queue.targets(&output) {
             self.error = Some("That file is already in the export queue".into());
             cx.notify();
             return Submitted::Invalid;
         }
-        let spec = match self.export_spec(output.clone(), preset, range) {
+        let spec = match self.export_spec(output.clone(), preset, format, range) {
             Ok(spec) => spec,
             Err(error) => {
                 self.error = Some(error);
@@ -591,6 +708,7 @@ impl Editor {
         &self,
         output: PathBuf,
         preset: Option<ExportPreset>,
+        format: animathio_export::Format,
         range: TimeRange,
     ) -> Result<crate::export_queue::JobSpec, String> {
         let mut project = self.project.clone();
@@ -602,6 +720,7 @@ impl Editor {
                 .map_err(|error| error.to_string())?;
             settings = preset.export_settings();
         }
+        settings.format = format;
         let rate = self.project.frame_rate();
         let summary = format!(
             "{}, {} to {}",

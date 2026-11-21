@@ -12,8 +12,8 @@ the render/audio/export data flow. The authority for these rules is
 | `format` | Versioned `project.json` (schema version 8) and content-addressed `.amio` ZIP containers. Stream APIs support custom storage; filesystem save helpers validate and atomically replace targets using synced temporary files in the same directory. |
 | `render` | Deterministic, GPU-free Vello CPU backend (the reference for tests and export), the clip-effect chain mechanics (rasterize a clip layer, hand each effect to the context's `EffectProcessor`, composite), an optional `gpu` feature with a Vello/wgpu `GpuBackend` for preview, embedded font shaping, the engine `ResourcePool`, `Frame` (RGBA8), PNG encoding and PNG/JPEG decoding. Also the shared `sample` demo project and the `FrameSource` video seam. |
 | `audio` | Engine-owned audio pools (one seekable `PcmReader` per asset; nothing holds a whole decoded asset), lazy block-wise resampling and channel mapping behind an LRU-budgeted cache, immutable mixer snapshots, Opus/Symphonia decoding, cpal/rtrb device playback and microphone capture (`CaptureSource`/`Recorder`: an injectable source, so tests and `ANIMATHIO_AUDIO=none` never open an input device). No audio resources live in `Project`. Also pure offline beat detection (`detect_beats`). |
-| `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, and the H.264 + AAC `Mp4Encoder` (BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
-| `export` | Deterministic offline MP4 export: steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder`. Never a recording of playback. |
+| `media` | FilmCraft decode behind the `MediaBackend` trait (probe, frame-exact video seek, audio PCM), an LRU-budgeted engine `MediaPool` with prefetch, the H.264 + AAC `Mp4Encoder` and the VP9 + Opus `WebmEncoder` (pure-Rust `effectcraft-vp9enc` / `effectcraft-opusenc` with the FilmCraft Matroska muxer; both BT.709-tagged). Untrusted-input limits (dimensions, frame counts, rates, checked arithmetic) are enforced before codec work. |
+| `export` | Deterministic offline MP4 or WebM export (`export::Format`, `Settings::format`): steps `render(evaluate(project, t))` frame by frame plus the audio mixer, encoded with `Mp4Encoder` or `WebmEncoder`. Never a recording of playback. |
 | `transcribe` | Local automatic subtitles: whisper.cpp speech recognition behind the opt-in `whisper` cargo feature (whisper.cpp through the whisper-rs bindings; needs cmake, a C++ toolchain and libclang), on-demand SHA-256-verified model downloads with resumable atomic writes, 16 kHz mono audio preparation on top of `audio`, pure cue splitting (line/duration/overlap rules) and SRT/WebVTT reading and writing. Everything but the engine works without the feature. |
 | `assist` | Optional prose-to-LaTeX authoring for the Math dialog: one OpenAI-compatible `chat/completions` client (`ureq` + rustls; covers OpenAI, Gemini's compatible endpoint and local Ollama or llama.cpp), non-secret `AssistSettings` (base URL and model, no key field), a strict LaTeX-only prompt, reply cleaning (code fences, math delimiters, reasoning blocks, prose rejection) and a `CancelToken` that closes the connection of a request in flight. The API key is supplied by the editor from the OS keyring and never serialised or put in an error. An integration crate: no `core` dependency, no provider-specific behaviour in the editor core, not a plugin (the sandbox has no network). |
 | `control` | Local JSON-RPC 2.0 control protocol over a user-only socket/named pipe: methods (including `export`), token auth, headless handler and client. |
@@ -29,8 +29,8 @@ the render/audio/export data flow. The authority for these rules is
 
 Video clips decode through `render::FrameSource` via the `media` crate's
 `MediaPool`, so real video frames appear in preview, the CLI and headless
-renders. `export` encodes MP4 (H.264 + AAC, BT.709-tagged) offline. WebM export
-and an FFmpeg fallback backend remain future work; `MediaBackend` is shaped so a
+renders. `export` encodes MP4 (H.264 + AAC) or WebM (VP9 + Opus), both BT.709-tagged, offline. An FFmpeg
+fallback backend remains future work; `MediaBackend` is shaped so a
 second backend can be added without touching callers.
 
 ## Layering
@@ -350,9 +350,9 @@ flowchart LR
         H --> S[export::Exporter::export]
         S --> T[render(evaluate(project, t)) per frame]
         S --> U[Mixer::mix per inter-frame block]
-        T --> V[media::Mp4Encoder]
+        T --> V[media::Mp4Encoder / WebmEncoder]
         U --> V
-        V --> W[out.mp4]
+        V --> W[out.mp4 / out.webm]
     end
 ```
 
@@ -401,7 +401,10 @@ flowchart LR
   retain their previous sampling paths (see [Clip retiming](#clip-retiming)).
 - **Export.** Export steps the render path frame by frame —
   `render(evaluate(project, t))` per frame plus the audio mixer's snapshot for
-  each inter-frame block — and encodes with `media::Mp4Encoder`. It is never a
+  each inter-frame block — and encodes with `media::Mp4Encoder` or, for the WebM format,
+  `media::WebmEncoder` (VP9 + Opus; the Opus packets are 20 ms and interleaved with the video by
+  presentation time, the first one starting before zero by the Opus pre-skip, written as the
+  track's `CodecDelay`). The format changes only the encoder behind the same loop. It is never a
   recording of playback.
 
 ## Audio effects

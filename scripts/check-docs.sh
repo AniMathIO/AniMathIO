@@ -271,6 +271,8 @@ wit=crates/plugin-api/wit/plugin.wit
 wit_version=$(grep -oE '^package animathio:plugin@[0-9.]+' "$wit" | sed 's/^package //')
 wit_words=$( { grep -oE '[a-z][a-z0-9]*(-[a-z0-9]+)*' "$wit"
   ls crates apps plugins plugins/examples | grep -oE '[a-z][a-z0-9]*(-[a-z0-9]+)*'
+  # Third-party codec crates the workspace actually depends on (FilmCraft, EffectCraft).
+  grep -ohE '^(filmcraft|effectcraft)-[a-z0-9-]+' crates/*/Cargo.toml
   cat <<EOF
 $packages
 $features

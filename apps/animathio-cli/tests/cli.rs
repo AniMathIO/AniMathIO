@@ -458,6 +458,92 @@ fn export_creates_missing_parents_and_never_overwrites_silently() {
 }
 
 #[test]
+fn export_writes_webm_by_extension_or_flag_and_rejects_contradictions() {
+    use animathio_media::{FilmCraftBackend, MediaBackend};
+    let dir = tempdir().unwrap();
+    let archive = dir.path().join("demo.amio");
+    ok(&["new-sample", "-o", path(&archive)]);
+    let probe = |file: &Path| {
+        let bytes = fs::read(file).unwrap();
+        assert!(bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]), "EBML header");
+        let info = FilmCraftBackend::new().probe(file).unwrap();
+        (info.container, info.video.unwrap().codec)
+    };
+
+    // A .webm name selects WebM without a flag; the default for any other name stays MP4.
+    let by_extension = dir.path().join("web.webm");
+    ok(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.3",
+        "-o",
+        path(&by_extension),
+    ]);
+    assert_eq!(probe(&by_extension), ("WebM".into(), "VP9".into()));
+    let default = dir.path().join("plain.mp4");
+    ok(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.2",
+        "-o",
+        path(&default),
+    ]);
+    let mp4 = FilmCraftBackend::new().probe(&default).unwrap();
+    assert_ne!(mp4.container, "WebM");
+    assert_ne!(mp4.video.unwrap().codec, "VP9");
+
+    // An explicit --format decides for names that carry no known extension, and --crf applies.
+    let by_flag = dir.path().join("clip.bin");
+    ok(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.3",
+        "--format",
+        "webm",
+        "--crf",
+        "35",
+        "-o",
+        path(&by_flag),
+    ]);
+    assert_eq!(probe(&by_flag), ("WebM".into(), "VP9".into()));
+    assert!(fs::metadata(&by_flag).unwrap().len() < fs::metadata(&by_extension).unwrap().len());
+
+    // Contradictions and unknown formats fail with a clear message and write nothing.
+    let clash = dir.path().join("clash.webm");
+    let rejected = cli(&[
+        "export",
+        path(&archive),
+        "--to",
+        "0.1",
+        "--format",
+        "mp4",
+        "-o",
+        path(&clash),
+    ]);
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("ends in .webm"), "{stderr}");
+    assert!(!clash.exists());
+    let unknown = cli(&[
+        "export",
+        path(&archive),
+        "--format",
+        "avi",
+        "-o",
+        path(&clash),
+    ]);
+    assert!(!unknown.status.success());
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("mp4 and webm"),
+        "{}",
+        String::from_utf8_lossy(&unknown.stderr)
+    );
+}
+
+#[test]
 fn export_refuses_to_overwrite_the_project_file() {
     let dir = tempdir().unwrap();
     let archive = dir.path().join("demo.amio");
