@@ -627,13 +627,15 @@ impl CaptureSource for CpalCapture {
         let host = cpal::default_host();
         let default_name = host
             .default_input_device()
-            .and_then(|device| device.name().ok());
+            .and_then(|device| device_name(&device));
         let devices = host
             .input_devices()
             .map_err(|error| describe_error(&error.to_string(), ErrorKind::Other))?;
         let mut listed: Vec<InputDevice> = Vec::new();
         for device in devices {
-            let Ok(name) = device.name() else { continue };
+            let Some(name) = device_name(&device) else {
+                continue;
+            };
             let mut id = name.clone();
             let mut copy = 1;
             while listed.iter().any(|known| known.id == id) {
@@ -663,7 +665,9 @@ impl CaptureSource for CpalCapture {
                     .map_err(|error| describe_error(&error.to_string(), ErrorKind::Other))?;
                 let mut found = None;
                 for candidate in devices {
-                    let Ok(name) = candidate.name() else { continue };
+                    let Some(name) = device_name(&candidate) else {
+                        continue;
+                    };
                     let mut key = name.clone();
                     let mut copy = 1;
                     while seen.contains(&key) {
@@ -690,7 +694,7 @@ impl CaptureSource for CpalCapture {
             .default_input_config()
             .map_err(|error| describe_error(&error.to_string(), ErrorKind::Config))?;
         let format = InputFormat {
-            rate: supported.sample_rate().0,
+            rate: supported.sample_rate(),
             channels: supported.channels(),
         };
         let config = supported.config();
@@ -712,6 +716,14 @@ impl CaptureSource for CpalCapture {
         );
         Ok(Box::new(stream))
     }
+}
+
+/// The human-readable name of an input device, when the backend reports one.
+fn device_name(device: &cpal::Device) -> Option<String> {
+    device
+        .description()
+        .ok()
+        .map(|description| description.name().to_owned())
 }
 
 struct CpalStream {
@@ -759,7 +771,7 @@ where
     let channels = usize::from(format.channels.max(1));
     let stream = device
         .build_input_stream(
-            config,
+            *config,
             move |data: &[T], _| {
                 // Real-time callback: no allocation, locking or logging. Push whole frames
                 // only — a partial frame at the ring's end would drop an odd sample and
@@ -771,9 +783,9 @@ where
             None,
         )
         .map_err(|error| {
-            let kind = match &error {
-                cpal::BuildStreamError::DeviceNotAvailable => ErrorKind::Unavailable,
-                cpal::BuildStreamError::StreamConfigNotSupported => ErrorKind::Config,
+            let kind = match error.kind() {
+                cpal::ErrorKind::DeviceNotAvailable => ErrorKind::Unavailable,
+                cpal::ErrorKind::UnsupportedConfig => ErrorKind::Config,
                 _ => ErrorKind::Other,
             };
             describe_error(&error.to_string(), kind)
