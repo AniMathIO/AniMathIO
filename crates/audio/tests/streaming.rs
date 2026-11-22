@@ -219,58 +219,59 @@ fn legacy_prepare(pcm: &Pcm, rate: u32, channels: u16) -> Vec<f32> {
 /// The previous eager Symphonia decode loop (gapless on, default audio track).
 fn legacy_decode(bytes: &[u8]) -> (u32, u16, Vec<f32>) {
     use symphonia::core::{
-        audio::SampleBuffer,
-        codecs::DecoderOptions,
+        codecs::{CodecParameters, audio::AudioDecoderOptions},
         errors::Error as E,
-        formats::FormatOptions,
+        formats::{FormatOptions, TrackType, probe::Hint},
         io::{MediaSourceStream, MediaSourceStreamOptions},
         meta::MetadataOptions,
-        probe::Hint,
     };
     let stream = MediaSourceStream::new(
         Box::new(std::io::Cursor::new(bytes.to_vec())),
         MediaSourceStreamOptions::default(),
     );
     let mut format = symphonia::default::get_probe()
-        .format(
-            &Hint::new(),
+        .probe(
+            &Hint::default(),
             stream,
-            &FormatOptions {
-                enable_gapless: true,
-                ..FormatOptions::default()
-            },
-            &MetadataOptions::default(),
+            FormatOptions::default(),
+            MetadataOptions::default(),
         )
-        .unwrap()
-        .format;
+        .unwrap();
     let track = format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.sample_rate.is_some())
-        .or_else(|| format.default_track())
+        .find(|t| {
+            matches!(&t.codec_params,
+                Some(CodecParameters::Audio(p)) if p.sample_rate.is_some())
+        })
+        .or_else(|| format.default_track(TrackType::Audio))
         .unwrap();
     let id = track.id;
+    let Some(CodecParameters::Audio(params)) = &track.codec_params else {
+        panic!("not an audio track");
+    };
     let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+        .make_audio_decoder(params, &AudioDecoderOptions::default())
         .unwrap();
     let (mut samples, mut spec) = (Vec::new(), None);
+    let mut chunk = Vec::new();
     loop {
         let packet = match format.next_packet() {
-            Ok(p) => p,
+            Ok(Some(p)) => p,
+            Ok(None) => break,
             Err(E::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => panic!("{e}"),
         };
-        if packet.track_id() != id {
+        if packet.track_id != id {
             continue;
         }
         let audio = decoder.decode(&packet).unwrap();
-        spec = Some(*audio.spec());
-        let mut buffer = SampleBuffer::<f32>::new(audio.capacity() as u64, *audio.spec());
-        buffer.copy_interleaved_ref(audio);
-        samples.extend_from_slice(buffer.samples());
+        spec = Some((audio.spec().rate(), audio.spec().channels().count()));
+        audio.copy_to_vec_interleaved::<f32>(&mut chunk);
+        samples.extend_from_slice(&chunk);
     }
-    let spec = spec.unwrap();
-    (spec.rate, spec.channels.count() as u16, samples)
+    let (rate, channels) = spec.unwrap();
+    (rate, channels as u16, samples)
 }
 
 fn lcg(state: &mut u64) -> u64 {
@@ -525,11 +526,12 @@ fn restarting_in_any_segment_reproduces_the_continuous_decode() {
 
 #[test]
 fn opus_decodes_in_ogg_matroska_and_mp4_with_pre_skip_removed() {
-    // `ffmpeg -c:a libopus`: 80 ms and 2.5 s (Ogg), 1 s (Matroska, MP4). The Ogg demuxer trims
-    // the end padding when the file has more than one audio page (the 80 ms file does not, so
-    // it keeps its 648 padding frames); Matroska/MP4 keep up to one packet of trailing padding.
+    // `ffmpeg -c:a libopus`: 80 ms and 2.5 s (Ogg), 1 s (Matroska, MP4). Symphonia's Ogg demuxer
+    // trims the end padding exactly (the 80 ms file decodes to its 3840 frames; Symphonia 0.5
+    // left the 648 padding frames of a single-page file in); Matroska/MP4 keep up to one packet
+    // of trailing padding.
     for (name, expected, channels) in [
-        ("tone.opus", 4488, 1),
+        ("tone.opus", 3840, 1),
         ("long.opus", 120_000, 2),
         ("opus_stereo.mka", 48_648, 2),
         ("opus_stereo.mp4", 48_648, 2),

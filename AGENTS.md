@@ -267,7 +267,7 @@ the old stream/ring and joins its worker before starting a new session.
 Linux builds need `libasound2-dev` (CI installs it). Normal tests need no device.
 The ignored device test can be run explicitly; `cargo run -p animathio-audio
 --example play` emits a 0.01-amplitude tone for at most 3 seconds and prints clock
-drift. Apply the same resource limits to these cargo invocations. Symphonia 0.5
+drift. Apply the same resource limits to these cargo invocations. Symphonia 0.6
 supports WAV/PCM, MP3, FLAC, AAC-LC/M4A and Vorbis; Opus (Ogg, Matroska/WebM, MP4) is decoded by
 the pure-Rust `filmcraft-opus` crate (MIT/Apache, no system libraries) behind Symphonia's
 demuxers; the pre-skip is removed, Matroska/MP4 keep up to one packet of trailing padding. Opening a

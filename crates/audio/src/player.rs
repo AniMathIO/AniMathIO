@@ -1,4 +1,7 @@
-use crate::{BlockGenerator, Error, Mixer, Speed};
+use crate::{
+    BlockGenerator, Error, Mixer, Speed,
+    stream_error::{StreamErrorAction, classify_stream_error},
+};
 use animathio_core::{Project, TICKS_PER_SECOND, Time, TimeRange};
 use arc_swap::ArcSwap;
 use cpal::{
@@ -40,10 +43,10 @@ impl Player {
             .default_output_device()
             .ok_or_else(|| Error::Playback("no default output device".into()))?;
         let supported = device.default_output_config().map_err(playback_error)?;
-        if supported.sample_rate().0 != mixer.rate() || supported.channels() != mixer.channels() {
+        if supported.sample_rate() != mixer.rate() || supported.channels() != mixer.channels() {
             return Err(Error::Invalid(format!(
                 "prepare mixer at device rate {} Hz, {} channels",
-                supported.sample_rate().0,
+                supported.sample_rate(),
                 supported.channels()
             )));
         }
@@ -74,7 +77,7 @@ impl Player {
             .default_output_device()
             .ok_or_else(|| Error::Playback("no default output device".into()))?;
         let config = device.default_output_config().map_err(playback_error)?;
-        Ok((config.sample_rate().0, config.channels()))
+        Ok((config.sample_rate(), config.channels()))
     }
     /// Start or resume from the paused position. Repeated play is a no-op.
     pub fn play(&mut self) -> Result<(), Error> {
@@ -195,17 +198,18 @@ impl Player {
         let stream = self
             .device
             .build_output_stream(
-                &self.config,
+                self.config,
                 move |data: &mut [T], info| {
                     let timestamp = info.timestamp();
-                    let latency = timestamp
-                        .playback
-                        .duration_since(&timestamp.callback)
-                        .unwrap_or_default();
+                    let latency = timestamp.playback.duration_since(timestamp.callback);
                     callback.fill(data, latency);
                 },
-                move |_| {
-                    callback_error.store(true, Ordering::Release);
+                move |error| {
+                    // An xrun is recovered by the backend (and was silent in cpal 0.16);
+                    // only errors that end the stream stop playback.
+                    if classify_stream_error(error.kind()) == StreamErrorAction::Fatal {
+                        callback_error.store(true, Ordering::Release);
+                    }
                 },
                 None,
             )
