@@ -322,7 +322,7 @@ v [icon] Transform                                    [reset]   ROW, HEADING
   `Size::Medium` in dialogs. `RAISED` fill, `BORDER` outline, `ACCENT` focus ring.
   Placeholder in `TEXT_MUTED` says what to type ("Search media", "Paste LaTeX"), never
   "Enter value".
-- **Sliders:** a slider is always paired with a numeric field (width 4rem) holding the
+- **Sliders:** a slider is always paired with a numeric field (width 4.5rem) holding the
   exact value. Track `BORDER`, fill `ACCENT`, thumb `TEXT`.
 - **Toggles:** a kit `Switch` for settings that apply immediately, a `Checkbox` inside
   forms that are submitted. Label to the left on the same row, control at the right edge;

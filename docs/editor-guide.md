@@ -203,7 +203,7 @@ stores it in the user data directory. The opt-in integration test runs the real 
 
 ## Describe a formula in words (optional AI assist)
 
-The **LaTeX** math dialog (Library, Math, LaTeX; also the inspector of a LaTeX clip) has an
+The **LaTeX** math dialog (Library, Math, LaTeX) has an
 optional **Describe in words…** section (collapsed by default so the LaTeX form fits at
 1280 x 720; open it with its header and it stays open for the rest of the session): type "the integral of x squared from 0 to 1", press
 **Convert to LaTeX**, and the model's answer replaces the formula field. The live preview
@@ -352,7 +352,14 @@ one undo step on release. The viewer header has the zoom menu, safe-area, rule-o
 and checkerboard toggles. The transport shows a large timecode (click it to type one),
 prev/next edit, frame step, the circular play button, loop, the shuttle-speed badge,
 the duration and a monitor-only volume (it never changes export). Inspector sections are
-collapsible cards with a reset button each; text, formulas, shapes and graphs show their own
+flat, collapsible and divided by hairlines, with a reset button each (every clip kind, LaTeX and graph
+included, uses the same rows: a Formula or Plot section holds the source or ranges, then Transform,
+Compositing and the rest). Position, Scale and ranges share one row (X/Y, W/H, min/max). Number
+fields have no -/+ buttons: type a value, drag its label, or press Up/Down in the field. A slider is
+always on the same row as its value field. Audio gain is shown in dB, and enum parameters read
+as names (Rectangle, DejaVu Sans) or a segmented control when there are two to four. Caption-only
+rows stay hidden while the caption style is Off. Effects are added from one **Add effect** menu
+at the top of the Effects section; text, formulas, shapes and graphs show their own
 content first, video leads with Speed and audio with its Audio section (gain, mute, effects), then
 Speed. Rotation is shown in degrees with one decimal and font sizes as a percentage of the short
 canvas edge, whatever unit the clip stores them in; colors read `#rrggbb` (the alpha byte is added
@@ -464,7 +471,7 @@ canvas, so they scale with the shorter canvas edge. They are set in the bundled 
 (the text plugin's `font = inter`). Title and Subtitle use weight 600, the headings 800,
 Body and Caption 400. Adding one is a single undo step and selects the
 text clip; edit its text in the inspector. Select any text clip to change **Font weight**
-(100–900, default 400) and **Font** (`dejavu` or `inter`) in the inspector; every change is
+(Thin 100 to Black 900, default Regular) and **Font** (DejaVu Sans or Inter) in the inspector; every change is
 an undoable command. With **Font** on `dejavu` (the default), weight 400 is DejaVu Sans and
 any other weight switches to Inter, so keyframing the weight of such a clip changes typeface;
 choose `inter` for a weight that varies smoothly.

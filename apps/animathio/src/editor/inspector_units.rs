@@ -6,6 +6,8 @@
 use gpui::{App, Div, IntoElement, ParentElement, Styled, div, px};
 use gpui_component::ActiveTheme;
 
+use crate::style::{color, hex, size};
+
 /// `#rrggbb`, with the alpha byte appended only when the color is not fully opaque.
 pub(super) fn format_hex(color: [u8; 4]) -> String {
     if color[3] == 255 {
@@ -97,20 +99,23 @@ pub(super) fn is_animatable(model: &crate::inspector::ParamModel) -> bool {
     )
 }
 
-const CHECKER_CELL: f32 = 8.0;
+const CHECKER_CELL: f32 = 6.0;
 const SWATCH_CELLS: usize = 4;
 
 /// Frame a color picker's swatch: a checkerboard behind it so transparent colors read as
-/// transparent, and a 1px outline so dark colors stay visible on the dark panel.
+/// transparent, and a 1px outline so dark colors stay visible on the dark panel. The
+/// swatch is `style::size::ROW_SM` (1.5rem) per docs/design.md "Fields".
 pub(super) fn framed_swatch(picker: impl IntoElement, transparent: bool, cx: &App) -> Div {
     let mut frame = div()
         .relative()
         .flex_shrink_0()
-        .w(gpui::rems(2.0))
-        .h(gpui::rems(2.0));
+        .w(size::ROW_SM)
+        .h(size::ROW_SM);
     if transparent {
-        let light = gpui::rgb(0xcfcfcf);
-        let dark = gpui::rgb(0x8c8c8c);
+        // The two greys of the transparency checkerboard, from the text tokens
+        // so no ad-hoc colour is introduced (docs/design.md tokens).
+        let light = hex(color::TEXT);
+        let dark = hex(color::TEXT_MUTED);
         let mut board = div()
             .absolute()
             .top_0()

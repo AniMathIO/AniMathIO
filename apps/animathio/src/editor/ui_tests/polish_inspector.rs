@@ -479,3 +479,84 @@ fn first_run_in_a_short_window_starts_with_small_tracks(cx: &mut gpui::TestAppCo
         crate::layout::TrackHeight::Small
     );
 }
+
+/// The id of the first clip of `kind` in the project.
+fn first_clip(ui: &mut Ui, matches: impl Fn(&ClipKind) -> bool) -> ClipId {
+    ui.read(|e| {
+        e.project
+            .tracks()
+            .iter()
+            .flat_map(animathio_core::Track::clips)
+            .find(|(_, clip)| matches(&clip.kind))
+            .map(|(id, _)| *id)
+            .expect("the sample has a clip of that kind")
+    })
+}
+
+/// The flat inspector fits Transform, down to Rotation, in a 720p window without scrolling.
+#[gpui::test]
+fn image_inspector_shows_rotation_without_scrolling_at_720p(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx.simulate_resize(size(px(1280.), px(720.)));
+    ui.settle();
+    let image = first_clip(&mut ui, |kind| matches!(kind, ClipKind::Image(_)));
+    select_clip(&mut ui, image);
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+    for row in ["param-Position", "param-Scale", "param-Rotation"] {
+        let bounds = ui
+            .cx
+            .debug_bounds(row)
+            .unwrap_or_else(|| panic!("{row} is drawn"));
+        assert!(
+            bounds.bottom() <= px(720.),
+            "{row} is below the 720p window: {bounds:?}"
+        );
+    }
+}
+
+/// LaTeX clips use the same sections as every other visual clip.
+#[gpui::test]
+fn latex_inspector_has_the_standard_sections(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("latex_inspector_has_the_standard_sections") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_math_default(MathObjectKind::Latex, Time(0), cx));
+    ui.settle();
+    for section in ["section-params", "section-transform", "section-opacity"] {
+        assert!(
+            ui.cx.debug_bounds(section).is_some(),
+            "{section} is part of a LaTeX clip's inspector"
+        );
+    }
+}
+
+/// Caption-only parameters stay hidden while `caption_style` is off, and come back with a style.
+#[gpui::test]
+fn caption_rows_hide_while_captions_are_off(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("caption_rows_hide_while_captions_are_off") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_math_default(MathObjectKind::Text, Time(0), cx));
+    ui.settle();
+    let text = ui
+        .update(|e, _, _| e.selected)
+        .expect("the new text clip is selected");
+    assert!(
+        ui.cx.debug_bounds("param-accent").is_none(),
+        "accent has no effect without a caption style"
+    );
+    ui.update(|e, _, cx| {
+        e.execute_plugin_param(text, "caption_style".into(), serde_json::json!("pop"), cx);
+    });
+    ui.settle();
+    assert!(
+        ui.cx.debug_bounds("param-accent").is_some(),
+        "accent shows once a caption style is chosen"
+    );
+}

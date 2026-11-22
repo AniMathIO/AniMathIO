@@ -1299,7 +1299,7 @@ pub(super) fn plugin_section_identity(kind: &ClipKind) -> (&'static str, IconNam
         "org.animathio.text" => ("Text", IconName::Type),
         "org.animathio.shapes" => ("Shape", IconName::Shapes),
         "org.animathio.latex" => ("Formula", IconName::Sigma),
-        "org.animathio.graph" => ("Graph", IconName::ChartNoAxesColumn),
+        "org.animathio.graph" => ("Plot", IconName::ChartNoAxesColumn),
         _ => ("Content", IconName::SlidersHorizontal),
     }
 }
@@ -1337,6 +1337,7 @@ pub(super) fn gain_db(gain: f64) -> f64 {
 }
 
 /// Short unit hint for a linear gain, for example `0.0 dB` or `-20.0 dB`.
+#[cfg(test)]
 pub(super) fn gain_db_label(gain: f64) -> String {
     let db = gain_db(gain);
     if db.is_finite() {

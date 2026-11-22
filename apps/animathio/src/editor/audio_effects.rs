@@ -6,7 +6,7 @@
 use gpui_component::switch::Switch;
 
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{TextRole, color, hex};
 use gpui_component::Disableable;
 
 /// One parameter row of an audio-effect card.
@@ -184,7 +184,7 @@ impl Editor {
         self.add_audio_effect_to_chain(AudioChain::Clip(id), plugin, effect, cx);
     }
 
-    fn add_audio_effect_to_chain(
+    pub(super) fn add_audio_effect_to_chain(
         &mut self,
         chain: AudioChain,
         plugin: &str,
@@ -253,7 +253,7 @@ impl Editor {
             let bypassed = model.bypassed;
             let header =
                 div()
-                    .h(gpui::rems(1.867))
+                    .h(crate::style::size::ROW)
                     .px_2()
                     .flex()
                     .flex_row()
@@ -271,8 +271,7 @@ impl Editor {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(crate::style::type_size::SM)
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_role(crate::style::Role::Label)
                             .text_color(hex(if bypassed {
                                 color::TEXT_MUTED
                             } else {
@@ -340,17 +339,9 @@ impl Editor {
                                 this.execute(&Command::RemoveAudioEffect { chain, effect }, cx);
                             })),
                     );
-            let mut card = div()
-                .mx_2()
-                .my_1()
-                .pb_1()
-                .rounded(px(crate::style::radius::CARD))
-                .border_1()
-                .border_color(hex(color::BORDER))
-                .bg(hex(color::RAISED))
-                .flex()
-                .flex_col()
-                .child(header);
+            // Flat group: the effect header and its rows, divided from the
+            // next effect by the hairline the section draws between them.
+            let mut card = div().flex().flex_col().pb_1().child(header);
             if model.plugin_missing {
                 card = card.child(
                     div()
@@ -499,37 +490,6 @@ impl Editor {
                     );
             }
             rows.push(card);
-        }
-        if available.is_empty() {
-            rows.push(
-                div()
-                    .px_3()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(hex(color::TEXT_MUTED))
-                    .child("No audio effect plugins loaded"),
-            );
-        } else {
-            rows.push(
-                div()
-                    .px_2()
-                    .pt_1()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .gap_1()
-                    .children(available.into_iter().map(|descriptor| {
-                        let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
-                        Button::new(SharedString::from(format!("add-ae-{chain:?}-{effect}")))
-                            .ghost()
-                            .compact()
-                            .icon(icons::icon(IconName::Plus).xsmall())
-                            .label(descriptor.name)
-                            .tooltip(descriptor.description)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.add_audio_effect_to_chain(chain, &plugin, &effect, cx);
-                            }))
-                    })),
-            );
         }
         rows
     }
