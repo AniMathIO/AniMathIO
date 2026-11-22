@@ -365,7 +365,9 @@ pub(super) fn paint_clip(
     }
     // Kind icon and label, only when the block is wide enough to hold them.
     if x1 - x0 > px(28.0) {
-        let icon_bounds = Bounds::new(point(lx + px(7.0), y0 + px(3.0)), size(px(12.0), px(12.0)));
+        // Centre the 12 px icon on the Caption text, which `paint_text_line` centres in a
+        // Label-height line from `y0 + 3` (centre about `y0 + 11.5`).
+        let icon_bounds = Bounds::new(point(lx + px(7.0), y0 + px(5.5)), size(px(12.0), px(12.0)));
         paint_icon(clip.icon, icon_bounds, cx.theme().foreground, window, cx);
         let warned = clip.effect_warning && x1 - x0 > px(64.0);
         if warned {
@@ -374,7 +376,7 @@ pub(super) fn paint_clip(
             window.paint_quad(fill(badge, style::hex(colors::WARNING)).corner_radii(px(4.0)));
             paint_icon(
                 IconName::TriangleAlert,
-                Bounds::new(point(lx + px(25.0), y0 + px(3.0)), size(px(12.0), px(12.0))),
+                Bounds::new(point(lx + px(25.0), y0 + px(5.5)), size(px(12.0), px(12.0))),
                 style::hex(colors::BG),
                 window,
                 cx,
@@ -937,9 +939,15 @@ pub(super) fn paint_ruler(
     let number_font = tabular_font(snapshot.theme.font_family.clone(), FontWeight(400.));
     let line = window.rem_size() * style::Role::Caption.line_height().0;
     let label_top = bounds.origin.y + px(ruler_height()) - line;
+    // Minor ticks share the bottom row with the tick numbers: skip the ones that would run
+    // through the previous number.
+    let mut label_end = bounds.origin.x - px(1.0);
     for tick in timeline::ruler_ticks(layout, minor) {
         let x = bounds.origin.x + px(timeline::time_to_x(layout, Time(tick)));
         let is_major = tick % step == 0;
+        if !is_major && x < label_end {
+            continue;
+        }
         let mark_top = bounds.origin.y
             + px(ruler_height() - (if is_major { 10.0 } else { 5.0 }) * style::ui_scale());
         let mark = Bounds::from_corners(
@@ -954,6 +962,9 @@ pub(super) fn paint_ruler(
             } else {
                 timecode::format_timecode(Time(tick), snapshot.frame_rate)
             };
+            // Tabular digits: about 0.62 em per character, plus the 5 px inset and a gap.
+            let char_width = window.rem_size() * style::Role::Caption.size().0 * 0.62;
+            label_end = x + px(8.0) + char_width * label.chars().count() as f32;
             paint_text_line(
                 label.into(),
                 point(x + px(5.0), label_top),

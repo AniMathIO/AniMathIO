@@ -376,8 +376,8 @@ I and O set in/out points (out is exclusive), Shift+I/O jumps to them, and Ctrl/
 the range; looping uses it and export defaults to it. Select (V), Blade (C), Ripple
 trim (B), Rate Stretch (R), Slip (Y), Slide (U), Rolling Edit (N) and Hand/pan (H) are available in the timeline toolbar. Shift+blade-click
 splits across tracks; Ctrl+edge-drag also ripple-trims. Ripple trim shifts later clips
-on the same track as one undo step. S toggles snapping and an engaged snap draws an
-yellow line. The additional edit tools preserve source intervals (Rate Stretch),
+on the same track as one undo step. S toggles snapping and an engaged snap draws a
+cyan line. The additional edit tools preserve source intervals (Rate Stretch),
 shift source in/out (Slip), compensate touching neighbours (Slide) or move a shared
 edit point (Rolling Edit). These edge tools also work at the fade-handle corners.
 Each drag is one undo step; the floating readout shows
@@ -389,7 +389,7 @@ and Ctrl/Cmd+G groups (links) a multi-selection. The full Premiere-style table l
 [docs/keyboard-shortcuts.md](keyboard-shortcuts.md).
 Ctrl/Cmd+wheel smoothly zooms around the pointer; drag the overview above the
 tracks to scroll. Clips show kind colours, video/image filmstrips, filled audio
-waveforms, content snippets, smooth fade curves and gradient transition windows. Select a
+waveforms, content snippets, smooth fade curves and hatched transition windows. Select a
 clip to show its keyframe diamonds. Tracks that carry sound have mute/solo/lock buttons and
 a horizontal gain slider (drag to adjust, double-click to reset to unity); a drag
 is one undo step. Tracks of text, formulas, shapes and images get a lock button and an eye
