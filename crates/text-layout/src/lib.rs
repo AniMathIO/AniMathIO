@@ -70,8 +70,8 @@ impl TextLayouter {
         builder.push_default(StyleProperty::FontFamily(FAMILY.into()));
         builder.push_default(StyleProperty::FontSize(font_size));
         let mut layout: Layout<()> = builder.build(text);
-        layout.break_all_lines(Some(width));
-        layout.align(
+        // parley 0.13: alignment is set before line breaking instead of after it.
+        layout.set_alignment(
             match align {
                 Align::Left => Alignment::Start,
                 Align::Center => Alignment::Center,
@@ -79,6 +79,7 @@ impl TextLayouter {
             },
             AlignmentOptions::default(),
         );
+        layout.break_all_lines(Some(width));
         layout
     }
 }
