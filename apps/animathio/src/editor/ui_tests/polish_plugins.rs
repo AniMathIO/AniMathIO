@@ -385,6 +385,17 @@ fn browse_card_details_disclose_and_hide_the_plugin_facts(cx: &mut TestAppContex
     assert!(visible(&mut ui, facts), "Details opens the plugin facts");
     assert!(visible(&mut ui, "plugin-license-com.example.hello"));
     assert!(visible(&mut ui, "plugin-abi-com.example.hello"));
+    // The open card grows below the Library body's fold: scroll it into view, as a user would.
+    let body = ui
+        .cx
+        .debug_bounds("library-body")
+        .expect("the Library body");
+    ui.cx.simulate_event(gpui::ScrollEvent {
+        position: body.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-400.))),
+        ..Default::default()
+    });
+    ui.settle();
     let link = ui
         .cx
         .debug_bounds("details-catalog:com.example.hello")
