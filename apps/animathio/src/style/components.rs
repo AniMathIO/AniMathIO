@@ -161,11 +161,25 @@ pub struct SegmentedOption {
     pub icon: Option<IconName>,
     /// The element/debug id for this option (for example `library-tab-media`).
     pub id: &'static str,
+    /// Why the option cannot be chosen right now (shown as its tooltip); `None` when it can.
+    pub unavailable: Option<&'static str>,
 }
 
 impl SegmentedOption {
     pub const fn new(id: &'static str, label: &'static str, icon: Option<IconName>) -> Self {
-        Self { label, icon, id }
+        Self {
+            label,
+            icon,
+            id,
+            unavailable: None,
+        }
+    }
+
+    /// The option is dimmed, ignores clicks and keys and explains itself in a tooltip while
+    /// `reason` is `Some`.
+    pub const fn unavailable(mut self, reason: Option<&'static str>) -> Self {
+        self.unavailable = reason;
+        self
     }
 }
 
@@ -197,6 +211,7 @@ pub fn segmented(
     debug_assert_eq!(options.len(), focus.len(), "one focus handle per option");
     let count = options.len().max(1) as f32;
     let focus: std::rc::Rc<[gpui::FocusHandle]> = focus.iter().cloned().collect();
+    let blocked: std::rc::Rc<[bool]> = options.iter().map(|o| o.unavailable.is_some()).collect();
     let (from, eased) = match slide {
         Some((from, changed, reduce_motion)) => {
             let progress = if reduce_motion {
@@ -231,12 +246,14 @@ pub fn segmented(
             .children((selected < options.len()).then_some(indicator))
             .children(options.iter().enumerate().map(|(position, option)| {
                 let (label, option_id, option_icon) = (option.label, option.id, option.icon);
+                let unavailable = option.unavailable;
                 let option_count = options.len();
                 let selected_option = position == selected;
                 let on_select = on_select.clone();
                 let on_key_select = on_select.clone();
                 let key_focus = focus.clone();
                 let click_focus = focus.clone();
+                let key_blocked = blocked.clone();
                 gpui::div()
                     .id(option_id)
                     .debug_selector(|| option_id.to_string())
@@ -263,7 +280,8 @@ pub fn segmented(
                             "end" => Some(option_count - 1),
                             _ => None,
                         };
-                        if let Some(next) = next {
+                        // An unavailable option can hold focus but never becomes the selection.
+                        if let Some(next) = next.filter(|next| !key_blocked[*next]) {
                             on_key_select(next, window, cx);
                             if let Some(handle) = key_focus.get(next) {
                                 window.focus(handle, cx);
@@ -272,13 +290,16 @@ pub fn segmented(
                         }
                     })
                     .relative()
+                    .px_2()
                     .flex_1()
                     .flex()
                     .items_center()
                     .justify_center()
                     .gap_1()
-                    .cursor_pointer()
-                    .text_color(if selected_option {
+                    .when(unavailable.is_none(), gpui::Styled::cursor_pointer)
+                    .text_color(if unavailable.is_some() {
+                        hex(color::TEXT_DISABLED)
+                    } else if selected_option {
                         hex(color::TEXT)
                     } else {
                         hex(color::TEXT_SECONDARY)
@@ -287,13 +308,17 @@ pub fn segmented(
                     .when(selected_option, |this| {
                         this.font_weight(gpui::FontWeight(500.))
                     })
-                    .when(!selected_option, |this| {
+                    .when(!selected_option && unavailable.is_none(), |this| {
                         this.hover(|styled| styled.bg(hex(color::HOVER)))
                     })
-                    .when(!labelled, |this| {
-                        this.tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+                    .when(!labelled || unavailable.is_some(), |this| {
+                        let tip = unavailable.unwrap_or(label);
+                        this.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
                     })
                     .on_click(move |_event, window, cx| {
+                        if unavailable.is_some() {
+                            return;
+                        }
                         on_select(position, window, cx);
                         if let Some(handle) = click_focus.get(position) {
                             window.focus(handle, cx);
@@ -503,6 +528,7 @@ impl ToolPanel {
                     .when_some(on_close, |this, on_close| {
                         this.child(
                             Button::new("tool-panel-close")
+                                .debug_selector(|| "tool-panel-close".into())
                                 .ghost()
                                 .xsmall()
                                 .icon(icon(IconName::X).xsmall())
@@ -811,26 +837,31 @@ mod tests {
             label: "Media",
             icon: None,
             id: "seg-media",
+            unavailable: None,
         },
         SegmentedOption {
             label: "Elements",
             icon: None,
             id: "seg-elements",
+            unavailable: None,
         },
         SegmentedOption {
             label: "Titles",
             icon: None,
             id: "seg-titles",
+            unavailable: None,
         },
         SegmentedOption {
             label: "Effects",
             icon: None,
             id: "seg-effects",
+            unavailable: None,
         },
         SegmentedOption {
             label: "Plugins",
             icon: None,
             id: "seg-plugins",
+            unavailable: None,
         },
     ];
 

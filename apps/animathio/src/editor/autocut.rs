@@ -1,15 +1,15 @@
 //! Automatic-cut review panel and background analysis. Drafts are invalidated on
 //! edits or setting changes; applying enabled cuts is one command history entry.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
+use super::tool_panel;
 use super::*;
-use crate::style;
+use crate::style::{self, SegmentedOption};
 use animathio_control::{
     AutocutParams, AutocutProposal, autocut_command, propose_autocuts_cancellable, timecode,
 };
 use gpui_component::{
     Disableable,
-    slider::{Slider, SliderEvent, SliderState},
+    slider::{SliderEvent, SliderState},
 };
 
 /// What the review analyses: the selected clip, its track's mix, or the whole project
@@ -23,14 +23,6 @@ pub(super) enum Scope {
 
 impl Scope {
     const ALL: [Self; 3] = [Self::Clip, Self::Track, Self::Project];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Clip => "Clip",
-            Self::Track => "Track",
-            Self::Project => "Project",
-        }
-    }
 
     fn of(params: &AutocutParams) -> Self {
         if params.clip.is_some() {
@@ -69,6 +61,11 @@ pub(super) struct Review {
     generation: u64,
     busy: bool,
     error: Option<String>,
+    /// Scroll position of the panel body.
+    scroll: ScrollHandle,
+    /// Keyboard focus for the segmented controls (one handle per option).
+    scope_focus: Vec<FocusHandle>,
+    language_focus: Vec<FocusHandle>,
 }
 
 impl Drop for Review {
@@ -175,6 +172,9 @@ impl Editor {
             generation: 0,
             busy: false,
             error: None,
+            scroll: ScrollHandle::new(),
+            scope_focus: tool_panel::focus_handles(Scope::ALL.len(), cx),
+            language_focus: tool_panel::focus_handles(3, cx),
         });
         self.analyse_autocut(cx);
     }
@@ -267,178 +267,190 @@ impl Editor {
         }
     }
 
-    pub(super) fn autocut_panel(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn autocut_panel(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         let review = self.autocut_review.as_ref()?;
         if self.is_start_screen() {
             return None;
         }
-        let theme = cx.theme().clone();
-        let mut panel = div()
-            .id("autocut-review")
-            .absolute()
-            .left(px(12.))
-            .top(px(56.))
-            .w(px(380.))
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .bg(theme.popover)
-            .text_color(theme.popover_foreground)
-            .border_1()
-            .border_color(theme.border)
-            .rounded(px(style::radius::PANEL))
-            .shadow_lg()
-            .occlude()
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
-                    .child(icons::icon(IconName::Scissors).small())
-                    .child("Automatic cuts"),
-            )
-            .child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.muted_foreground)
-                    .child(if review.params.clip.is_some() {
-                        "Selected clip and linked companions"
-                    } else if review.params.track.is_some() {
-                        "Selected track mix and linked companions"
-                    } else {
-                        "Mixed project audio / in-out range"
-                    }),
-            );
+        let entity = cx.entity();
+        let fillers = review.params.fillers;
+        let scoped = review.params.clip.is_some() || review.params.track.is_some();
+
+        // What is analysed.
+        let mut target = vec![
+            tool_panel::note(if review.params.clip.is_some() {
+                "Selected clip and linked companions"
+            } else if review.params.track.is_some() {
+                "Selected track mix and linked companions"
+            } else {
+                "Mixed project audio or the in and out range"
+            })
+            .into_any_element(),
+        ];
         if self.selected.is_some() {
             let current = Scope::of(&review.params);
-            let mut picker = div().flex().flex_row().gap_1().items_center().child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.muted_foreground)
-                    .child("Analyse"),
+            let entity = entity.clone();
+            target.insert(
+                0,
+                style::form_row(
+                    "Analyse",
+                    tool_panel::choice(
+                        "autocut-scope",
+                        &[
+                            SegmentedOption::new("autocut-scope-Clip", "Clip", None),
+                            SegmentedOption::new("autocut-scope-Track", "Track", None),
+                            SegmentedOption::new("autocut-scope-Project", "Project", None),
+                        ],
+                        &review.scope_focus,
+                        Scope::ALL.iter().position(|s| *s == current).unwrap_or(0),
+                        move |index, _, cx| {
+                            let scope = Scope::ALL[index.min(Scope::ALL.len() - 1)];
+                            entity.update(cx, |this, cx| this.set_autocut_scope(scope, cx));
+                        },
+                    ),
+                )
+                .into_any_element(),
             );
-            for scope in Scope::ALL {
-                picker = picker.child(
-                    Button::new(SharedString::from(format!(
-                        "autocut-scope-{}",
-                        scope.label()
-                    )))
-                    .compact()
-                    .selected(scope == current)
-                    .label(scope.label())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.set_autocut_scope(scope, cx);
-                    })),
-                );
-            }
-            panel = panel.child(picker);
         }
-        let labels = [
-            format!("Silence threshold: {:.0} dBFS", review.params.silence_db),
-            format!("Minimum pause: {}", timecode(review.params.min_silence)),
-            format!("Speech padding: {}", timecode(review.params.padding_before)),
+
+        // Detection: three sliders, each with its value.
+        let values = [
+            format!("{:.0} dBFS", review.params.silence_db),
+            tool_panel::seconds_label(review.params.min_silence, 1),
+            tool_panel::seconds_label(review.params.padding_before, 2),
         ];
-        for (label, state) in labels.into_iter().zip(&review.sliders) {
-            panel = panel
-                .child(div().text_size(crate::style::type_size::XS).child(label))
-                .child(Slider::new(state).horizontal());
+        let detection: Vec<AnyElement> = ["Silence threshold", "Minimum pause", "Speech padding"]
+            .into_iter()
+            .zip(&review.sliders)
+            .zip(values)
+            .map(|((label, state), value)| {
+                tool_panel::slider_row(label, state, value).into_any_element()
+            })
+            .collect();
+
+        // Options: switches that re-run the analysis.
+        let mut options = vec![
+            style::switch_row(
+                "autocut-short-pauses",
+                "Keep short pauses",
+                Some("Leave the natural breaths between words."),
+                review.params.keep_short_pauses,
+                {
+                    let entity = entity.clone();
+                    move |checked, _, cx| {
+                        let checked = *checked;
+                        entity.update(cx, |this, cx| {
+                            if let Some(r) = this.autocut_review.as_mut() {
+                                r.params.keep_short_pauses = checked;
+                            }
+                            this.analyse_autocut(cx);
+                        });
+                    }
+                },
+            )
+            .into_any_element(),
+            style::switch_row(
+                "autocut-fillers",
+                "Fillers and repeats",
+                Some("Also cut filler words and repeated phrases."),
+                fillers,
+                {
+                    let entity = entity.clone();
+                    move |checked, _, cx| {
+                        let checked = *checked;
+                        entity.update(cx, |this, cx| {
+                            if let Some(r) = this.autocut_review.as_mut() {
+                                r.params.fillers = checked;
+                            }
+                            this.analyse_autocut(cx);
+                        });
+                    }
+                },
+            )
+            .into_any_element(),
+        ];
+        if scoped {
+            options.push(
+                style::switch_row(
+                    "autocut-all-tracks",
+                    "Cut all unlocked tracks",
+                    Some("Off cuts only the selection and its linked tracks."),
+                    review.params.all_unlocked_tracks,
+                    {
+                        let entity = entity.clone();
+                        move |checked, _, cx| {
+                            let checked = *checked;
+                            entity.update(cx, |this, cx| {
+                                if let Some(r) = this.autocut_review.as_mut() {
+                                    r.params.all_unlocked_tracks = checked;
+                                }
+                                this.analyse_autocut(cx);
+                            });
+                        }
+                    },
+                )
+                .into_any_element(),
+            );
         }
-        let keep = review.params.keep_short_pauses;
-        let all = review.params.all_unlocked_tracks;
-        let scoped = review.params.clip.is_some() || review.params.track.is_some();
-        let fillers = review.params.fillers;
-        panel = panel.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_1()
-                .child(
-                    Button::new("autocut-short-pauses")
-                        .compact()
-                        .label(if keep {
-                            "Keep short pauses: on"
-                        } else {
-                            "Keep short pauses: off"
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(r) = this.autocut_review.as_mut() {
-                                r.params.keep_short_pauses = !r.params.keep_short_pauses;
-                            }
-                            this.analyse_autocut(cx);
-                        })),
-                )
-                .child(
-                    Button::new("autocut-all-tracks")
-                        .compact()
-                        .disabled(!scoped)
-                        .label(if all || !scoped {
-                            "All unlocked tracks"
-                        } else {
-                            "Selected + linked tracks"
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(r) = this.autocut_review.as_mut() {
-                                r.params.all_unlocked_tracks = !r.params.all_unlocked_tracks;
-                            }
-                            this.analyse_autocut(cx);
-                        })),
-                )
-                .child(
-                    Button::new("autocut-fillers")
-                        .compact()
-                        .label(if fillers {
-                            "Fillers + repeats: on"
-                        } else {
-                            "Fillers + repeats: off"
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(r) = this.autocut_review.as_mut() {
-                                r.params.fillers = !r.params.fillers;
-                            }
-                            this.analyse_autocut(cx);
-                        })),
-                )
-                .child(
-                    Button::new("autocut-language")
-                        .compact()
-                        .label(format!(
-                            "Language: {}",
-                            review.params.language.as_deref().unwrap_or("auto")
-                        ))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(r) = this.autocut_review.as_mut() {
-                                r.params.language = match r.params.language.as_deref() {
-                                    None => Some("en".into()),
-                                    Some("en") => Some("hu".into()),
-                                    _ => None,
-                                };
-                            }
-                            this.analyse_autocut(cx);
-                        })),
+        let language_index = match review.params.language.as_deref() {
+            Some("en") => 1,
+            Some("hu") => 2,
+            _ => 0,
+        };
+        options.push(
+            style::form_row(
+                "Language",
+                tool_panel::choice(
+                    "autocut-language",
+                    &[
+                        SegmentedOption::new("autocut-language-auto", "Auto", None),
+                        SegmentedOption::new("autocut-language-en", "English", None),
+                        SegmentedOption::new("autocut-language-hu", "Hungarian", None),
+                    ],
+                    &review.language_focus,
+                    language_index,
+                    {
+                        let entity = entity.clone();
+                        move |index, _, cx| {
+                            entity.update(cx, |this, cx| {
+                                if let Some(r) = this.autocut_review.as_mut() {
+                                    r.params.language = match index {
+                                        1 => Some("en".into()),
+                                        2 => Some("hu".into()),
+                                        _ => None,
+                                    };
+                                }
+                                this.analyse_autocut(cx);
+                            });
+                        }
+                    },
                 ),
+            )
+            .into_any_element(),
         );
         if fillers && !animathio_transcribe::engine_available() {
-            panel = panel.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .child("This build has no speech engine, so filler words cannot be found. Release installers include one; from source, build with the whisper feature."),
+            options.push(
+                tool_panel::note(
+                    "This build has no speech engine, so filler words cannot be found. Release installers include one; from source, build with the whisper feature.",
+                )
+                .into_any_element(),
             );
         }
+
+        let mut body = tool_panel::body()
+            .child(tool_panel::section("Target", target))
+            .child(tool_panel::section("Detection", detection))
+            .child(tool_panel::section("Options", options));
         if let Some(error) = &review.error {
-            panel = panel.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.danger)
-                    .child(error.clone()),
-            );
+            body = body.child(tool_panel::problem(error.clone()));
         }
         if review.busy {
-            panel = panel.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .child("Analysing audio..."),
-            );
+            body = body.child(tool_panel::note("Analysing audio…"));
         }
         if let Some(proposal) = &review.proposal {
             let enabled: Vec<_> = proposal.cuts.iter().filter(|c| c.enabled).collect();
@@ -448,43 +460,40 @@ impl Editor {
                     .map(|c| c.range.end.0 - c.range.start.0)
                     .sum(),
             );
-            panel = panel.child(div().text_size(crate::style::type_size::XS).child(format!(
-                "{} of {} cuts / {} saved",
-                enabled.len(),
-                proposal.cuts.len(),
-                timecode(saved)
-            )));
-            let mut list = div()
-                .id("autocut-list")
-                .max_h(px(170.))
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .gap_1();
+            let mut rows: Vec<AnyElement> = vec![
+                tool_panel::note(format!(
+                    "{} of {} cuts, {} saved",
+                    enabled.len(),
+                    proposal.cuts.len(),
+                    tool_panel::seconds_label(saved, 1)
+                ))
+                .into_any_element(),
+            ];
+            let mut list = div().id("autocut-list").flex().flex_col();
             for (i, cut) in proposal.cuts.iter().enumerate() {
                 let start = cut.range.start;
+                let reason = match cut.reason {
+                    animathio_control::AutocutReason::Silence => "Pause",
+                    animathio_control::AutocutReason::Filler => "Filler",
+                    animathio_control::AutocutReason::Repeat => "Repeat",
+                };
                 list = list.child(
                     div()
                         .flex()
-                        .gap_1()
                         .items_center()
+                        .gap_1()
                         .child(
-                            Button::new(("autocut-toggle", i))
-                                .ghost()
-                                .compact()
-                                .icon(icons::icon(if cut.enabled {
-                                    IconName::Check
-                                } else {
-                                    IconName::Minus
-                                }))
-                                .label(format!(
-                                    "{} - {}  {:?} ({:.0}%)",
+                            tool_panel::check_row(
+                                ("autocut-toggle", i),
+                                None,
+                                cut.enabled,
+                                format!(
+                                    "{} - {}  {reason} ({:.0}%)",
                                     timecode(cut.range.start),
                                     timecode(cut.range.end),
-                                    cut.reason,
                                     cut.confidence * 100.
-                                ))
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                                ),
+                                cx.listener(move |this, _, _, cx| {
                                     if let Some(p) = this
                                         .autocut_review
                                         .as_mut()
@@ -493,12 +502,15 @@ impl Editor {
                                         p.cuts[i].enabled = !p.cuts[i].enabled;
                                     }
                                     cx.notify();
-                                })),
+                                }),
+                            )
+                            .flex_1()
+                            .min_w_0(),
                         )
                         .child(
                             Button::new(("autocut-seek", i))
                                 .ghost()
-                                .compact()
+                                .xsmall()
                                 .icon(icons::icon(IconName::Play))
                                 .tooltip("Preview cut start")
                                 .on_click(
@@ -507,58 +519,74 @@ impl Editor {
                         ),
                 );
             }
-            panel = panel.child(list);
+            rows.push(list.into_any_element());
+            body = body.child(tool_panel::section("Proposed cuts", rows));
         }
+
         let busy = review.busy;
         let can_apply = !busy
             && review
                 .proposal
                 .as_ref()
                 .is_some_and(|p| p.cuts.iter().any(|c| c.enabled));
-        panel = panel.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_2()
-                .child(
-                    Button::new("autocut-analyse")
-                        .compact()
-                        .label("Analyse")
+        let footer = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_wrap()
+            .justify_end()
+            .gap_2()
+            .child(
+                style::secondary_button("autocut-analyse", cx)
+                    .debug_selector(|| "autocut-analyse".into())
+                    .small()
+                    .label("Analyse")
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.analyse_autocut(cx))),
+            )
+            .when(fillers && animathio_transcribe::engine_available(), |row| {
+                row.child(
+                    style::secondary_button("autocut-download", cx)
+                        .small()
+                        .label("Download model and analyse")
                         .disabled(busy)
-                        .on_click(cx.listener(|this, _, _, cx| this.analyse_autocut(cx))),
-                )
-                .when(fillers && animathio_transcribe::engine_available(), |row| {
-                    row.child(
-                        Button::new("autocut-download")
-                            .compact()
-                            .label("Download model & analyse")
-                            .disabled(busy)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(r) = this.autocut_review.as_mut() {
-                                    r.params.download_model = true;
-                                }
-                                this.analyse_autocut(cx);
-                            })),
-                    )
-                })
-                .child(
-                    Button::new("autocut-cancel")
-                        .compact()
-                        .label("Cancel")
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.autocut_review = None;
-                            cx.notify();
+                            if let Some(r) = this.autocut_review.as_mut() {
+                                r.params.download_model = true;
+                            }
+                            this.analyse_autocut(cx);
                         })),
                 )
-                .child(
-                    style::primary_button("autocut-apply", cx)
-                        .compact()
-                        .label("Apply")
-                        .disabled(!can_apply)
-                        .on_click(cx.listener(|this, _, _, cx| this.apply_autocut(cx))),
-                ),
-        );
-        Some(panel)
+            })
+            .child(
+                style::secondary_button("autocut-cancel", cx)
+                    .debug_selector(|| "autocut-cancel".into())
+                    .small()
+                    .label("Cancel")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.autocut_review = None;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                style::primary_button("autocut-apply", cx)
+                    .debug_selector(|| "autocut-apply".into())
+                    .small()
+                    .label("Apply")
+                    .disabled(!can_apply)
+                    .on_click(cx.listener(|this, _, _, cx| this.apply_autocut(cx))),
+            );
+        Some(
+            style::ToolPanel::new("autocut-review", IconName::Scissors, "Automatic cuts")
+                .bottom_height(self.dock.bottom_height)
+                .on_close(cx.listener(|this, _, _, cx| {
+                    this.autocut_review = None;
+                    cx.notify();
+                }))
+                .body(review.scroll.clone(), body)
+                .footer(footer)
+                .render(window),
+        )
     }
 }
 

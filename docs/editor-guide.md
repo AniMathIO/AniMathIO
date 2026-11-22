@@ -85,27 +85,30 @@ Library are laid out so that their key controls are visible there without scroll
 
 Open **Library → Plugins**. Community plugins start off. This is the only place the switch
 lives (Preferences reports its state and links here). A permanent caption under it reads
-"Third-party · sandboxed · not audited": community plugins run sandboxed with memory and time
-limits and are not audited by AniMathIO. While the switch is off only the first-party plugins
-are listed; turning it on adds a trust card and the **Installed** and **Browse** tabs.
+"Community plugins run sandboxed and are not reviewed.": they run with memory and time
+limits and are not audited by AniMathIO. While the switch is off only the built-in plugins
+are listed; turning it on adds a short note and the **Installed** and **Browse** tabs.
 
-**Installed** lists bundled plugins (always enabled) and installed community plugins.
-Community cards match the first-party ones (icon, name, version, id, kinds, author, Source
-link). Turn the **Enabled** switch on to load an installed plugin, or off to unload it.
-**Remove** (red) asks for confirmation, then deletes the community bundle. These actions update the preview without restarting;
+**Installed** lists built-in plugins (always on) and installed community plugins. Every card
+shows the icon, the name and one switch, a line saying what the plugin does and a caption
+with its origin and version ("Built in, version 1.2.0", "Community, version 1.0.0, by
+Author"). **Details** opens the plugin id, package file and ABI. Turn the switch on to load
+an installed community plugin, or off to unload it. **Remove** (red) asks for confirmation,
+then deletes the community bundle. These actions update the preview without restarting;
 project clips retain their plugin reference and show a placeholder while it is missing.
 A missing-plugin notice above the workspace names the ids and opens plugin management;
 a matching fetched registry entry also offers **Install**.
 
 **Browse** is available only while the community switch is on. Click it to fetch the
 community index in the background. Search matches names, authors, ids and descriptions.
-Cards show version, licence, minimum ABI, compatibility and a source link. **Install**
+Cards show the name, version, author and description, with a source link; **Details**
+adds the licence and minimum ABI, and an incompatible plugin says why. **Install**
 downloads the indexed release and checks its size, SHA-256 and package metadata before
 saving it. A fresh installation starts disabled: choose Enable on its Browse card or in Installed.
 An incompatible plugin stays visible with a reason and its Install control disabled.
 Network failures show a Retry action and keep installed plugins usable.
 
-Browse also offers **Update available** when the latest indexed version is newer than
+Browse also offers **Update** when the latest indexed version is newer than
 an installed version. Updates require a click and preserve the enabled setting. A
 delisted installed plugin shows the registry's reason and is never removed silently.
 **Install** is the primary button on a Browse card; after a registry install the card shows
@@ -491,7 +494,7 @@ selection, double-click to edit a name, colour and note, press Delete to remove,
 keys to nudge by a frame, and Ctrl+C / Ctrl+V to copy and paste markers at the playhead
 (markers snap, and clips and the playhead snap to markers). Markers ride along with ripple
 edits and autocut. Clip > Markers and beat
-sync opens a panel that lists the markers, detects the tempo and beats of the project
+sync opens a panel (one of the shared floating tool panels: same width and header, an **X** to close, a scrolling body and a pinned footer, always above the timeline) that lists the markers, detects the tempo and beats of the project
 audio (or the selected clip) offline, adds markers at every beat, every Nth beat or the
 downbeats, and snaps the selected clips' cut points to beats and markers or splits
 them there, each as one undo step. The same actions are `animathio-cli markers` /

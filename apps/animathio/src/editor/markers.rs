@@ -1,10 +1,10 @@
 //! Timeline markers and beat/marker sync: adding, jumping, editing and dragging markers,
 //! plus a panel that lists them and runs beat detection, "markers at beats" and cut sync.
 //! Every edit is one `Command` (or one `Command::Batch`), so each is a single undo step.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
+use super::tool_panel;
 use super::*;
-use crate::style;
+use crate::style::{self, SegmentedOption, TextRole as _, color};
 use animathio_control::{
     BeatDetectParams, BeatDetection, BeatMarkerOptions, BeatSelection, SyncCutsParams, SyncMode,
     SyncSource, analyze_beats, markers_at_beats_command, select_beats, sync_cuts_command,
@@ -18,6 +18,9 @@ use gpui_component::{
 /// Pixel width of a marker flag on the ruler.
 const FLAG_W: f32 = 10.0;
 const FLAG_H: f32 = 9.0;
+/// Marker colour swatch in the edit dialog, and the colour dot in the panel list.
+const SWATCH: gpui::Rems = gpui::Rems(1.333);
+const DOT: gpui::Rems = gpui::Rems(0.667);
 
 /// The colour of a palette entry as a paint colour.
 pub(super) fn paint_color(color: MarkerColor) -> Hsla {
@@ -52,9 +55,33 @@ pub(super) struct Panel {
     source: SyncSource,
     /// Analyse the selected clip instead of the whole mix.
     selected_only: bool,
+    /// Scroll position of the panel body.
+    scroll: ScrollHandle,
+    /// Keyboard focus for the segmented controls (one handle per option).
+    scope_focus: Vec<FocusHandle>,
+    every_focus: Vec<FocusHandle>,
+    source_focus: Vec<FocusHandle>,
+    shift_focus: Vec<FocusHandle>,
 }
-impl Default for Panel {
-    fn default() -> Self {
+
+/// The "Max shift" choices in milliseconds.
+const MAX_SHIFTS_MS: [i64; 3] = [100, 250, 500];
+
+impl Panel {
+    /// The beat placement and sync settings, for the UI tests: (every Nth beat, downbeats only,
+    /// max shift in ms).
+    #[cfg(test)]
+    pub(super) fn settings(&self) -> (u32, bool, i64) {
+        (self.every, self.downbeats_only, self.max_shift_ms)
+    }
+
+    /// Whether the beat analysis listens to the selected clip only (UI tests).
+    #[cfg(test)]
+    pub(super) fn selected_only(&self) -> bool {
+        self.selected_only
+    }
+
+    fn new(cx: &mut Context<Editor>) -> Self {
         Self {
             identity: Arc::new(()),
             generation: 0,
@@ -68,6 +95,11 @@ impl Default for Panel {
             max_shift_ms: 250,
             source: SyncSource::Beats,
             selected_only: false,
+            scroll: ScrollHandle::new(),
+            scope_focus: tool_panel::focus_handles(2, cx),
+            every_focus: tool_panel::focus_handles(4, cx),
+            source_focus: tool_panel::focus_handles(3, cx),
+            shift_focus: tool_panel::focus_handles(3, cx),
         }
     }
 }
@@ -140,7 +172,7 @@ impl Editor {
     }
 
     pub(super) fn open_marker_panel(&mut self, cx: &mut Context<Self>) {
-        self.marker_panel = Some(Panel::default());
+        self.marker_panel = Some(Panel::new(cx));
         cx.notify();
     }
 
@@ -387,7 +419,7 @@ impl Editor {
                 let color = color.clone();
                 div()
                     .id(("marker-color", i))
-                    .size(gpui::rems(1.333))
+                    .size(SWATCH)
                     .rounded_full()
                     .cursor_pointer()
                     .bg(paint_color(option))
@@ -488,200 +520,194 @@ impl Editor {
             .collect()
     }
 
-    pub(super) fn marker_panel(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn marker_panel(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         let panel = self.marker_panel.as_ref()?;
         if self.is_start_screen() {
             return None;
         }
-        let theme = cx.theme().clone();
         let rate = self.project.frame_rate();
         let selected_count = self.selected_ids().len();
-        let mut root = div()
-            .id("marker-panel")
-            .absolute()
-            .right(px(12.))
-            .top(px(56.))
-            .w(px(360.))
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .bg(theme.popover)
-            .text_color(theme.popover_foreground)
-            .border_1()
-            .border_color(theme.border)
-            .rounded(px(style::radius::PANEL))
-            .shadow_lg()
-            .occlude()
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
-                    .child(icons::icon(IconName::Flag).small())
-                    .child("Markers and beats"),
-            );
-        // Beat detection.
+        let entity = cx.entity();
         let detected = panel.detection.as_ref();
-        root = root.child(
+
+        // Beats: where to listen, how to place markers, and the result of the analysis.
+        let scope = tool_panel::choice(
+            "beats-scope",
+            &[
+                SegmentedOption::new("beats-scope-mix", "Project mix", None),
+                SegmentedOption::new("beats-scope-clip", "Selected clip", None).unavailable(
+                    self.selected
+                        .is_none()
+                        .then_some("Select a clip to analyse only that clip"),
+                ),
+            ],
+            &panel.scope_focus,
+            usize::from(panel.selected_only),
+            {
+                let entity = entity.clone();
+                move |index, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        let selected_only = index == 1;
+                        if selected_only && this.selected.is_none() {
+                            return;
+                        }
+                        if let Some(p) = this.marker_panel.as_mut()
+                            && p.selected_only != selected_only
+                        {
+                            p.selected_only = selected_only;
+                            p.detection = None;
+                        }
+                        cx.notify();
+                    });
+                }
+            },
+        );
+        let every_index = if panel.downbeats_only {
+            3
+        } else {
+            match panel.every {
+                2 => 1,
+                4 => 2,
+                _ => 0,
+            }
+        };
+        let place = tool_panel::choice(
+            "beats-every",
+            &[
+                SegmentedOption::new("beats-every-1", "Every", None),
+                SegmentedOption::new("beats-every-2", "Every 2", None),
+                SegmentedOption::new("beats-every-4", "Every 4", None),
+                SegmentedOption::new("beats-downbeats", "Downbeats", None),
+            ],
+            &panel.every_focus,
+            every_index,
+            {
+                let entity = entity.clone();
+                move |index, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        if let Some(p) = this.marker_panel.as_mut() {
+                            p.downbeats_only = index == 3;
+                            // Downbeats keep the last "every Nth" choice for when it is turned off.
+                            match index {
+                                0 => p.every = 1,
+                                1 => p.every = 2,
+                                2 => p.every = 4,
+                                _ => {}
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
+            },
+        );
+        let mut beats = vec![
+            style::form_row("Audio", scope).into_any_element(),
+            tool_panel::stacked("Place markers on", place).into_any_element(),
             div()
                 .flex()
-                .flex_wrap()
-                .gap_1()
                 .child(
-                    Button::new("beats-scope")
-                        .compact()
-                        .disabled(self.selected.is_none())
-                        .label(if panel.selected_only {
-                            "Audio: selected clip"
-                        } else {
-                            "Audio: project mix"
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(p) = this.marker_panel.as_mut() {
-                                p.selected_only = !p.selected_only;
-                                p.detection = None;
-                            }
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    style::primary_button("beats-detect", cx)
-                        .compact()
+                    style::secondary_button("beats-detect", cx)
+                        .debug_selector(|| "beats-detect".into())
+                        .small()
                         .label("Detect beats")
                         .disabled(panel.busy)
                         .on_click(cx.listener(|this, _, _, cx| this.detect_beats(cx))),
-                ),
-        );
+                )
+                .into_any_element(),
+        ];
         if panel.busy {
-            root = root.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .child("Analysing audio..."),
-            );
+            beats.push(tool_panel::note("Analysing audio…").into_any_element());
         }
         if let Some(error) = &panel.error {
-            root = root.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.danger)
-                    .child(error.clone()),
-            );
+            beats.push(tool_panel::problem(error.clone()).into_any_element());
         }
         if let Some(notice) = &panel.notice {
-            root = root.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.muted_foreground)
-                    .child(notice.clone()),
-            );
+            beats.push(tool_panel::note(notice.clone()).into_any_element());
         }
         if let Some(d) = detected {
-            root = root.child(div().text_size(crate::style::type_size::XS).child(format!(
-                "{:.1} BPM, {} beats, {:.0}% confidence",
-                d.bpm,
-                d.beats.len(),
-                d.confidence * 100.
-            )));
-        }
-        let every = panel.every;
-        let downbeats = panel.downbeats_only;
-        let mut subset = div()
-            .flex()
-            .flex_wrap()
-            .gap_1()
-            .items_center()
-            .child(div().text_size(crate::style::type_size::XS).child("Beats:"));
-        for n in [1_u32, 2, 4] {
-            subset = subset.child(
-                Button::new(("beats-every", n as usize))
-                    .compact()
-                    .label(if n == 1 {
-                        "Every".to_owned()
-                    } else {
-                        format!("Every {n}")
-                    })
-                    .selected(!downbeats && every == n)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(p) = this.marker_panel.as_mut() {
-                            p.every = n;
-                            p.downbeats_only = false;
-                        }
-                        cx.notify();
-                    })),
+            beats.push(
+                tool_panel::note(format!(
+                    "{:.1} BPM, {} beats, {:.0}% confidence",
+                    d.bpm,
+                    d.beats.len(),
+                    d.confidence * 100.
+                ))
+                .into_any_element(),
             );
         }
-        subset = subset.child(
-            Button::new("beats-downbeats")
-                .compact()
-                .label("Downbeats")
-                .selected(downbeats)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(p) = this.marker_panel.as_mut() {
-                        p.downbeats_only = !p.downbeats_only;
-                    }
-                    cx.notify();
-                })),
-        );
-        root = root.child(subset).child(
-            Button::new("beats-add-markers")
-                .compact()
-                .icon(icons::icon(IconName::Flag))
-                .label("Add markers at beats")
-                .disabled(detected.is_none())
-                .on_click(cx.listener(|this, _, _, cx| this.add_beat_markers(cx))),
-        );
+
         // Cut sync.
-        let source_label = match panel.source {
-            SyncSource::Beats => "Sync to: beats",
-            SyncSource::Markers => "Sync to: markers",
-            SyncSource::Both => "Sync to: beats + markers",
+        let source_index = match panel.source {
+            SyncSource::Beats => 0,
+            SyncSource::Markers => 1,
+            SyncSource::Both => 2,
         };
-        let max_shift = panel.max_shift_ms;
-        root = root.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap_1()
-                .child(
-                    Button::new("sync-source")
-                        .compact()
-                        .label(source_label)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(p) = this.marker_panel.as_mut() {
-                                p.source = match p.source {
-                                    SyncSource::Beats => SyncSource::Markers,
-                                    SyncSource::Markers => SyncSource::Both,
-                                    SyncSource::Both => SyncSource::Beats,
-                                };
-                            }
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    Button::new("sync-shift")
-                        .compact()
-                        .label(format!("Max shift: {max_shift} ms"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(p) = this.marker_panel.as_mut() {
-                                p.max_shift_ms = match p.max_shift_ms {
-                                    100 => 250,
-                                    250 => 500,
-                                    _ => 100,
-                                };
-                            }
-                            cx.notify();
-                        })),
-                ),
+        let sync_source = tool_panel::choice(
+            "sync-source",
+            &[
+                SegmentedOption::new("sync-source-beats", "Beats", None),
+                SegmentedOption::new("sync-source-markers", "Markers", None),
+                SegmentedOption::new("sync-source-both", "Both", None),
+            ],
+            &panel.source_focus,
+            source_index,
+            {
+                let entity = entity.clone();
+                move |index, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        if let Some(p) = this.marker_panel.as_mut() {
+                            p.source = match index {
+                                1 => SyncSource::Markers,
+                                2 => SyncSource::Both,
+                                _ => SyncSource::Beats,
+                            };
+                        }
+                        cx.notify();
+                    });
+                }
+            },
         );
-        root = root.child(
+        let shift_index = MAX_SHIFTS_MS
+            .iter()
+            .position(|ms| *ms == panel.max_shift_ms)
+            .unwrap_or(1);
+        let sync_shift = tool_panel::choice(
+            "sync-shift",
+            &[
+                SegmentedOption::new("sync-shift-100", "100 ms", None),
+                SegmentedOption::new("sync-shift-250", "250 ms", None),
+                SegmentedOption::new("sync-shift-500", "500 ms", None),
+            ],
+            &panel.shift_focus,
+            shift_index,
+            {
+                let entity = entity.clone();
+                move |index, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        if let Some(p) = this.marker_panel.as_mut() {
+                            p.max_shift_ms = MAX_SHIFTS_MS[index.min(MAX_SHIFTS_MS.len() - 1)];
+                        }
+                        cx.notify();
+                    });
+                }
+            },
+        );
+        let sync = vec![
+            style::form_row("Sync to", sync_source).into_any_element(),
+            style::form_row("Max shift", sync_shift).into_any_element(),
             div()
                 .flex()
                 .flex_wrap()
-                .gap_1()
+                .gap_2()
                 .child(
-                    Button::new("sync-snap")
-                        .compact()
+                    style::secondary_button("sync-snap", cx)
+                        .debug_selector(|| "sync-snap".into())
+                        .small()
                         .icon(icons::icon(IconName::Magnet))
                         .label("Snap selected cuts")
                         .disabled(selected_count == 0)
@@ -690,65 +716,72 @@ impl Editor {
                         ),
                 )
                 .child(
-                    Button::new("sync-split")
-                        .compact()
+                    style::secondary_button("sync-split", cx)
+                        .debug_selector(|| "sync-split".into())
+                        .small()
                         .icon(icons::icon(IconName::Scissors))
-                        .label("Split selected at targets")
+                        .label("Split at targets")
                         .disabled(selected_count == 0)
                         .on_click(
                             cx.listener(|this, _, _, cx| this.sync_selected(SyncMode::Split, cx)),
                         ),
-                ),
-        );
-        // Marker list.
-        let mut list = div()
-            .id("marker-list")
-            .max_h(px(180.))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .gap_1();
+                )
+                .into_any_element(),
+        ];
+
+        // Marker list: `ROW` rows, the whole row seeks, ghost icon buttons edit and remove.
+        let mut list = div().id("marker-list").flex().flex_col();
         for (i, marker) in self.project.markers().iter().enumerate() {
             let (id, time) = (marker.id, marker.time);
             let is_selected = self.marker_selection.contains(&id);
-            let label = if marker.name.is_empty() {
-                timecode::format_timecode(marker.time, rate)
-            } else {
-                format!(
-                    "{}  {}",
-                    timecode::format_timecode(marker.time, rate),
-                    marker.name
-                )
-            };
             list = list.child(
                 div()
+                    .id(("marker-seek", i))
                     .flex()
-                    .gap_1()
                     .items_center()
-                    .rounded(px(3.))
-                    .when(is_selected, |row| row.bg(theme.accent))
+                    .gap_2()
+                    .min_h(style::size::ROW)
+                    .pl_2()
+                    .pr_1()
+                    .rounded(px(style::radius::CONTROL))
+                    .cursor_pointer()
+                    .when(is_selected, |row| {
+                        row.bg(style::tint(color::ACCENT, style::Alpha::Wash))
+                    })
+                    .hover(|row| row.bg(style::hex(color::HOVER)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.clear_selection(cx);
+                        this.marker_selection.insert(id);
+                        this.seek_to(time, cx);
+                    }))
                     .child(
                         div()
-                            .size(gpui::rems(0.667))
+                            .size(DOT)
                             .flex_shrink_0()
                             .rounded_full()
                             .bg(paint_color(marker.color)),
                     )
                     .child(
-                        Button::new(("marker-seek", i))
-                            .ghost()
-                            .compact()
-                            .label(label)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.clear_selection(cx);
-                                this.marker_selection.insert(id);
-                                this.seek_to(time, cx);
-                            })),
+                        div()
+                            .flex_shrink_0()
+                            .text_role(style::Role::Label)
+                            .text_color(style::hex(color::TEXT_SECONDARY))
+                            .tabular()
+                            .child(timecode::format_timecode(marker.time, rate)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_role(style::Role::Label)
+                            .text_color(style::hex(color::TEXT))
+                            .child(marker.name.clone()),
                     )
                     .child(
                         Button::new(("marker-edit", i))
                             .ghost()
-                            .compact()
+                            .xsmall()
                             .icon(icons::icon(IconName::Pencil))
                             .tooltip("Edit marker")
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -758,7 +791,7 @@ impl Editor {
                     .child(
                         Button::new(("marker-remove", i))
                             .ghost()
-                            .compact()
+                            .xsmall()
                             .icon(icons::icon(IconName::Trash))
                             .tooltip("Remove marker")
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -767,42 +800,131 @@ impl Editor {
                     ),
             );
         }
-        root = root
+        let marker_count = self.project.markers().len();
+        let markers = if marker_count == 0 {
+            style::empty_state(Some(IconName::Flag), "Markers you add appear here.", None)
+                .into_any_element()
+        } else {
+            list.into_any_element()
+        };
+
+        let body = tool_panel::body()
+            .child(tool_panel::section("Beats", beats))
+            .child(tool_panel::section("Sync cuts", sync))
+            .child(tool_panel::section(
+                if marker_count == 0 {
+                    "Markers".to_owned()
+                } else {
+                    format!("Markers ({marker_count})")
+                },
+                [markers],
+            ));
+        // The same footer wrapper as Automatic cuts and Auto duck (it wraps at a larger UI scale).
+        // The primary action is the one that can run: "Add at playhead" until beats exist.
+        let beats_ready = detected.is_some();
+        let add_here = if beats_ready {
+            style::secondary_button("marker-add", cx)
+        } else {
+            style::primary_button("marker-add", cx)
+        };
+        let add_beats = if beats_ready {
+            style::primary_button("beats-add-markers", cx)
+        } else {
+            style::secondary_button("beats-add-markers", cx)
+        };
+        let footer = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_wrap()
+            .justify_end()
+            .gap_2()
             .child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .child(count_label(self.project.markers().len(), "marker")),
+                add_here
+                    .debug_selector(|| "marker-add".into())
+                    .small()
+                    .icon(icons::icon(IconName::Plus))
+                    .label("Add at playhead")
+                    .on_click(cx.listener(|this, _, _, cx| this.add_marker_at_playhead(cx))),
             )
-            .child(list)
             .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("marker-add")
-                            .compact()
-                            .icon(icons::icon(IconName::Plus))
-                            .label("Add at playhead")
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.add_marker_at_playhead(cx)),
-                            ),
-                    )
-                    .child(
-                        Button::new("marker-panel-close")
-                            .compact()
-                            .label("Close")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.marker_panel = None;
-                                cx.notify();
-                            })),
-                    ),
+                add_beats
+                    .debug_selector(|| "beats-add-markers".into())
+                    .small()
+                    .icon(icons::icon(IconName::Flag))
+                    .label("Add markers at beats")
+                    .disabled(!beats_ready)
+                    .on_click(cx.listener(|this, _, _, cx| this.add_beat_markers(cx))),
             );
-        Some(root)
+        Some(
+            style::ToolPanel::new("marker-panel", IconName::Flag, "Markers and beats")
+                .bottom_height(self.dock.bottom_height)
+                .on_close(cx.listener(|this, _, _, cx| {
+                    this.marker_panel = None;
+                    cx.notify();
+                }))
+                .body(panel.scroll.clone(), body)
+                .footer(footer)
+                .render(window),
+        )
     }
 }
 
-/// Horizontal padding inside a marker name plate.
-const PLATE_PAD: f32 = 6.0;
+/// Gap between a marker's name and the next marker's flag.
+const NAME_GAP: f32 = 4.0;
+
+/// The x of every marker flag, left to right.
+fn sorted_flag_xs(layout: &TimelineLayout, snapshot: &TimelineSnapshot) -> Vec<f32> {
+    let mut xs: Vec<f32> = snapshot
+        .markers
+        .iter()
+        .map(|marker| timeline::time_to_x(layout, marker.time))
+        .collect();
+    xs.sort_by(f32::total_cmp);
+    xs
+}
+
+/// The x of the first flag to the right of `x` (`flag_xs` sorted ascending).
+fn next_flag_x(flag_xs: &[f32], x: f32) -> Option<f32> {
+    let first_after = flag_xs.partition_point(|candidate| *candidate <= x + 0.5);
+    flag_xs.get(first_after).copied()
+}
+
+/// `name`, or its longest prefix followed by "…" that fits in `available` (a name that would
+/// be cut mid-letter by the next flag ends in an ellipsis instead).
+fn fit_name(name: &str, available: Pixels, name_font: &Font, window: &mut Window) -> String {
+    if available <= px(0.) {
+        return String::new();
+    }
+    if label_width(name, name_font.clone(), window) <= available {
+        return name.to_owned();
+    }
+    ellipsize(name, |candidate| {
+        label_width(candidate, name_font.clone(), window) <= available
+    })
+}
+
+/// The longest prefix of `name` (whole characters) that `fits` once "…" is appended, with the
+/// ellipsis; empty when not even one character fits. `name` itself is assumed not to fit.
+fn ellipsize(name: &str, mut fits: impl FnMut(&str) -> bool) -> String {
+    let boundaries: Vec<usize> = name.char_indices().map(|(i, _)| i).collect();
+    // `low..=high` counts the characters kept; the whole name is already ruled out, so the
+    // most that can be kept is one character fewer, and `boundaries[middle]` is always valid.
+    let (mut low, mut high) = (0, boundaries.len().saturating_sub(1));
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        if fits(&format!("{}…", &name[..boundaries[middle]])) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    if low == 0 {
+        String::new()
+    } else {
+        format!("{}…", &name[..boundaries[low]])
+    }
+}
 
 /// Paint ranges, lines and flags for every visible marker over the whole timeline.
 pub(super) fn paint_markers(
@@ -813,6 +935,7 @@ pub(super) fn paint_markers(
     window: &mut Window,
     cx: &mut App,
 ) {
+    let flag_xs = sorted_flag_xs(layout, snapshot);
     for marker in &snapshot.markers {
         let x = timeline::time_to_x(layout, marker.time);
         let end_x = marker.end.map(|end| timeline::time_to_x(layout, end));
@@ -869,32 +992,52 @@ pub(super) fn paint_markers(
             .corner_radii(px(2.0)),
         );
         if !marker.name.is_empty() {
-            // A backing plate keeps the name legible over the timecode labels.
-            let plate = f32::from(
-                label_width(
-                    &marker.name,
-                    font(snapshot.theme.font_family.clone()),
-                    window,
-                ) + px(PLATE_PAD),
-            );
-            window.paint_quad(
-                fill(
-                    Bounds::new(
-                        point(left + px(FLAG_W + 1.0), bounds.top() + px(1.0)),
-                        size(px(plate), px(14.0)),
-                    ),
-                    style::hex(style::color::BG).opacity(0.9),
-                )
-                .corner_radii(px(2.0)),
-            );
+            // The name sits on the ruler's top row, beside the flag, and stops before the
+            // next marker's flag so two neighbouring names never overlap.
+            let name_left = left + px(FLAG_W + 3.0);
+            let limit = next_flag_x(&flag_xs, x).map_or(bounds.right(), |next| {
+                (bounds.origin.x + px(next - NAME_GAP)).min(bounds.right())
+            });
+            let name_font = font(snapshot.theme.font_family.clone());
+            let name = fit_name(&marker.name, limit - name_left, &name_font, window);
             paint_clip_label(
-                marker.name.clone().into(),
-                point(left + px(FLAG_W + 3.0), bounds.top() + px(1.0)),
-                bounds.right(),
-                font(snapshot.theme.font_family.clone()),
+                name.into(),
+                point(name_left, bounds.top() + px(1.0)),
+                limit,
+                name_font,
                 window,
                 cx,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ellipsize, next_flag_x};
+
+    #[core::prelude::v1::test]
+    fn a_long_name_is_cut_to_the_longest_prefix_that_fits_with_an_ellipsis() {
+        // Each character is one unit wide (the ellipsis too): `limit` units fit.
+        let cut = |name: &str, limit: usize| ellipsize(name, |s| s.chars().count() <= limit);
+        assert_eq!(cut("Introduction", 6), "Intro…");
+        // One short of the whole name: the search must not index past the last character.
+        assert_eq!(cut("Introduction", 12), "Introductio…");
+        assert_eq!(cut("Introduction", 1), "");
+        assert_eq!(cut("Introduction", 0), "");
+        // Multi-byte characters are kept whole.
+        assert_eq!(cut("Übergang", 3), "Üb…");
+        assert_eq!(cut("a", 0), "");
+        assert_eq!(cut("", 0), "");
+    }
+
+    #[core::prelude::v1::test]
+    fn a_name_stops_at_the_next_flag_to_its_right() {
+        let flags = [10.0, 40.0, 40.2, 90.0];
+        assert_eq!(next_flag_x(&flags, 10.0), Some(40.0));
+        // Flags a fraction of a pixel apart count as one: the next one is the first beyond.
+        assert_eq!(next_flag_x(&flags, 40.0), Some(90.0));
+        assert_eq!(next_flag_x(&flags, 90.0), None);
+        assert_eq!(next_flag_x(&[], 0.0), None);
     }
 }

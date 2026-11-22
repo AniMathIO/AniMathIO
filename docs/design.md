@@ -274,6 +274,7 @@ Stretch/1:1 in the inspector and any other choice of two to five short options.
   `TEXT_SECONDARY`, `HOVER` fill on hover. The sliding pill animates in `BASE_MS`.
 - Labels are one word where possible. When labels do not fit, show icons only, with a
   tooltip on each. Arrow keys, Home and End move between options and move keyboard focus with the selection; a click focuses the option. The focus ring is a constant 2 px edge (transparent at rest), so focusing never shifts the content. The caller owns one `FocusHandle` per option.
+- An option that cannot be chosen right now (`SegmentedOption::unavailable(reason)`, for example "Selected clip" with nothing selected) is dimmed to `TEXT_DISABLED`, ignores clicks and keys and explains itself in a tooltip.
 - A heading under a tab strip never repeats the active tab's name.
 
 ### Inspector
@@ -429,6 +430,14 @@ are non-modal panels over the workspace. They share one frame:
   3 Preview).
 - Toggle chips for "include this track" use a `Check` icon when on and no icon when off,
   never a minus sign.
+- Settings are labelled rows, never state-in-label buttons: a segmented control for up to
+  four short options ("Sync to: Beats | Markers | Both"), a switch row for on/off, a slider
+  with its exact value at the right. The five tool panels (the editor's markers, autocut,
+  ducking, scenes and reframe modules) build their frame with `style::ToolPanel` and
+  their rows with the helpers in `editor/tool_panel.rs`. The footer has the one primary
+  action at the right (Apply, Reframe, Split, Add markers at beats); Cancel stays only
+  where it discards a running analysis. Marker names on the ruler stop at the next
+  marker's flag, so neighbouring names never overlap.
 
 ### Toasts
 

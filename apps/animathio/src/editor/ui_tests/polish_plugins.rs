@@ -365,3 +365,41 @@ fn status_bar_names_the_renderer_actually_used(cx: &mut TestAppContext) {
         "{label}"
     );
 }
+
+/// A Browse card keeps the plugin id, licence and ABI behind its Details link, which toggles.
+#[gpui::test]
+fn browse_card_details_disclose_and_hide_the_plugin_facts(cx: &mut TestAppContext) {
+    let (mut ui, _root, _store) = community_ui(cx);
+    ui.update(|e, _, cx| {
+        e.set_community_plugins_enabled(true, cx).unwrap();
+        e.browse_community(cx);
+    });
+    ui.settle();
+    let facts = "plugin-id-com.example.hello";
+    assert!(!visible(&mut ui, facts), "closed by default");
+    let link = ui
+        .cx
+        .debug_bounds("details-catalog:com.example.hello")
+        .expect("the Details link");
+    ui.click(link.center(), gpui::Modifiers::default());
+    assert!(visible(&mut ui, facts), "Details opens the plugin facts");
+    assert!(visible(&mut ui, "plugin-license-com.example.hello"));
+    assert!(visible(&mut ui, "plugin-abi-com.example.hello"));
+    // The open card grows below the Library body's fold: scroll it into view, as a user would.
+    let body = ui
+        .cx
+        .debug_bounds("library-body")
+        .expect("the Library body");
+    ui.cx.simulate_event(gpui::ScrollEvent {
+        position: body.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-400.))),
+        ..Default::default()
+    });
+    ui.settle();
+    let link = ui
+        .cx
+        .debug_bounds("details-catalog:com.example.hello")
+        .expect("the link stays");
+    ui.click(link.center(), gpui::Modifiers::default());
+    assert!(!visible(&mut ui, facts), "Hide details closes them again");
+}

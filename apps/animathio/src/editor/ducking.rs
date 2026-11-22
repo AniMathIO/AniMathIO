@@ -1,13 +1,13 @@
 //! "Auto duck…" panel: pick the voice source and music tracks, tune depth and ramps, review
 //! the ducked spans on the timeline, then apply one undoable batch of gain keyframes.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
+use super::tool_panel;
 use super::*;
-use crate::style;
+use crate::style::{self, TextRole as _};
 use animathio_control::{DuckParams, DuckProposal, duck_command, propose_duck, timecode};
 use gpui_component::{
     Disableable,
-    slider::{Slider, SliderEvent, SliderState},
+    slider::{SliderEvent, SliderState},
 };
 
 pub(super) fn duck_clip_label(project: &Project, track: &Track, clip: &Clip) -> String {
@@ -390,6 +390,7 @@ impl Editor {
         overlay
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(super) fn duck_panel(
         &self,
         window: &Window,
@@ -399,30 +400,7 @@ impl Editor {
         if self.is_start_screen() {
             return None;
         }
-        let theme = cx.theme().clone();
-        // The body scrolls; the Analyse/Cancel/Apply footer is pinned below it so the primary
-        // action never sits under the fold.
-        let mut panel = div()
-            .id("duck-scroll")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .track_scroll(&self.duck_scroll)
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
-                    .child(icons::icon(IconName::Volume2).small())
-                    .child("Auto duck"),
-            )
-            .child(div().text_size(crate::style::type_size::XS).text_color(theme.muted_foreground).child(
-                "Lower the music while someone speaks. Choose the voice, choose what to duck, check the shaded spans on the timeline, then Apply. Edit > Undo reverts it in one step.",
-            ));
+        let entity = cx.entity();
         let audio_tracks: Vec<(TrackId, String, bool)> = self
             .project
             .tracks()
@@ -440,8 +418,9 @@ impl Editor {
                 (t.id(), t.name().to_owned(), voice)
             })
             .collect();
-        let chips = |panel: Stateful<Div>, title: &str, music: bool, cx: &mut Context<Self>| {
-            let mut row = div().flex().flex_wrap().gap_1().items_center();
+        // Track rows: a check when the track is included, nothing when it is not.
+        let track_rows = |music: bool, cx: &mut Context<Self>| -> Vec<AnyElement> {
+            let mut rows = Vec::new();
             for (id, name, is_voice) in &audio_tracks {
                 // Music is never the voice: hide tracks that hold the voice clip.
                 if music && *is_voice {
@@ -453,46 +432,39 @@ impl Editor {
                     review.params.voice_tracks.contains(id)
                 };
                 let id = *id;
-                row = row.child(
-                    Button::new((
-                        if music { "duck-music" } else { "duck-voice" },
-                        id.0 as usize,
-                    ))
-                    .compact()
-                    .icon(icons::icon(if on {
-                        IconName::SquareCheck
-                    } else {
-                        IconName::Square
-                    }))
-                    .label(name.clone())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(r) = this.duck_review.as_mut() {
-                            let (own, other) = if music {
-                                (&mut r.params.music_tracks, &mut r.params.voice_tracks)
-                            } else {
-                                (&mut r.params.voice_tracks, &mut r.params.music_tracks)
-                            };
-                            if let Some(pos) = own.iter().position(|t| *t == id) {
-                                own.remove(pos);
-                            } else {
-                                own.push(id);
-                                other.retain(|t| *t != id);
+                rows.push(
+                    tool_panel::check_row(
+                        (
+                            if music { "duck-music" } else { "duck-voice" },
+                            id.0 as usize,
+                        ),
+                        None,
+                        on,
+                        name.clone(),
+                        cx.listener(move |this, _, _, cx| {
+                            if let Some(r) = this.duck_review.as_mut() {
+                                let (own, other) = if music {
+                                    (&mut r.params.music_tracks, &mut r.params.voice_tracks)
+                                } else {
+                                    (&mut r.params.voice_tracks, &mut r.params.music_tracks)
+                                };
+                                if let Some(pos) = own.iter().position(|t| *t == id) {
+                                    own.remove(pos);
+                                } else {
+                                    own.push(id);
+                                    other.retain(|t| *t != id);
+                                }
                             }
-                        }
-                        this.analyse_duck(cx);
-                    })),
+                            this.analyse_duck(cx);
+                        }),
+                    )
+                    .into_any_element(),
                 );
             }
-            panel
-                .child(
-                    div()
-                        .text_size(crate::style::type_size::XS)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(title.to_owned()),
-                )
-                .child(row)
+            rows
         };
-        panel = chips(panel, "1. Voice source", false, cx);
+
+        // 1. Voice.
         let selected_audio = self.selected.is_some_and(|id| {
             self.find_clip(id).is_some_and(|c| {
                 matches!(
@@ -502,18 +474,18 @@ impl Editor {
             })
         });
         let clip_voice = !review.params.voice_clips.is_empty();
-        panel = panel.child(
-            Button::new("duck-voice-clip")
-                .debug_selector(|| "duck-voice-clip".into())
-                .compact()
-                .disabled(!selected_audio && !clip_voice)
-                .icon(icons::icon(if clip_voice {
-                    IconName::SquareCheck
-                } else {
-                    IconName::Square
-                }))
-                .label("Use the selected clip as the voice")
-                .on_click(cx.listener(|this, _, _, cx| {
+        let voice_clip_disabled = !selected_audio && !clip_voice;
+        let mut voice = track_rows(false, cx);
+        voice.push(
+            tool_panel::check_row(
+                "duck-voice-clip",
+                Some("duck-voice-clip".into()),
+                clip_voice,
+                "Use the selected clip as the voice",
+                cx.listener(move |this, _, _, cx| {
+                    if voice_clip_disabled {
+                        return;
+                    }
                     let selected = this.selected;
                     if let Some(r) = this.duck_review.as_mut() {
                         if r.params.voice_clips.is_empty() {
@@ -524,16 +496,16 @@ impl Editor {
                     }
                     this.refresh_music_defaults();
                     this.analyse_duck(cx);
-                })),
+                }),
+            )
+            .when(voice_clip_disabled, |row| row.opacity(0.5))
+            .into_any_element(),
         );
-        panel = panel.child(
-            div()
-                .text_size(crate::style::type_size::XS)
-                .font_weight(FontWeight::SEMIBOLD)
-                .child("2. Music"),
-        );
-        panel = chips(panel, "Tracks", true, cx);
-        let mut clip_targets = div().flex().flex_wrap().gap_1();
+
+        // 2. Music: tracks, then individual clips.
+        let mut music = vec![tool_panel::note("Tracks").into_any_element()];
+        music.extend(track_rows(true, cx));
+        let mut clip_rows: Vec<AnyElement> = Vec::new();
         for track in self.project.tracks() {
             for clip in track
                 .clips()
@@ -545,19 +517,13 @@ impl Editor {
                 })
             {
                 let id = clip.id;
-                let on = review.params.music_clips.contains(&id);
-                clip_targets = clip_targets.child(
-                    Button::new(("duck-music-clip", id.0 as usize))
-                        .compact()
-                        .debug_selector(move || format!("duck-target-{}", id.0))
-                        .label(duck_clip_label(&self.project, track, clip))
-                        .tooltip(format!("Clip {}", id.0))
-                        .icon(icons::icon(if on {
-                            IconName::SquareCheck
-                        } else {
-                            IconName::Square
-                        }))
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                clip_rows.push(
+                    tool_panel::check_row(
+                        ("duck-music-clip", id.0 as usize),
+                        Some(format!("duck-target-{}", id.0)),
+                        review.params.music_clips.contains(&id),
+                        duck_clip_label(&self.project, track, clip),
+                        cx.listener(move |this, _, _, cx| {
                             if let Some(r) = this.duck_review.as_mut() {
                                 if r.params.music_clips.contains(&id) {
                                     r.params.music_clips.retain(|c| *c != id);
@@ -566,143 +532,148 @@ impl Editor {
                                 }
                             }
                             this.analyse_duck(cx);
-                        })),
+                        }),
+                    )
+                    .into_any_element(),
                 );
             }
         }
-        panel = panel
-            .child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Individual clips"),
-            )
-            .child(clip_targets);
+        if !clip_rows.is_empty() {
+            music.push(tool_panel::note("Individual clips").into_any_element());
+            music.extend(clip_rows);
+        }
+
+        // Settings: the depth, the timing behind one disclosure, and the keyframe policy.
+        let values = [
+            format!("-{:.1} dB", review.params.depth_db),
+            tool_panel::seconds_label(review.params.attack, 2),
+            tool_panel::seconds_label(review.params.release, 2),
+            tool_panel::seconds_label(review.params.min_gap, 2),
+            format!("{:.0} dBFS", review.params.threshold_db),
+        ];
         let labels = [
-            format!("Duck depth: -{:.1} dB", review.params.depth_db),
-            format!("Attack: {}", timecode(review.params.attack)),
-            format!("Release: {}", timecode(review.params.release)),
-            format!("Minimum gap to merge: {}", timecode(review.params.min_gap)),
-            format!("Voice threshold: {:.0} dBFS", review.params.threshold_db),
+            "Duck depth",
+            "Attack",
+            "Release",
+            "Minimum gap to merge",
+            "Voice threshold",
         ];
         let timing_open = review.timing_open;
-        for (index, (label, state)) in labels.into_iter().zip(&review.sliders).enumerate() {
+        let mut settings: Vec<AnyElement> = Vec::new();
+        for (index, ((label, state), value)) in labels
+            .into_iter()
+            .zip(&review.sliders)
+            .zip(values)
+            .enumerate()
+        {
             if index == 1 {
-                panel = panel.child(
-                    Button::new("duck-timing")
-                        .debug_selector(|| "duck-timing".into())
-                        .ghost()
-                        .compact()
-                        .icon(
-                            icons::icon(if timing_open {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .xsmall(),
+                settings.push(
+                    div()
+                        .flex()
+                        .child(
+                            Button::new("duck-timing")
+                                .debug_selector(|| "duck-timing".into())
+                                .ghost()
+                                .small()
+                                .icon(
+                                    icons::icon(if timing_open {
+                                        IconName::ChevronDown
+                                    } else {
+                                        IconName::ChevronRight
+                                    })
+                                    .xsmall(),
+                                )
+                                .label("Timing and voice threshold")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(r) = this.duck_review.as_mut() {
+                                        r.timing_open = !r.timing_open;
+                                    }
+                                    cx.notify();
+                                })),
                         )
-                        .label("Timing and voice threshold")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(r) = this.duck_review.as_mut() {
-                                r.timing_open = !r.timing_open;
-                            }
-                            cx.notify();
-                        })),
+                        .into_any_element(),
                 );
             }
             if index == 0 || timing_open {
-                panel = panel
-                    .child(div().text_size(crate::style::type_size::XS).child(label))
-                    .child(Slider::new(state).horizontal());
+                settings.push(tool_panel::slider_row(label, state, value).into_any_element());
             }
         }
-        let replace = review.params.replace_existing;
-        panel = panel.child(
-            Button::new("duck-replace")
-                .compact()
-                .icon(icons::icon(if replace {
-                    IconName::SquareCheck
-                } else {
-                    IconName::Square
-                }))
-                .label("Replace existing gain keyframes")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(r) = this.duck_review.as_mut() {
-                        r.params.replace_existing = !r.params.replace_existing;
-                    }
-                    this.analyse_duck(cx);
-                })),
+        settings.push(
+            style::switch_row(
+                "duck-replace",
+                "Replace existing gain keyframes",
+                None,
+                review.params.replace_existing,
+                move |checked, _, cx| {
+                    let checked = *checked;
+                    entity.update(cx, |this, cx| {
+                        if let Some(r) = this.duck_review.as_mut() {
+                            r.params.replace_existing = checked;
+                        }
+                        this.analyse_duck(cx);
+                    });
+                },
+            )
+            .into_any_element(),
         );
+
+        let mut body = tool_panel::body()
+            .child(tool_panel::note(
+                "Lowers the music while someone speaks. Check the shaded spans on the timeline, then apply. Undo reverts it in one step.",
+            ))
+            .child(tool_panel::section("1. Voice", voice))
+            .child(tool_panel::section("2. Music", music))
+            .child(tool_panel::section("Settings", settings));
         if !review.ready() {
-            panel = panel.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.muted_foreground)
-                    .child("Choose a voice source and at least one music track or clip."),
-            );
+            body = body.child(tool_panel::note(
+                "Choose a voice source and at least one music track or clip.",
+            ));
         }
         if let Some(error) = &review.error {
-            panel = panel.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.danger)
-                    .child(error.clone()),
-            );
+            body = body.child(tool_panel::problem(error.clone()));
         }
         if review.busy {
-            panel = panel.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .child("Analysing audio..."),
-            );
+            body = body.child(tool_panel::note("Analysing audio…"));
         }
         if let Some(proposal) = &review.proposal {
-            panel = panel
-                .child(
-                    div()
-                        .text_size(crate::style::type_size::XS)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("3. Preview"),
+            let mut preview: Vec<AnyElement> = vec![
+                tool_panel::note(duck_summary(&review.params, proposal, &self.project))
+                    .id("duck-summary")
+                    .debug_selector(|| "duck-summary".into())
+                    .text_color(style::hex(style::color::TEXT))
+                    .into_any_element(),
+                tool_panel::note(
+                    "Shaded spans on the music tracks show where the level is lowered. The play button beside a voice region moves the playhead to where that region starts.",
                 )
-                .child(
-                    div()
-                        .id("duck-summary")
-                        .debug_selector(|| "duck-summary".into())
-                        .text_size(crate::style::type_size::XS)
-                        .child(duck_summary(&review.params, proposal, &self.project)),
-                )
-                .child(
-                    div()
-                        .text_size(crate::style::type_size::XS)
-                        .text_color(theme.muted_foreground)
-                        .child(
-                            "Shaded spans on the music tracks show where the level is lowered. The play button beside a voice region moves the playhead to where that region starts.",
-                        ),
-                );
-            let mut list = div()
-                .id("duck-list")
-                .flex_shrink_0()
-                .max_h(px(120.))
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .gap_1();
+                .into_any_element(),
+            ];
+            let mut list = div().id("duck-list").flex().flex_col();
             for (i, range) in proposal.voice.iter().enumerate() {
                 let start = range.start;
                 list = list.child(
                     div()
                         .flex()
-                        .gap_1()
                         .items_center()
-                        .child(div().text_size(crate::style::type_size::XS).child(format!(
-                            "{} - {}",
-                            timecode(range.start),
-                            timecode(range.end)
-                        )))
+                        .gap_2()
+                        .min_h(style::size::ROW)
+                        .pl_2()
+                        .pr_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_role(style::Role::Label)
+                                .text_color(style::hex(style::color::TEXT_SECONDARY))
+                                .tabular()
+                                .child(format!(
+                                    "{} - {}",
+                                    timecode(range.start),
+                                    timecode(range.end)
+                                )),
+                        )
                         .child(
                             Button::new(("duck-seek", i))
                                 .ghost()
-                                .compact()
+                                .xsmall()
                                 .icon(icons::icon(IconName::Play))
                                 .tooltip("Move the playhead to the start of this voice region")
                                 .on_click(
@@ -711,8 +682,10 @@ impl Editor {
                         ),
                 );
             }
-            panel = panel.child(list);
+            preview.push(list.into_any_element());
+            body = body.child(tool_panel::section("3. Preview", preview));
         }
+
         let busy = review.busy;
         let can_apply = !busy
             && review
@@ -720,25 +693,23 @@ impl Editor {
                 .as_ref()
                 .is_some_and(|p| !p.clips.is_empty());
         let footer = div()
+            .flex_1()
+            .min_w_0()
             .flex()
             .flex_wrap()
-            .gap_2()
             .justify_end()
-            .px_3()
-            .py_2()
-            .border_t_1()
-            .border_color(theme.border)
+            .gap_2()
             .child(
-                Button::new("duck-analyse")
-                    .compact()
+                style::secondary_button("duck-analyse", cx)
+                    .small()
                     .label("Analyse")
                     .disabled(busy || !review.ready())
                     .on_click(cx.listener(|this, _, _, cx| this.analyse_duck(cx))),
             )
             .child(
-                Button::new("duck-cancel")
+                style::secondary_button("duck-cancel", cx)
                     .debug_selector(|| "duck-cancel".into())
-                    .compact()
+                    .small()
                     .label("Cancel")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.duck_review = None;
@@ -748,7 +719,7 @@ impl Editor {
             .child(
                 style::primary_button("duck-apply", cx)
                     .debug_selector(|| "duck-apply".into())
-                    .compact()
+                    .small()
                     .label("Apply")
                     .disabled(!can_apply)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -756,41 +727,15 @@ impl Editor {
                     })),
             );
         Some(
-            div()
-                .id("duck-review")
-                .debug_selector(|| "duck-review".into())
-                .absolute()
-                .left(px(12.))
-                .top(px(56.))
-                .w(px(400.))
-                .max_h(
-                    // End above the timeline dock and the status line so its tools stay usable.
-                    (window.viewport_size().height
-                        - px(56. + 32. + self.dock.bottom_height * style::ui_scale()))
-                    .max(px(160.)),
-                )
-                .flex()
-                .flex_col()
-                .bg(theme.popover)
-                .text_color(theme.popover_foreground)
-                .border_1()
-                .border_color(theme.border)
-                .rounded(px(style::radius::PANEL))
-                .shadow_lg()
-                .occlude()
-                .child(
-                    div()
-                        .relative()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .child(panel)
-                        .child(gpui_component::scroll::Scrollbar::vertical(
-                            &self.duck_scroll,
-                        )),
-                )
-                .child(footer),
+            style::ToolPanel::new("duck-review", IconName::Volume2, "Auto duck")
+                .bottom_height(self.dock.bottom_height)
+                .on_close(cx.listener(|this, _, _, cx| {
+                    this.duck_review = None;
+                    cx.notify();
+                }))
+                .body(self.duck_scroll.clone(), body)
+                .footer(footer)
+                .render(window),
         )
     }
 }

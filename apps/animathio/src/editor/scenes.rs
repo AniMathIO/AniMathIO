@@ -1,7 +1,8 @@
 //! Cancellable scene analysis and explicit review before applying edits.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
+use super::tool_panel;
 use super::*;
+use crate::style::{self, SegmentedOption};
 use animathio_control::{SceneDraft, SceneParams, detect_scenes, scene_command};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 pub(super) struct ScenePanel {
@@ -11,7 +12,26 @@ pub(super) struct ScenePanel {
     progress: Arc<AtomicU32>,
     pub(super) busy: bool,
     message: String,
+    /// Scroll position of the panel body.
+    scroll: ScrollHandle,
+    /// Keyboard focus for the segmented controls (one handle per option).
+    sensitivity_focus: Vec<FocusHandle>,
+    min_focus: Vec<FocusHandle>,
+    delete_focus: Vec<FocusHandle>,
 }
+
+/// The "Minimum shot" and "Delete shots shorter than" choices, in frames.
+const MIN_SHOT_FRAMES: [u32; 4] = [1, 6, 12, 24];
+const DELETE_FRAMES: [u32; 4] = [0, 6, 12, 24];
+
+#[cfg(test)]
+impl ScenePanel {
+    /// The detection settings the panel will analyse (and re-analyse) with.
+    pub(super) fn params(&self) -> &SceneParams {
+        &self.params
+    }
+}
+
 impl Drop for ScenePanel {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -42,6 +62,21 @@ impl Editor {
     fn start_scenes(&mut self, params: SceneParams, cx: &mut Context<Self>) {
         let cancel = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU32::new(0));
+        // A new analysis keeps the scroll position and the keyboard focus of the controls.
+        let (scroll, sensitivity_focus, min_focus, delete_focus) = match &self.scene_panel {
+            Some(p) => (
+                p.scroll.clone(),
+                p.sensitivity_focus.clone(),
+                p.min_focus.clone(),
+                p.delete_focus.clone(),
+            ),
+            None => (
+                ScrollHandle::new(),
+                tool_panel::focus_handles(3, cx),
+                tool_panel::focus_handles(4, cx),
+                tool_panel::focus_handles(4, cx),
+            ),
+        };
         self.scene_panel = Some(ScenePanel {
             draft: None,
             params: params.clone(),
@@ -49,6 +84,10 @@ impl Editor {
             progress: progress.clone(),
             busy: true,
             message: "Analysing video…".into(),
+            scroll,
+            sensitivity_focus,
+            min_focus,
+            delete_focus,
         });
         let project = self.project.clone();
         let assets = self.assets.clone();
@@ -99,89 +138,113 @@ impl Editor {
         cx.notify();
     }
     #[allow(clippy::too_many_lines)]
-    pub(super) fn scene_view(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn scene_view(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         let panel = self.scene_panel.as_ref()?;
-        let mut view = div()
-            .id("scene-review")
-            .absolute()
-            .left(px(12.))
-            .top(px(56.))
-            .w(px(390.))
-            .max_h(px(650.))
-            .overflow_y_scroll()
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .bg(cx.theme().popover)
-            .text_color(cx.theme().popover_foreground)
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded(px(8.))
-            .shadow_lg()
-            .occlude()
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(icons::icon(IconName::Scissors))
-                    .child("Split at scene changes"),
-            )
-            .child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .child(panel.message.clone()),
-            );
-        if panel.busy {
-            view = view.child(
-                gpui_component::progress::Progress::new("scene-progress").value(f32::from(
-                    u8::try_from(panel.progress.load(Ordering::Relaxed)).unwrap_or(100),
-                )),
-            );
+        if self.is_start_screen() {
+            return None;
         }
-        view = view.child(div().text_size(crate::style::type_size::XS).child(format!(
-            "Sensitivity {:.0}% · minimum {} frames · delete under {} frames (leaves gaps)",
-            panel.params.sensitivity * 100.,
-            panel.params.min_shot_frames,
-            panel.params.delete_shorter_than_frames
-        )));
-        if !panel.busy {
-            for (label, value) in [("Low sensitivity", 0.25), ("Medium", 0.5), ("High", 0.75)] {
-                let mut params = panel.params.clone();
-                params.sensitivity = value;
-                view = view.child(
-                    Button::new(SharedString::from(label))
-                        .compact()
-                        .label(label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.start_scenes(params.clone(), cx);
-                        })),
-                );
-            }
-            for frames in [0, 6, 12, 24] {
-                let mut params = panel.params.clone();
-                params.delete_shorter_than_frames = frames;
-                view = view.child(
-                    Button::new(SharedString::from(format!("scene-delete-{frames}")))
-                        .compact()
-                        .label(format!("Delete shots under {frames} frames"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.start_scenes(params.clone(), cx);
-                        })),
-                );
-            }
-            for frames in [1, 6, 12, 24] {
-                let mut params = panel.params.clone();
-                params.min_shot_frames = frames;
-                view = view.child(
-                    Button::new(SharedString::from(format!("scene-min-{frames}")))
-                        .compact()
-                        .label(format!("Minimum shot: {frames} frames"))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.start_scenes(params.clone(), cx);
-                        })),
-                );
-            }
+        let entity = cx.entity();
+        let busy = panel.busy;
+
+        // What to analyse, and how.
+        let mut settings: Vec<AnyElement> =
+            vec![tool_panel::note(panel.message.clone()).into_any_element()];
+        if busy {
+            settings.push(
+                gpui_component::progress::Progress::new("scene-progress")
+                    .value(f32::from(
+                        u8::try_from(panel.progress.load(Ordering::Relaxed)).unwrap_or(100),
+                    ))
+                    .into_any_element(),
+            );
+        } else {
+            let restart = |entity: &Entity<Self>, mutate: fn(&mut SceneParams, usize)| {
+                let entity = entity.clone();
+                move |index: usize, _: &mut Window, cx: &mut App| {
+                    entity.update(cx, |this, cx| {
+                        let Some(mut params) = this.scene_panel.as_ref().map(|p| p.params.clone())
+                        else {
+                            return;
+                        };
+                        mutate(&mut params, index);
+                        this.start_scenes(params, cx);
+                    });
+                }
+            };
+            let sensitivity = match panel.params.sensitivity {
+                s if s < 0.375 => 0,
+                s if s < 0.625 => 1,
+                _ => 2,
+            };
+            settings.push(
+                style::form_row(
+                    "Sensitivity",
+                    tool_panel::choice(
+                        "scene-sensitivity",
+                        &[
+                            SegmentedOption::new("scene-sensitivity-low", "Low", None),
+                            SegmentedOption::new("scene-sensitivity-medium", "Medium", None),
+                            SegmentedOption::new("scene-sensitivity-high", "High", None),
+                        ],
+                        &panel.sensitivity_focus,
+                        sensitivity,
+                        restart(&entity, |params, index| {
+                            params.sensitivity = [0.25, 0.5, 0.75][index.min(2)];
+                        }),
+                    ),
+                )
+                .into_any_element(),
+            );
+            let min_index = MIN_SHOT_FRAMES
+                .iter()
+                .position(|f| *f == panel.params.min_shot_frames);
+            settings.push(
+                tool_panel::stacked(
+                    "Minimum shot",
+                    tool_panel::choice(
+                        "scene-min",
+                        &[
+                            SegmentedOption::new("scene-min-1", "1 frame", None),
+                            SegmentedOption::new("scene-min-6", "6 frames", None),
+                            SegmentedOption::new("scene-min-12", "12 frames", None),
+                            SegmentedOption::new("scene-min-24", "24 frames", None),
+                        ],
+                        &panel.min_focus,
+                        min_index.unwrap_or(0),
+                        restart(&entity, |params, index| {
+                            params.min_shot_frames = MIN_SHOT_FRAMES[index.min(3)];
+                        }),
+                    ),
+                )
+                .into_any_element(),
+            );
+            let delete_index = DELETE_FRAMES
+                .iter()
+                .position(|f| *f == panel.params.delete_shorter_than_frames);
+            settings.push(
+                tool_panel::stacked(
+                    "Delete shots shorter than (leaves gaps)",
+                    tool_panel::choice(
+                        "scene-delete",
+                        &[
+                            SegmentedOption::new("scene-delete-0", "Off", None),
+                            SegmentedOption::new("scene-delete-6", "6 frames", None),
+                            SegmentedOption::new("scene-delete-12", "12 frames", None),
+                            SegmentedOption::new("scene-delete-24", "24 frames", None),
+                        ],
+                        &panel.delete_focus,
+                        delete_index.unwrap_or(0),
+                        restart(&entity, |params, index| {
+                            params.delete_shorter_than_frames = DELETE_FRAMES[index.min(3)];
+                        }),
+                    ),
+                )
+                .into_any_element(),
+            );
             if let Some(clip) = panel.params.clip {
                 let track = self
                     .project
@@ -192,76 +255,113 @@ impl Editor {
                 let mut params = panel.params.clone();
                 params.clip = None;
                 params.track = track;
-                view = view.child(
-                    Button::new("scene-track")
-                        .compact()
-                        .label("Analyse all video on this track")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.start_scenes(params.clone(), cx);
-                        })),
+                settings.push(
+                    div()
+                        .flex()
+                        .child(
+                            style::secondary_button("scene-track", cx)
+                                .small()
+                                .label("Analyse all video on this track")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.start_scenes(params.clone(), cx);
+                                })),
+                        )
+                        .into_any_element(),
                 );
             }
         }
+        let mut body = tool_panel::body().child(tool_panel::section("Detection", settings));
+
         if let Some(draft) = &panel.draft {
-            let mut rows = div()
-                .id("scene-cuts")
-                .max_h(px(300.))
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .gap_1();
+            let mut rows = div().id("scene-cuts").flex().flex_col().gap_1();
             for (i, cut) in draft.cuts.iter().enumerate() {
+                let mut row = div().flex().items_center().gap_2();
                 if cut.thumbnail.len() == 96 * 54 {
                     let rgba = image::RgbaImage::from_fn(96, 54, |x, y| {
                         let v = cut.thumbnail[(y * 96 + x) as usize];
                         image::Rgba([v, v, v, 255])
                     });
-                    rows = rows.child(
+                    row = row.child(
                         img(Arc::new(RenderImage::new([image::Frame::new(rgba)])))
                             .w(px(96.))
-                            .h(px(54.)),
+                            .h(px(54.))
+                            .flex_shrink_0()
+                            .rounded(px(style::radius::CONTROL)),
                     );
                 }
                 rows = rows.child(
-                    Button::new(SharedString::from(format!("scene-cut-{i}")))
-                        .compact()
-                        .label(format!(
-                            "{} · {}",
-                            if cut.enabled { "Include" } else { "Skip" },
-                            crate::timecode::format_timecode(cut.time, self.project.frame_rate())
-                        ))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(draft) =
-                                this.scene_panel.as_mut().and_then(|p| p.draft.as_mut())
-                            {
-                                draft.cuts[i].enabled = !draft.cuts[i].enabled;
-                            }
-                            cx.notify();
-                        })),
+                    row.child(
+                        tool_panel::check_row(
+                            SharedString::from(format!("scene-cut-{i}")),
+                            Some(format!("scene-cut-{i}")),
+                            cut.enabled,
+                            crate::timecode::format_timecode(cut.time, self.project.frame_rate()),
+                            cx.listener(move |this, _, _, cx| {
+                                if let Some(draft) =
+                                    this.scene_panel.as_mut().and_then(|p| p.draft.as_mut())
+                                {
+                                    draft.cuts[i].enabled = !draft.cuts[i].enabled;
+                                }
+                                cx.notify();
+                            }),
+                        )
+                        .flex_1()
+                        .min_w_0(),
+                    ),
                 );
             }
-            view = view
-                .child(rows)
-                .child(
-                    Button::new("scene-split")
-                        .label("Split")
-                        .on_click(cx.listener(|this, _, _, cx| this.apply_scenes(false, cx))),
-                )
-                .child(
-                    Button::new("scene-markers")
-                        .label("Add markers")
-                        .on_click(cx.listener(|this, _, _, cx| this.apply_scenes(true, cx))),
-                );
+            let included = draft.cuts.iter().filter(|c| c.enabled).count();
+            body = body.child(tool_panel::section(
+                format!("Proposed cuts ({included} of {})", draft.cuts.len()),
+                [rows.into_any_element()],
+            ));
         }
-        Some(
-            view.child(
-                Button::new("scene-close")
-                    .label(if panel.busy { "Cancel" } else { "Close" })
+
+        // Cancel while the analysis runs; Add markers and Split once there is a draft.
+        let footer = if busy {
+            Some(
+                style::secondary_button("scene-close", cx)
+                    .small()
+                    .label("Cancel")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.scene_panel = None;
                         cx.notify();
-                    })),
-            ),
-        )
+                    }))
+                    .into_any_element(),
+            )
+        } else if panel.draft.is_some() {
+            Some(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        style::secondary_button("scene-markers", cx)
+                            .small()
+                            .label("Add markers")
+                            .on_click(cx.listener(|this, _, _, cx| this.apply_scenes(true, cx))),
+                    )
+                    .child(
+                        style::primary_button("scene-split", cx)
+                            .small()
+                            .label("Split")
+                            .on_click(cx.listener(|this, _, _, cx| this.apply_scenes(false, cx))),
+                    )
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+        let mut tool =
+            style::ToolPanel::new("scene-review", IconName::Scissors, "Split at scene changes")
+                .bottom_height(self.dock.bottom_height)
+                .on_close(cx.listener(|this, _, _, cx| {
+                    this.scene_panel = None;
+                    cx.notify();
+                }))
+                .body(panel.scroll.clone(), body);
+        if let Some(footer) = footer {
+            tool = tool.footer(footer);
+        }
+        Some(tool.render(window))
     }
 }

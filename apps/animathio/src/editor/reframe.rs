@@ -1,12 +1,12 @@
 //! Subject-aware auto-reframe settings and cancellable worker.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
+use super::tool_panel;
 use super::*;
+use crate::style::{self, SegmentedOption};
 use animathio_control::{ReframeParams, analyse_reframe, reframe_command};
 use gpui_component::{
-    Disableable,
     progress::Progress,
-    slider::{Slider, SliderEvent, SliderState},
+    slider::{SliderEvent, SliderState},
 };
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -18,6 +18,21 @@ pub(super) struct ReframePanel {
     progress: Arc<AtomicU32>,
     pub(super) busy: bool,
     message: String,
+    /// Scroll position of the panel body.
+    scroll: ScrollHandle,
+    /// Keyboard focus for the aspect ratio choice (one handle per option).
+    aspect_focus: Vec<FocusHandle>,
+}
+
+/// The aspect ratios the panel offers.
+const ASPECTS: [&str; 3] = ["9:16", "1:1", "4:5"];
+
+impl ReframePanel {
+    /// The chosen aspect ratio, for the UI tests.
+    #[cfg(test)]
+    pub(super) fn aspect(&self) -> &str {
+        &self.params.aspect
+    }
 }
 impl Drop for ReframePanel {
     fn drop(&mut self) {
@@ -67,6 +82,8 @@ impl Editor {
             message: "Changes the canvas and replaces video position/scale keys. \
                       Undo restores everything."
                 .into(),
+            scroll: ScrollHandle::new(),
+            aspect_focus: tool_panel::focus_handles(ASPECTS.len(), cx),
         });
         cx.notify();
     }
@@ -155,103 +172,105 @@ impl Editor {
         .detach();
         cx.notify();
     }
-    pub(super) fn reframe_view(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn reframe_view(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         let panel = self.reframe_panel.as_ref()?;
         if self.is_start_screen() {
             return None;
         }
         let busy = panel.busy;
-        let mut view = div()
-            .id("auto-reframe-panel")
-            .absolute()
-            .left(px(12.))
-            .top(px(56.))
-            .w(px(390.))
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .bg(cx.theme().popover)
-            .text_color(cx.theme().popover_foreground)
-            .border_1()
-            .border_color(cx.theme().border)
-            .rounded(px(8.))
-            .shadow_lg()
-            .occlude()
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(icons::icon(IconName::Scan))
-                    .child("Auto reframe"),
+        let entity = cx.entity();
+        let aspect_index = ASPECTS
+            .iter()
+            .position(|aspect| *aspect == panel.params.aspect)
+            .unwrap_or(0);
+        let mut rows = vec![
+            tool_panel::note(if panel.params.clips.is_empty() {
+                "All video clips"
+            } else {
+                "Selected video clips"
+            })
+            .into_any_element(),
+            style::form_row(
+                "Aspect ratio",
+                tool_panel::choice(
+                    "reframe-aspect",
+                    &[
+                        SegmentedOption::new("reframe-9:16", "9:16", None),
+                        SegmentedOption::new("reframe-1:1", "1:1", None),
+                        SegmentedOption::new("reframe-4:5", "4:5", None),
+                    ],
+                    &panel.aspect_focus,
+                    aspect_index,
+                    move |index, _, cx| {
+                        entity.update(cx, |this, cx| {
+                            if let Some(p) = this.reframe_panel.as_mut()
+                                && !p.busy
+                            {
+                                p.params.aspect = ASPECTS[index.min(ASPECTS.len() - 1)].into();
+                            }
+                            cx.notify();
+                        });
+                    },
+                ),
             )
-            .child(div().text_size(crate::style::type_size::XS).child(
-                if panel.params.clips.is_empty() {
-                    "All video clips"
-                } else {
-                    "Selected video clips"
-                },
-            ));
-        let mut aspects = div().flex().gap_2();
-        for aspect in ["9:16", "1:1", "4:5"] {
-            aspects = aspects.child(
-                Button::new(SharedString::from(format!("reframe-{aspect}")))
-                    .compact()
-                    .label(if panel.params.aspect == aspect {
-                        format!("{aspect} (selected)")
-                    } else {
-                        aspect.into()
-                    })
-                    .disabled(busy)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(p) = this.reframe_panel.as_mut() {
-                            p.params.aspect = aspect.into();
-                        }
-                        cx.notify();
-                    })),
+            .into_any_element(),
+        ];
+        if !busy {
+            rows.push(
+                tool_panel::slider_row(
+                    "Tracking smoothness",
+                    &panel.slider,
+                    format!("{:.0}%", panel.params.smoothness * 100.),
+                )
+                .into_any_element(),
             );
         }
-        view = view
-            .child(aspects)
-            .child(div().text_size(crate::style::type_size::XS).child(format!(
-                "Tracking smoothness: {:.0}%",
-                panel.params.smoothness * 100.
-            )))
-            .when(!busy, |v| v.child(Slider::new(&panel.slider).horizontal()))
-            .child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .child(panel.message.clone()),
-            );
+        rows.push(tool_panel::note(panel.message.clone()).into_any_element());
         if busy {
-            view = view.child(Progress::new("reframe-progress").value(f32::from(
-                u8::try_from(panel.progress.load(Ordering::Relaxed)).unwrap_or(100),
-            )));
+            rows.push(
+                Progress::new("reframe-progress")
+                    .value(f32::from(
+                        u8::try_from(panel.progress.load(Ordering::Relaxed)).unwrap_or(100),
+                    ))
+                    .into_any_element(),
+            );
         }
+        let body = tool_panel::body().child(tool_panel::section("Reframe", rows));
+        // Cancel while the analysis runs (it discards the work); Reframe otherwise.
+        let footer = if busy {
+            style::secondary_button("reframe-cancel", cx)
+                .debug_selector(|| "reframe-cancel".into())
+                .small()
+                .label("Cancel")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.reframe_panel = None;
+                    cx.notify();
+                }))
+        } else {
+            style::primary_button("reframe-start", cx)
+                .debug_selector(|| "reframe-start".into())
+                .small()
+                .label("Reframe")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(p) = this.reframe_panel.as_ref() {
+                        this.start_reframe(p.params.clone(), None, cx);
+                    }
+                }))
+        };
         Some(
-            view.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("reframe-start")
-                            .label("Reframe")
-                            .disabled(busy)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(p) = this.reframe_panel.as_ref() {
-                                    this.start_reframe(p.params.clone(), None, cx);
-                                }
-                            })),
-                    )
-                    .child(
-                        Button::new("reframe-cancel")
-                            .label(if busy { "Cancel" } else { "Close" })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.reframe_panel = None;
-                                cx.notify();
-                            })),
-                    ),
-            ),
+            style::ToolPanel::new("auto-reframe-panel", IconName::Scan, "Auto reframe")
+                .bottom_height(self.dock.bottom_height)
+                .on_close(cx.listener(|this, _, _, cx| {
+                    this.reframe_panel = None;
+                    cx.notify();
+                }))
+                .body(panel.scroll.clone(), body)
+                .footer(footer)
+                .render(window),
         )
     }
 }
