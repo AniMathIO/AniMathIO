@@ -530,12 +530,21 @@ impl Editor {
                 .child(card_title(
                     plugin.manifest.name.clone(),
                     // Built-in plugins are always on; the switch shows the state.
-                    gpui_component::switch::Switch::new(SharedString::from(format!(
-                        "builtin-{id}"
-                    )))
-                    .checked(true)
-                    .disabled(true)
-                    .accessibility_label(format!("{name} is always on")),
+                    div()
+                        .id(SharedString::from(format!("builtin-note-{id}")))
+                        .opacity(0.6)
+                        .tooltip(|window, cx| {
+                            gpui_component::tooltip::Tooltip::new("Built-in plugins are always on")
+                                .build(window, cx)
+                        })
+                        .child(
+                            gpui_component::switch::Switch::new(SharedString::from(format!(
+                                "builtin-{id}"
+                            )))
+                            .checked(true)
+                            .disabled(true)
+                            .accessibility_label(format!("{name} is always on")),
+                        ),
                 ))
                 .child(div().text_color(hex(color::TEXT_SECONDARY)).child(kinds))
                 .child(
@@ -993,13 +1002,11 @@ impl Editor {
             let action = entry.clone();
             let key = format!("catalog:{}", entry.id);
             let mut row = card(format!("catalog-{}", entry.id))
-                .child(card_title(
-                    entry.name.clone(),
-                    div()
-                        .flex_shrink_0()
-                        .child(caption(format!("Version {}", entry.version))),
-                ))
-                .child(caption(format!("By {}", entry.author)))
+                .child(card_title(entry.name.clone(), div()))
+                .child(caption(format!(
+                    "By {}, version {}",
+                    entry.author, entry.version
+                )))
                 .child(
                     div()
                         .text_color(hex(color::TEXT_SECONDARY))

@@ -24,6 +24,14 @@ pub(super) struct ScenePanel {
 const MIN_SHOT_FRAMES: [u32; 4] = [1, 6, 12, 24];
 const DELETE_FRAMES: [u32; 4] = [0, 6, 12, 24];
 
+#[cfg(test)]
+impl ScenePanel {
+    /// The detection settings the panel will analyse (and re-analyse) with.
+    pub(super) fn params(&self) -> &SceneParams {
+        &self.params
+    }
+}
+
 impl Drop for ScenePanel {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);

@@ -1600,8 +1600,8 @@ fn scene_menu_requires_video_and_does_not_mutate(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
-fn scene_review_split_and_undo(cx: &mut TestAppContext) {
+/// A project with one four-second video clip of the three-shot test movie, and its bytes.
+pub(super) fn scenes_fixture() -> (Project, BTreeMap<animathio_core::AssetId, Vec<u8>>) {
     use animathio_core::{Asset, AssetId, Clip, ClipKind, TICKS_PER_SECOND, TimeRange, TrackId};
     let bytes = include_bytes!("../../../../../crates/control/tests/scenes.mp4").to_vec();
     let asset = AssetId::of(&bytes);
@@ -1631,8 +1631,14 @@ fn scene_review_split_and_undo(cx: &mut TestAppContext) {
     }
     .apply(&mut project)
     .unwrap();
+    (project, BTreeMap::from([(asset, bytes)]))
+}
+
+#[gpui::test]
+fn scene_review_split_and_undo(cx: &mut TestAppContext) {
+    let (project, assets) = scenes_fixture();
     let before = project.clone();
-    let mut ui = Ui::open(cx, project, BTreeMap::from([(asset, bytes)]));
+    let mut ui = Ui::open(cx, project, assets);
     ui.update(|e, _, cx| e.select_only(ClipId(1), cx));
     ui.dispatch(actions::SceneCuts);
     ui.settle();

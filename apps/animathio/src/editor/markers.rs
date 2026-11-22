@@ -75,6 +75,12 @@ impl Panel {
         (self.every, self.downbeats_only, self.max_shift_ms)
     }
 
+    /// Whether the beat analysis listens to the selected clip only (UI tests).
+    #[cfg(test)]
+    pub(super) fn selected_only(&self) -> bool {
+        self.selected_only
+    }
+
     fn new(cx: &mut Context<Editor>) -> Self {
         Self {
             identity: Arc::new(()),
@@ -534,7 +540,11 @@ impl Editor {
             "beats-scope",
             &[
                 SegmentedOption::new("beats-scope-mix", "Project mix", None),
-                SegmentedOption::new("beats-scope-clip", "Selected clip", None),
+                SegmentedOption::new("beats-scope-clip", "Selected clip", None).unavailable(
+                    self.selected
+                        .is_none()
+                        .then_some("Select a clip to analyse only that clip"),
+                ),
             ],
             &panel.scope_focus,
             usize::from(panel.selected_only),
@@ -809,14 +819,28 @@ impl Editor {
                 },
                 [markers],
             ));
+        // The same footer wrapper as Automatic cuts and Auto duck (it wraps at a larger UI scale).
+        // The primary action is the one that can run: "Add at playhead" until beats exist.
+        let beats_ready = detected.is_some();
+        let add_here = if beats_ready {
+            style::secondary_button("marker-add", cx)
+        } else {
+            style::primary_button("marker-add", cx)
+        };
+        let add_beats = if beats_ready {
+            style::primary_button("beats-add-markers", cx)
+        } else {
+            style::secondary_button("beats-add-markers", cx)
+        };
         let footer = div()
+            .flex_1()
+            .min_w_0()
             .flex()
             .flex_wrap()
-            .items_center()
             .justify_end()
             .gap_2()
             .child(
-                style::secondary_button("marker-add", cx)
+                add_here
                     .debug_selector(|| "marker-add".into())
                     .small()
                     .icon(icons::icon(IconName::Plus))
@@ -824,12 +848,12 @@ impl Editor {
                     .on_click(cx.listener(|this, _, _, cx| this.add_marker_at_playhead(cx))),
             )
             .child(
-                style::primary_button("beats-add-markers", cx)
+                add_beats
                     .debug_selector(|| "beats-add-markers".into())
                     .small()
                     .icon(icons::icon(IconName::Flag))
                     .label("Add markers at beats")
-                    .disabled(detected.is_none())
+                    .disabled(!beats_ready)
                     .on_click(cx.listener(|this, _, _, cx| this.add_beat_markers(cx))),
             );
         Some(

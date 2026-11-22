@@ -115,7 +115,7 @@ pub(super) fn slider_row(
     )
 }
 
-/// A selectable row with a leading check (`Check` when on, nothing when off; never a
+/// A selectable row with a leading check box (`Check` when on, an empty outline when off; never a
 /// minus), used for "include this track" chips and proposed cuts. `ROW` high.
 pub(super) fn check_row(
     id: impl Into<ElementId>,
@@ -144,13 +144,30 @@ pub(super) fn check_row(
         })
         .hover(|row| row.bg(hex(color::HOVER)))
         .on_click(on_click)
-        .child(div().w(CHECK_SLOT).flex_shrink_0().when(on, |slot| {
-            slot.child(
-                icons::icon(IconName::Check)
-                    .xsmall()
-                    .text_color(hex(color::ACCENT)),
-            )
-        }))
+        // An empty outline box when off, so an unchecked row never reads as plain text.
+        .child(
+            div()
+                .w(CHECK_SLOT)
+                .h(CHECK_SLOT)
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(style::radius::CONTROL))
+                .border_1()
+                .border_color(hex(if on {
+                    color::ACCENT
+                } else {
+                    color::BORDER_STRONG
+                }))
+                .when(on, |slot| {
+                    slot.child(
+                        icons::icon(IconName::Check)
+                            .xsmall()
+                            .text_color(hex(color::ACCENT)),
+                    )
+                }),
+        )
         .child(div().flex_1().min_w_0().truncate().child(label.into()));
     match selector {
         Some(selector) => row.debug_selector(move || selector.clone()),

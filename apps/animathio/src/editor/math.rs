@@ -198,20 +198,17 @@ impl Editor {
         let size = project_size(&self.project);
         let panel = cx
             .new(|cx| MathEditor::new(draft, editor, session, range, edit, true, size, window, cx));
-        // The large dialog width; the LaTeX palette sits beside the form when the window allows.
-        let width = f32::from(style::dialog_width::of(style::dialog_width::LARGE))
-            .min(f32::from(window.viewport_size().width) - 32.);
+        // The large dialog width, clamped to the viewport; the LaTeX palette sits beside the
+        // form when the window allows.
+        let width = style::dialog_width::LARGE
+            .min((f32::from(window.viewport_size().width) - 32.) / style::ui_scale());
+        let title = if edit.is_some() {
+            "Edit math object"
+        } else {
+            "Add math object"
+        };
         super::dialogs::open_dialog(window, cx, move |dialog, _, _| {
-            dialog
-                .title(super::dialogs::heading(
-                    IconName::Sigma,
-                    if edit.is_some() {
-                        "Edit math object"
-                    } else {
-                        "Add math object"
-                    },
-                ))
-                .width(px(width))
+            super::dialogs::dialog_frame(dialog, width, IconName::Sigma, title, None)
                 .child(panel.clone())
                 .on_ok({
                     let panel = panel.clone();
@@ -423,6 +420,8 @@ pub(super) struct MathEditor {
     busy: bool,
     focused: bool,
     form_scroll: ScrollHandle,
+    /// Keyboard focus of the snippet and template chips (snippets first, then templates).
+    chip_focus: Vec<FocusHandle>,
     palette_scroll: ScrollHandle,
 }
 impl MathEditor {
@@ -560,6 +559,9 @@ impl MathEditor {
             busy: false,
             focused: false,
             form_scroll: ScrollHandle::new(),
+            chip_focus: (0..LATEX_SNIPPETS.len() + LATEX_TEMPLATES.len())
+                .map(|_| cx.focus_handle())
+                .collect(),
             palette_scroll: ScrollHandle::new(),
         };
         if this.draft.kind == MathObjectKind::Polygon {
@@ -677,6 +679,15 @@ impl MathEditor {
         })
         .detach();
         cx.notify();
+    }
+    /// The keyboard focus handle of a snippet or template chip, by its label (UI tests).
+    #[cfg(test)]
+    pub(super) fn chip_focus_for(&self, label: &str) -> Option<FocusHandle> {
+        let at = LATEX_SNIPPETS
+            .iter()
+            .chain(LATEX_TEMPLATES)
+            .position(|(name, _)| *name == label)?;
+        self.chip_focus.get(at).cloned()
     }
     fn snippet(&mut self, value: &str, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(source) = &self.source {
@@ -933,6 +944,7 @@ impl Render for MathEditor {
             .flex_col()
             .gap_2();
         if self.draft.kind == MathObjectKind::Latex {
+            let mut chip = 0;
             for (title, items, replace) in [
                 ("Snippets", LATEX_SNIPPETS, false),
                 ("Templates", LATEX_TEMPLATES, true),
@@ -945,22 +957,16 @@ impl Render for MathEditor {
                 );
                 let mut buttons = div().flex().flex_wrap().gap_1();
                 for &(label, value) in items {
+                    // A real button, so a chip takes Tab focus and Enter/Space inserts it.
+                    let focus = self.chip_focus[chip].clone();
+                    chip += 1;
                     buttons = buttons.child(
-                        div()
-                            .id(SharedString::from(format!("{title}-{label}")))
-                            .h(style::size::ROW_SM)
-                            .px_2()
-                            .flex()
-                            .items_center()
-                            .rounded(px(style::radius::CONTROL))
-                            .border_1()
-                            .border_color(hex(color::BORDER))
-                            .bg(hex(color::RAISED))
-                            .text_role(style::Role::Label)
-                            .text_color(hex(color::TEXT))
-                            .cursor_pointer()
-                            .hover(|chip| chip.bg(hex(color::HOVER)))
-                            .child(label)
+                        Button::new(SharedString::from(format!("{title}-{label}")))
+                            .track_focus(&focus)
+                            .debug_selector(move || format!("math-chip-{label}"))
+                            .small()
+                            .outline()
+                            .label(label)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.snippet(value, replace, window, cx);
                             })),
