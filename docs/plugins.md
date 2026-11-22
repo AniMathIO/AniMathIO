@@ -914,7 +914,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = "0.40.0"
+wit-bindgen = "0.63.0"
 
 [workspace]
 ```
