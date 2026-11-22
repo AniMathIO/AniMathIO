@@ -208,9 +208,9 @@ fn fetch(agent: &ureq::Agent) -> Option<Release> {
 fn notice(release: &Release) -> gpui_component::notification::Notification {
     let url = release.url.clone();
     crate::style::Toast::info(format!("AniMathIO {} is available", release.version)).action(
-        move |_, _, _| {
+        move |_, _, cx| {
             let url = url.clone();
-            gpui_component::button::Button::new("update-check-open-release")
+            crate::style::secondary_button("update-check-open-release", cx)
                 .label("Open release page")
                 .on_click(move |_, _, cx| cx.open_url(&url))
         },

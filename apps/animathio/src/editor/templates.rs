@@ -1,8 +1,7 @@
 //! Project template launcher and placeholder workflow.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{self, color, hex};
+use crate::style::{self, Role, TextRole as _, color, hex};
 use animathio_control::{
     MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, template_catalog,
 };
@@ -72,18 +71,21 @@ impl Editor {
             })
             .detach();
         }
-        let mut cards = div().flex().flex_wrap().gap_2();
+        let scale = style::ui_scale();
+        let mut cards = div().flex().flex_wrap().gap_3();
         for manifest in self.title_library.template_manifests.clone() {
             let id = manifest.id.clone();
             let delete_id = id.clone();
             let keyboard_id = id.clone();
             let mut preview = div()
                 .relative()
-                .h(px(100.))
+                .h(px(96. * scale))
                 .w_full()
                 .flex()
                 .items_center()
                 .justify_center()
+                .rounded(px(style::radius::CONTROL))
+                .overflow_hidden()
                 .bg(hex(color::BG));
             if let Some(image) = self.title_library.templates.get(&id) {
                 preview = preview.child(
@@ -93,28 +95,18 @@ impl Editor {
                         .object_fit(ObjectFit::Contain),
                 );
             } else {
-                preview = preview.child(icons::icon(IconName::Type));
+                preview =
+                    preview.child(icons::icon(IconName::Type).text_color(hex(color::TEXT_MUTED)));
             }
-            preview = preview.child(
-                div()
-                    .absolute()
-                    .left(px(6.))
-                    .bottom(px(6.))
-                    .px_2()
-                    .rounded(px(style::radius::PILL))
-                    .bg(style::hexa(color::BG, 0.8))
-                    .border_1()
-                    .border_color(hex(color::BORDER))
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(hex(color::TEXT_SECONDARY))
-                    .child(manifest.aspect.clone()),
-            );
             let mut card = div()
                 .relative()
                 .id(SharedString::from(id.clone()))
-                .w(px(180.))
+                .w(px(180. * scale))
+                .flex()
+                .flex_col()
+                .gap_2()
                 .p_3()
-                .rounded(px(crate::style::radius::PANEL))
+                .rounded(px(style::radius::CARD))
                 .border_1()
                 .border_color(hex(color::BORDER))
                 .bg(hex(color::RAISED))
@@ -128,33 +120,39 @@ impl Editor {
                         cx.stop_propagation();
                     }
                 }))
-                .hover(|s| {
-                    s.top(px(-2.))
-                        .bg(hex(color::HOVER))
-                        .border_color(hex(color::ACCENT))
-                })
+                .hover(|s| s.bg(hex(color::HOVER)).border_color(hex(color::ACCENT)))
+                .active(|s| s.bg(hex(color::PRESSED)))
                 .child(preview)
                 .child(
                     div()
-                        .mt_2()
-                        .text_size(crate::style::type_size::SM)
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(manifest.name),
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_role(Role::Heading)
+                                .child(manifest.name),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_role(Role::Label)
+                                .child(manifest.aspect.clone()),
+                        ),
                 )
-                .child(
-                    div()
-                        .text_size(crate::style::type_size::XS)
-                        .text_color(hex(color::TEXT_SECONDARY))
-                        .child(manifest.category),
-                )
+                .child(div().text_role(Role::Caption).child(manifest.category))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_template(&id, window, cx);
                 }));
             if delete_id.starts_with("user-") {
                 card = card.child(
-                    div().absolute().top(px(16.)).right(px(16.)).child(
+                    div().absolute().top_1().right_1().child(
                         Button::new(SharedString::from(format!("delete-{delete_id}")))
                             .ghost()
+                            .small()
                             .icon(icons::icon(IconName::Trash))
                             .tooltip("Delete template")
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -162,7 +160,8 @@ impl Editor {
                                 if let Err(error) =
                                     animathio_control::delete_user_template(&delete_id)
                                 {
-                                    this.error = Some(error.to_string());
+                                    this.error =
+                                        Some(format!("Could not delete the template: {error}"));
                                 }
                                 this.title_library.templates_started = false;
                                 cx.notify();
@@ -172,16 +171,7 @@ impl Editor {
             }
             cards = cards.child(card);
         }
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .text_size(crate::style::type_size::LG)
-                    .child("Templates"),
-            )
-            .child(cards)
+        cards
     }
 
     fn open_template(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -247,7 +237,7 @@ impl Editor {
             .iter()
             .map(|p| {
                 let text = template.accepts_text(p.clip).then(|| {
-                    cx.new(|cx| InputState::new(window, cx).placeholder("Type replacement text"))
+                    cx.new(|cx| InputState::new(window, cx).placeholder("Replacement text"))
                 });
                 let label = p
                     .label
@@ -291,12 +281,7 @@ impl Editor {
                     })
                 })
             };
-            let mut body = div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .max_h(px(420.))
-                .overflow_hidden();
+            let mut body = div().flex().flex_col().gap_3();
             for (id, label, text) in &rows {
                 let id = *id;
                 let chosen = media.read(cx).0.get(&id).cloned();
@@ -330,18 +315,13 @@ impl Editor {
                             }
                         }
                     })
-                    .child(
-                        div()
-                            .text_size(crate::style::type_size::SM)
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(label.clone()),
-                    );
+                    .child(div().text_role(Role::Heading).child(label.clone()));
                 if let Some(text) = text {
                     row = row.child(Input::new(text));
                 }
                 let pick = {
                     let media = media.clone();
-                    Button::new(SharedString::from(format!("pick-{}", id.0)))
+                    style::secondary_button(SharedString::from(format!("pick-{}", id.0)), cx)
                         .icon(icons::icon(IconName::FolderOpen))
                         .label(if chosen.is_some() {
                             "Change media…"
@@ -384,12 +364,14 @@ impl Editor {
                     controls = controls
                         .child(
                             Button::new(SharedString::from(format!("cover-{}", id.0)))
+                                .small()
                                 .label("Cover")
                                 .selected(fill.cover)
                                 .on_click(set_fit(true)),
                         )
                         .child(
                             Button::new(SharedString::from(format!("contain-{}", id.0)))
+                                .small()
                                 .label("Contain")
                                 .selected(!fill.cover)
                                 .on_click(set_fit(false)),
@@ -406,57 +388,51 @@ impl Editor {
                                 }),
                         );
                     row = row.child(controls).child(
-                        div()
-                            .text_size(crate::style::type_size::XS)
-                            .text_color(style::hex(style::color::TEXT_SECONDARY))
-                            .child(
-                                fill.path
-                                    .file_name()
-                                    .map_or_default(|n| n.to_string_lossy().into_owned()),
-                            ),
+                        div().text_role(Role::Caption).child(
+                            fill.path
+                                .file_name()
+                                .map_or_default(|n| n.to_string_lossy().into_owned()),
+                        ),
                     );
                 } else {
                     row = row.child(controls);
                 }
                 body = body.child(row);
             }
-            let dialog = dialog
-                .title("Fill placeholders")
-                .width(px(520.))
-                .child(
-                    div()
-                        .mb_3()
-                        .text_size(crate::style::type_size::SM)
-                        .text_color(style::hex(style::color::TEXT_SECONDARY))
-                        .child(
-                            "Type text, or pick/drop an image or video. Media keeps the \
-                             placeholder's timing, transform and effects.",
-                        ),
-                )
-                .child(body)
-                .footer(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .justify_end()
-                        .child(
-                            Button::new("fill-skip")
-                                .label("Skip")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(
-                            style::primary_button("fill-template", cx)
-                                .label("Apply")
-                                .on_click({
-                                    let apply_fill = apply_fill.clone();
-                                    move |_, window, cx| {
-                                        if apply_fill(cx) {
-                                            window.close_dialog(cx);
-                                        }
+            let dialog = super::dialogs::dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::LayoutTemplate,
+                "Fill placeholders",
+                Some(
+                    "Type text, or pick or drop an image or video. Media keeps the \
+                     placeholder's timing, transform and effects.",
+                ),
+            )
+            .child(body)
+            .footer(super::dialogs::footer_row(
+                cx,
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        style::secondary_button("fill-skip", cx)
+                            .label("Skip")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        style::primary_button("fill-template", cx)
+                            .label("Apply")
+                            .on_click({
+                                let apply_fill = apply_fill.clone();
+                                move |_, window, cx| {
+                                    if apply_fill(cx) {
+                                        window.close_dialog(cx);
                                     }
-                                }),
-                        ),
-                );
+                                }
+                            }),
+                    ),
+            ));
             // Enter applies the template, like the primary button.
             super::dialogs::on_enter(dialog, move |_, cx| apply_fill(cx))
         });
@@ -474,7 +450,7 @@ impl Editor {
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Template name"));
         let category = cx.new(|cx| InputState::new(window, cx).default_value("My templates"));
         let editor = cx.entity();
-        super::dialogs::open_dialog(window, cx, move |dialog, _, _| {
+        super::dialogs::open_dialog(window, cx, move |dialog, _, cx| {
             let n = name.clone();
             let c = category.clone();
             let editor = editor.clone();
@@ -486,7 +462,7 @@ impl Editor {
                     let category = c.read(cx).value().to_string();
                     editor.update(cx, |this, cx| {
                         if name.trim().is_empty() {
-                            this.error = Some("Give the template a name".into());
+                            this.error = Some("Give the template a name before saving it.".into());
                             cx.notify();
                             return false;
                         }
@@ -526,26 +502,44 @@ impl Editor {
                     })
                 })
             };
-            let dialog = dialog
-                .title("Save as template")
-                .child(super::dialogs::tagged_input(
-                    "template-name",
-                    Input::new(&name),
-                ))
-                .child(Input::new(&category))
-                .child("Selected clips become labelled placeholders.")
-                .child(
-                    Button::new("save-template")
-                        .label("Save template")
-                        .on_click({
-                            let save_template = save_template.clone();
-                            move |_, window, cx| {
-                                if save_template(cx) {
-                                    window.close_dialog(cx);
+            let dialog = super::dialogs::dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::LayoutTemplate,
+                "Save as template",
+                Some("Selected clips become labelled placeholders you can fill later."),
+            )
+            .child(
+                super::dialogs::form_body()
+                    .child(style::form_row(
+                        "Name",
+                        super::dialogs::tagged_input("template-name", Input::new(&name)),
+                    ))
+                    .child(style::form_row("Category", Input::new(&category))),
+            )
+            .footer(super::dialogs::footer_row(
+                cx,
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        style::secondary_button("save-template-cancel", cx)
+                            .label("Cancel")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        style::primary_button("save-template", cx)
+                            .label("Save")
+                            .on_click({
+                                let save_template = save_template.clone();
+                                move |_, window, cx| {
+                                    if save_template(cx) {
+                                        window.close_dialog(cx);
+                                    }
                                 }
-                            }
-                        }),
-                );
+                            }),
+                    ),
+            ));
             // Enter saves the template.
             super::dialogs::on_enter(dialog, move |_, cx| save_template(cx))
         });

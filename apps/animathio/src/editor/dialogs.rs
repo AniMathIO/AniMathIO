@@ -1,14 +1,43 @@
 //! Modal workflows built from gpui-component dialogs, forms and inputs.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
+//!
+//! Every modal shares one frame ([`dialog_frame`]): a title with a secondary-coloured icon,
+//! an optional one-line description, a label-column body ([`style::form_row`]) and a footer
+//! that stays pinned ([`footer_row`]): the form-wide error on the left, the actions on the
+//! right with the primary one last. Widths are the three [`style::dialog_width`] steps.
 
 use super::*;
-use crate::style;
+use crate::style::{self, Role, TextRole as _};
 use animathio_control::ExportPreset;
 use gpui_component::dialog::{Cancel, Confirm, Dialog};
-use gpui_component::form::{Field as FormField, Form};
-use gpui_component::input::{Input, InputState, NumberInput};
+use gpui_component::form::Field as FormField;
+use gpui_component::input::{Input, InputState};
 use gpui_component::select::{Select, SelectState};
 use gpui_component::{IndexPath, WindowExt};
+
+/// The label column of a [`style::form_row`] (captions align with the controls beside it).
+const LABEL_COLUMN: Rems = Rems(8.5);
+/// A hairline outline for a segmented control: its `BG` well would otherwise vanish on the
+/// dialog surface.
+fn outlined(frame: Div) -> Div {
+    frame
+        .rounded(px(style::radius::CONTROL))
+        .border_1()
+        .border_color(style::hex(style::color::BORDER))
+}
+
+/// A two-option segmented control in a form row.
+const SEGMENT_WIDTH: Rems = Rems(12.);
+/// A short numeric field with its unit (`s`, `%`, `frames`).
+const SHORT_FIELD: Rems = Rems(9.);
+
+/// The validation error of the dialog being built, so its footer can show it. [`open_dialog`]
+/// sets it before every build; [`footer_row`] marks it as shown, and a dialog whose footer
+/// does not use [`footer_row`] still gets the error appended to its body.
+struct DialogError {
+    message: Option<SharedString>,
+    in_footer: std::cell::Cell<bool>,
+}
+impl gpui::Global for DialogError {}
 
 /// Keep validation errors readable inside the modal, above its dimmed background.
 /// Each dialog remembers the error sequence at first render, so old errors never leak in.
@@ -25,32 +54,94 @@ pub(super) fn open_dialog(
         let error = state.last_error.clone();
         let initial = baseline.get().unwrap_or(sequence);
         baseline.set(Some(initial));
+        let error = (sequence != initial).then_some(error).flatten();
+        cx.set_global(DialogError {
+            message: error.clone().map(SharedString::from),
+            in_footer: std::cell::Cell::new(false),
+        });
         let dialog = builder(dialog, window, cx);
-        if sequence != initial
-            && let Some(error) = error
-        {
-            dialog.child(
-                div()
-                    .id("dialog-validation-error")
-                    .debug_selector(|| "dialog-validation-error".into())
-                    .text_color(cx.theme().danger)
-                    .child(error),
-            )
-        } else {
-            dialog
+        let shown = cx
+            .try_global::<DialogError>()
+            .is_some_and(|state| state.in_footer.get());
+        match error {
+            Some(error) if !shown => dialog.child(validation_error(error)),
+            _ => dialog,
         }
     });
 }
 
+/// The one-line form-wide error (alert icon, `DANGER` text).
+fn validation_error(message: impl Into<SharedString>) -> Stateful<Div> {
+    div()
+        .id("dialog-validation-error")
+        .debug_selector(|| "dialog-validation-error".into())
+        .flex()
+        .items_start()
+        .gap_1()
+        .text_role(Role::Label)
+        .text_color(style::hex(style::color::DANGER))
+        .child(
+            icons::icon(IconName::CircleAlert)
+                .small()
+                .text_color(style::hex(style::color::DANGER)),
+        )
+        .child(div().min_w_0().child(message.into()))
+}
+
+/// A dialog title: the icon (`TEXT_SECONDARY`) and the name of the thing or the action, in
+/// the title role.
 pub(super) fn heading(icon: IconName, title: &'static str) -> Div {
     div()
         .flex()
         .items_center()
         .gap_2()
-        .text_size(crate::style::type_size::LG)
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(icons::icon(icon).text_color(style::hex(style::color::ACCENT)))
+        .text_role(Role::Title)
+        .child(icons::icon(icon).text_color(style::hex(style::color::TEXT_SECONDARY)))
         .child(title)
+}
+
+/// The shared dialog frame: one of the three widths ([`style::dialog_width`]), the title and
+/// an optional line saying what the dialog does.
+pub(super) fn dialog_frame(
+    dialog: Dialog,
+    width: f32,
+    icon: IconName,
+    title: &'static str,
+    description: Option<&'static str>,
+) -> Dialog {
+    let dialog = dialog
+        .title(heading(icon, title))
+        .width(style::dialog_width::of(width));
+    match description {
+        Some(text) => dialog.child(dialog_description(text)),
+        None => dialog,
+    }
+}
+
+/// The line under a dialog title (body text, secondary colour).
+pub(super) fn dialog_description(text: impl Into<SharedString>) -> Div {
+    div()
+        .mb_3()
+        .text_role(Role::Body)
+        .text_color(style::hex(style::color::TEXT_SECONDARY))
+        .child(text.into())
+}
+
+/// The rows of a form body, one gap between them.
+pub(super) fn form_body() -> Div {
+    div().flex().flex_col().gap_2()
+}
+
+/// A caption under a field (help text, a summary): `CAPTION` in `TEXT_MUTED`, aligned with
+/// the control column of a [`style::form_row`].
+pub(super) fn field_caption(id: &'static str, text: impl Into<SharedString>) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .pl(LABEL_COLUMN)
+        .ml_2()
+        .text_role(Role::Caption)
+        .child(text.into())
 }
 
 type Choices = Entity<SelectState<Vec<String>>>;
@@ -86,6 +177,44 @@ pub(super) fn settings_preset_index(width: u32, height: u32, rate: FrameRate) ->
         .unwrap_or(ExportPreset::ALL.len())
 }
 
+/// A two-option segmented control in a form row (12rem wide), `selected` being 0 or 1.
+fn two_way(
+    id: &'static str,
+    [first, second]: [(&'static str, &'static str); 2],
+    focus: &[FocusHandle],
+    selected: usize,
+    on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
+) -> Div {
+    outlined(div().w(SEGMENT_WIDTH)).child(
+        style::segmented(
+            id,
+            &[
+                style::SegmentedOption::new(first.0, first.1, None),
+                style::SegmentedOption::new(second.0, second.1, None),
+            ],
+            focus,
+            selected,
+            None,
+            true,
+            on_select,
+        )
+        .p_0(),
+    )
+}
+
+/// Frame rates offered in Project settings (a trailing "Custom…" reveals the rational field).
+const RATE_CHOICES: [&str; 8] = [
+    "23.976 fps",
+    "24 fps",
+    "25 fps",
+    "29.97 fps",
+    "30 fps",
+    "50 fps",
+    "59.94 fps",
+    "60 fps",
+];
+const CUSTOM_RATE: &str = "Custom…";
+
 pub(super) fn field(label: &'static str, child: impl IntoElement) -> FormField {
     FormField::new().label(label).child(child)
 }
@@ -101,25 +230,60 @@ pub(super) fn tagged_input(id: &'static str, child: impl IntoElement) -> impl In
 /// A form submission reports whether validation and application succeeded.
 pub(super) type Submit = std::rc::Rc<dyn Fn(&mut App) -> bool>;
 
-/// Route custom footer buttons through the same Confirm/Cancel actions as Enter/Escape.
-pub(super) fn submit_footer(label: &'static str, app: &App) -> Div {
+/// The pinned footer of every dialog: a form-wide validation error at the left (alert icon,
+/// `DANGER`), the actions at the right. Pass the buttons in order: secondary actions, Cancel,
+/// then the primary action last.
+pub(super) fn footer_row(app: &App, buttons: impl IntoElement) -> Div {
+    let error = app.try_global::<DialogError>().and_then(|state| {
+        let message = state.message.clone()?;
+        state.in_footer.set(true);
+        Some(message)
+    });
     div()
         .flex()
-        .gap_2()
-        .justify_end()
+        .items_center()
+        .gap_3()
+        .pt_3()
         .child(
-            Button::new("dialog-cancel")
-                .label("Cancel")
-                .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx)),
+            div()
+                .flex_1()
+                .min_w_0()
+                .children(error.map(validation_error)),
         )
         .child(
-            style::primary_button("dialog-apply", app)
-                .debug_selector(|| "dialog-apply".into())
-                .label(label)
-                .on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
-                }),
+            div()
+                .flex()
+                .items_center()
+                .flex_shrink_0()
+                .gap_2()
+                .child(buttons),
         )
+}
+
+/// The Cancel button: it closes through the same action as Escape.
+pub(super) fn cancel_button(id: &'static str, app: &App) -> Button {
+    style::secondary_button(id, app)
+        .label("Cancel")
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx))
+}
+
+/// Route custom footer buttons through the same Confirm/Cancel actions as Enter/Escape.
+pub(super) fn submit_footer(label: &'static str, app: &App) -> Div {
+    footer_row(
+        app,
+        div()
+            .flex()
+            .gap_2()
+            .child(cancel_button("dialog-cancel", app))
+            .child(
+                style::primary_button("dialog-apply", app)
+                    .debug_selector(|| "dialog-apply".into())
+                    .label(label)
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
+                    }),
+            ),
+    )
 }
 
 /// The component closes exactly once on success; validation failure preserves the form.
@@ -185,15 +349,27 @@ impl Editor {
         open_dialog(window, cx, move |dialog, _, cx| {
             let editor = editor.clone();
             let action = action.clone();
-            let dialog = dialog
-                .title(heading(IconName::TriangleAlert, title))
-                .child(
-                    div()
-                        .text_size(crate::style::type_size::SM)
-                        .text_color(style::hex(style::color::TEXT_SECONDARY))
-                        .child(detail),
-                )
-                .footer(submit_footer(label, cx));
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::SMALL,
+                IconName::TriangleAlert,
+                title,
+                Some(detail),
+            )
+            .footer(footer_row(
+                cx,
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(cancel_button("dialog-cancel", cx))
+                    .child(
+                        style::destructive_button("dialog-apply", label, true, cx)
+                            .debug_selector(|| "dialog-apply".into())
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
+                            }),
+                    ),
+            ));
             on_enter(dialog, move |window, cx| {
                 window.close_dialog(cx);
                 editor.update(cx, |this, cx| this.run_replace(action.clone(), window, cx));
@@ -235,7 +411,7 @@ pub(super) fn middle_truncate(text: &str, max: usize) -> String {
     format!("{start}…{end}")
 }
 
-/// The one-line outcome of the export choices: `640×360 · 30 fps · MP4 · chapters on`.
+/// The one-line outcome of the export choices: `640 × 360, 30 fps, chapters on`.
 pub(super) fn export_summary(
     size: (u32, u32),
     frame_rate: &str,
@@ -243,28 +419,25 @@ pub(super) fn export_summary(
     format: animathio_export::Format,
 ) -> String {
     let chapters = if !format.supports_chapters() {
-        "no chapters (WebM)"
+        "no chapters"
     } else if markers == 0 {
         "no chapters (no markers)"
     } else {
         "chapters on"
     };
-    let container = match format {
-        animathio_export::Format::Mp4 => "MP4",
-        animathio_export::Format::Webm => "WebM",
-    };
-    format!(
-        "{}×{} · {frame_rate} · {container} · {chapters}",
-        size.0, size.1
-    )
+    format!("{} × {}, {frame_rate}, {chapters}", size.0, size.1)
 }
 
-/// The format whose selector label is `label`; MP4 for anything else.
-pub(super) fn format_from_label(label: &str) -> animathio_export::Format {
-    animathio_export::Format::ALL
-        .into_iter()
-        .find(|format| format.label() == label)
-        .unwrap_or_default()
+/// The segmented-control option of an export container.
+fn format_option(format: animathio_export::Format) -> style::SegmentedOption {
+    match format {
+        animathio_export::Format::Mp4 => {
+            style::SegmentedOption::new("export-format-mp4", "MP4", None)
+        }
+        animathio_export::Format::Webm => {
+            style::SegmentedOption::new("export-format-webm", "WebM", None)
+        }
+    }
 }
 
 /// Outcome of submitting the Export dialog.
@@ -287,17 +460,19 @@ impl Editor {
             .range(duration)
             .unwrap_or_else(|| TimeRange::new(Time(0), Time(duration)).unwrap());
         let rate = self.project.frame_rate();
-        let mut presets = vec!["Project settings".to_owned()];
+        let project_resolution = project_size(&self.project);
+        let project_rate = frame_rate_label(rate);
+        let mut presets = vec![format!(
+            "Project settings ({} × {}, {project_rate})",
+            project_resolution.0, project_resolution.1
+        )];
         presets.extend(ExportPreset::ALL.map(|preset| preset.label().to_owned()));
         let preset = choices(presets, 0, window, cx);
-        let format = choices(
-            animathio_export::Format::ALL
-                .map(|format| format.label().to_owned())
-                .to_vec(),
-            0,
-            window,
-            cx,
-        );
+        let format = std::rc::Rc::new(std::cell::Cell::new(animathio_export::Format::default()));
+        let format_focus: Vec<FocusHandle> = animathio_export::Format::ALL
+            .iter()
+            .map(|_| cx.focus_handle())
+            .collect();
         let range = choices(
             vec!["Whole project".into(), "In/out".into(), "Custom".into()],
             usize::from(self.marks.marked()),
@@ -320,45 +495,12 @@ impl Editor {
             cx,
         );
         // The dialog re-renders when a choice changes: Custom start/end appear only for the
-        // Custom range, and the summary and path caption follow the preset and output.
-        for select in [&preset, &range, &format] {
+        // Custom range, and the summary follows the preset and format.
+        for select in [&preset, &range] {
             cx.subscribe_in(
                 select,
                 window,
                 |_, _, _: &gpui_component::select::SelectEvent<Vec<String>>, window, _| {
-                    window.refresh();
-                },
-            )
-            .detach();
-        }
-        // Switching the container swaps a `.mp4`/`.webm` extension in the path with it, so the
-        // file name never contradicts the selector (other names are left alone).
-        {
-            let output = output.clone();
-            cx.subscribe_in(
-                &format,
-                window,
-                move |_,
-                      select,
-                      _: &gpui_component::select::SelectEvent<Vec<String>>,
-                      window,
-                      cx| {
-                    let chosen = format_from_label(&selected(select, cx));
-                    output.update(cx, |state, cx| {
-                        let current = PathBuf::from(state.value().trim());
-                        if animathio_export::Format::for_path(&current)
-                            .is_some_and(|other| other != chosen)
-                        {
-                            state.set_value(
-                                current
-                                    .with_extension(chosen.extension())
-                                    .to_string_lossy()
-                                    .into_owned(),
-                                window,
-                                cx,
-                            );
-                        }
-                    });
                     window.refresh();
                 },
             )
@@ -370,8 +512,6 @@ impl Editor {
             |_, _, _: &gpui_component::input::InputEvent, window, _| window.refresh(),
         )
         .detach();
-        let project_resolution = project_size(&self.project);
-        let project_rate = frame_rate_label(rate);
         let markers = self.project.markers().len();
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
@@ -391,7 +531,7 @@ impl Editor {
                     let preset = ExportPreset::ALL
                         .into_iter()
                         .find(|p| p.label() == preset_name);
-                    let container = format_from_label(&selected(&format, cx));
+                    let container = format.get();
                     let choice = selected(&range, cx);
                     let from = timecode::parse_timecode(&from.read(cx).value(), rate);
                     let to = timecode::parse_timecode(&to.read(cx).value(), rate);
@@ -414,200 +554,166 @@ impl Editor {
             let chosen_preset = ExportPreset::ALL
                 .into_iter()
                 .find(|p| p.label() == selected(&preset, cx));
-            let container = format_from_label(&selected(&format, cx));
+            let container = format.get();
             let custom_range = selected(&range, cx) == "Custom";
             let (size, rate_label) = chosen_preset.map_or_else(
                 || (project_resolution, project_rate.clone()),
                 |p| (p.resolution(), "30 fps".to_owned()),
             );
-            let secondary = style::hex(style::color::TEXT_SECONDARY);
-            let note = chosen_preset.map_or_else(
-                || {
-                    format!(
-                        "Project settings: export at this project's own size and frame rate \
-                         ({}×{}, {project_rate}). Pick a preset to deliver at another size \
-                         without changing the project.",
-                        project_resolution.0, project_resolution.1
-                    )
-                },
-                |p| {
-                    format!(
-                        "Delivery preset: {}×{} at 30 fps, high quality. Applied to the export \
-                         only; the project keeps its settings.",
-                        p.resolution().0,
-                        p.resolution().1
-                    )
-                },
-            );
             let format_note = match container {
                 animathio_export::Format::Mp4 => {
-                    "H.264 video and AAC audio. Plays everywhere; timeline markers become chapters."
+                    "H.264 video and AAC audio. Plays everywhere; markers become chapters."
                 }
                 animathio_export::Format::Webm => {
-                    "VP9 video and Opus audio for the web. No chapters, and encoding is slower \
-                     than MP4."
+                    "VP9 video and Opus audio for the web. Slower to encode than MP4."
                 }
             };
-            let output_text = path_input.read(cx).value().to_string();
-            let dialog = dialog
-                .title(heading(IconName::Clapperboard, "Export video"))
-                .width(px(560.))
-                .child(
-                    div()
-                        .mb_3()
-                        .text_size(crate::style::type_size::SM)
-                        .text_color(style::hex(style::color::TEXT_SECONDARY))
-                        .child("The final cut. Render a video or add it to your queue."),
-                )
-                .child(
-                    Form::new()
-                        .child(field(
-                            "Preset",
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(Select::new(&preset))
-                                .child(
-                                    div()
-                                        .id("export-preset-note")
-                                        .debug_selector(|| "export-preset-note".into())
-                                        .text_size(crate::style::type_size::XS)
-                                        .text_color(secondary)
-                                        .child(note.clone()),
-                                ),
-                        ))
-                        .child(field(
-                            "Format",
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .id("export-format-select")
-                                        .debug_selector(|| "export-format-select".into())
-                                        .child(Select::new(&format)),
+            // Switching the container swaps a `.mp4`/`.webm` extension in the path with it, so
+            // the file name never contradicts the selector (other names are left alone).
+            let on_format = {
+                let (format, output) = (format.clone(), output.clone());
+                move |index: usize, window: &mut Window, cx: &mut App| {
+                    let chosen = animathio_export::Format::ALL[index];
+                    format.set(chosen);
+                    output.update(cx, |state, cx| {
+                        let current = PathBuf::from(state.value().trim());
+                        if animathio_export::Format::for_path(&current)
+                            .is_some_and(|other| other != chosen)
+                        {
+                            state.set_value(
+                                current
+                                    .with_extension(chosen.extension())
+                                    .to_string_lossy()
+                                    .into_owned(),
+                                window,
+                                cx,
+                            );
+                        }
+                    });
+                    window.refresh();
+                }
+            };
+            let format_options = animathio_export::Format::ALL.map(format_option);
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::Clapperboard,
+                "Export video",
+                Some("Render the project to a video file."),
+            )
+            .child(
+                form_body()
+                    .child(style::form_row("Preset", Select::new(&preset)))
+                    .child(style::form_row(
+                        "Format",
+                        outlined(div())
+                            .id("export-format-select")
+                            .debug_selector(|| "export-format-select".into())
+                            .w(SEGMENT_WIDTH)
+                            .child(
+                                style::segmented(
+                                    "export-format",
+                                    &format_options,
+                                    &format_focus,
+                                    animathio_export::Format::ALL
+                                        .iter()
+                                        .position(|f| *f == container)
+                                        .unwrap_or(0),
+                                    None,
+                                    true,
+                                    on_format,
                                 )
-                                .child(
-                                    div()
-                                        .id("export-format-note")
-                                        .debug_selector(|| "export-format-note".into())
-                                        .text_size(crate::style::type_size::XS)
-                                        .text_color(secondary)
-                                        .child(format_note),
-                                ),
-                        ))
-                        .child(field(
-                            "Output file",
+                                .p_0(),
+                            ),
+                    ))
+                    .child(field_caption("export-format-note", format_note))
+                    .child(style::form_row(
+                        "File",
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(tagged_input("export-output", Input::new(&output)))
+                            .child(style::secondary_button("export-browse", cx).label("Browse…").on_click(
+                                move |_, window, cx| {
+                                    let current = PathBuf::from(
+                                        path_input.read(cx).value().to_string(),
+                                    );
+                                    let mut picker = rfd::FileDialog::new()
+                                        .add_filter(
+                                            match container {
+                                                animathio_export::Format::Mp4 => "MP4 video",
+                                                animathio_export::Format::Webm => "WebM video",
+                                            },
+                                            &[container.extension()],
+                                        )
+                                        .set_file_name(format!(
+                                            "video.{}",
+                                            container.extension()
+                                        ));
+                                    if let Some(parent) = current
+                                        .parent()
+                                        .filter(|p| !p.as_os_str().is_empty())
+                                    {
+                                        picker = picker.set_directory(parent);
+                                    }
+                                    if let Some(path) = picker.save_file() {
+                                        path_input.update(cx, |state, cx| {
+                                            state.set_value(
+                                                path.to_string_lossy().into_owned(),
+                                                window,
+                                                cx,
+                                            );
+                                        });
+                                    }
+                                },
+                            )),
+                    ))
+                    .child(style::form_row("Range", Select::new(&range)))
+                    .when(custom_range, |form| {
+                        form.child(style::form_row(
+                            "Start",
                             div()
                                 .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap_2()
-                                        .child(tagged_input("export-output", Input::new(&output)))
-                                        .child(
-                                            Button::new("export-browse").label("Browse…").on_click(
-                                                move |_, window, cx| {
-                                                    let current = PathBuf::from(
-                                                        path_input.read(cx).value().to_string(),
-                                                    );
-                                                    let mut picker = rfd::FileDialog::new()
-                                                        .add_filter(
-                                                            match container {
-                                                                animathio_export::Format::Mp4 => {
-                                                                    "MP4 video"
-                                                                }
-                                                                animathio_export::Format::Webm => {
-                                                                    "WebM video"
-                                                                }
-                                                            },
-                                                            &[container.extension()],
-                                                        )
-                                                        .set_file_name(format!(
-                                                            "video.{}",
-                                                            container.extension()
-                                                        ));
-                                                    if let Some(parent) = current
-                                                        .parent()
-                                                        .filter(|p| !p.as_os_str().is_empty())
-                                                    {
-                                                        picker = picker.set_directory(parent);
-                                                    }
-                                                    if let Some(path) = picker.save_file() {
-                                                        path_input.update(cx, |state, cx| {
-                                                            state.set_value(
-                                                                path.to_string_lossy().into_owned(),
-                                                                window,
-                                                                cx,
-                                                            );
-                                                        });
-                                                    }
-                                                },
-                                            ),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .id("export-output-caption")
-                                        .debug_selector(|| "export-output-caption".into())
-                                        .text_size(crate::style::type_size::XS)
-                                        .text_color(secondary)
-                                        .child(middle_truncate(&output_text, 80)),
-                                ),
+                                .child(tagged_input("export-custom-start", Input::new(&from))),
                         ))
-                        .child(field("Range", Select::new(&range)))
-                        .when(custom_range, |form| {
-                            form.child(field(
-                                "Custom start (HH:MM:SS:FF)",
-                                div()
-                                    .flex()
-                                    .child(tagged_input("export-custom-start", Input::new(&from))),
-                            ))
-                            .child(field(
-                                "Custom end, exclusive",
-                                div()
-                                    .flex()
-                                    .child(tagged_input("export-custom-end", Input::new(&to))),
-                            ))
-                        }),
-                )
-                .child(
-                    div()
-                        .id("export-summary")
-                        .debug_selector(|| "export-summary".into())
-                        .mt_2()
-                        .text_size(crate::style::type_size::SM)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(export_summary(size, &rate_label, markers, container)),
-                )
-                .footer(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .justify_end()
-                        .child(
-                            Button::new("dialog-cancel")
-                                .label("Cancel")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(
-                            Button::new("export-add-to-queue")
-                                .icon(icons::icon(IconName::ListVideo))
-                                .label("Add to queue")
-                                .on_click(move |_, window, cx| queue_submit(false, window, cx)),
-                        )
-                        .child(
-                            style::primary_button("export-now", cx)
-                                .debug_selector(|| "export-now".into())
-                                .icon(icons::icon(IconName::Upload))
-                                .label("Export now")
-                                .on_click(move |_, window, cx| now_submit(true, window, cx)),
-                        ),
-                );
+                        .child(style::form_row(
+                            "End",
+                            div()
+                                .flex()
+                                .child(tagged_input("export-custom-end", Input::new(&to))),
+                        ))
+                        .child(field_caption(
+                            "export-custom-hint",
+                            "Timecodes are hours:minutes:seconds:frames. The end frame is not included.",
+                        ))
+                    })
+                    .child(field_caption(
+                        "export-summary",
+                        export_summary(size, &rate_label, markers, container),
+                    )),
+            )
+            .footer(footer_row(
+                cx,
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        style::secondary_button("export-add-to-queue", cx)
+                            .label("Add to queue")
+                            .on_click(move |_, window, cx| queue_submit(false, window, cx)),
+                    )
+                    .child(
+                        style::secondary_button("dialog-cancel", cx)
+                            .label("Cancel")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        style::primary_button("export-now", cx)
+                            .debug_selector(|| "export-now".into())
+                            .label("Export")
+                            .on_click(move |_, window, cx| now_submit(true, window, cx)),
+                    ),
+            ));
             // Enter exports now, like the primary button.
             on_enter(dialog, move |window, cx| {
                 enter_submit(true, window, cx);
@@ -760,18 +866,12 @@ impl Editor {
         front: bool,
         cx: &mut Context<Self>,
     ) {
-        let name = spec
-            .params
-            .output
-            .file_name()
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
         self.export_queue.enqueue(spec, front);
         self.export_queue_open = true;
         self.pump_export_queue();
         if !front {
-            self.notices.push(crate::style::Toast::info(format!(
-                "Added {name} to the export queue"
-            )));
+            self.notices
+                .push(crate::style::Toast::info("Added to export queue"));
         }
         cx.notify();
     }
@@ -791,10 +891,10 @@ impl Editor {
                     crate::style::Toast::success(format!("Exported {name}"))
                 }
                 Event::Failed { name, error, .. } => {
-                    crate::style::Toast::error(format!("Export of {name} failed: {error}"))
+                    crate::style::Toast::error(format!("Could not export {name}: {error}"))
                 }
                 Event::Cancelled { name, .. } => {
-                    crate::style::Toast::info(format!("Export of {name} cancelled"))
+                    crate::style::Toast::info(format!("Cancelled export of {name}"))
                 }
             };
             self.notices.push(notice);
@@ -811,40 +911,40 @@ impl Editor {
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let cancel = editor.clone();
-            let dialog =
-                dialog
-                    .title(heading(IconName::TriangleAlert, "Replace existing file?"))
-                    .width(px(480.))
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::SMALL,
+                IconName::TriangleAlert,
+                "Replace existing file?",
+                Some("This file already exists. Exporting replaces it."),
+            )
+            .child(
+                div()
+                    .id("overwrite-path")
+                    .debug_selector(|| "overwrite-path".into())
+                    .text_role(Role::Label)
+                    .text_color(style::hex(style::color::TEXT_SECONDARY))
+                    .child(middle_truncate(&path, 64)),
+            )
+            .on_close(move |_, _, cx| {
+                cancel.update(cx, |this, cx| {
+                    this.pending_export = None;
+                    cx.notify();
+                });
+            })
+            .footer(footer_row(
+                cx,
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(cancel_button("overwrite-cancel", cx))
                     .child(
-                        div()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(path.clone()),
-                    )
-                    .on_close(move |_, _, cx| {
-                        cancel.update(cx, |this, cx| {
-                            this.pending_export = None;
-                            cx.notify();
-                        });
-                    })
-                    .footer(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .justify_end()
-                            .child(Button::new("overwrite-cancel").label("Cancel").on_click(
-                                |_, window, cx| window.dispatch_action(Box::new(Cancel), cx),
-                            ))
-                            .child(
-                                style::primary_button("overwrite-replace", cx)
-                                    .label("Replace")
-                                    .on_click(|_, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(Confirm { secondary: false }),
-                                            cx,
-                                        );
-                                    }),
-                            ),
-                    );
+                        style::destructive_button("overwrite-replace", "Replace", true, cx)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
+                            }),
+                    ),
+            ));
             let replace = editor.clone();
             on_enter(dialog, move |_, cx| {
                 replace.update(cx, |this, cx| {
@@ -859,65 +959,121 @@ impl Editor {
     }
 
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (width, height) = project_size(&self.project);
-        let width = input(width.to_string(), window, cx);
-        let height = input(height.to_string(), window, cx);
+        // Bound to a name so the style guard does not mistake the call for a colour literal.
+        let to_color = fields::to_hsla;
+        let (current_width, current_height) = project_size(&self.project);
+        let rate = self.project.frame_rate();
+        let width = input(current_width.to_string(), window, cx);
+        let height = input(current_height.to_string(), window, cx);
+        let rate_index = RATE_CHOICES
+            .iter()
+            .position(|label| parse_fps(label.trim_end_matches(" fps")).is_ok_and(|r| r == rate))
+            .unwrap_or(RATE_CHOICES.len());
+        let rates = choices(
+            RATE_CHOICES
+                .iter()
+                .map(|label| (*label).to_owned())
+                .chain(std::iter::once(CUSTOM_RATE.to_owned()))
+                .collect(),
+            rate_index,
+            window,
+            cx,
+        );
         let fps = input(
-            format!(
-                "{}/{}",
-                self.project.frame_rate().numerator(),
-                self.project.frame_rate().denominator()
-            ),
+            format!("{}/{}", rate.numerator(), rate.denominator()),
             window,
             cx,
         );
         let background = self.project.background();
         let color = cx.new(|cx| {
             gpui_component::color_picker::ColorPickerState::new(window, cx)
-                .default_value(fields::to_hsla(background))
+                .default_value(to_color(background))
         });
         let background_hex = format!(
             "#{:02x}{:02x}{:02x}{:02x}",
             background[0], background[1], background[2], background[3]
         );
-        let (current_width, current_height) = project_size(&self.project);
         let presets = choices(
             settings_preset_labels(),
-            settings_preset_index(current_width, current_height, self.project.frame_rate()),
+            settings_preset_index(current_width, current_height, rate),
             window,
             cx,
         );
+        // Choosing a preset sets the size at once (there is no separate "use" button); the
+        // trailing "Custom" entry leaves the fields alone.
+        {
+            let (width, height) = (width.clone(), height.clone());
+            cx.subscribe_in(
+                &presets,
+                window,
+                move |_,
+                      _,
+                      event: &gpui_component::select::SelectEvent<Vec<String>>,
+                      window,
+                      cx| {
+                    let gpui_component::select::SelectEvent::Confirm(Some(label)) = event else {
+                        return;
+                    };
+                    if let Some(preset) = ExportPreset::ALL.into_iter().find(|p| p.label() == label)
+                    {
+                        let (preset_width, preset_height) = preset.resolution();
+                        width.update(cx, |state, cx| {
+                            state.set_value(preset_width.to_string(), window, cx);
+                        });
+                        height.update(cx, |state, cx| {
+                            state.set_value(preset_height.to_string(), window, cx);
+                        });
+                    }
+                },
+            )
+            .detach();
+        }
+        cx.subscribe_in(
+            &rates,
+            window,
+            |_, _, _: &gpui_component::select::SelectEvent<Vec<String>>, window, _| {
+                window.refresh();
+            },
+        )
+        .detach();
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
-            let w = width.clone();
-            let h = height.clone();
-            let f = fps.clone();
-            let c = color.clone();
+            let (width_field, height_field, fps_field) =
+                (width.clone(), height.clone(), fps.clone());
+            let (rate_select, color_picker) = (rates.clone(), color.clone());
             let editor = editor.clone();
-            let pw = width.clone();
-            let ph = height.clone();
-            let preset = presets.clone();
+            let custom_rate = selected(&rates, cx) == CUSTOM_RATE;
             let submit: Submit = std::rc::Rc::new(move |cx: &mut App| {
-                let size = w
+                let size = width_field
                     .read(cx)
                     .value()
+                    .trim()
                     .parse::<u32>()
                     .ok()
-                    .zip(h.read(cx).value().parse::<u32>().ok())
+                    .zip(height_field.read(cx).value().trim().parse::<u32>().ok())
                     .filter(|(width, height)| *width > 0 && *height > 0);
-                let rate = parse_fps(f.read(cx).value().trim()).ok();
+                let choice = selected(&rate_select, cx);
+                let rate = if choice == CUSTOM_RATE {
+                    parse_fps(fps_field.read(cx).value().trim()).ok()
+                } else {
+                    parse_fps(choice.trim_end_matches(" fps")).ok()
+                };
                 let background = {
                     let rgba = Rgba::from(
-                        c.read(cx)
+                        color_picker
+                            .read(cx)
                             .value()
-                            .unwrap_or_else(|| fields::to_hsla(background)),
+                            .unwrap_or_else(|| to_color(background)),
                     );
                     [rgba.r, rgba.g, rgba.b, rgba.a]
                         .map(|v| (v * 255.).round().clamp(0., 255.) as u8)
                 };
                 editor.update(cx, |this, cx| {
                     let Some(((width, height), frame_rate)) = size.zip(rate) else {
-                        this.error = Some("Enter valid dimensions and frame rate".into());
+                        this.error = Some(
+                            "Enter a width and height in pixels and a frame rate, such as 30 or 30000/1001."
+                                .into(),
+                        );
                         cx.notify();
                         return false;
                     };
@@ -931,69 +1087,76 @@ impl Editor {
                     this.try_execute(&command, cx)
                 })
             });
-            let dialog = dialog
-                .title(heading(IconName::Settings2, "Project settings"))
-                .width(px(460.))
-                .child(
-                    Form::new()
-                        .child(field(
-                            "Resolution preset",
-                            div().flex().gap_2().child(Select::new(&presets)).child(
-                                Button::new("apply-size").label("Use size").on_click(
-                                    move |_, window, cx| {
-                                        if let Some(p) = ExportPreset::ALL
-                                            .into_iter()
-                                            .find(|p| p.label() == selected(&preset, cx))
-                                        {
-                                            let (width, height) = p.resolution();
-                                            pw.update(cx, |s, cx| {
-                                                s.set_value(width.to_string(), window, cx);
-                                            });
-                                            ph.update(cx, |s, cx| {
-                                                s.set_value(height.to_string(), window, cx);
-                                            });
-                                        }
-                                    },
-                                ),
+            let px_unit = || div().pr_1().text_role(Role::Label).child("px");
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::Settings2,
+                "Project settings",
+                Some("Canvas size, frame rate and background colour of this project."),
+            )
+            .child(
+                form_body()
+                    .child(style::form_row("Preset", Select::new(&presets)))
+                    .child(style::form_row(
+                        "Size",
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(tagged_input(
+                                "project-width",
+                                Input::new(&width).suffix(px_unit()),
+                            ))
+                            .child(
+                                div()
+                                    .text_role(Role::Body)
+                                    .text_color(style::hex(style::color::TEXT_SECONDARY))
+                                    .child("×"),
+                            )
+                            .child(tagged_input(
+                                "project-height",
+                                Input::new(&height).suffix(px_unit()),
+                            )),
+                    ))
+                    .child(style::form_row("Frame rate", Select::new(&rates)))
+                    .when(custom_rate, |form| {
+                        form.child(style::form_row(
+                            "Custom rate",
+                            tagged_input("project-fps", Input::new(&fps)),
+                        ))
+                        .child(field_caption(
+                            "project-fps-hint",
+                            "A number such as 30, or a fraction such as 30000/1001.",
+                        ))
+                    })
+                    .child(style::form_row(
+                        "Background",
+                        // Swatch plus hex like the inspector's colour rows; the bordered
+                        // frame keeps a near-black background visible on the dialog.
+                        div()
+                            .id("settings-background")
+                            .debug_selector(|| "settings-background".into())
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .rounded(px(style::radius::CONTROL))
+                                    .border_1()
+                                    .border_color(style::hex(style::color::BORDER_STRONG))
+                                    .p_0p5()
+                                    .child(gpui_component::color_picker::ColorPicker::new(&color)),
+                            )
+                            .child(
+                                div()
+                                    .text_role(Role::Label)
+                                    .tabular()
+                                    .child(background_hex.clone()),
                             ),
-                        ))
-                        .child(field(
-                            "Width",
-                            tagged_input("project-width", NumberInput::new(&width)),
-                        ))
-                        .child(field("Height", NumberInput::new(&height)))
-                        .child(field(
-                            "FPS (number or numerator/denominator)",
-                            Input::new(&fps),
-                        ))
-                        .child(field(
-                            "Background",
-                            // Swatch plus hex like the inspector's colour rows; the bordered
-                            // frame keeps a near-black background visible on the dialog.
-                            div()
-                                .debug_selector(|| "settings-background".into())
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .rounded(px(6.))
-                                        .border_1()
-                                        .border_color(style::hex(style::color::TEXT_MUTED))
-                                        .p_0p5()
-                                        .child(gpui_component::color_picker::ColorPicker::new(
-                                            &color,
-                                        )),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(crate::style::type_size::XS)
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(background_hex.clone()),
-                                ),
-                        )),
-                );
+                    )),
+            );
             form_dialog(dialog, "Apply", cx, submit)
         });
     }
@@ -1007,9 +1170,9 @@ impl Editor {
                 .to_string_lossy()
                 .into_owned();
             let placeholder = if self.path.is_some() {
-                "Blank: next to the project".to_owned()
+                "Next to the project".to_owned()
             } else {
-                "Blank: your Videos folder".to_owned()
+                "Your Videos folder".to_owned()
             };
             cx.new(|cx| {
                 InputState::new(window, cx)
@@ -1017,18 +1180,6 @@ impl Editor {
                     .default_value(value)
             })
         };
-        let gpu = choices(
-            vec!["GPU".into(), "CPU".into()],
-            usize::from(!self.preview.gpu),
-            window,
-            cx,
-        );
-        let density = choices(
-            vec!["Compact".into(), "Comfortable".into()],
-            usize::from(!self.preferences.compact),
-            window,
-            cx,
-        );
         let scale_values: Vec<String> = std::iter::once("Desktop default".to_owned())
             .chain((80..=200).step_by(10).map(|n| format!("{n}%")))
             .collect();
@@ -1037,39 +1188,38 @@ impl Editor {
             .ui_scale
             .map_or(0, |n| ((n.clamp(80, 200) - 80) / 10 + 1) as usize);
         let scale = choices(scale_values, scale_index, window, cx);
-        let motion = choices(
-            vec!["Full motion".into(), "Reduce motion".into()],
-            usize::from(self.preferences.reduce_motion),
-            window,
-            cx,
-        );
+        // The two-state settings: segmented controls and switches share one cell each with
+        // the submit handler, since the controls only report changes.
+        let gpu = std::rc::Rc::new(std::cell::Cell::new(self.preview.gpu));
+        let compact = std::rc::Rc::new(std::cell::Cell::new(self.preferences.compact));
+        let reduce_motion = std::rc::Rc::new(std::cell::Cell::new(self.preferences.reduce_motion));
         let check_updates = std::rc::Rc::new(std::cell::Cell::new(self.preferences.check_updates));
+        let gpu_focus: Vec<FocusHandle> = (0..2).map(|_| cx.focus_handle()).collect();
+        let density_focus: Vec<FocusHandle> = (0..2).map(|_| cx.focus_handle()).collect();
         let community_on = crate::editor_env::community_plugins_enabled();
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let scale_submit = scale.clone();
-            let motion_submit = motion.clone();
             let autosave_submit = autosave.clone();
             let folder_submit = folder.clone();
-            let gpu_submit = gpu.clone();
-            let density_submit = density.clone();
-            let check_submit = check_updates.clone();
+            let (gpu_submit, compact_submit) = (gpu.clone(), compact.clone());
+            let (motion_submit, check_submit) = (reduce_motion.clone(), check_updates.clone());
             let editor = editor.clone();
             let open_plugins = editor.clone();
             let folder_browse = folder.clone();
             let submit = std::rc::Rc::new(move |cx: &mut App| {
-                let Ok(seconds) = autosave_submit.read(cx).value().parse::<u64>() else {
+                let Ok(seconds) = autosave_submit.read(cx).value().trim().parse::<u64>() else {
                     editor.update(cx, |this, cx| {
                         this.error =
-                            Some("Enter whole seconds for autosave (0 disables it)".into());
+                            Some("Enter whole seconds for autosave, or 0 to turn it off.".into());
                         cx.notify();
                     });
                     return false;
                 };
                 let folder = PathBuf::from(folder_submit.read(cx).value().to_string());
-                let gpu = selected(&gpu_submit, cx) == "GPU";
-                let compact = selected(&density_submit, cx) == "Compact";
-                let reduce_motion = selected(&motion_submit, cx) == "Reduce motion";
+                let gpu = gpu_submit.get();
+                let compact = compact_submit.get();
+                let reduce_motion = motion_submit.get();
                 let check_updates = check_submit.get();
                 editor.update(cx, |this, cx| {
                     let preferences = crate::preferences::Preferences {
@@ -1084,7 +1234,7 @@ impl Editor {
                         check_updates,
                     };
                     if let Err(error) = preferences.save() {
-                        this.error = Some(error);
+                        this.error = Some(format!("Could not save preferences: {error}"));
                         cx.notify();
                         return false;
                     }
@@ -1117,118 +1267,203 @@ impl Editor {
                     true
                 })
             });
-            let dialog = dialog
-                .title(heading(IconName::SlidersHorizontal, "Preferences"))
-                .child(
-                    Form::new()
-                        .child(field("Preview renderer", Select::new(&gpu)))
-                        .child(field(
-                            "Autosave seconds (0 disables)",
-                            div()
-                                .id("preferences-autosave")
-                                .debug_selector(|| "preferences-autosave".into())
-                                .child(NumberInput::new(&autosave)),
-                        ))
-                        .child(field(
-                            "Default export folder",
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(tagged_input(
-                                    "preferences-export-folder",
-                                    Input::new(&folder),
-                                ))
-                                .child(
-                                    Button::new("preferences-export-folder-browse")
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::SlidersHorizontal,
+                "Preferences",
+                None,
+            )
+            .child(
+                div()
+                    .mt_2()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(style::form_group(
+                        "General",
+                        [
+                            style::form_row(
+                                "Autosave every",
+                                div()
+                                    .id("preferences-autosave")
+                                    .debug_selector(|| "preferences-autosave".into())
+                                    .w(SHORT_FIELD)
+                                    .child(
+                                        Input::new(&autosave)
+                                            .suffix(div().pr_1().text_role(Role::Label).child("s")),
+                                    ),
+                            )
+                            .into_any_element(),
+                            field_caption("preferences-autosave-help", "0 turns autosave off.")
+                                .into_any_element(),
+                            style::form_row(
+                                "Export folder",
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(tagged_input(
+                                        "preferences-export-folder",
+                                        Input::new(&folder),
+                                    ))
+                                    .child(
+                                        style::secondary_button(
+                                            "preferences-export-folder-browse",
+                                            cx,
+                                        )
                                         .debug_selector(|| {
                                             "preferences-export-folder-browse".into()
                                         })
                                         .label("Browse…")
-                                        .on_click(move |_, window, cx| {
-                                            let mut picker = rfd::FileDialog::new();
-                                            let current = PathBuf::from(
-                                                folder_browse.read(cx).value().trim().to_owned(),
-                                            );
-                                            if current.is_dir() {
-                                                picker = picker.set_directory(current);
-                                            }
-                                            if let Some(path) = picker.pick_folder() {
-                                                folder_browse.update(cx, |state, cx| {
-                                                    state.set_value(
-                                                        path.to_string_lossy().into_owned(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
+                                        .on_click(
+                                            move |_, window, cx| {
+                                                let mut picker = rfd::FileDialog::new();
+                                                let current = PathBuf::from(
+                                                    folder_browse
+                                                        .read(cx)
+                                                        .value()
+                                                        .trim()
+                                                        .to_owned(),
+                                                );
+                                                if current.is_dir() {
+                                                    picker = picker.set_directory(current);
+                                                }
+                                                if let Some(path) = picker.pick_folder() {
+                                                    folder_browse.update(cx, |state, cx| {
+                                                        state.set_value(
+                                                            path.to_string_lossy().into_owned(),
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    });
+                                                }
+                                            },
+                                        ),
+                                    ),
+                            )
+                            .into_any_element(),
+                        ],
+                    ))
+                    .child(style::form_group(
+                        "Interface",
+                        [
+                            style::form_row("UI scale", Select::new(&scale)).into_any_element(),
+                            style::form_row(
+                                "Density",
+                                two_way(
+                                    "preferences-density",
+                                    [
+                                        ("preferences-density-compact", "Compact"),
+                                        ("preferences-density-comfortable", "Comfortable"),
+                                    ],
+                                    &density_focus,
+                                    usize::from(!compact.get()),
+                                    {
+                                        let compact = compact.clone();
+                                        move |index, window, _| {
+                                            compact.set(index == 0);
+                                            window.refresh();
+                                        }
+                                    },
                                 ),
-                        ))
-                        .child(field("Interface: UI scale", Select::new(&scale)))
-                        .child(field("Theme density", Select::new(&density)))
-                        .child(field("Motion", Select::new(&motion)))
-                        .child(
-                            FormField::new().child(
-                                gpui_component::checkbox::Checkbox::new(
-                                    "preferences-check-updates",
-                                )
-                                .label("Check for updates on startup")
-                                .checked(check_updates.get())
-                                .accessibility_label("Check for updates")
-                                .on_change({
+                            )
+                            .into_any_element(),
+                            style::switch_row(
+                                "preferences-reduce-motion",
+                                "Reduce motion",
+                                None,
+                                reduce_motion.get(),
+                                {
+                                    let reduce_motion = reduce_motion.clone();
+                                    move |checked, window, _| {
+                                        reduce_motion.set(*checked);
+                                        window.refresh();
+                                    }
+                                },
+                            )
+                            .into_any_element(),
+                        ],
+                    ))
+                    .child(style::form_group(
+                        "Preview",
+                        [style::form_row(
+                            "Renderer",
+                            two_way(
+                                "preferences-renderer",
+                                [
+                                    ("preferences-renderer-gpu", "GPU"),
+                                    ("preferences-renderer-cpu", "CPU"),
+                                ],
+                                &gpu_focus,
+                                usize::from(!gpu.get()),
+                                {
+                                    let gpu = gpu.clone();
+                                    move |index, window, _| {
+                                        gpu.set(index == 0);
+                                        window.refresh();
+                                    }
+                                },
+                            ),
+                        )
+                        .into_any_element()],
+                    ))
+                    .child(style::form_group(
+                        "Plugins and updates",
+                        [
+                            style::switch_row(
+                                "preferences-check-updates",
+                                "Check for updates on startup",
+                                None,
+                                check_updates.get(),
+                                {
                                     let check_updates = check_updates.clone();
                                     move |checked, window, _| {
                                         check_updates.set(*checked);
                                         window.refresh();
                                     }
-                                }),
-                            ),
-                        )
-                        .child(
+                                },
+                            )
+                            .into_any_element(),
                             // One switch, one source of truth (CommunityStore): it lives in
                             // Library > Plugins, and this row only reports it and links there.
-                            FormField::new().child(
-                                div()
-                                    .id("preferences-community-plugins")
-                                    .debug_selector(|| "preferences-community-plugins".into())
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .child(div().child(format!(
-                                                "Community plugins: {}",
-                                                if community_on { "on" } else { "off" }
-                                            )))
-                                            .child(
-                                                div()
-                                                    .text_size(crate::style::type_size::XS)
-                                                    .text_color(style::hex(
-                                                        style::color::TEXT_SECONDARY,
-                                                    ))
-                                                    .child(
-                                                        "Third-party, sandboxed, not audited. \
-                                                         Manage them in Library > Plugins.",
-                                                    ),
-                                            ),
-                                    )
-                                    .child(
-                                        Button::new("preferences-open-plugins")
-                                            .debug_selector(|| "preferences-open-plugins".into())
-                                            .label("Open Plugins")
-                                            .on_click(move |_, window, cx| {
-                                                window.close_dialog(cx);
-                                                open_plugins.update(cx, |this, cx| {
-                                                    this.dock.left_open = true;
-                                                    this.select_left_tab(LeftTab::Plugins, cx);
-                                                });
-                                            }),
-                                    ),
-                            ),
-                        ),
-                );
+                            div()
+                                .id("preferences-community-plugins")
+                                .debug_selector(|| "preferences-community-plugins".into())
+                                .child(style::form_row(
+                                    "Community plugins",
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .text_role(Role::Body)
+                                                .child(if community_on { "On" } else { "Off" }),
+                                        )
+                                        .child(
+                                            style::secondary_button("preferences-open-plugins", cx)
+                                                .debug_selector(|| {
+                                                    "preferences-open-plugins".into()
+                                                })
+                                                .label("Open Plugins")
+                                                .on_click(move |_, window, cx| {
+                                                    window.close_dialog(cx);
+                                                    open_plugins.update(cx, |this, cx| {
+                                                        this.dock.left_open = true;
+                                                        this.select_left_tab(LeftTab::Plugins, cx);
+                                                    });
+                                                }),
+                                        ),
+                                ))
+                                .child(field_caption(
+                                    "preferences-community-help",
+                                    "Third-party plugins run sandboxed and are not reviewed.",
+                                ))
+                                .into_any_element(),
+                        ],
+                    )),
+            );
             form_dialog(dialog, "Save", cx, submit)
         });
     }
@@ -1240,7 +1475,7 @@ impl Editor {
         else {
             return;
         };
-        let scene = input("", window, cx);
+        let scene = cx.new(|cx| InputState::new(window, cx).placeholder("First scene in the file"));
         let editor = cx.entity();
         open_dialog(window, cx, move |dialog, _, cx| {
             let editor = editor.clone();
@@ -1266,19 +1501,21 @@ impl Editor {
                     }
                 })
             });
-            let dialog = dialog
-                .title(heading(IconName::Code, "Import Manim scene"))
-                .child(Form::new().child(field(
-                    "Scene class (blank uses first Scene)",
-                    Input::new(&scene),
-                )));
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::Code,
+                "Import Manim scene",
+                Some("Turns a Manim scene into clips on a new timeline."),
+            )
+            .child(form_body().child(style::form_row("Scene class", Input::new(&scene))));
             form_dialog(dialog, "Import", cx, submit)
         });
     }
 
     pub(super) fn open_write_on(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.selected.filter(|id| self.find_clip(*id).is_some_and(|clip| matches!(&clip.kind, ClipKind::Plugin { plugin_id,.. } if plugin_id.contains("latex")))) else {
-            self.error = Some("Select a LaTeX clip to apply Write on".into()); cx.notify(); return;
+            self.error = Some("Select a LaTeX clip to use Write on.".into()); cx.notify(); return;
         };
         let duration = input("1", window, cx);
         let editor = cx.entity();
@@ -1292,19 +1529,27 @@ impl Editor {
                         seconds.and_then(|seconds| editing::write_on_command(clip, seconds))
                     }) else {
                         this.error =
-                            Some("Duration must be positive and fit within the clip".into());
+                            Some("Enter a duration in seconds that is longer than zero and fits within the clip.".into());
                         cx.notify();
                         return false;
                     };
                     this.try_execute(&command, cx)
                 })
             });
-            let dialog = dialog
-                .title(heading(IconName::WandSparkles, "Write on"))
-                .child(Form::new().child(field(
-                    "Reveal duration in seconds",
-                    tagged_input("write-duration", NumberInput::new(&duration)),
-                )));
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::WandSparkles,
+                "Write on",
+                Some("Reveals the equation as if it were being written."),
+            )
+            .child(form_body().child(style::form_row(
+                "Duration",
+                div().w(SHORT_FIELD).child(tagged_input(
+                    "write-duration",
+                    Input::new(&duration).suffix(div().pr_1().text_role(Role::Label).child("s")),
+                )),
+            )));
             form_dialog(dialog, "Apply", cx, submit)
         });
     }
@@ -1327,27 +1572,13 @@ impl Editor {
             )
             .unwrap_or(1);
         let duration = input(frames.to_string(), window, cx);
-        let mode = choices(
-            vec!["Speed (%)".into(), "Duration (frames)".into()],
-            0,
-            window,
-            cx,
-        );
-        let reverse = choices(
-            vec!["Forward".into(), "Reverse".into()],
-            usize::from(clip.time_map.reverse),
-            window,
-            cx,
-        );
-        let ripple = choices(
-            vec![
-                "Leave trailing clips in place".into(),
-                "Ripple trailing clips".into(),
-            ],
-            0,
-            window,
-            cx,
-        );
+        // Two-option choices are segmented controls and a switch, sharing a cell with the
+        // submit handler since the controls only report changes.
+        let by_duration = std::rc::Rc::new(std::cell::Cell::new(false));
+        let reverse = std::rc::Rc::new(std::cell::Cell::new(clip.time_map.reverse));
+        let ripple = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mode_focus: Vec<FocusHandle> = (0..2).map(|_| cx.focus_handle()).collect();
+        let direction_focus: Vec<FocusHandle> = (0..2).map(|_| cx.focus_handle()).collect();
         let maintain_pitch = std::rc::Rc::new(std::cell::Cell::new(clip.maintain_pitch));
         // Keys on the clip's own clock (a clip cut into the middle of a ramp keeps the
         // curve's clock running ahead of it): the Apply command rebuilds the clock from
@@ -1373,7 +1604,7 @@ impl Editor {
             let (percent, duration, mode, reverse, ripple, ramps) = (
                 percent.clone(),
                 duration.clone(),
-                mode.clone(),
+                by_duration.clone(),
                 reverse.clone(),
                 ripple.clone(),
                 ramps.clone(),
@@ -1383,31 +1614,91 @@ impl Editor {
             let ramp_text = ramp_text.clone();
             let original_ramps = original_ramps.clone();
             let clip = clip.clone();
-            let form = Form::new()
-                .child(field("Change", Select::new(&mode)))
-                .child(field(
-                    "Speed (%)",
-                    tagged_input("speed-percent", Input::new(&percent)),
-                ))
-                .child(field("Duration (frames)", Input::new(&duration)))
-                .child(field("Direction", Select::new(&reverse)))
-                .child(field(
-                    "Maintain pitch",
-                    gpui_component::checkbox::Checkbox::new("speed-maintain-pitch")
-                        .checked(maintain_pitch.get())
-                        .on_change({
-                            let value = maintain_pitch.clone();
-                            move |checked, window, _| {
-                                value.set(*checked);
+            let form = form_body()
+                .child(style::form_row(
+                    "Change by",
+                    two_way(
+                        "speed-mode",
+                        [("speed-mode-speed", "Speed"), ("speed-mode-duration", "Duration")],
+                        &mode_focus,
+                        usize::from(by_duration.get()),
+                        {
+                            let by_duration = by_duration.clone();
+                            move |index, window, _| {
+                                by_duration.set(index == 1);
                                 window.refresh();
                             }
-                        }),
+                        },
+                    ),
                 ))
-                .child(field("Ripple", Select::new(&ripple)))
-                .child(field("Ramp keys (frame:percent, …)", Input::new(&ramps)));
+                .child(style::form_row(
+                    "Speed",
+                    div().w(SHORT_FIELD).child(tagged_input(
+                        "speed-percent",
+                        Input::new(&percent)
+                            .suffix(div().pr_1().text_role(Role::Label).child("%")),
+                    )),
+                ))
+                .child(style::form_row(
+                    "Duration",
+                    div().w(SHORT_FIELD).child(
+                        Input::new(&duration)
+                            .suffix(div().pr_1().text_role(Role::Label).child("frames")),
+                    ),
+                ))
+                .child(style::form_row(
+                    "Direction",
+                    two_way(
+                        "speed-direction",
+                        [
+                            ("speed-direction-forward", "Forward"),
+                            ("speed-direction-reverse", "Reverse"),
+                        ],
+                        &direction_focus,
+                        usize::from(reverse.get()),
+                        {
+                            let reverse = reverse.clone();
+                            move |index, window, _| {
+                                reverse.set(index == 1);
+                                window.refresh();
+                            }
+                        },
+                    ),
+                ))
+                .child(style::switch_row(
+                    "speed-maintain-pitch",
+                    "Maintain pitch",
+                    None,
+                    maintain_pitch.get(),
+                    {
+                        let value = maintain_pitch.clone();
+                        move |checked, window, _| {
+                            value.set(*checked);
+                            window.refresh();
+                        }
+                    },
+                ))
+                .child(style::switch_row(
+                    "speed-ripple",
+                    "Ripple trailing clips",
+                    Some("Moves later clips to close or open the gap."),
+                    ripple.get(),
+                    {
+                        let value = ripple.clone();
+                        move |checked, window, _| {
+                            value.set(*checked);
+                            window.refresh();
+                        }
+                    },
+                ))
+                .child(style::form_row("Ramp keys", Input::new(&ramps)))
+                .child(field_caption(
+                    "speed-ramp-help",
+                    "Pairs of frame:percent, such as 0:100, 30:50. Ramp keys override a constant speed; clear them to use Speed or Duration.",
+                ));
             let submit: Submit = std::rc::Rc::new(move |cx: &mut App| {
                 let result = (|| -> Result<Command, String> {
-                    let speed = if selected(&mode, cx) == "Duration (frames)" {
+                    let speed = if mode.get() {
                         if !ramps.read(cx).value().trim().is_empty() {
                             return Err("Clear ramp keys before setting duration".into());
                         }
@@ -1446,8 +1737,8 @@ impl Editor {
                     };
                     // Only edit what changed: a locked linked companion must not reject an
                     // edit that leaves its own setting alone.
-                    let reverse = selected(&reverse, cx) == "Reverse";
-                    let ripple = selected(&ripple, cx) == "Ripple trailing clips";
+                    let reverse = reverse.get();
+                    let ripple = ripple.get();
                     let mut commands = Vec::new();
                     if speed != clip.time_map.speed
                         || reverse != clip.time_map.reverse
@@ -1469,7 +1760,7 @@ impl Editor {
                         });
                     }
                     match commands.len() {
-                        0 => Err("Nothing to change".to_string()),
+                        0 => Err("Nothing to change. Edit a value first.".to_string()),
                         1 => Ok(commands.remove(0)),
                         _ => Ok(Command::Batch { commands }),
                     }
@@ -1483,8 +1774,14 @@ impl Editor {
                     }
                 })
             });
-            let dialog = dialog.title(heading(IconName::SlidersHorizontal,"Speed/Duration")).width(px(540.)).child(form)
-                .child(div().text_size(style::type_size::SM).child("Ramp keys override constant speed. Clear keys for constant speed or duration. Linked audio follows the Maintain pitch setting. Keyframes keep their timeline times. Overlaps are rejected."));
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::SlidersHorizontal,
+                "Speed and duration",
+                Some("Change how fast the clip plays or how long it lasts."),
+            )
+            .child(form);
             form_dialog(dialog, "Apply", cx, submit)
         });
     }
@@ -1506,16 +1803,30 @@ impl Editor {
                         if let Some(frames) = count {
                             this.try_execute(&Command::InsertFrameHold { id, at, frames }, cx)
                         } else {
-                            this.error = Some("Enter a positive frame count".into());
+                            this.error = Some("Enter a whole number of frames, at least 1.".into());
                             cx.notify();
                             false
                         }
                     })
                 }
             });
-            let dialog = dialog.title(heading(IconName::SlidersHorizontal,"Insert frame hold segment"))
-                .child(field("Duration (project frames)",tagged_input("hold-frames", Input::new(&frames))))
-                .child(div().text_size(style::type_size::SM).child("Inserts at the playhead and ripples unlocked trailing clips. Linked audio is silent during the hold."));
+            let dialog = dialog_frame(
+                dialog,
+                style::dialog_width::MEDIUM,
+                IconName::SlidersHorizontal,
+                "Insert frame hold",
+                Some(
+                    "Holds the frame at the playhead and moves unlocked clips after it later. \
+                     Linked audio is silent during the hold.",
+                ),
+            )
+            .child(form_body().child(style::form_row(
+                "Duration",
+                div().w(SHORT_FIELD).child(tagged_input(
+                    "hold-frames",
+                    Input::new(&frames).suffix(div().pr_1().text_role(Role::Label).child("frames")),
+                )),
+            )));
             form_dialog(dialog, "Insert", cx, submit)
         });
     }

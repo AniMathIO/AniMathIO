@@ -1,15 +1,13 @@
 //! Generate subtitles: dialog, job queue slot, progress popover and control calls.
 //! Mirrors the export queue: a status-bar button opens a popover with progress and cancel.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style;
+use crate::style::{self, Role, TextRole as _};
 use crate::subtitle_job::{Phase, State, SubtitleJob};
 use animathio_control::{SubtitleGenerateParams, SubtitleResult, subtitle_command};
 use animathio_transcribe::{ModelSize, models};
 use gpui_component::Disableable;
 use gpui_component::WindowExt;
-use gpui_component::form::{Field as FormField, Form};
 use gpui_component::progress::Progress;
 use gpui_component::select::{Select, SelectState};
 
@@ -114,12 +112,12 @@ impl Editor {
                 range.clone(),
             );
             let note = if engine {
-                "Speech recognition runs on this computer; nothing is uploaded. A model that is \
-                 not installed yet is downloaded once from Hugging Face and checked with \
-                 SHA-256 when you press Generate."
+                "Speech recognition runs on this computer and nothing is uploaded. A model that is \
+                 not installed yet is downloaded once from Hugging Face and verified when you \
+                 select Generate."
             } else {
                 "This build of AniMathIO has no speech engine. The installers from the release \
-                 page include one; when building from source, add the `whisper` cargo feature."
+                 page include one. When building from source, add the `whisper` cargo feature."
             };
             let color_pickers = editor.update(cx, |this, cx| {
                 [
@@ -164,84 +162,61 @@ impl Editor {
                     })
                 })
             };
-            let dialog = dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .text_size(crate::style::type_size::LG)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(
-                            icons::icon(IconName::Captions)
-                                .text_color(style::hex(style::color::ACCENT)),
-                        )
-                        .child("Generate subtitles"),
-                )
-                .width(px(520.))
-                .child(
-                    div()
-                        .mb_3()
-                        .text_size(crate::style::type_size::SM)
-                        .text_color(style::hex(style::color::TEXT_SECONDARY))
-                        .child(note),
-                )
-                .child(
-                    Form::new()
-                        .child(FormField::new().label("Model").child(Select::new(&model)))
-                        .child(
-                            FormField::new()
-                                .label("Language")
-                                .child(Select::new(&language)),
-                        )
-                        .child(FormField::new().label("Audio").child(Select::new(&range))),
-                )
-                .child(
-                    div()
-                        .mt_3()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_size(crate::style::type_size::SM)
-                                .font_weight(FontWeight::MEDIUM)
-                                .child("Caption style"),
-                        )
-                        .child(caption_styles::caption_style_picker(
-                            &editor,
-                            "dialog-caption",
-                            &look.style,
-                            &look,
-                            None,
-                            color_pickers,
-                            &presets,
-                        )),
-                )
-                .footer(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .justify_end()
-                        .child(
-                            Button::new("subtitles-cancel")
-                                .label("Cancel")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(
-                            style::primary_button("subtitles-generate", cx)
-                                .label("Generate")
-                                .disabled(!engine)
-                                .on_click({
-                                    let generate = generate.clone();
-                                    move |_, window, cx| {
-                                        if generate(cx) {
-                                            window.close_dialog(cx);
-                                        }
+            let dialog = super::dialogs::dialog_frame(
+                dialog,
+                style::dialog_width::LARGE,
+                IconName::Captions,
+                "Generate subtitles",
+                None,
+            )
+            .child(super::dialogs::dialog_description(note))
+            .child(
+                super::dialogs::form_body()
+                    .child(style::form_row("Model", Select::new(&model)))
+                    .child(style::form_row("Language", Select::new(&language)))
+                    .child(style::form_row("Audio", Select::new(&range))),
+            )
+            .child(
+                div()
+                    .mt_4()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().text_role(Role::Heading).child("Caption style"))
+                    .child(caption_styles::caption_style_picker(
+                        &editor,
+                        "dialog-caption",
+                        &look.style,
+                        &look,
+                        None,
+                        color_pickers,
+                        &presets,
+                    )),
+            )
+            .footer(super::dialogs::footer_row(
+                cx,
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        style::secondary_button("subtitles-cancel", cx)
+                            .label("Cancel")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        style::primary_button("subtitles-generate", cx)
+                            .label("Generate")
+                            .disabled(!engine)
+                            .on_click({
+                                let generate = generate.clone();
+                                move |_, window, cx| {
+                                    if generate(cx) {
+                                        window.close_dialog(cx);
                                     }
-                                }),
-                        ),
-                );
+                                }
+                            }),
+                    ),
+            ));
             // Enter generates, like the primary button.
             super::dialogs::on_enter(dialog, move |_, cx| generate(cx))
         });
@@ -302,7 +277,7 @@ impl Editor {
             .as_ref()
             .is_some_and(|j| j.state == State::Running)
         {
-            return Err("subtitles are already being generated".into());
+            return Err("Subtitles are already being generated.".into());
         }
         let job = SubtitleJob::spawn(
             self.project.clone(),
@@ -336,7 +311,7 @@ impl Editor {
         let outcome = result.and_then(|draft| {
             if !same_project {
                 return Err(ControlError::Other(
-                    "another project was opened; the subtitles were discarded".into(),
+                    "Another project was opened, so the subtitles were discarded.".into(),
                 ));
             }
             if draft.cues.is_empty() {
@@ -348,11 +323,9 @@ impl Editor {
             }
             let (command, added) = subtitle_command(&self.project, &draft.cues, &style)?;
             if !self.try_execute(&command, cx) {
-                return Err(ControlError::Other(
-                    self.error
-                        .take()
-                        .unwrap_or_else(|| "could not add subtitles".into()),
-                ));
+                return Err(ControlError::Other(self.error.take().unwrap_or_else(
+                    || "Could not add the subtitles to the timeline.".into(),
+                )));
             }
             Ok(SubtitleResult {
                 language: draft.language,
@@ -363,7 +336,7 @@ impl Editor {
         let (state, toast) = match &outcome {
             Ok(result) if result.added.is_some() => {
                 let message = format!(
-                    "Added {} subtitles ({})",
+                    "Generated {} subtitles ({})",
                     result.cues.len(),
                     result.language
                 );
@@ -375,11 +348,11 @@ impl Editor {
             }
             Err(error) if error.to_string() == "cancelled" => (
                 State::Cancelled,
-                style::Toast::info("Subtitle generation cancelled"),
+                style::Toast::info("Cancelled subtitle generation"),
             ),
             Err(error) => (
                 State::Failed(error.to_string()),
-                style::Toast::error(format!("Subtitles failed: {error}")),
+                style::Toast::error(format!("Could not generate subtitles: {error}")),
             ),
         };
         if let Some(job) = self.subtitle_job.as_mut() {
@@ -403,27 +376,15 @@ impl Editor {
             "Subtitles".to_owned()
         };
         Some(
-            div()
-                .id("status-subtitles")
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap_1()
-                .px_2()
-                .h(gpui::rems(1.467))
-                .border_1()
-                .border_color(cx.theme().border)
-                .bg(style::hex(style::color::PANEL))
+            style::chip("status-subtitles", Some(IconName::Captions), label)
+                .tabular()
                 .cursor_pointer()
-                .rounded(px(style::radius::CONTROL))
-                .hover(|this| this.bg(cx.theme().muted))
+                .hover(|this| this.bg(style::hex(style::color::HOVER)))
                 .text_color(if running {
-                    cx.theme().primary
+                    style::hex(style::color::ACCENT)
                 } else {
-                    cx.theme().muted_foreground
+                    style::hex(style::color::TEXT_SECONDARY)
                 })
-                .child(icons::icon(IconName::Captions).small())
-                .child(label)
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.subtitle_panel_open = !this.subtitle_panel_open;
                     cx.notify();
@@ -436,16 +397,15 @@ impl Editor {
         if !self.subtitle_panel_open || self.is_start_screen() {
             return None;
         }
-        let theme = cx.theme().clone();
-        let (icon, color) = match &job.state {
-            State::Running => (IconName::LoaderCircle, theme.primary),
-            State::Done(_) => (IconName::CircleCheck, theme.success),
-            State::Failed(_) => (IconName::CircleAlert, theme.danger),
-            State::Cancelled => (IconName::Ban, theme.muted_foreground),
+        let (icon, tone) = match &job.state {
+            State::Running => (IconName::LoaderCircle, style::color::ACCENT),
+            State::Done(_) => (IconName::CircleCheck, style::color::SUCCESS),
+            State::Failed(_) => (IconName::CircleAlert, style::color::DANGER),
+            State::Cancelled => (IconName::Ban, style::color::TEXT_SECONDARY),
         };
         let phase = match job.phase() {
-            _ if job.cancelling && job.state == State::Running => "Cancelling...".to_owned(),
-            Phase::Preparing => "Preparing audio and model...".to_owned(),
+            _ if job.cancelling && job.state == State::Running => "Cancelling…".to_owned(),
+            Phase::Preparing => "Preparing audio and model…".to_owned(),
             Phase::Downloading { downloaded, total } => format!(
                 "Downloading model: {} of {}",
                 models::display_size(downloaded),
@@ -465,21 +425,28 @@ impl Editor {
             .flex_col()
             .gap_1()
             .p_2()
-            .rounded(px(style::radius::CONTROL))
+            .rounded(px(style::radius::CARD))
             .border_1()
-            .border_color(theme.border)
+            .border_color(style::hex(style::color::BORDER))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap_2()
-                    .child(icons::icon(icon).small().text_color(color))
-                    .child(div().flex_1().min_w_0().truncate().child(job.label.clone()))
+                    .child(icons::icon(icon).small().text_color(style::hex(tone)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_role(Role::Body)
+                            .child(job.label.clone()),
+                    )
                     .child(
                         Button::new("subtitles-job-cancel")
                             .ghost()
-                            .compact()
+                            .small()
                             .icon(icons::icon(IconName::X))
                             .tooltip(if running { "Cancel" } else { "Dismiss" })
                             .disabled(job.cancelling && running)
@@ -495,12 +462,7 @@ impl Editor {
                             })),
                     ),
             )
-            .child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.muted_foreground)
-                    .child(detail),
-            );
+            .child(div().text_role(Role::Label).tabular().child(detail));
         if running {
             row = row.child(
                 Progress::new("subtitle-progress")
@@ -511,8 +473,8 @@ impl Editor {
         if let State::Failed(error) = &job.state {
             row = row.child(
                 div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.danger)
+                    .text_role(Role::Label)
+                    .text_color(style::hex(style::color::DANGER))
                     .child(error.clone()),
             );
         }
@@ -520,18 +482,18 @@ impl Editor {
             div()
                 .id("subtitles-panel")
                 .absolute()
-                .right(px(8.))
-                .bottom(px(32.))
-                .w(px(440.))
+                .right(px(8. * style::ui_scale()))
+                .bottom(px(32. * style::ui_scale()))
+                .w(style::dialog_width::of(style::dialog_width::SMALL))
                 .p_3()
                 .flex()
                 .flex_col()
                 .gap_2()
-                .bg(theme.popover)
-                .text_color(theme.popover_foreground)
+                .bg(style::hex(style::color::RAISED))
+                .text_color(style::hex(style::color::TEXT))
                 .border_1()
-                .border_color(theme.border)
-                .rounded(px(style::radius::PANEL))
+                .border_color(style::hex(style::color::BORDER_STRONG))
+                .rounded(px(style::radius::OVERLAY))
                 .shadow_lg()
                 .occlude()
                 .child(
@@ -540,12 +502,16 @@ impl Editor {
                         .flex_row()
                         .items_center()
                         .gap_2()
-                        .child(icons::icon(IconName::Captions).small())
-                        .child(div().flex_1().child("Subtitles"))
+                        .child(
+                            icons::icon(IconName::Captions)
+                                .small()
+                                .text_color(style::hex(style::color::TEXT_SECONDARY)),
+                        )
+                        .child(div().flex_1().text_role(Role::Heading).child("Subtitles"))
                         .child(
                             Button::new("subtitles-panel-close")
                                 .ghost()
-                                .compact()
+                                .small()
                                 .icon(icons::icon(IconName::X))
                                 .tooltip("Close")
                                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {

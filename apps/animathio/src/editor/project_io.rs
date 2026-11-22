@@ -106,7 +106,7 @@ impl Editor {
                 self.sync_audio(cx);
                 self.request_render(Time(0));
             }
-            Err(error) => self.error = Some(error),
+            Err(error) => self.error = Some(format!("Could not create the project: {error}")),
         }
         cx.notify();
     }
@@ -135,7 +135,8 @@ impl Editor {
     ) {
         if self.save_pending {
             if !autosave {
-                self.error = Some("a save is already running".into());
+                self.error =
+                    Some("A save is already running. Save again when it has finished.".into());
             }
             return;
         }
@@ -144,6 +145,7 @@ impl Editor {
         let assets = self.assets.clone();
         let generation = self.audio_generation;
         let original_path = self.path.clone();
+        let name = file_name(&path);
         self.last_autosave = Instant::now();
         cx.spawn(async move |this, cx| {
             let destination = path.clone();
@@ -163,10 +165,12 @@ impl Editor {
                         editor.recent.add(&path);
                         editor
                             .notices
-                            .push(crate::style::Toast::success("Project saved"));
+                            .push(crate::style::Toast::success(format!("Saved {name}")));
                     }
                     Ok(()) => {}
-                    Err(error) => editor.error = Some(error),
+                    Err(error) => {
+                        editor.error = Some(format!("Could not save {name}: {error}"));
+                    }
                 }
                 cx.notify();
             });
@@ -205,7 +209,7 @@ impl Editor {
                 self.last_autosave = Instant::now();
                 self.pool = AudioPool::default();
                 if let Err(error) = load_audio(&mut self.pool, &self.project, &self.assets) {
-                    self.error = Some(error);
+                    self.error = Some(format!("Could not prepare the project audio: {error}"));
                 }
                 self.audio_ids = audio_asset_ids(&self.project);
                 self.clock = self.env.make_clock(&self.project, &self.pool);
@@ -216,13 +220,15 @@ impl Editor {
                 self.request_render(Time(0));
                 self.recent.add(path);
                 if recovered {
-                    self.notices
-                        .push(crate::style::Toast::info("Recovered from autosave"));
+                    self.notices.push(crate::style::Toast::info(format!(
+                        "Recovered {} from its autosave",
+                        file_name(path)
+                    )));
                 }
                 true
             }
             Err(error) => {
-                self.error = Some(error);
+                self.error = Some(format!("Could not open {}: {error}", file_name(path)));
                 false
             }
         };
@@ -284,7 +290,7 @@ impl Editor {
                         )));
                     }
                 }
-                Err(error) => self.error = Some(error.0),
+                Err(error) => self.error = Some(format!("Could not import the media: {}", error.0)),
             }
         }
         cx.notify();
@@ -480,12 +486,20 @@ impl Editor {
                     self.after_edit(cx);
                 }
                 Err(error) => {
-                    self.error = Some(error.to_string());
+                    self.error = Some(format!("Could not import {}: {error}", file_name(&path)));
                     cx.notify();
                 }
             }
         }
     }
+}
+
+/// The file name of a path for messages, or the whole path when it has none.
+fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 #[cfg(test)]

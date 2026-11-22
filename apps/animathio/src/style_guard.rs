@@ -18,7 +18,6 @@ const BASELINE: &[(&str, usize)] = &[
     ("editor/assist.rs", 1),
     ("editor/audio_effects.rs", 1),
     ("editor/community_plugins.rs", 2),
-    ("editor/dialogs.rs", 3),
     ("editor/fields.rs", 11),
     ("editor/inspector_units.rs", 4),
     ("editor/inspector_view.rs", 2),
@@ -26,9 +25,6 @@ const BASELINE: &[(&str, usize)] = &[
     ("editor/math.rs", 2),
     ("editor/reframe.rs", 1),
     ("editor/scenes.rs", 1),
-    ("editor/start_screen.rs", 31),
-    ("editor/subtitles.rs", 1),
-    ("editor/templates.rs", 1),
     ("editor/video_effects.rs", 1),
 ];
 
