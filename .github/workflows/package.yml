@@ -75,7 +75,7 @@ jobs:
     timeout-minutes: 150
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
       - name: Install Linux development headers
@@ -281,7 +281,7 @@ jobs:
       - name: Upload editor smoke evidence (Windows)
         # Also on failure, so the logs outlive the job output.
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-editor-smoke
           path: |
@@ -328,11 +328,11 @@ jobs:
       - name: Attest build provenance
         # `id-token: write` is not granted to pull requests from forks.
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ matrix.subject }}
       - name: Upload installers
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installers-${{ matrix.artifact }}
           path: target/packages/*
@@ -345,7 +345,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download installers
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: installers-*
           path: installers
@@ -376,7 +376,7 @@ jobs:
           printf '%s\0' "${installers[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
           cat SHA256SUMS
       - name: Upload SHA256SUMS
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: SHA256SUMS
           path: installers/SHA256SUMS
