@@ -91,6 +91,11 @@ impl Editor {
     }
 
     pub(super) fn after_edit(&mut self, cx: &mut Context<Self>) {
+        // A speed-key drag holds an index into the curve; any edit (undo and redo
+        // included) may have changed the curve, so the gesture ends without a commit.
+        if matches!(self.gesture, Some(TimelineGesture::Ramp(_))) {
+            self.gesture = None;
+        }
         self.invalidate_autocut();
         self.invalidate_duck();
         self.invalidate_beats();

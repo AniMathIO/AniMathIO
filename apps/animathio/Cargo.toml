@@ -127,3 +127,6 @@ installer-icon = "assets/icons/icon.ico"
 
 [package.metadata.packager.macos]
 minimum-system-version = "11.0"
+# Merged into the bundle Info.plist: macOS kills an app that opens the microphone
+# without NSMicrophoneUsageDescription (Record audio).
+info-plist-path = "assets/macos/Info.plist"

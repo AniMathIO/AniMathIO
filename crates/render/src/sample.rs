@@ -135,7 +135,7 @@ pub fn build() -> Result<Sample, Error> {
         ),
         (
             animathio_plugin_api::sources::text(
-                "AniMathIO 2.0\nAnimate α + β = γ".into(),
+                "AniMathIO\nAnimate α + β = γ".into(),
                 0.08,
                 [240, 245, 255, 255],
             ),

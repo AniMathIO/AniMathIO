@@ -293,7 +293,7 @@ pub(super) fn caption_style_picker(
             )
             .into_any_element(),
         ))
-        .child(row("Text colour", texts.into_any_element()))
+        .child(row("Text color", texts.into_any_element()))
         .child(row("Accent", accents.into_any_element()))
 }
 

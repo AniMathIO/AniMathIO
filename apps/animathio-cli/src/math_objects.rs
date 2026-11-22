@@ -18,7 +18,7 @@ pub(super) enum MathAction {
         /// Field override, e.g. --field radius=2 or --field 'vertices=-2,-1; 2,-1; 0,2'.
         #[arg(long = "field")]
         fields: Vec<String>,
-        /// Hex colour.
+        /// Hex color.
         #[arg(long)]
         color: Option<String>,
         /// Timeline start in seconds or ticks.

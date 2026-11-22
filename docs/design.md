@@ -5,10 +5,8 @@ a multi-track timeline, plus math objects, captions, audio tools and plugins. Th
 document is the design system for that editor. It names every colour, size and
 component the UI is allowed to use, and the words it uses.
 
-**Status.** The 2.3 tokens and shared components are in code (`style/`); components
-migrate per surface (UI rework PRs 2-6). Surface modules that still name a retired
-2.2 constant (the gradient endpoints, the yellow snap guide) read it as a deprecated
-alias for the new token until their PR removes it. Take every value from
+**Status.** The 2.3 UI rework is done: the tokens and shared components are in code
+(`style/`) and every surface uses them. Take every value from
 `apps/animathio/src/style/` (or from the gpui-component `Theme`, which
 `style::apply_palette` fills), never from a literal; the `style_guard` test fails a
 file that gains new ad-hoc colour or size literals, and each surface PR ratchets its
@@ -232,9 +230,7 @@ through gpui's motion policy.
 
 Each component has one implementation in `apps/animathio/src/style/components.rs`
 (re-exported by the `style` module) and is used everywhere that kind of thing appears.
-The rework (PRs 2-6) moves each surface onto them; until a surface migrates it keeps
-its previous look, except for what the theme already restyles (palette, radii, primary
-buttons).
+Every surface uses them.
 
 ### Window frame and status bar
 

@@ -224,6 +224,12 @@ impl Editor {
         let Some(clip) = self.find_clip(id) else {
             return;
         };
+        // The curve may have changed under the drag (undo, redo): drop a stale key.
+        if index >= clip.time_map.ramps.len() {
+            self.gesture = None;
+            cx.notify();
+            return;
+        }
         let (low, high) = crate::speed_ramp::time_bounds(clip, index, gap);
         let time = Time((timeline::x_to_time(layout, x).0 - clip.range.start.0).clamp(low, high));
         let speed = lane.speed_at(y);
@@ -397,15 +403,22 @@ impl Editor {
                             ),
                     ),
             )
-            .child(Self::label_column(crate::style::switch_row(
-                "maintain-pitch",
-                "Maintain pitch",
-                None,
-                clip.maintain_pitch,
-                move |checked, _, cx| {
-                    editor.update(cx, |this, cx| this.set_maintain_pitch(id, *checked, cx));
+            // Pitch only matters where there is sound: image, text, formula and shape clips
+            // have none.
+            .when(
+                matches!(clip.kind, ClipKind::Audio(_) | ClipKind::Video(_)),
+                |column| {
+                    column.child(Self::label_column(crate::style::switch_row(
+                        "maintain-pitch",
+                        "Maintain pitch",
+                        None,
+                        clip.maintain_pitch,
+                        move |checked, _, cx| {
+                            editor.update(cx, |this, cx| this.set_maintain_pitch(id, *checked, cx));
+                        },
+                    )))
                 },
-            )))
+            )
     }
 }
 /// A percentage without trailing zeros: `100%`, `62.5%`.

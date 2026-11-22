@@ -487,9 +487,9 @@ pub(crate) struct ProposeAutocuts {
     padding_before_ms: Option<f64>,
     /// Silence kept after speech in milliseconds (default 100).
     padding_after_ms: Option<f64>,
-    /// Analyse a clip (video resolves its linked audio).
+    /// Analyze a clip (video resolves its linked audio).
     clip: Option<u64>,
-    /// Analyse one track's audio mix.
+    /// Analyze one track's audio mix.
     track: Option<u64>,
     /// Inclusive start of the analysis range in milliseconds (requires `to_ms`).
     from_ms: Option<f64>,
@@ -594,7 +594,7 @@ pub(crate) struct AddMarker {
     time_ms: f64,
     /// Display name (default empty).
     name: Option<String>,
-    /// Palette colour: red, orange, yellow, green, cyan, blue (default), purple or pink.
+    /// Palette color: red, orange, yellow, green, cyan, blue (default), purple or pink.
     color: Option<String>,
     /// Free-form note.
     note: Option<String>,
@@ -627,9 +627,9 @@ pub(crate) struct RemoveMarker {
 #[derive(Deserialize, JsonSchema)]
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct DetectBeats {
-    /// Analyse one clip (video resolves to its linked audio); omit for the whole mix.
+    /// Analyze one clip (video resolves to its linked audio); omit for the whole mix.
     clip: Option<u64>,
-    /// Analyse one track's mixed audio.
+    /// Analyze one track's mixed audio.
     track: Option<u64>,
     /// Inclusive start of the analysis range in milliseconds (requires `to_ms`).
     from_ms: Option<f64>,
@@ -651,7 +651,7 @@ pub(crate) struct DetectBeats {
     /// With `add_markers`: only downbeats.
     #[serde(default)]
     downbeats_only: bool,
-    /// With `add_markers`: marker colour (default cyan).
+    /// With `add_markers`: marker color (default cyan).
     color: Option<String>,
 }
 #[derive(Deserialize, JsonSchema)]
@@ -675,9 +675,9 @@ pub(crate) struct SyncCutsToBeats {
     /// Use only downbeats.
     #[serde(default)]
     downbeats_only: bool,
-    /// Analyse this clip's audio for beats (default: the whole mix).
+    /// Analyze this clip's audio for beats (default: the whole mix).
     analyze_clip: Option<u64>,
-    /// Analyse this track's audio for beats.
+    /// Analyze this track's audio for beats.
     analyze_track: Option<u64>,
     /// Force this tempo instead of estimating it.
     bpm: Option<f64>,
@@ -709,7 +709,7 @@ pub(crate) struct AutoSubtitles {
     /// Most lines per subtitle. Default 2.
     pub(crate) max_lines: Option<usize>,
     /// Caption style: "classic" (default, white text on a translucent bar), "word-highlight"
-    /// (active word on an accent pill), "karaoke" (words fill with the accent colour),
+    /// (active word on an accent pill), "karaoke" (words fill with the accent color),
     /// "pop" (active word scales up), "one-word" (one big word at a time) or "bold-outline"
     /// (big uppercase type with a thick outline, centred on 9:16). Word timings from the
     /// recogniser drive the animation.
@@ -723,11 +723,11 @@ pub(crate) struct AutoSubtitles {
 pub(crate) struct CaptionLook {
     /// Font size relative to the shorter canvas dimension (0.01-0.2; style default, about 0.04-0.06).
     pub(crate) font_size: Option<f64>,
-    /// Text colour as "#RRGGBB" or "#RRGGBBAA". Default white.
+    /// Text color as "#RRGGBB" or "#RRGGBBAA". Default white.
     pub(crate) color: Option<String>,
     /// Colour of the active word (pill, fill or pop), "#RRGGBB[AA]". Default yellow.
     pub(crate) accent: Option<String>,
-    /// Outline colour, "#RRGGBB[AA]". Default black.
+    /// Outline color, "#RRGGBB[AA]". Default black.
     pub(crate) outline: Option<String>,
     /// "top", "middle" or "bottom" inside the safe area (style default: bottom; bold-outline
     /// on a portrait canvas: middle).

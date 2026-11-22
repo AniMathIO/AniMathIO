@@ -443,11 +443,14 @@ stay fixed while track rows scroll vertically.
 **Record audio** (the microphone button in Library → Media, or File → Record audio…) opens a
 recorder card. Pick an input (or leave "System default"), press **Record**, and watch the
 level meter: it turns red at full scale, which means the take is distorted. **Stop** saves the
-take as a WAV asset named "Recording N.wav" in the library and, with "Add to timeline at
-playhead" on, places an audio clip at the playhead on a free audio track (or a new one); both
-happen as one undo step. **Cancel** discards the take. The project changes only on Stop, and a
-take ends with the project it started in. If the microphone is missing, busy or blocked by
-your system's privacy settings, the card says so. Recording is off when `ANIMATHIO_AUDIO=none`.
+take as a WAV asset named "Recording N.wav" in the library and, with "Add to timeline" on,
+places an audio clip where the playhead was when you pressed Record, on a free audio track (or
+a new one); both happen as one undo step. If the clip cannot be placed, the take still stays in
+the library and a notice says so. **Cancel** discards the take. The project changes only on
+Stop, and a take ends with the project it started in. If the microphone is missing, busy or
+blocked by your system's privacy settings, the card says so. The macOS bundle declares
+`NSMicrophoneUsageDescription`, so macOS asks for microphone permission the first time you
+press Record. Recording is off when `ANIMATHIO_AUDIO=none`.
 
 ![The recorder mid-take, on a scripted tone](../docs/screenshots/editor-record-audio.png)
 

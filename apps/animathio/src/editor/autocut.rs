@@ -246,7 +246,7 @@ impl Editor {
                         Err(error) => review.error = Some(error.to_string()),
                     }
                 } else {
-                    review.error = Some("Project changed; analyse again".into());
+                    review.error = Some("Project changed; analyze again".into());
                 }
                 cx.notify();
             });
@@ -263,7 +263,7 @@ impl Editor {
             review.proposal = None;
             review.generation = review.generation.wrapping_add(1);
             review.busy = false;
-            review.error = Some("Project changed; analyse again".into());
+            review.error = Some("Project changed; analyze again".into());
         }
     }
 
@@ -298,7 +298,7 @@ impl Editor {
             target.insert(
                 0,
                 style::form_row(
-                    "Analyse",
+                    "Analyze",
                     tool_panel::choice(
                         "autocut-scope",
                         &[
@@ -450,7 +450,7 @@ impl Editor {
             body = body.child(tool_panel::problem(error.clone()));
         }
         if review.busy {
-            body = body.child(tool_panel::note("Analysing audio…"));
+            body = body.child(tool_panel::note("Analyzing audio…"));
         }
         if let Some(proposal) = &review.proposal {
             let enabled: Vec<_> = proposal.cuts.iter().filter(|c| c.enabled).collect();
@@ -540,7 +540,7 @@ impl Editor {
                 style::secondary_button("autocut-analyse", cx)
                     .debug_selector(|| "autocut-analyse".into())
                     .small()
-                    .label("Analyse")
+                    .label("Analyze")
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.analyse_autocut(cx))),
             )
@@ -548,7 +548,7 @@ impl Editor {
                 row.child(
                     style::secondary_button("autocut-download", cx)
                         .small()
-                        .label("Download model and analyse")
+                        .label("Download model and analyze")
                         .disabled(busy)
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(r) = this.autocut_review.as_mut() {

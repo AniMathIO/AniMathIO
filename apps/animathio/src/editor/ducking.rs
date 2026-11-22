@@ -65,7 +65,7 @@ pub(super) fn duck_summary(
 ) -> String {
     let keyframes: usize = proposal.clips.iter().map(|c| c.keys.len()).sum();
     if proposal.voice.is_empty() {
-        return "No voice found. Lower the voice threshold or widen the analysed range.".into();
+        return "No voice found. Lower the voice threshold or widen the analyzed range.".into();
     }
     if proposal.clips.is_empty() {
         return format!(
@@ -333,7 +333,7 @@ impl Editor {
                         Err(error) => review.error = Some(error.to_string()),
                     }
                 } else {
-                    review.error = Some("Project changed; analyse again".into());
+                    review.error = Some("Project changed; analyze again".into());
                 }
                 cx.notify();
             });
@@ -345,7 +345,7 @@ impl Editor {
     pub(super) fn invalidate_duck(&mut self) {
         if let Some(review) = self.duck_review.as_mut() {
             review.invalidate();
-            review.error = Some("Project changed; analyse again".into());
+            review.error = Some("Project changed; analyze again".into());
         }
     }
 
@@ -633,7 +633,7 @@ impl Editor {
             body = body.child(tool_panel::problem(error.clone()));
         }
         if review.busy {
-            body = body.child(tool_panel::note("Analysing audio…"));
+            body = body.child(tool_panel::note("Analyzing audio…"));
         }
         if let Some(proposal) = &review.proposal {
             let mut preview: Vec<AnyElement> = vec![
@@ -702,7 +702,7 @@ impl Editor {
             .child(
                 style::secondary_button("duck-analyse", cx)
                     .small()
-                    .label("Analyse")
+                    .label("Analyze")
                     .disabled(busy || !review.ready())
                     .on_click(cx.listener(|this, _, _, cx| this.analyse_duck(cx))),
             )
