@@ -379,8 +379,9 @@ v [icon] Transform                                    [reset]   ROW, HEADING
 +------------------------------------------------+
 ```
 
-- Built with the kit `Dialog` through `dialogs::open_dialog`, so validation errors show
-  in the dialog. Three widths: small 440 px (confirmations), medium 560 px (forms:
+- Built with the kit `Dialog` through `dialogs::open_dialog` and framed by
+  `dialogs::dialog_frame` (width, icon and title, description), so validation errors show
+  in the dialog footer (`dialogs::footer_row`). Three widths: small 440 px (confirmations), medium 560 px (forms:
   Export, Project settings, Preferences, Speed/Duration), large 760 px (workspaces such as
   the Math dialog and Generate subtitles). Height is at most the window height minus
   4rem; the body scrolls and the footer stays visible.
@@ -388,7 +389,9 @@ v [icon] Transform                                    [reset]   ROW, HEADING
   thing or the action ("Export video", "Project settings"), never a slogan.
 - Forms put labels in a left column (8.5rem, `LABEL`, `TEXT_SECONDARY`) and controls on
   the right, one setting per row, grouped under `HEADING` group titles with a `gap_4`
-  between groups. Preferences has groups: General, Interface, Preview, Plugins, Updates.
+  between groups. Preferences has groups: General, Interface, Preview, and Plugins and updates.
+  Two-state settings are switches ("Reduce motion", "Check for updates on startup") or
+  a two-option segmented control (Density, Renderer); never a two-item select.
 - Errors appear next to the field they concern; an error that concerns the whole form
   appears at the left of the footer with an alert icon, in `DANGER`.
 - Enter confirms and Escape cancels (as `dialogs::submit_footer` does today).
@@ -506,7 +509,8 @@ The launcher is a start page, not a landing page.
 - Heading in `DISPLAY` ("Start a project"), one line of `BODY` `TEXT_SECONDARY` under it,
   and the three entry actions (New project as primary, Open project…, Import…) visible
   without scrolling at 1280×720. The graph-paper grid from the logo is drawn faintly
-  (`BORDER` at the wash step) behind this heading block and nowhere else.
+  (`BORDER` at the edge step: `BORDER` at the wash step is invisible on `PANEL`) behind this
+  heading block and nowhere else.
 - Canvas presets, templates and recent projects follow as card rows with `HEADING`
   titles. The page scrolls with a visible scrollbar.
 

@@ -403,14 +403,16 @@ Export opens a form with a Format selector (MP4 with H.264 + AAC, the default, o
 Opus; switching it rewrites a `.mp4`/`.webm` extension in the path, and WebM carries no chapters), a path chooser, whole/in-out/custom range and shared
 `youtube_1080p`, `youtube_4k`, `shorts_vertical`, `square` and `portrait` presets (30 fps, CRF 18).
 Presets apply to an export snapshot, keeping project settings unchanged. Existing
-files require confirmation. Exports never block the editor: "Add to queue" or "Export now"
+files require confirmation. Exports never block the editor: "Add to queue" or "Export"
 snapshots the project into a job, and the Export queue popover (status bar, View menu) runs
 jobs one at a time with progress, ETA, cancel, show-in-folder/open and error text; toasts
 announce completion or failure.
-File → Project settings edits resolution, rational fps and background. Preferences
-(Ctrl/Cmd+,) saves the preview renderer, autosave interval (0 disables), default export
-folder, UI scale, density and reduced motion in the application config directory,
-separately from projects. Interface → UI scale defaults to the desktop's text scaling
+File → Project settings edits the canvas size (choosing a preset fills it in at once), the
+frame rate (a list of common rates, or Custom… for a rational such as 30000/1001) and the
+background. Preferences (Ctrl/Cmd+,) groups its settings under General (autosave
+interval, 0 turns it off; export folder), Interface (UI scale, Compact or Comfortable
+density, Reduce motion), Preview (GPU or CPU renderer) and Plugins and updates, and saves
+them in the application config directory, separately from projects. Interface → UI scale defaults to the desktop's text scaling
 (KDE forceFontDPI/Xft.dpi, GNOME text-scaling-factor, Windows text-size slider), can be
 set to 80–200% in 10% steps and applies live; `ANIMATHIO_UI_SCALE=150` overrides it for
 a run.
@@ -468,8 +470,8 @@ any other weight switches to Inter, so keyframing the weight of such a clip chan
 choose `inter` for a weight that varies smoothly.
 
 New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
-launcher. The launcher pins **Open project**, **Import v1** and **Import Manim** in its
-hero, so they stay visible in a 1280 × 720 window. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
+launcher. The launcher puts **New project**, **Open project…** and an **Import…** menu (AniMathIO 1.x
+project…, Manim scene…) under its heading, so they stay visible in a 1280 × 720 window. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
 another tile starts that format. The launcher, project settings and export dialog
 share 1080p, 4K, 9:16, square and 4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
 and `fields`; see [the control guide](mcp.md#title-preset-library).

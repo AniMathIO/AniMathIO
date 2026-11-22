@@ -154,8 +154,10 @@ fn export_dialog_shows_custom_times_only_for_custom_and_summarises(cx: &mut Test
     assert!(!visible(&mut ui, "export-custom-start"));
     assert!(!visible(&mut ui, "export-custom-end"));
     assert!(visible(&mut ui, "export-summary"));
-    assert!(visible(&mut ui, "export-preset-note"));
-    assert!(visible(&mut ui, "export-output-caption"));
+    assert!(
+        !visible(&mut ui, "export-output-caption"),
+        "the path is shown once, in the File field"
+    );
 }
 
 #[gpui::test]
@@ -171,19 +173,17 @@ fn export_format_selector_picks_webm_and_rewrites_the_extension(cx: &mut TestApp
     assert!(visible(&mut ui, "export-format-select"));
     assert!(visible(&mut ui, "export-format-note"));
 
-    // The default is MP4. Open the selector and move to WebM like a keyboard user would.
-    let select = ui.cx.debug_bounds("export-format-select").unwrap();
-    ui.click(select.center(), gpui::Modifiers::default());
-    ui.press("down");
-    ui.press("enter");
+    // The default is MP4; choose WebM in the segmented control.
+    let webm = ui.cx.debug_bounds("export-format-webm").unwrap();
+    ui.click(webm.center(), gpui::Modifiers::default());
     ui.advance_clock(std::time::Duration::from_millis(400));
     assert!(
         visible(&mut ui, "export-format-select"),
         "choosing a format keeps the dialog open"
     );
 
-    // Export now: the job writes `talk.webm`, the extension followed the selector.
-    let export_now = ui.cx.debug_bounds("export-now").expect("Export now button");
+    // Export: the job writes `talk.webm`, the extension followed the selector.
+    let export_now = ui.cx.debug_bounds("export-now").expect("Export button");
     ui.click(export_now.center(), gpui::Modifiers::default());
     ui.settle();
     let (output, id) = ui.read(|editor| {
@@ -253,11 +253,11 @@ fn export_dialog_refuses_a_file_name_that_contradicts_the_format(cx: &mut TestAp
 fn export_summary_and_path_truncation() {
     assert_eq!(
         export_summary((640, 360), "30 fps", 3, animathio_export::Format::Webm),
-        "640×360 · 30 fps · WebM · no chapters (WebM)"
+        "640 × 360, 30 fps, no chapters"
     );
     assert_eq!(
         export_summary((640, 360), "30 fps", 3, animathio_export::Format::Mp4),
-        "640×360 · 30 fps · MP4 · chapters on"
+        "640 × 360, 30 fps, chapters on"
     );
     assert!(
         export_summary((640, 360), "30 fps", 0, animathio_export::Format::Mp4)

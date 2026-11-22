@@ -3577,13 +3577,63 @@ fn dropping_the_assist_panel_cancels_the_request(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn launcher_open_and_imports_are_pinned_in_view_at_720p(cx: &mut TestAppContext) {
+fn preferences_save_and_every_group_fit_at_720p(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.settle();
+    ui.update(Editor::open_preferences);
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    for selector in [
+        "preferences-autosave",
+        "preferences-density-compact",
+        "preferences-renderer-gpu",
+        "preferences-reduce-motion",
+        "preferences-check-updates",
+        "preferences-community-plugins",
+        "dialog-apply",
+    ] {
+        let bounds = ui
+            .cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is rendered"));
+        assert!(bounds.top() >= gpui::px(0.), "{selector}: {bounds:?}");
+        assert!(bounds.bottom() <= gpui::px(720.), "{selector}: {bounds:?}");
+    }
+    // Two-state settings are switches and segmented controls, not selects.
+    let motion = ui.read(|e| e.preferences.reduce_motion);
+    let switch = ui.cx.debug_bounds("preferences-reduce-motion").unwrap();
+    ui.click(
+        gpui::point(switch.right() - gpui::px(16.), switch.center().y),
+        gpui::Modifiers::default(),
+    );
+    let save = ui.cx.debug_bounds("dialog-apply").unwrap();
+    ui.click(save.center(), gpui::Modifiers::default());
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    assert_ne!(
+        ui.read(|e| e.preferences.reduce_motion),
+        motion,
+        "the switch changed the setting"
+    );
+    // Put the shared test config back.
+    ui.update(|e, _, cx| {
+        let mut restored = e.preferences.clone();
+        restored.reduce_motion = motion;
+        restored.save().unwrap();
+        e.preferences = restored;
+        cx.set_reduce_motion(motion);
+    });
+}
+
+#[gpui::test]
+fn launcher_actions_and_canvas_cards_are_in_view_at_720p(cx: &mut TestAppContext) {
     let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
     assert!(ui.read(Editor::is_start_screen));
     ui.cx
         .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
     ui.settle();
-    for selector in ["start-open", "start-v1", "start-manim"] {
+    for selector in ["start-new", "start-open", "start-import", "canvas-preset-0"] {
         let bounds = ui
             .cx
             .debug_bounds(selector)
@@ -3591,6 +3641,18 @@ fn launcher_open_and_imports_are_pinned_in_view_at_720p(cx: &mut TestAppContext)
         // Above the status bar and the window edge, without scrolling the launcher.
         assert!(bounds.bottom() <= gpui::px(680.), "{selector}: {bounds:?}");
         assert!(bounds.right() <= gpui::px(1280.), "{selector}: {bounds:?}");
+        assert!(bounds.size.width > gpui::px(40.), "{selector}: {bounds:?}");
+    }
+    // The two imports live in the Import… menu.
+    let import = ui.cx.debug_bounds("start-import").unwrap();
+    ui.click(import.center(), gpui::Modifiers::default());
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    for selector in ["start-v1", "start-manim"] {
+        let bounds = ui
+            .cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is in the menu"));
+        assert!(bounds.bottom() <= gpui::px(720.), "{selector}: {bounds:?}");
         assert!(bounds.size.width > gpui::px(40.), "{selector}: {bounds:?}");
     }
 }
