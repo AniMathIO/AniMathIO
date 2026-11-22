@@ -393,6 +393,95 @@ fn graph_golden_frame() {
 }
 
 #[test]
+fn graph_tick_labels_sit_clear_of_the_axes_golden() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+
+    // Tick labels sit centred below the x axis and right-aligned left of the
+    // y axis with a font-scaled gap; negative ticks are exactly where the old
+    // on-axis placement merged the minus signs into the axis line.
+    let scene = host
+        .render_clip(
+            &graph,
+            &BTreeMap::new(),
+            &json!({
+                "items": "plot y=x^2/2-1",
+                "show_labels": true,
+            }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    golden_vector(scene, "graph-tick-labels");
+}
+
+#[test]
+fn graph_tick_labels_stay_inside_edge_and_offscreen_axes_golden() {
+    use animathio_core::{PathVerb, VectorElement};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+
+    // Edge and off-screen axes: `y_min = 0` in stretch mode puts the x axis on
+    // the clip's bottom edge, `x_min = 0` puts the y axis on the left edge, and
+    // negative-only ranges take both zero axes off-screen. Every tick label
+    // must land inside the clip instead of spilling past it.
+    let cases: [(&str, serde_json::Value); 3] = [
+        (
+            "graph-labels-bottom-axis",
+            json!({
+                "items": "plot y=x^2/2-1", "scale_mode": "stretch",
+                "x_min": -5.0, "x_max": 5.0, "y_min": 0.0, "y_max": 6.0,
+            }),
+        ),
+        (
+            "graph-labels-left-axis",
+            json!({
+                "items": "plot y=x^2/2-1", "scale_mode": "stretch",
+                "x_min": 0.0, "x_max": 10.0, "y_min": -3.0, "y_max": 3.0,
+            }),
+        ),
+        (
+            "graph-labels-negative-only",
+            json!({
+                "items": "plot y=-x-7", "scale_mode": "stretch",
+                "x_min": -6.0, "x_max": -1.0, "y_min": -6.0, "y_max": -1.0,
+            }),
+        ),
+    ];
+    for (name, params) in cases {
+        let scene = host
+            .render_clip(&graph, &BTreeMap::new(), &params, 0, (640, 360))
+            .unwrap();
+        let mut labels = 0usize;
+        for element in &scene.elements {
+            let VectorElement::FillPath { path, .. } = element else {
+                continue;
+            };
+            labels += 1;
+            for verb in path {
+                let points: Vec<_> = match verb {
+                    PathVerb::MoveTo(p) | PathVerb::LineTo(p) => vec![p],
+                    PathVerb::QuadTo(a, b) => vec![a, b],
+                    PathVerb::CubicTo(a, b, c) => vec![a, b, c],
+                    PathVerb::Close => continue,
+                };
+                for p in points {
+                    assert!(
+                        (0.0..=640.0).contains(&p.x) && (0.0..=360.0).contains(&p.y),
+                        "{name}: label point {p:?} outside the clip"
+                    );
+                }
+            }
+        }
+        assert!(labels > 0, "{name}: expected tick labels");
+        golden_vector(scene, name);
+    }
+}
+
+#[test]
 fn graph_styles_survive_the_component_boundary() {
     use animathio_core::{Color, VectorElement};
 
