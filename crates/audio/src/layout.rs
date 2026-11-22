@@ -116,12 +116,16 @@ impl ChannelLayout {
         Self(list.to_vec())
     }
     /// Speakers in interleave order, from Symphonia's channel set (ascending bit order is the
-    /// interleave order of every Symphonia decoder). Channel sets without speaker positions
-    /// (discrete, ambisonic, labelled) take the default layout for their count.
+    /// interleave order of every Symphonia decoder). Discrete channels take the default layout
+    /// for their count; ambisonic and labelled sets have no speaker positions, so they are
+    /// `Speaker::Other` per channel and fail as `Unsupported` in [`ChannelMatrix::new`] (as an
+    /// unmapped channel set always did).
     #[must_use]
     pub fn from_symphonia(channels: &Channels) -> Self {
-        let Channels::Positioned(positions) = channels else {
-            return Self::default_for(u16::try_from(channels.count()).unwrap_or(u16::MAX));
+        let positions = match channels {
+            Channels::Positioned(positions) => positions,
+            Channels::Discrete(count) => return Self::default_for(*count),
+            other => return Self(vec![Speaker::Other; other.count()]),
         };
         let mut list = Vec::new();
         for flag in positions.iter() {
@@ -359,5 +363,71 @@ mod tests {
         close(&out, &[h, h]);
         matrix.apply(&[0., 0., 0., 0., 0., 1.], &mut out);
         close(&out, &[0., 0.]);
+    }
+
+    fn positioned(flags: Position) -> ChannelLayout {
+        ChannelLayout::from_symphonia(&Channels::Positioned(flags))
+    }
+
+    #[test]
+    fn positioned_sets_map_to_the_same_layouts_and_folds_as_before() {
+        use Position as P;
+        let stereo = positioned(P::FRONT_LEFT | P::FRONT_RIGHT);
+        assert_eq!(stereo, ChannelLayout::default_for(2));
+        let quad = positioned(P::FRONT_LEFT | P::FRONT_RIGHT | P::REAR_LEFT | P::REAR_RIGHT);
+        assert_eq!(quad, ChannelLayout::default_for(4));
+        let surround = positioned(
+            P::FRONT_LEFT
+                | P::FRONT_RIGHT
+                | P::FRONT_CENTER
+                | P::LFE1
+                | P::REAR_LEFT
+                | P::REAR_RIGHT,
+        );
+        assert_eq!(surround, ChannelLayout::default_for(6));
+        let seven_one = positioned(
+            P::FRONT_LEFT
+                | P::FRONT_RIGHT
+                | P::FRONT_CENTER
+                | P::LFE1
+                | P::REAR_LEFT
+                | P::REAR_RIGHT
+                | P::SIDE_LEFT
+                | P::SIDE_RIGHT,
+        );
+        assert_eq!(seven_one, ChannelLayout::default_for(8));
+        // The fold-down is the BS.775 one: centre and surrounds at -3 dB, LFE dropped.
+        let h = FRAC_1_SQRT_2;
+        let mut out = [0.0; 2];
+        let matrix = ChannelMatrix::new(&surround, 2).unwrap();
+        matrix.apply(&[0., 0., 1., 0., 0., 0.], &mut out);
+        close(&out, &[h, h]);
+        matrix.apply(&[0., 0., 0., 1., 0., 0.], &mut out);
+        close(&out, &[0., 0.]);
+        matrix.apply(&[0., 0., 0., 0., 1., 0.], &mut out);
+        close(&out, &[h, 0.]);
+        let matrix = ChannelMatrix::new(&seven_one, 2).unwrap();
+        matrix.apply(&[0., 0., 0., 0., 1., 0., 1., 0.], &mut out);
+        close(&out, &[1., 0.]);
+    }
+
+    #[test]
+    fn channel_sets_without_positions_keep_their_old_behaviour() {
+        use symphonia::core::audio::layouts::CHANNEL_LAYOUT_5P1;
+        // Discrete channels follow the default layout for their count.
+        assert_eq!(
+            ChannelLayout::from_symphonia(&Channels::Discrete(6)),
+            ChannelLayout::default_for(6)
+        );
+        // Ambisonic and labelled sets have no speakers: they stay unmapped and are rejected.
+        let ambisonic = ChannelLayout::from_symphonia(&Channels::Ambisonic(1));
+        assert_eq!(ambisonic.speakers(), [Speaker::Other; 4]);
+        assert!(ChannelMatrix::new(&ambisonic, 2).is_err());
+        let custom = ChannelLayout::from_symphonia(&Channels::Custom(Box::new([])));
+        assert_eq!(custom.channels(), 0);
+        assert_eq!(
+            ChannelLayout::from_symphonia(&CHANNEL_LAYOUT_5P1),
+            ChannelLayout::default_for(6)
+        );
     }
 }

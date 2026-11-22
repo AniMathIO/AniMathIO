@@ -17,10 +17,13 @@
 //! Streams are polled on the caller's thread, so they need not be `Send` (cpal streams are not on
 //! every platform); sources are `Send + Sync` so one can sit in a shared environment.
 
-use crate::Error;
+use crate::{
+    Error,
+    stream_error::{StreamErrorAction, classify_stream_error},
+};
 use animathio_core::{TICKS_PER_SECOND, Time};
 use cpal::{
-    FromSample, SampleFormat, SizedSample,
+    FromSample, I24, SampleFormat, SizedSample, U24,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -625,25 +628,25 @@ const RING_SECONDS: usize = 4;
 impl CaptureSource for CpalCapture {
     fn devices(&self) -> Result<Vec<InputDevice>, Error> {
         let host = cpal::default_host();
-        let default_name = host
+        let default_id = host
             .default_input_device()
-            .and_then(|device| device_name(&device));
+            .and_then(|device| device_id(&device));
         let devices = host
             .input_devices()
             .map_err(|error| describe_error(&error.to_string(), ErrorKind::Other))?;
         let mut listed: Vec<InputDevice> = Vec::new();
         for device in devices {
-            let Some(name) = device_name(&device) else {
+            // The stable cpal id is the picker's key (the label is the ALSA hint description
+            // on Linux and repeats across hints); a device without one cannot be reopened.
+            let Some(id) = device_id(&device) else {
                 continue;
             };
-            let mut id = name.clone();
-            let mut copy = 1;
-            while listed.iter().any(|known| known.id == id) {
-                copy += 1;
-                id = format!("{name} #{copy}");
+            if listed.iter().any(|known| known.id == id) {
+                continue;
             }
-            let is_default = default_name.as_deref() == Some(&name)
-                && !listed.iter().any(|known| known.is_default);
+            let name = device_name(&device).unwrap_or_else(|| id.clone());
+            let is_default =
+                default_id.as_deref() == Some(&id) && !listed.iter().any(|known| known.is_default);
             listed.push(InputDevice {
                 id,
                 name,
@@ -658,41 +661,18 @@ impl CaptureSource for CpalCapture {
     fn open(&self, device: Option<&str>) -> Result<Box<dyn CaptureStream>, Error> {
         let host = cpal::default_host();
         let device = match device {
-            Some(id) => {
-                let mut seen: Vec<String> = Vec::new();
-                let devices = host
-                    .input_devices()
-                    .map_err(|error| describe_error(&error.to_string(), ErrorKind::Other))?;
-                let mut found = None;
-                for candidate in devices {
-                    let Some(name) = device_name(&candidate) else {
-                        continue;
-                    };
-                    let mut key = name.clone();
-                    let mut copy = 1;
-                    while seen.contains(&key) {
-                        copy += 1;
-                        key = format!("{name} #{copy}");
-                    }
-                    seen.push(key.clone());
-                    if key == id {
-                        found = Some(candidate);
-                        break;
-                    }
-                }
-                found.ok_or_else(|| {
-                    Error::Capture(format!(
-                        "the microphone \"{id}\" is no longer available; pick another one"
-                    ))
-                })?
-            }
+            Some(id) => find_input_device(&host, id)?.ok_or_else(|| {
+                Error::Capture(format!(
+                    "the microphone \"{id}\" is no longer available; pick another one"
+                ))
+            })?,
             None => host
                 .default_input_device()
                 .ok_or_else(|| Error::Capture("no microphone was found".into()))?,
         };
         let supported = device
             .default_input_config()
-            .map_err(|error| describe_error(&error.to_string(), ErrorKind::Config))?;
+            .map_err(|error| capture_error(&error, ErrorKind::Config))?;
         let format = InputFormat {
             rate: supported.sample_rate(),
             channels: supported.channels(),
@@ -712,7 +692,7 @@ impl CaptureSource for CpalCapture {
         }
         let stream = open!(
             F32 => f32, F64 => f64, I8 => i8, I16 => i16, I32 => i32, I64 => i64,
-            U8 => u8, U16 => u16, U32 => u32, U64 => u64,
+            U8 => u8, U16 => u16, U32 => u32, U64 => u64, I24 => I24, U24 => U24,
         );
         Ok(Box::new(stream))
     }
@@ -724,6 +704,42 @@ fn device_name(device: &cpal::Device) -> Option<String> {
         .description()
         .ok()
         .map(|description| description.name().to_owned())
+}
+
+/// The stable id of an input device (cpal's `DeviceId`, host-prefixed), when it has one.
+fn device_id(device: &cpal::Device) -> Option<String> {
+    device.id().ok().map(|id| id.to_string())
+}
+
+/// The input device with this picker id. Ids are cpal `DeviceId` strings; an id that is not one
+/// (a choice saved by an older build stored the label) falls back to the first device whose
+/// label matches, so it keeps working where the name is unambiguous.
+fn find_input_device(host: &cpal::Host, id: &str) -> Result<Option<cpal::Device>, Error> {
+    if let Some(device) = id
+        .parse::<cpal::DeviceId>()
+        .ok()
+        .and_then(|parsed| host.device_by_id(&parsed))
+    {
+        return Ok(Some(device));
+    }
+    let devices = host
+        .input_devices()
+        .map_err(|error| describe_error(&error.to_string(), ErrorKind::Other))?;
+    Ok(devices
+        .into_iter()
+        .find(|candidate| device_name(candidate).as_deref() == Some(id)))
+}
+
+/// A message for a person from a cpal error, keyed on its kind rather than its text.
+fn capture_error(error: &cpal::Error, fallback: ErrorKind) -> Error {
+    match error.kind() {
+        cpal::ErrorKind::PermissionDenied => denied_error(),
+        cpal::ErrorKind::DeviceNotAvailable | cpal::ErrorKind::DeviceBusy => {
+            kind_error(&error.to_string(), ErrorKind::Unavailable)
+        }
+        cpal::ErrorKind::UnsupportedConfig => kind_error(&error.to_string(), ErrorKind::Config),
+        _ => kind_error(&error.to_string(), fallback),
+    }
 }
 
 struct CpalStream {
@@ -779,20 +795,18 @@ where
                 // and counts them.
                 push_whole_frames(&mut producer, data, channels, &callback_dropped);
             },
-            move |_| callback_error.store(true, Ordering::Release),
+            move |error| match classify_stream_error(error.kind()) {
+                // A backend-recovered xrun (or a rerouting notice): the take goes on. The gap's
+                // size is unknown, so it is not counted as dropped frames.
+                StreamErrorAction::Glitch | StreamErrorAction::Ignore => {}
+                StreamErrorAction::Fatal => callback_error.store(true, Ordering::Release),
+            },
             None,
         )
-        .map_err(|error| {
-            let kind = match error.kind() {
-                cpal::ErrorKind::DeviceNotAvailable => ErrorKind::Unavailable,
-                cpal::ErrorKind::UnsupportedConfig => ErrorKind::Config,
-                _ => ErrorKind::Other,
-            };
-            describe_error(&error.to_string(), kind)
-        })?;
+        .map_err(|error| capture_error(&error, ErrorKind::Other))?;
     stream
         .play()
-        .map_err(|error| describe_error(&error.to_string(), ErrorKind::Other))?;
+        .map_err(|error| capture_error(&error, ErrorKind::Other))?;
     Ok(CpalStream {
         _stream: stream,
         consumer,
@@ -830,29 +844,39 @@ enum ErrorKind {
     Other,
 }
 
-/// A message for a person from a backend error: permission problems and busy or missing devices
-/// get an explanation and a next step, anything else keeps the backend's text.
+/// The message for an operating-system refusal to use the microphone.
+fn denied_error() -> Error {
+    Error::Capture(
+        "Microphone access was denied. Allow AniMathIO to use the microphone in your system's \
+         privacy settings, then try again."
+            .into(),
+    )
+}
+
+/// A message for a person from a backend error known only by its text (a listing failure, a
+/// scripted test device): permission wording gets the access message, then `kind` decides.
 fn describe_error(detail: &str, kind: ErrorKind) -> Error {
     let lower = detail.to_ascii_lowercase();
     let denied = ["permission", "denied", "not allowed", "privacy", "authoriz"]
         .iter()
         .any(|word| lower.contains(word));
-    let message = if denied {
-        "Microphone access was denied. Allow AniMathIO to use the microphone in your system's \
-         privacy settings, then try again."
-            .to_owned()
-    } else {
-        match kind {
-            ErrorKind::Unavailable => "The microphone is not available. It may be unplugged or in \
-                 use by another application."
-                .to_owned(),
-            ErrorKind::Config => {
-                format!("The microphone does not offer a format AniMathIO can record ({detail}).")
-            }
-            ErrorKind::Other => format!("The microphone could not be opened: {detail}"),
+    if denied {
+        return denied_error();
+    }
+    kind_error(detail, kind)
+}
+
+/// The message for a classified failure; `detail` is only quoted where it helps.
+fn kind_error(detail: &str, kind: ErrorKind) -> Error {
+    Error::Capture(match kind {
+        ErrorKind::Unavailable => "The microphone is not available. It may be unplugged or in \
+             use by another application."
+            .to_owned(),
+        ErrorKind::Config => {
+            format!("The microphone does not offer a format AniMathIO can record ({detail}).")
         }
-    };
-    Error::Capture(message)
+        ErrorKind::Other => format!("The microphone could not be opened: {detail}"),
+    })
 }
 
 #[cfg(test)]
@@ -1128,5 +1152,31 @@ mod tests {
         assert!(busy.to_string().contains("in use by another"), "{busy}");
         let format = describe_error("no 16-bit config", ErrorKind::Config);
         assert!(format.to_string().contains("no 16-bit config"), "{format}");
+    }
+
+    #[test]
+    fn cpal_error_kinds_pick_the_message_without_reading_the_text() {
+        let message = |kind| capture_error(&cpal::Error::new(kind), ErrorKind::Other).to_string();
+        // A permission refusal is recognised by its kind even when the text says nothing.
+        let denied = cpal::Error::with_message(cpal::ErrorKind::PermissionDenied, "EPERM");
+        assert!(
+            capture_error(&denied, ErrorKind::Other)
+                .to_string()
+                .contains("privacy settings")
+        );
+        for kind in [
+            cpal::ErrorKind::DeviceBusy,
+            cpal::ErrorKind::DeviceNotAvailable,
+        ] {
+            assert!(message(kind).contains("in use by another"), "{kind:?}");
+        }
+        assert!(message(cpal::ErrorKind::UnsupportedConfig).contains("format"));
+        // Wording that merely resembles a refusal does not turn a busy device into one.
+        let busy = cpal::Error::with_message(cpal::ErrorKind::DeviceBusy, "access denied by peer");
+        assert!(
+            capture_error(&busy, ErrorKind::Other)
+                .to_string()
+                .contains("in use by another")
+        );
     }
 }

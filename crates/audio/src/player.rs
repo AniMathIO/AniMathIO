@@ -1,4 +1,7 @@
-use crate::{BlockGenerator, Error, Mixer, Speed};
+use crate::{
+    BlockGenerator, Error, Mixer, Speed,
+    stream_error::{StreamErrorAction, classify_stream_error},
+};
 use animathio_core::{Project, TICKS_PER_SECOND, Time, TimeRange};
 use arc_swap::ArcSwap;
 use cpal::{
@@ -201,8 +204,12 @@ impl Player {
                     let latency = timestamp.playback.duration_since(timestamp.callback);
                     callback.fill(data, latency);
                 },
-                move |_| {
-                    callback_error.store(true, Ordering::Release);
+                move |error| {
+                    // An xrun is recovered by the backend (and was silent in cpal 0.16);
+                    // only errors that end the stream stop playback.
+                    if classify_stream_error(error.kind()) == StreamErrorAction::Fatal {
+                        callback_error.store(true, Ordering::Release);
+                    }
                 },
                 None,
             )
