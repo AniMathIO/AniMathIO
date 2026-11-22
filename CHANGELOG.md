@@ -4,47 +4,49 @@ All notable changes to AniMathIO 2.x are documented in this file. It is generate
 from [Conventional Commits](https://www.conventionalcommits.org) by release-plz and
 git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMathIO/AniMathIO/releases?q=animathio-v1).
 
-## [2.3.0](https://github.com/AniMathIO/AniMathIO/compare/v2.2.0...v2.3.0) - 2026-11-22
+## [2.3.0](https://github.com/AniMathIO/AniMathIO/compare/v2.2.0...v2.3.0) - 2026-11-23
 
+The last feature release of AniMathIO 2: from here on, security fixes and the dependency updates they need.
 
 ### Added
 
-- *(audio)* Denoise from range markers, Auto duck guidance, Classic caption goldens ([#318](https://github.com/AniMathIO/AniMathIO/pull/318))
-- *(assist)* Optional natural-language to LaTeX authoring ([#317](https://github.com/AniMathIO/AniMathIO/pull/317))
-- *(audio)* Record microphone audio into the Media library ([#332](https://github.com/AniMathIO/AniMathIO/pull/332))
-- *(ui)* 2.3 design tokens and shared components ([#349](https://github.com/AniMathIO/AniMathIO/pull/349))
-- *(ui)* Calmer timeline, single-row track headers and a cleaner viewer ([#351](https://github.com/AniMathIO/AniMathIO/pull/351))
-- *(ui)* Restyle the window shell, panel headers and Library ([#352](https://github.com/AniMathIO/AniMathIO/pull/352))
-- *(ui)* One dialog frame, grouped Preferences and a plain launcher ([#354](https://github.com/AniMathIO/AniMathIO/pull/354))
-- *(ui)* Flat inspector with one row layout for every clip kind ([#353](https://github.com/AniMathIO/AniMathIO/pull/353))
-- *(ui)* Shared tool-panel frame, plain plugin cards and a tidier Math dialog ([#355](https://github.com/AniMathIO/AniMathIO/pull/355))
-- Maintain pitch, above-1x video filtering and speed-ramp handles ([#314](https://github.com/AniMathIO/AniMathIO/pull/314))
+- *(ui)* A redesigned editor: neutral greys with one cyan accent, a flat inspector with one row layout for every clip kind, one dialog frame, grouped Preferences, a plain launcher, a shared tool-panel frame, plain plugin cards, a calmer timeline with single-row track headers and a tidier viewer ([#349](https://github.com/AniMathIO/AniMathIO/pull/349), [#351](https://github.com/AniMathIO/AniMathIO/pull/351), [#352](https://github.com/AniMathIO/AniMathIO/pull/352), [#353](https://github.com/AniMathIO/AniMathIO/pull/353), [#354](https://github.com/AniMathIO/AniMathIO/pull/354), [#355](https://github.com/AniMathIO/AniMathIO/pull/355))
+- *(audio)* Record microphone audio into the Media library, optionally onto the timeline at the playhead ([#332](https://github.com/AniMathIO/AniMathIO/pull/332))
+- *(assist)* Optional "Describe in words" LaTeX authoring with any OpenAI-compatible service or a local model; off until you set it up ([#317](https://github.com/AniMathIO/AniMathIO/pull/317))
+- *(export)* WebM (VP9 + Opus) export alongside MP4 in the editor, CLI and MCP ([#338](https://github.com/AniMathIO/AniMathIO/pull/338))
 - *(export)* Embed timeline markers as MP4 chapters ([#319](https://github.com/AniMathIO/AniMathIO/pull/319))
-- *(animations)* Clipped and per-character slide presets via a slide effect ([#311](https://github.com/AniMathIO/AniMathIO/pull/311))
+- Maintain pitch, above-1x video filtering and speed-ramp handles ([#314](https://github.com/AniMathIO/AniMathIO/pull/314))
+- *(audio)* Learn the denoise profile from a range marker or selection, and a guided Auto duck panel ([#318](https://github.com/AniMathIO/AniMathIO/pull/318))
+- *(animations)* Clipped and per-character slide presets via a slide effect (plugin ABI 1.3) ([#311](https://github.com/AniMathIO/AniMathIO/pull/311))
 - Restore weighted text and 1.x typography presets ([#312](https://github.com/AniMathIO/AniMathIO/pull/312))
-- *(export)* WebM (VP9 + Opus) export alongside MP4 ([#338](https://github.com/AniMathIO/AniMathIO/pull/338))
+
+### Changed
+
+- Dependency upgrades: wasmtime 51, symphonia 0.6, cpal 0.18, rubato 5, parley 0.13, wit-bindgen 0.63, gpui-component 0.10, toml 1 ([#368](https://github.com/AniMathIO/AniMathIO/pull/368)). Compiled plugins are recompiled once. Resampled audio is no longer byte-identical to 2.2 (differences below 4e-7 per sample), and assets with uncommon sample-rate ratios no longer lose about 3 ms at the start. Ogg Opus files decode to their exact length. Plugin authors need Rust 1.85 or newer.
 
 ### Fixed
 
+- *(macos)* The bundle declares microphone usage, so recording asks for permission ([#360](https://github.com/AniMathIO/AniMathIO/pull/360))
+- *(audio)* Undo or redo during a speed-key drag no longer crashes ([#360](https://github.com/AniMathIO/AniMathIO/pull/360))
+- *(audio)* A recording that cannot be placed on the timeline stays in the library instead of being lost ([#360](https://github.com/AniMathIO/AniMathIO/pull/360))
+- *(audio)* Recording: left and right channels can no longer swap, dropped audio is reported, Stop finishes off the UI thread and the clip lands where the playhead was when Record was pressed ([#345](https://github.com/AniMathIO/AniMathIO/pull/345))
+- *(audio)* Playback and recording keep going after a short audio underrun; microphones are listed by stable device ids ([#368](https://github.com/AniMathIO/AniMathIO/pull/368))
+- *(audio)* Alt-click no longer adds a speed key on clips too narrow for the speed lane or on frame holds, and variable-frame-rate video is blended by frame identity in speed ramps ([#331](https://github.com/AniMathIO/AniMathIO/pull/331))
+- *(graph)* Tick labels sit beside the axis instead of on it, stay inside the clip at edge and off-screen axes, and digits with counters (0, 4, 6, 8, 9) render hollow ([#370](https://github.com/AniMathIO/AniMathIO/pull/370))
 - *(captions)* Keep the word-highlight pill from swallowing the inter-word spaces ([#369](https://github.com/AniMathIO/AniMathIO/pull/369))
-- *(graph)* Place tick labels clear of the axis lines ([#370](https://github.com/AniMathIO/AniMathIO/pull/370))
+- *(animations)* Character-slide presets no longer refuse text with an empty or unknown caption style ([#336](https://github.com/AniMathIO/AniMathIO/pull/336))
+- *(assist)* Bound network error text and keep the key status when a conversion is cancelled ([#335](https://github.com/AniMathIO/AniMathIO/pull/335))
+- *(ui)* Right-to-left system locales no longer mirror half the editor; sliders no longer capture the timeline keys ([#368](https://github.com/AniMathIO/AniMathIO/pull/368))
+- *(ui)* Inspector Fit labels, keyframe diamonds clear of clip labels, Enter confirms template dialogs, size presets switch to Custom on manual edits, and the transport timecode fits at 1024x768 ([#373](https://github.com/AniMathIO/AniMathIO/pull/373))
 - *(editor)* First-time-user usability pass ([#321](https://github.com/AniMathIO/AniMathIO/pull/321))
 - *(ui)* Keep key controls visible at 1280x720 (math dialog, launcher, Library dock) ([#322](https://github.com/AniMathIO/AniMathIO/pull/322))
-- *(ui)* Final UI/UX review P1 polish (audio gain, Auto duck, Math assist, settings, shape inspector, ruler) ([#323](https://github.com/AniMathIO/AniMathIO/pull/323))
+- *(ui)* Final UI/UX review polish (audio gain, Auto duck, Math assist, settings, shape inspector, ruler) ([#323](https://github.com/AniMathIO/AniMathIO/pull/323))
 - *(ui)* Polish community plugins, Preferences, Export and the launcher ([#324](https://github.com/AniMathIO/AniMathIO/pull/324))
 - *(ui)* Inspector consistency, content-hugging selection box, track headers and 720p density ([#325](https://github.com/AniMathIO/AniMathIO/pull/325))
-- *(test)* Keep settings, community store and plugin cache inside target/ under test ([#330](https://github.com/AniMathIO/AniMathIO/pull/330))
-- *(test)* Isolate the community plugin scenario, match plugin caption styles and share MAX_FONT_SIZE ([#336](https://github.com/AniMathIO/AniMathIO/pull/336))
-- *(assist)* Bound transport error text and keep the key status read before a cancel ([#335](https://github.com/AniMathIO/AniMathIO/pull/335))
-- *(audio)* Recording follow-ups (channel order, dropped samples, off-thread finish, clip position) ([#345](https://github.com/AniMathIO/AniMathIO/pull/345))
-- *(audio)* Polish speed retiming review nits ([#331](https://github.com/AniMathIO/AniMathIO/pull/331))
-- *(ui)* Address remaining 2.3 review findings ([#373](https://github.com/AniMathIO/AniMathIO/pull/373))
-- 2.3.0 release review fixes (macOS mic permission, retime undo crash, recording placement) ([#360](https://github.com/AniMathIO/AniMathIO/pull/360))
 
 ### Performance
 
 - Cache ruler label widths, stretch fingerprints and viewer ink bounds; checked frame-hold math ([#342](https://github.com/AniMathIO/AniMathIO/pull/342))
-
 
 ## [2.2.0](https://github.com/AniMathIO/AniMathIO/compare/v2.1.0...v2.2.0) - 2026-11-17
 
