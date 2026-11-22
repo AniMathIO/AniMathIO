@@ -139,7 +139,8 @@ pub(crate) fn time_bounds(clip: &Clip, index: usize, gap: i64) -> (i64, i64) {
     let keys = &clip.time_map.ramps;
     let low = index
         .checked_sub(1)
-        .map_or(0, |i| local_time(clip, &keys[i]).saturating_add(gap).max(0));
+        .and_then(|i| keys.get(i))
+        .map_or(0, |prev| local_time(clip, prev).saturating_add(gap).max(0));
     let high = keys.get(index + 1).map_or(length(clip), |next| {
         local_time(clip, next).saturating_sub(gap).min(length(clip))
     });

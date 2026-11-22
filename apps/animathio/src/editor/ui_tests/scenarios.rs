@@ -2712,6 +2712,62 @@ fn speed_ramp_handles_drag_add_and_remove_as_single_undo_steps(cx: &mut TestAppC
     assert_eq!(ramps(&ui).len(), 3);
 }
 
+/// Undo with the mouse held during a speed-key drag removes the keys the drag points at:
+/// the gesture ends, nothing panics and the ramp stays what undo left.
+#[gpui::test]
+fn undo_during_a_speed_key_drag_ends_the_gesture_without_panicking(cx: &mut TestAppContext) {
+    use animathio_core::SpeedPoint;
+    let (project, assets) = voice_pair();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| {
+        e.select_only(PAIR_FIRST, cx);
+        e.try_execute(
+            &Command::SetClipSpeed {
+                id: PAIR_FIRST,
+                speed: ClipSpeed::default(),
+                reverse: false,
+                ramps: vec![
+                    SpeedPoint {
+                        time: Time(0),
+                        speed: ClipSpeed::default(),
+                    },
+                    SpeedPoint {
+                        time: Time(500 * MS),
+                        speed: ClipSpeed::new(2, 1).unwrap(),
+                    },
+                ],
+                ripple: false,
+            },
+            cx,
+        );
+    });
+    ui.settle();
+    let ramps = |ui: &Ui| ui.read(|e| e.find_clip(PAIR_FIRST).unwrap().time_map.ramps.clone());
+    assert_eq!(ramps(&ui).len(), 2);
+    let none = gpui::Modifiers::default();
+    let grab = ramp_point(&ui, PAIR_FIRST, Some(1), Time(0));
+    ui.cx
+        .simulate_mouse_down(grab, gpui::MouseButton::Left, none);
+    ui.settle();
+    assert!(ui.read(|e| matches!(e.gesture, Some(TimelineGesture::Ramp(_)))));
+
+    // Ctrl+Z with the button still down: the ramp is gone and so is the gesture.
+    ui.dispatch(Undo);
+    assert_eq!(ramps(&ui).len(), 0);
+    assert!(ui.read(|e| e.gesture.is_none()));
+    let moved = grab + gpui::point(gpui::px(-12.), gpui::px(-8.));
+    ui.cx
+        .simulate_mouse_move(moved, gpui::MouseButton::Left, none);
+    ui.cx
+        .simulate_mouse_up(moved, gpui::MouseButton::Left, none);
+    ui.settle();
+    assert_eq!(ramps(&ui).len(), 0, "the stale drag committed nothing");
+
+    // Redo brings the curve back untouched.
+    ui.dispatch(Redo);
+    assert_eq!(ramps(&ui).len(), 2);
+}
+
 /// The first clip of [`voice_pair`] selected, with speed keys 100% at 0, 200% at 600 ms
 /// and 100% at 1200 ms.
 fn ramp_ui(cx: &mut TestAppContext) -> Ui {
