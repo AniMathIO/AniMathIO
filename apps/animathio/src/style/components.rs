@@ -227,7 +227,8 @@ pub fn segmented(
             .h(size::ROW)
             .rounded(gpui::px(radius::CONTROL))
             .bg(hex(color::BG))
-            .child(indicator)
+            // An unknown value selects nothing: no pill.
+            .children((selected < options.len()).then_some(indicator))
             .children(options.iter().enumerate().map(|(position, option)| {
                 let (label, option_id, option_icon) = (option.label, option.id, option.icon);
                 let option_count = options.len();

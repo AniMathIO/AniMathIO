@@ -117,7 +117,7 @@ impl Editor {
     pub(super) fn escape(&mut self, cx: &mut Context<Self>) {
         if self.track_rename.is_some() {
             self.finish_track_rename(false, cx);
-        } else if self.context_menu.take().is_some() {
+        } else if self.context_menu.take().is_some() || self.fields.add_menu.take().is_some() {
         } else if self.gesture.take().is_some() || self.keyframe_drag.take().is_some() {
             self.snap_line = None;
         } else {

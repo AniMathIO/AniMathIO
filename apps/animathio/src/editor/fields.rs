@@ -25,6 +25,10 @@ use crate::style::{Role, TextRole, color, hex, size};
 /// Width of the value field next to a slider, in rems (the field holds the
 /// exact value with its unit suffix, which 4rem clipped).
 const FIELD_W: f32 = 4.5;
+/// Share of a row taken by the label column; a pair row (two fields) gives the
+/// fields more, since its labels (Position, Scale, Size) are short.
+const LABEL_FRACTION: f32 = 0.4;
+const PAIR_LABEL_FRACTION: f32 = 0.3;
 /// Width of the keyframe column, in rems: diamond plus hover-revealed arrows.
 const KF_COL: f32 = 3.5;
 /// Widths of the keyframe controls, in rems.
@@ -32,12 +36,90 @@ const KF_ARROW_W: f32 = 0.933;
 const KF_DIAMOND_W: f32 = 1.2;
 /// Gain slider bounds in dB (the field shows dB; the model stays linear).
 const GAIN_DB_RANGE: (f64, f64, f64) = (-60., 24., 0.5);
+/// The lane the overlay scrollbar of the inspector occupies; rows end left of it
+/// so no field or border runs under the thumb.
+pub(super) const SCROLLBAR_GUTTER: gpui::Pixels = gpui::px(14.);
 /// Geometry of the "Add effect" menu, in rems.
-const MENU_TOP_REMS: gpui::Rems = gpui::Rems(2.2);
 const MENU_W_REMS: gpui::Rems = gpui::Rems(14.);
 const MENU_MAX_H_REMS: gpui::Rems = gpui::Rems(16.);
 
 type EnumState = SelectState<SearchableVec<EnumChoice>>;
+
+/// What a row shows in its label column and, for plain text, the tooltip that
+/// carries the whole label when the column truncates it.
+pub(super) struct RowLabel {
+    element: AnyElement,
+    tooltip: Option<SharedString>,
+}
+
+impl RowLabel {
+    /// A text label; its tooltip repeats the full text.
+    pub(super) fn text(text: impl Into<SharedString>) -> Self {
+        let text: SharedString = text.into();
+        Self {
+            element: text.clone().into_any_element(),
+            tooltip: Some(text),
+        }
+    }
+
+    /// A shortened `text` whose tooltip carries the `full` label.
+    pub(super) fn shortened(text: impl Into<SharedString>, full: impl Into<SharedString>) -> Self {
+        Self {
+            element: text.into().into_any_element(),
+            tooltip: Some(full.into()),
+        }
+    }
+}
+
+impl From<&str> for RowLabel {
+    fn from(text: &str) -> Self {
+        Self::text(text.to_owned())
+    }
+}
+
+impl From<String> for RowLabel {
+    fn from(text: String) -> Self {
+        Self::text(text)
+    }
+}
+
+impl From<SharedString> for RowLabel {
+    fn from(text: SharedString) -> Self {
+        Self::text(text)
+    }
+}
+
+/// An element label brings its own tooltip (scrub labels) or none.
+impl From<Stateful<Div>> for RowLabel {
+    fn from(element: Stateful<Div>) -> Self {
+        Self {
+            element: element.into_any_element(),
+            tooltip: None,
+        }
+    }
+}
+
+impl From<Div> for RowLabel {
+    fn from(element: Div) -> Self {
+        Self {
+            element: element.into_any_element(),
+            tooltip: None,
+        }
+    }
+}
+
+/// The label a plugin parameter shows in the narrow label column: the
+/// explanatory parenthesis and redundant prefixes are dropped (the tooltip keeps
+/// the full label).
+fn short_label(label: &str) -> String {
+    let base = label.split(" (").next().unwrap_or(label);
+    match base {
+        "Axes and labels color" => "Axes color".to_owned(),
+        "Plot stroke width" => "Stroke width".to_owned(),
+        "Coordinate scale" => "Coordinates".to_owned(),
+        other => other.replace("Character slide", "Slide"),
+    }
+}
 
 /// One enum choice: the raw stored value plus what the row displays.
 #[derive(Clone, PartialEq)]
@@ -145,10 +227,16 @@ pub(super) struct FieldPool {
     sliders: BTreeMap<String, (Entity<SliderState>, Subscription)>,
     /// One focus handle per option of every segmented enum control.
     segmented: BTreeMap<String, SegState>,
-    /// The inspector's "Add effect" menu is open (video or audio section).
-    pub(super) add_menu_open: bool,
+    /// The inspector's "Add effect" menu that is open, if any: the video and
+    /// the audio sections have their own.
+    pub(super) add_menu: Option<EffectTarget>,
     /// The LaTeX snippets disclosure is open.
     pub(super) snippets_open: bool,
+    /// The LaTeX "More" group (units, alignment) is open.
+    pub(super) more_open: bool,
+    /// The last strict typeset check of a formula or graph clip: the parameters
+    /// it ran with and its error.
+    typeset: BTreeMap<ClipId, (String, Option<String>)>,
 }
 
 #[cfg(test)]
@@ -246,6 +334,7 @@ impl FieldPool {
         self.assets.retain(|key, _| keep(key));
         self.enums.retain(|key, _| keep(key));
         self.segmented.retain(|key, _| keep(key));
+        self.typeset.retain(|id, _| clips.contains(id));
     }
 
     /// Drop multi-selection widgets other than those keyed with `prefix`.
@@ -267,6 +356,7 @@ impl FieldPool {
         self.assets.retain(|key, _| key.starts_with(&prefix));
         self.enums.retain(|key, _| key.starts_with(&prefix));
         self.segmented.retain(|key, _| key.starts_with(&prefix));
+        self.typeset.retain(|id, _| *id == clip);
     }
 }
 
@@ -291,23 +381,42 @@ fn is_numeric_prefix(text: &str) -> bool {
         .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E'))
 }
 
-/// The factor between what a field shows and what the model stores: an
-/// opacity displays as a percent (`100` for a stored `1`), everything else is
-/// unchanged (gains convert through dB, see below).
+/// The factor between what a field shows and what the model stores: opacity,
+/// position and scale are canvas fractions shown as percents (`100` for a
+/// stored `1`), everything else is unchanged (gains convert through dB, see
+/// below).
 fn field_display_scale(target: &InputTarget) -> f64 {
-    if is_opacity_target(target) { 100. } else { 1. }
+    if is_percent_target(target) { 100. } else { 1. }
 }
 
-fn is_opacity_target(target: &InputTarget) -> bool {
+/// How far one pixel of a label drag moves a field, in what the field shows:
+/// the model step times the display scale (a 0.05 opacity step is 5 percent).
+fn scrub_step(target: &InputTarget, step: f64) -> f64 {
+    step * field_display_scale(target)
+}
+
+/// The weight step (100..900) nearest to a stored weight, so a value between two
+/// steps shows a name.
+fn nearest_weight(value: f64) -> f64 {
+    (value / 100.).round().clamp(1., 9.) * 100.
+}
+
+/// Whether the field is a transform component the inspector shows as a
+/// percent: opacity, position and scale.
+fn is_percent_target(target: &InputTarget) -> bool {
+    let (InputTarget::Field { field, .. } | InputTarget::SelectionField { field, .. }) = target
+    else {
+        return false;
+    };
     matches!(
-        target,
-        InputTarget::Field {
-            field: Field::Transform(TransformProperty::Opacity),
-            ..
-        } | InputTarget::SelectionField {
-            field: Field::Transform(TransformProperty::Opacity),
-            ..
-        }
+        field,
+        Field::Transform(
+            TransformProperty::Opacity
+                | TransformProperty::X
+                | TransformProperty::Y
+                | TransformProperty::ScaleX
+                | TransformProperty::ScaleY
+        )
     )
 }
 
@@ -784,12 +893,41 @@ impl Editor {
             InputTarget::Field { field, .. } | InputTarget::SelectionField { field, .. } => {
                 match field {
                     Field::Transform(TransformProperty::Rotation) => Some("\u{b0}"),
-                    Field::Transform(TransformProperty::Opacity) => Some("%"),
+                    Field::Transform(
+                        TransformProperty::Opacity
+                        | TransformProperty::X
+                        | TransformProperty::Y
+                        | TransformProperty::ScaleX
+                        | TransformProperty::ScaleY,
+                    ) => Some("%"),
                     Field::Param(name) if name == "gain" => Some("dB"),
                     _ => None,
                 }
             }
-            InputTarget::PluginNumber { id, name } => self.font_size_units(*id, name).map(|_| "%"),
+            InputTarget::PluginNumber { id, name } => self
+                .font_size_units(*id, name)
+                .map(|_| "%")
+                .or_else(|| self.shape_number_suffix(*id, name)),
+            _ => None,
+        }
+    }
+
+    /// The unit of a shape parameter: pixels for lengths while the shape is in
+    /// pixel units, degrees for its rotation. Normalised lengths have no unit.
+    fn shape_number_suffix(&self, id: ClipId, name: &str) -> Option<&'static str> {
+        let ClipKind::Plugin { plugin_id, .. } = &self.find_clip(id)?.kind else {
+            return None;
+        };
+        if plugin_id != "org.animathio.shapes" {
+            return None;
+        }
+        match name {
+            "rotation" => Some("\u{b0}"),
+            "x" | "y" | "width" | "height" | "radius" | "stroke_width"
+                if self.plugin_text_value(id, "units", "pixels") == "pixels" =>
+            {
+                Some("px")
+            }
             _ => None,
         }
     }
@@ -1275,10 +1413,11 @@ impl Editor {
                 )
             })
             .collect();
+        // A value that is none of the options selects none of them.
         let selected = options
             .iter()
             .position(|option| option == current)
-            .unwrap_or(0);
+            .unwrap_or(usize::MAX);
         let editor = cx.entity();
         let param = name.to_owned();
         let values = options.to_vec();
@@ -1600,14 +1739,45 @@ impl Editor {
     /// keyframe arrows.
     pub(super) fn param_row(
         diamond: Option<Div>,
-        label: impl IntoElement,
+        label: impl Into<RowLabel>,
         control: impl IntoElement,
         _cx: &mut Context<Self>,
     ) -> Div {
         Self::row_shell(diamond, label, control)
     }
 
-    fn row_shell(diamond: Option<Div>, label: impl IntoElement, control: impl IntoElement) -> Div {
+    fn row_shell(
+        diamond: Option<Div>,
+        label: impl Into<RowLabel>,
+        control: impl IntoElement,
+    ) -> Div {
+        Self::row_shell_with(diamond, label, control, LABEL_FRACTION)
+    }
+
+    /// [`Self::row_shell`] with the label column at `label_fraction` of the width.
+    fn row_shell_with(
+        diamond: Option<Div>,
+        label: impl Into<RowLabel>,
+        control: impl IntoElement,
+        label_fraction: f32,
+    ) -> Div {
+        let RowLabel { element, tooltip } = label.into();
+        let label_cell = div()
+            .w(gpui::relative(label_fraction))
+            .flex_shrink_0()
+            .min_w_0()
+            .truncate()
+            .text_role(Role::Label);
+        let label_cell = match tooltip {
+            Some(text) => label_cell
+                .id(SharedString::from(format!("row-label-{text}")))
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                })
+                .child(element)
+                .into_any_element(),
+            None => label_cell.child(element).into_any_element(),
+        };
         div()
             .group("insp-row")
             .min_h(size::ROW)
@@ -1632,21 +1802,14 @@ impl Editor {
                     .flex_row()
                     .items_center()
                     .gap_1()
-                    .child(
-                        div()
-                            .w(gpui::relative(0.4))
-                            .flex_shrink_0()
-                            .min_w_0()
-                            .truncate()
-                            .text_role(Role::Label)
-                            .child(label),
-                    )
+                    .child(label_cell)
                     .child(div().flex_1().min_w_0().child(control)),
             )
     }
 
     /// A row label that scrubs its number when dragged horizontally
-    /// (Shift coarse, Ctrl fine).
+    /// (Shift coarse, Ctrl fine). Its tooltip names the whole label next to the
+    /// gesture, since the column truncates long labels.
     pub(super) fn scrub_label(
         key: &str,
         text: String,
@@ -1655,12 +1818,30 @@ impl Editor {
         step: f64,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let full = text.clone();
+        Self::scrub_label_full(key, text, &full, target, value, step, cx)
+    }
+
+    /// [`Self::scrub_label`] showing a shortened `text` whose tooltip carries
+    /// the `full` label.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn scrub_label_full(
+        key: &str,
+        text: String,
+        full: &str,
+        target: InputTarget,
+        value: f64,
+        step: f64,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let tooltip = SharedString::from(format!("{full}. Drag to adjust"));
         div()
             .id(SharedString::from(format!("label-{key}")))
             .cursor_ew_resize()
+            .truncate()
             .child(text)
-            .tooltip(|window, cx| {
-                gpui_component::tooltip::Tooltip::new("Drag to adjust").build(window, cx)
+            .tooltip(move |window, cx| {
+                gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -1679,8 +1860,21 @@ impl Editor {
 
     /// A row that cannot be keyframed: the keyframe column stays (empty) so its
     /// label lines up with the other rows.
-    pub(super) fn param_row_flush(label: impl IntoElement, control: impl IntoElement) -> Div {
+    pub(super) fn param_row_flush(label: impl Into<RowLabel>, control: impl IntoElement) -> Div {
         Self::row_shell(None, label, control)
+    }
+
+    /// Content that sits in the label column of the rows above it (a switch, a
+    /// caption, a row of buttons): the keyframe column stays empty so it lines
+    /// up with the labels.
+    pub(super) fn label_column(content: impl IntoElement) -> Div {
+        div()
+            .px_2()
+            .flex()
+            .flex_row()
+            .gap_1()
+            .child(div().w(gpui::rems(KF_COL)).flex_shrink_0())
+            .child(div().flex_1().min_w_0().child(content))
     }
 
     /// Two controls that belong together (`X`/`Y`, width and height, a min/max
@@ -1688,10 +1882,10 @@ impl Editor {
     /// one-letter prefix inside the field.
     pub(super) fn param_row_pair(
         diamond: Option<Div>,
-        label: impl IntoElement,
+        label: impl Into<RowLabel>,
         left: impl IntoElement,
         right: impl IntoElement,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Div {
         let pair = div()
             .flex()
@@ -1700,7 +1894,7 @@ impl Editor {
             .gap_1()
             .child(div().flex_1().min_w_0().child(left))
             .child(div().flex_1().min_w_0().child(right));
-        Self::param_row(diamond, label, pair, cx)
+        Self::row_shell_with(diamond, label, pair, PAIR_LABEL_FRACTION)
     }
 
     /// Slider and field on one row (docs/design.md: a slider is never on a
@@ -1770,7 +1964,7 @@ impl Editor {
             label.to_owned(),
             input_target.clone(),
             field_to_display(&input_target, value),
-            step,
+            scrub_step(&input_target, step),
             cx,
         );
         Self::param_row(Some(diamond), label, control, cx)
@@ -1894,7 +2088,10 @@ impl Editor {
                 )
             })
             .collect();
-        let selected = Fit::ALL.iter().position(|fit| *fit == current).unwrap_or(0);
+        let selected = Fit::ALL
+            .iter()
+            .position(|fit| *fit == current)
+            .unwrap_or(usize::MAX);
         let editor = cx.entity();
         let control = self.segmented_pooled(
             format!("c{}:fit", id.0),
@@ -1907,13 +2104,23 @@ impl Editor {
             },
             cx,
         );
-        // Four options need the whole row, so the control has no label column.
+        // Four options need the whole row width, so the control sits under its
+        // label (in the label column) instead of beside it.
         div()
-            .min_h(size::ROW)
             .flex()
-            .items_center()
-            .px_2()
-            .child(div().flex_1().min_w_0().child(control))
+            .flex_col()
+            .child(Self::label_column(
+                div().pt_1().text_role(Role::Label).child("Fit"),
+            ))
+            .child(
+                div()
+                    .min_h(size::ROW)
+                    .flex()
+                    .items_center()
+                    .px_2()
+                    .child(div().flex_1().min_w_0().child(control)),
+            )
+            .debug_selector(|| "param-Fit".to_owned())
     }
 
     pub(super) fn numeric_param_rows(
@@ -1963,25 +2170,23 @@ impl Editor {
         );
         let editor = cx.entity();
         rows.push(
-            div()
-                .px_2()
-                .child(crate::style::switch_row(
-                    "audio-muted",
-                    "Muted",
-                    None,
-                    field_value(&clip, &Field::Param("muted".to_owned())) != 0.0,
-                    move |checked, _, cx| {
-                        editor.update(cx, |this, cx| {
-                            this.commit_field(
-                                id,
-                                &Field::Param("muted".to_owned()),
-                                f64::from(u8::from(*checked)),
-                                cx,
-                            );
-                        });
-                    },
-                ))
-                .into_any_element(),
+            Self::label_column(crate::style::switch_row(
+                "audio-muted",
+                "Muted",
+                None,
+                field_value(&clip, &Field::Param("muted".to_owned())) != 0.0,
+                move |checked, _, cx| {
+                    editor.update(cx, |this, cx| {
+                        this.commit_field(
+                            id,
+                            &Field::Param("muted".to_owned()),
+                            f64::from(u8::from(*checked)),
+                            cx,
+                        );
+                    });
+                },
+            ))
+            .into_any_element(),
         );
         rows
     }
@@ -1992,6 +2197,8 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        // Formulas and graphs draw a failure inline; the inspector wants it as text.
+        let typeset_error = self.typeset_error(id);
         let Some(clip) = self.find_clip(id) else {
             return Vec::new();
         };
@@ -2015,21 +2222,43 @@ impl Editor {
                     && !technical_param(&plugin_id, model.id())
             })
             .collect();
-        // The formula leads its section, then what changes how it looks.
-        if plugin_id == "org.animathio.latex" {
+        // Rarely changed formula options stay reachable in a collapsed group.
+        let more: Vec<&ParamModel> = models
+            .iter()
+            .filter(|model| {
+                plugin_id == "org.animathio.latex"
+                    && technical_param(&plugin_id, model.id())
+                    && model.id() != "strict_errors"
+                    && plugin_param_visible(&plugin_id, model.id(), value_of)
+            })
+            .collect();
+        // The formula or function leads its section, then what changes how it looks.
+        let leading: &[&str] = match plugin_id.as_str() {
+            "org.animathio.latex" => &["source", "size", "color", "mode", "reveal"],
+            "org.animathio.graph" => &["items", "x_min", "x_max", "y_min", "y_max", "color"],
+            _ => &[],
+        };
+        if !leading.is_empty() {
             let rank = |name: &str| {
-                ["source", "size", "color", "mode", "reveal"]
+                leading
                     .iter()
                     .position(|first| *first == name)
                     .unwrap_or(usize::MAX)
             };
             visible.sort_by_key(|model| rank(model.id()));
         }
+        // The parameter whose failure the typeset error belongs under.
+        let error_after = match plugin_id.as_str() {
+            "org.animathio.latex" => "source",
+            "org.animathio.graph" => "items",
+            _ => "",
+        };
         let mut rows: Vec<AnyElement> = Vec::new();
         let mut index = 0;
         while index < visible.len() {
             let model = visible[index];
             let next = visible.get(index + 1);
+
             if let (ParamModel::Number { .. }, Some(pair_model)) = (model, next)
                 && let Some(label) = plugin_param_pair(model.id(), pair_model.id())
                 && let ParamModel::Number { .. } = pair_model
@@ -2044,7 +2273,30 @@ impl Editor {
                     self.plugin_row(id, &plugin_id, model, window, cx)
                         .into_any_element(),
                 );
+                // The failure is shown right below the field it belongs to.
+                if model.id() == error_after
+                    && let Some(message) = &typeset_error
+                {
+                    rows.push(Self::typeset_error_row(message).into_any_element());
+                }
                 index += 1;
+            }
+        }
+        if !more.is_empty() {
+            let open = self.fields.more_open;
+            rows.push(
+                Self::disclosure_row("latex-more", "More", open, cx, |fields| {
+                    fields.more_open = !fields.more_open;
+                })
+                .into_any_element(),
+            );
+            if open {
+                for model in more {
+                    rows.push(
+                        self.plugin_row(id, &plugin_id, model, window, cx)
+                            .into_any_element(),
+                    );
+                }
             }
         }
         rows
@@ -2123,7 +2375,8 @@ impl Editor {
             .find_clip(id)
             .is_some_and(|clip| clip.animations.iter().any(|a| a.target == target));
         let diamond = (is_animatable(model) || has_keys).then(|| self.row_diamond(id, &target, cx));
-        let mut label = model.label().to_owned().into_any_element();
+        let short = short_label(model.label());
+        let mut label = RowLabel::shortened(short.clone(), model.label().to_owned());
         let control = match model {
             ParamModel::Number { step, min, max, .. } => {
                 let value = self.plugin_number_display_value(id, &name);
@@ -2138,9 +2391,10 @@ impl Editor {
                 if is_font_weight_param(plugin_id, &name, *min, *max) {
                     self.weight_control(id, &name, value, window, cx)
                 } else {
-                    label = Self::scrub_label(
+                    label = Self::scrub_label_full(
                         &format!("c{}:pn:{name}", id.0),
-                        model.label().to_owned(),
+                        short.clone(),
+                        model.label(),
                         InputTarget::PluginNumber {
                             id,
                             name: name.clone(),
@@ -2149,7 +2403,7 @@ impl Editor {
                         *step,
                         cx,
                     )
-                    .into_any_element();
+                    .into();
                     let number = self.number_control(
                         &format!("c{}:pn:{name}", id.0),
                         InputTarget::PluginNumber {
@@ -2194,6 +2448,7 @@ impl Editor {
                     return div()
                         .flex()
                         .flex_col()
+                        .debug_selector(move || format!("param-{name}"))
                         .child(Self::param_row(diamond, label, div(), cx))
                         .child(div().px_2().pb_1().w_full().child(editor));
                 }
@@ -2273,6 +2528,8 @@ impl Editor {
             (800., "Extra bold"),
             (900., "Black"),
         ];
+        // A weight between two steps (a variable-font value) shows the nearest name.
+        let value = nearest_weight(value);
         let key = format!("c{}:weight:{name}", id.0);
         if !self.fields.enums.contains_key(&key) {
             let selected = WEIGHTS
@@ -2485,14 +2742,25 @@ impl Editor {
 
     /// An inspector scroll body with an always-visible scrollbar, so overflow is discoverable.
     fn scrolled(&self, body: Stateful<Div>) -> Div {
-        div().flex_1().min_h_0().relative().child(body).child(
-            gpui_component::scroll::Scrollbar::vertical(&self.inspector_scroll),
-        )
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .child(body.pr(SCROLLBAR_GUTTER))
+            .child(gpui_component::scroll::Scrollbar::vertical(
+                &self.inspector_scroll,
+            ))
     }
 
     /// Inspector panel: header, collapsible sections and widgets for the
     /// selected clip.
     pub(super) fn inspector(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        // An Add effect menu belongs to the selection that opened it.
+        if let Some(target) = self.fields.add_menu
+            && !target.belongs_to(self.selected, self.audio_inspector_track)
+        {
+            self.fields.add_menu = None;
+        }
         let mut pane = div()
             .key_context("Inspector")
             .track_focus(&self.panel_focus[2])
@@ -2622,7 +2890,6 @@ impl Editor {
             let mut content_column = div().flex().flex_col().children(rows);
             if plugin_id_of(&clip.kind).as_deref() == Some("org.animathio.latex") {
                 content_column = content_column.children(self.latex_extras(id, window, cx));
-                content_column = content_column.children(self.source_error_row());
             }
             content = Some(self.section_with_icon("params", title, Some(icon), content_column, cx));
         } else if visual {
@@ -2796,6 +3063,38 @@ impl Editor {
         pane.child(self.scrolled(body))
     }
 
+    /// A "Show/Hide" disclosure row in the label column: the label, then a ghost
+    /// button that flips `toggle` on the field pool.
+    fn disclosure_row(
+        button_id: &'static str,
+        label: &'static str,
+        open: bool,
+        cx: &mut Context<Self>,
+        toggle: fn(&mut FieldPool),
+    ) -> Div {
+        Self::param_row_flush(
+            label,
+            div().flex().child(
+                Button::new(button_id)
+                    .ghost()
+                    .xsmall()
+                    .icon(
+                        icons::icon(if open {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .xsmall(),
+                    )
+                    .label(if open { "Hide" } else { "Show" })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        toggle(&mut this.fields);
+                        cx.notify();
+                    })),
+            ),
+        )
+    }
+
     /// LaTeX-only extras under the Formula section: the snippets disclosure.
     fn latex_extras(
         &mut self,
@@ -2806,41 +3105,10 @@ impl Editor {
         let mut extras: Vec<AnyElement> = Vec::new();
         let open = self.fields.snippets_open;
         extras.push(
-            div()
-                .group("insp-row")
-                .min_h(size::ROW)
-                .px_2()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap_1()
-                .child(div().w(gpui::rems(KF_COL)).flex_shrink_0())
-                .child(
-                    div()
-                        .w(gpui::relative(0.4))
-                        .flex_shrink_0()
-                        .text_role(Role::Label)
-                        .child("Snippets"),
-                )
-                .child(
-                    Button::new("latex-snippets")
-                        .ghost()
-                        .xsmall()
-                        .icon(
-                            icons::icon(if open {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .xsmall(),
-                        )
-                        .label(if open { "Hide" } else { "Show" })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.fields.snippets_open = !this.fields.snippets_open;
-                            cx.notify();
-                        })),
-                )
-                .into_any_element(),
+            Self::disclosure_row("latex-snippets", "Snippets", open, cx, |fields| {
+                fields.snippets_open = !fields.snippets_open;
+            })
+            .into_any_element(),
         );
         if open {
             let chips = div()
@@ -2875,24 +3143,65 @@ impl Editor {
         extras
     }
 
-    /// The preview's failure while the formula does not typeset, as a `DANGER`
-    /// row under the Formula section. The preview keeps the previous render and
-    /// the warning clears with the first frame that renders again.
-    fn source_error_row(&self) -> Option<Div> {
-        let error = super::math::plain_plugin_error(self.effect_warning.as_ref()?);
-        Some(
-            div()
-                .px_2()
-                .py_1()
-                .flex()
-                .flex_row()
-                .items_start()
-                .gap_1()
-                .text_role(Role::Label)
-                .text_color(hex(color::DANGER))
-                .child(icons::icon(IconName::TriangleAlert).small())
-                .child(error),
-        )
+    /// The failure of a formula or graph that does not typeset, as a `DANGER`
+    /// row under its source field.
+    fn typeset_error_row(message: &str) -> Div {
+        div()
+            .px_2()
+            .py_1()
+            .flex()
+            .flex_row()
+            .items_start()
+            .gap_1()
+            .debug_selector(|| "typeset-error".to_owned())
+            .text_role(Role::Label)
+            .text_color(hex(color::DANGER))
+            .child(icons::icon(IconName::TriangleAlert).small())
+            .child(message.to_owned())
+    }
+
+    /// Why a formula or graph clip does not typeset, or `None` when it does. The
+    /// plugins draw an inline error unless asked to be strict, so the clip is
+    /// checked with `strict_errors` on (as the Math dialog preview does), once
+    /// per change of its parameters, and the result belongs to that clip alone.
+    fn typeset_error(&mut self, id: ClipId) -> Option<String> {
+        let ClipKind::Plugin { plugin_id, .. } = &self.find_clip(id)?.kind else {
+            return None;
+        };
+        if !matches!(
+            plugin_id.as_str(),
+            "org.animathio.latex" | "org.animathio.graph"
+        ) {
+            return None;
+        }
+        let plugin_id = plugin_id.clone();
+        let models = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == plugin_id)?
+            .models();
+        let mut params = serde_json::Map::new();
+        for model in &models {
+            if let Some(value) = self.plugin_opaque(id, model.id()) {
+                params.insert(model.id().to_owned(), value);
+            }
+        }
+        params.insert("strict_errors".into(), json!(true));
+        let params = Value::Object(params);
+        let key = params.to_string();
+        if let Some((cached, error)) = self.fields.typeset.get(&id)
+            && *cached == key
+        {
+            return error.clone();
+        }
+        let size = project_size(&self.project);
+        let error = self.plugin_host.as_mut().and_then(|host| {
+            host.render_clip(&plugin_id, &BTreeMap::new(), &params, 0, size)
+                .err()
+        });
+        let error = error.map(|error| super::math::plain_plugin_error(&error.to_string()));
+        self.fields.typeset.insert(id, (key, error.clone()));
+        error
     }
 
     /// Insert a snippet at the LaTeX source editor's caret; the editor's
@@ -2928,11 +3237,14 @@ impl Editor {
 
     /// One "Add effect" button with a menu of everything the loaded plugins
     /// offer (docs/design.md: at the top of the Effects section). `target`
-    /// selects the pixel effects of a clip or the audio effects of a chain.
+    /// selects the pixel effects of a clip or the audio effects of a chain. The
+    /// menu is a popover (placed under the button, or above it when there is no
+    /// room, never clipped by the scroll area); it closes on a click away, on
+    /// Escape, on a choice and when the selection changes.
     fn add_effect_control(
         &mut self,
         target: EffectTarget,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let audio = matches!(target, EffectTarget::Audio(_));
@@ -2941,28 +3253,89 @@ impl Editor {
         } else {
             self.available_effects()
         };
-        let open = self.fields.add_menu_open;
-        let editor = cx.entity();
         let empty = available.is_empty();
-        let mut control = div().relative().px_2().pb_1().child(
-            // Content-sized, not stretched across the row.
-            div().flex().child(
-                Button::new(if audio {
-                    "add-audio-effect"
-                } else {
-                    "add-video-effect"
-                })
+        let open = !empty && self.fields.add_menu == Some(target);
+        let editor = cx.entity();
+        let button_id = if audio {
+            "add-audio-effect"
+        } else {
+            "add-video-effect"
+        };
+        let choices: Vec<(String, String, String)> = available
+            .into_iter()
+            .map(|descriptor| (descriptor.plugin_id, descriptor.effect_id, descriptor.name))
+            .collect();
+        let toggle = editor.clone();
+        let popover = gpui_component::popover::Popover::new(SharedString::from(format!(
+            "{button_id}-menu-{}",
+            target.key()
+        )))
+        .anchor(gpui::Anchor::TopLeft)
+        .open(open)
+        .on_open_change(move |open, _, cx| {
+            toggle.update(cx, |this, cx| {
+                if *open {
+                    this.fields.add_menu = Some(target);
+                } else if this.fields.add_menu == Some(target) {
+                    this.fields.add_menu = None;
+                }
+                cx.notify();
+            });
+        })
+        .p_1()
+        .trigger(
+            Button::new(button_id)
                 .outline()
                 .small()
                 .icon(icons::icon(IconName::Plus).small())
                 .label("Add effect")
-                .tooltip("Add an effect from the loaded plugins")
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.fields.add_menu_open = !this.fields.add_menu_open;
-                    cx.notify();
-                })),
-            ),
-        );
+                .tooltip("Add an effect from the loaded plugins"),
+        )
+        .content(move |_, _, _| {
+            let mut menu = div()
+                .id("add-effect-menu")
+                .debug_selector(|| "add-effect-menu".to_owned())
+                .w(MENU_W_REMS)
+                .max_h(MENU_MAX_H_REMS)
+                .overflow_y_scroll()
+                .flex()
+                .flex_col();
+            for (plugin, effect, name) in &choices {
+                let (plugin, effect) = (plugin.clone(), effect.clone());
+                let editor = editor.clone();
+                menu = menu.child(
+                    div()
+                        .id(SharedString::from(format!("add-effect-{name}")))
+                        .px_2()
+                        .h(size::ROW)
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .cursor_pointer()
+                        .rounded(px(crate::style::radius::CONTROL))
+                        .text_role(Role::Body)
+                        .hover(|item| item.bg(hex(color::HOVER)))
+                        .child(icons::icon(IconName::Plus).small())
+                        .child(name.clone())
+                        .on_click(move |_, _, cx| {
+                            editor.update(cx, |this, cx| {
+                                this.fields.add_menu = None;
+                                match target {
+                                    EffectTarget::Audio(chain) => {
+                                        this.add_audio_effect_to_chain(chain, &plugin, &effect, cx);
+                                    }
+                                    EffectTarget::Video(id) => {
+                                        this.add_effect_to_clip(id, &plugin, &effect, cx);
+                                    }
+                                }
+                            });
+                        }),
+                );
+            }
+            menu
+        });
+        let mut control = div().px_2().pb_1().child(div().flex().child(popover));
         if empty {
             control = control.child(
                 div()
@@ -2976,60 +3349,34 @@ impl Editor {
                     }),
             );
         }
-        if !open || empty {
-            return control;
-        }
-        // The menu overlays the section below the button.
-        let mut menu = div()
-            .id("add-effect-menu")
-            .absolute()
-            .left_2()
-            .top(MENU_TOP_REMS)
-            .w(MENU_W_REMS)
-            .max_h(MENU_MAX_H_REMS)
-            .overflow_y_scroll()
-            .bg(hex(color::RAISED))
-            .border_1()
-            .border_color(hex(color::BORDER_STRONG))
-            .rounded(px(crate::style::radius::OVERLAY))
-            .p_1()
-            .flex()
-            .flex_col()
-            .shadow_lg()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        for descriptor in available {
-            let (plugin, effect) = (descriptor.plugin_id.clone(), descriptor.effect_id.clone());
-            let editor = editor.clone();
-            menu = menu.child(support::context_item(
-                IconName::Plus,
-                &descriptor.name,
-                None::<&dyn Action>,
-                move |_, _, cx| {
-                    editor.update(cx, |this, cx| {
-                        this.fields.add_menu_open = false;
-                        match target {
-                            EffectTarget::Audio(chain) => {
-                                this.add_audio_effect_to_chain(chain, &plugin, &effect, cx);
-                            }
-                            EffectTarget::Video(id) => {
-                                this.add_effect_to_clip(id, &plugin, &effect, cx);
-                            }
-                        }
-                    });
-                },
-                window,
-                cx,
-            ));
-        }
-        control.child(menu)
+        control
     }
 }
 
 /// What the Add effect menu adds to.
-#[derive(Clone, Copy)]
-enum EffectTarget {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum EffectTarget {
     Video(ClipId),
     Audio(AudioChain),
+}
+
+impl EffectTarget {
+    /// A stable key for element ids.
+    fn key(self) -> String {
+        match self {
+            Self::Video(id) => format!("v{}", id.0),
+            Self::Audio(AudioChain::Clip(id)) => format!("ac{}", id.0),
+            Self::Audio(AudioChain::Track(track)) => format!("at{}", track.0),
+        }
+    }
+
+    /// Whether the menu of this target belongs to the current selection.
+    fn belongs_to(self, clip: Option<ClipId>, track: Option<TrackId>) -> bool {
+        match self {
+            Self::Video(id) | Self::Audio(AudioChain::Clip(id)) => clip == Some(id),
+            Self::Audio(AudioChain::Track(owner)) => track == Some(owner),
+        }
+    }
 }
 
 /// Sections separated by 1px `BORDER` dividers: every section but the first
@@ -3092,6 +3439,64 @@ mod tests {
         assert!((scrub_value(0.5, 10., 0.01, false, false) - 0.6).abs() < 1e-9);
         assert!((scrub_value(0.5, 10., 0.01, true, false) - 0.51).abs() < 1e-9);
         assert!((scrub_value(0.5, -2., 0.01, false, true) - 0.3).abs() < 1e-9);
+    }
+
+    fn field_target(property: TransformProperty) -> InputTarget {
+        InputTarget::Field {
+            id: ClipId(1),
+            field: Field::Transform(property),
+        }
+    }
+
+    /// A percent field scrubs in percent per pixel: the 0.05 model step of an opacity is five
+    /// percent, so a drag moves the shown value, not 1/100 of it.
+    #[core::prelude::v1::test]
+    fn percent_fields_scrub_in_their_display_units() {
+        let opacity = field_target(TransformProperty::Opacity);
+        let step = scrub_step(
+            &opacity,
+            field_step(&Field::Transform(TransformProperty::Opacity)),
+        );
+        assert!((step - 5.).abs() < 1e-9);
+        assert!((scrub_value(50., 2., step, false, false) - 60.).abs() < 1e-9);
+        let position = field_target(TransformProperty::X);
+        assert!((scrub_step(&position, 0.01) - 1.).abs() < 1e-9);
+        // Degrees and decibels already show in model steps.
+        let rotation = field_target(TransformProperty::Rotation);
+        assert!((scrub_step(&rotation, 1.) - 1.).abs() < 1e-9);
+    }
+
+    #[core::prelude::v1::test]
+    fn position_and_scale_show_as_percent_of_the_canvas() {
+        for property in [
+            TransformProperty::X,
+            TransformProperty::Y,
+            TransformProperty::ScaleX,
+            TransformProperty::ScaleY,
+        ] {
+            let target = field_target(property);
+            assert!((field_to_display(&target, 0.24) - 24.).abs() < 1e-9);
+            assert!((field_from_display(&target, 24.) - 0.24).abs() < 1e-9);
+        }
+        assert!(
+            (field_to_display(&field_target(TransformProperty::Rotation), 30.) - 30.).abs() < 1e-9
+        );
+    }
+
+    #[core::prelude::v1::test]
+    fn long_labels_shorten_and_weights_snap() {
+        assert_eq!(
+            short_label("Character slide direction (1 left, 2 right, 3 top, 4 bottom)"),
+            "Slide direction"
+        );
+        assert_eq!(short_label("Character slide (1 is at rest)"), "Slide");
+        assert_eq!(short_label("Plot stroke width (540p px)"), "Stroke width");
+        assert_eq!(short_label("Axes and labels color"), "Axes color");
+        assert_eq!(short_label("Font size"), "Font size");
+        assert!((nearest_weight(450.) - 500.).abs() < 1e-9);
+        assert!((nearest_weight(849.) - 800.).abs() < 1e-9);
+        assert!((nearest_weight(0.) - 100.).abs() < 1e-9);
+        assert!((nearest_weight(1200.) - 900.).abs() < 1e-9);
     }
 
     #[core::prelude::v1::test]

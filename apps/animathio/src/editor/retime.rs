@@ -326,13 +326,12 @@ impl Editor {
                     "Speed",
                     summary(format!("Hold, {frames} frames")),
                 ))
-                .child(
+                .child(Self::label_column(
                     div()
-                        .px_2()
                         .text_role(crate::style::Role::Caption)
                         .text_color(hex(color::TEXT_MUTED))
                         .child("Trim edges to change duration; audio is silent."),
-                );
+                ));
         }
         div()
             .flex()
@@ -349,9 +348,8 @@ impl Editor {
                     }
                 )),
             ))
-            .child(
+            .child(Self::label_column(
                 div()
-                    .px_2()
                     .text_role(crate::style::Role::Caption)
                     .text_color(hex(color::TEXT_MUTED))
                     .child(if clip.time_map.ramps.is_empty() {
@@ -359,9 +357,9 @@ impl Editor {
                     } else {
                         "Linear speed ramp"
                     }),
-            )
+            ))
             .child(
-                // The two actions side by side at `Size::Small`, never full width.
+                // The actions side by side at `Size::Small`, never full width.
                 div()
                     .px_2()
                     .pt_1()
@@ -399,7 +397,7 @@ impl Editor {
                             ),
                     ),
             )
-            .child(div().px_2().child(crate::style::switch_row(
+            .child(Self::label_column(crate::style::switch_row(
                 "maintain-pitch",
                 "Maintain pitch",
                 None,
