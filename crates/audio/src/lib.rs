@@ -9,6 +9,7 @@ mod player;
 mod prepared;
 mod source;
 mod speed;
+mod stream_error;
 mod stretch;
 mod waveform;
 

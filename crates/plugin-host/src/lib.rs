@@ -284,7 +284,7 @@ pub struct CapabilityGrants {
 
 /// Build the [`StoreLimits`] applied to every plugin store. A single memory of at most
 /// `max_memory_bytes` makes the per-memory limit effectively the aggregate plugin allocation.
-/// Instances, memories and tables are capped far below wasmtime's defaults; wasmtime 50's
+/// Instances, memories and tables are capped far below wasmtime's defaults; wasmtime 51's
 /// component runtime needs at least three core instances per component, hence the eight here.
 fn sandbox_store_limits(limits: &SandboxLimits) -> StoreLimits {
     StoreLimitsBuilder::new()
@@ -520,11 +520,15 @@ impl ComponentDiskCache {
     }
 
     /// Compute disk cache key from wasm hash and wasmtime engine version.
+    ///
+    /// The version tag is bumped with the wasmtime dependency itself: serialized
+    /// components are engine-specific, so entries written by an older wasmtime
+    /// must never be looked up, let alone deserialized.
     #[must_use]
     pub fn cache_key(wasm_bytes: &[u8]) -> String {
         let mut hasher = blake3::Hasher::new();
         hasher.update(wasm_bytes);
-        hasher.update(b"wasmtime-50.0.1");
+        hasher.update(b"wasmtime-51.0.0");
         hasher.finalize().to_hex().to_string()
     }
 
@@ -2416,6 +2420,70 @@ mod tests {
 
         let secret = read_secret(&tmp.path().join("key")).unwrap();
         assert!(read_verified_entry(&secret, &entry).is_some());
+    }
+
+    #[test]
+    fn cache_entries_from_an_older_wasmtime_are_rejected() {
+        let tmp = private_dir();
+        let cache = ComponentDiskCache::new(tmp.path());
+        assert!(cache.is_enabled());
+
+        let engine = component_engine();
+        let wasm = empty_component();
+
+        // Simulate an entry written by the previous wasmtime version: a valid
+        // MAC over a payload that would still deserialize, but stored under
+        // the old engine-version cache key.
+        let old_key = {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(&wasm);
+            hasher.update(b"wasmtime-50.0.1");
+            hasher.finalize().to_hex().to_string()
+        };
+        let old_entry = tmp.path().join(format!("{old_key}.bin"));
+        let component = Component::from_binary(&engine, &wasm).unwrap();
+        let secret = read_secret(&tmp.path().join("key")).unwrap();
+        write_verified_entry(
+            tmp.path(),
+            &old_entry,
+            &secret,
+            &component.serialize().unwrap(),
+        )
+        .unwrap();
+        assert!(old_entry.exists());
+
+        // A lookup under the current version key must not consume the old
+        // entry: it recompiles and writes a fresh entry, and the old file is
+        // never read (so it stays in place and can never be misinterpreted).
+        cache.get_or_compile(&engine, &wasm).unwrap();
+        let new_entry = tmp
+            .path()
+            .join(format!("{}.bin", ComponentDiskCache::cache_key(&wasm)));
+        assert_ne!(new_entry, old_entry);
+        assert!(new_entry.exists());
+        assert!(old_entry.exists());
+    }
+
+    #[test]
+    fn cache_entry_round_trips_through_deserialize() {
+        let tmp = private_dir();
+        let cache = ComponentDiskCache::new(tmp.path());
+        assert!(cache.is_enabled());
+
+        let engine = component_engine();
+        let wasm = empty_component();
+        cache.get_or_compile(&engine, &wasm).unwrap();
+        let entry = tmp
+            .path()
+            .join(format!("{}.bin", ComponentDiskCache::cache_key(&wasm)));
+
+        // The stored entry verifies against the MAC and deserializes under
+        // the same engine — the cache-hit path a restart takes.
+        let secret = read_secret(&tmp.path().join("key")).unwrap();
+        let bytes = read_verified_entry(&secret, &entry).unwrap();
+        // SAFETY: `bytes` is a component serialized by this engine version
+        // and MAC-verified above, exactly like `get_or_compile` does.
+        assert!(unsafe { Component::deserialize(&engine, &bytes) }.is_ok());
     }
 
     #[test]

@@ -35,7 +35,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-
 [dev-dependencies]
 animathio-plugin-host = { path = "../../crates/plugin-host", features = ["test-support"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-base64 = "0.22"
+base64 = "0.23"
 tempfile = "3"
 
 [lints]

@@ -253,9 +253,12 @@ format, and decoding, resampling and channel mapping then run lazily inside
 `Mixer::mix(project, range)` (shared by preview and export) in fixed blocks held by an LRU cache
 with a byte budget (`PrepareOptions`, default 256 MiB). Nothing holds a whole asset: the pool keeps
 one seekable `PcmReader` per asset (`AudioSource::open_reader`; `SymphoniaSource` streams, `Pcm`
-stays resident), so memory is independent of the length of the media. Output equals the old
-whole-asset decode and resample bit for bit: the FFT resampler lets each block start one chunk
-early (pre-roll), and the sinc fallback used only for extreme rate ratios replays sequentially. Insert
+stays resident), so memory is independent of the length of the media. Block output equals a
+whole-asset decode and resample with the same rubato version bit for bit (the `tests/streaming.rs`
+oracle): the FFT resampler lets each block start one chunk early (pre-roll), and the sinc fallback
+used only for extreme rate ratios replays sequentially. Since rubato 5 (2.3.0) resampled output is
+not byte-identical to 2.2: the FFT window is computed in f64 (differences up to ~4e-7 per sample),
+and the sinc fallback now trims its true delay (2.2 cut ~3 ms from the start of such assets). Insert
 long assets with `pool.insert(id, &SymphoniaSource::open(..)?)`; do not call `decode_all` on them.
 The device callback only consumes the ring and updates the latency-corrected master
 clock; `Player::now()` is quantized to callbacks and freezes on underflow. Seek drops
@@ -264,7 +267,7 @@ the old stream/ring and joins its worker before starting a new session.
 Linux builds need `libasound2-dev` (CI installs it). Normal tests need no device.
 The ignored device test can be run explicitly; `cargo run -p animathio-audio
 --example play` emits a 0.01-amplitude tone for at most 3 seconds and prints clock
-drift. Apply the same resource limits to these cargo invocations. Symphonia 0.5
+drift. Apply the same resource limits to these cargo invocations. Symphonia 0.6
 supports WAV/PCM, MP3, FLAC, AAC-LC/M4A and Vorbis; Opus (Ogg, Matroska/WebM, MP4) is decoded by
 the pure-Rust `filmcraft-opus` crate (MIT/Apache, no system libraries) behind Symphonia's
 demuxers; the pre-skip is removed, Matroska/MP4 keep up to one packet of trailing padding. Opening a

@@ -11,7 +11,7 @@
 use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{Input, InputEvent, InputState, StepAction, Textarea, TextareaState};
 use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_component::slider::{Slider, SliderEvent, SliderState};
+use gpui_component::slider::{SliderEvent, SliderState};
 use gpui_component::switch::Switch;
 use gpui_component::{Disableable, IndexPath, Sizable};
 
@@ -1025,7 +1025,7 @@ impl Editor {
         div()
             .h(px(14.))
             .w_full()
-            .child(Slider::new(&state).horizontal())
+            .child(tool_panel::slider(&state, &self.focus_handle))
     }
 
     pub(super) fn move_number_scrub(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {

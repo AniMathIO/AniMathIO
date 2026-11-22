@@ -15,8 +15,9 @@ use animathio_audio::{
     SymphoniaSource, Waveform,
 };
 use animathio_core::*;
+use rubato::audioadapter_buffers::direct::SequentialSliceOfVecs;
 use rubato::{
-    FftFixedInOut, Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters,
+    Async, Fft, FixedAsync, FixedSync, Resampler, SincInterpolationParameters,
     SincInterpolationType, WindowFunction,
 };
 use std::{
@@ -77,25 +78,26 @@ fn noise(rate: u32, channels: u16, frames: usize) -> Pcm {
 // ---------------------------------------------------------------------------------------------
 // Reference: the previous whole-asset implementation, ported verbatim.
 // ---------------------------------------------------------------------------------------------
-enum LegacyResampler {
-    Fft(FftFixedInOut<f32>),
-    SincIn(SincFixedIn<f32>),
-    SincOut(SincFixedOut<f32>),
+/// Reference resampler behind rubato's object-safe trait.
+struct LegacyResampler {
+    inner: Box<dyn Resampler<f32>>,
 }
 impl LegacyResampler {
     fn input_frames_next(&self) -> usize {
-        match self {
-            Self::Fft(r) => r.input_frames_next(),
-            Self::SincIn(r) => r.input_frames_next(),
-            Self::SincOut(r) => r.input_frames_next(),
-        }
+        self.inner.input_frames_next()
     }
     fn process(&mut self, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
-        match self {
-            Self::Fft(r) => r.process(input, None).unwrap(),
-            Self::SincIn(r) => r.process(input, None).unwrap(),
-            Self::SincOut(r) => r.process(input, None).unwrap(),
-        }
+        let channels = input.len();
+        let in_frames = input.first().map_or(0, Vec::len);
+        let out_frames = self.inner.output_frames_next();
+        let mut output = vec![vec![0.0_f32; out_frames]; channels];
+        let input_view = SequentialSliceOfVecs::new(input, channels, in_frames).unwrap();
+        let mut output_view =
+            SequentialSliceOfVecs::new_mut(&mut output, channels, out_frames).unwrap();
+        self.inner
+            .process_into_buffer(&input_view, &mut output_view, None)
+            .unwrap();
+        output
     }
 }
 fn legacy_resampler(
@@ -114,45 +116,50 @@ fn legacy_resampler(
     let fft_out = fft_chunks * (output_rate / a) as usize;
     let params = SincInterpolationParameters {
         sinc_len: 256,
-        f_cutoff: 0.95,
+        f_cutoff: Some(0.95),
         oversampling_factor: 256,
         interpolation: SincInterpolationType::Linear,
         window: WindowFunction::BlackmanHarris2,
     };
-    if fft_in <= 16_384 && fft_out <= 16_384 {
-        let r = FftFixedInOut::<f32>::new(
-            input_rate as usize,
-            output_rate as usize,
-            chunk_in,
-            channels,
+    let inner: Box<dyn Resampler<f32>> = if fft_in <= 16_384 && fft_out <= 16_384 {
+        Box::new(
+            Fft::<f32>::new(
+                input_rate as usize,
+                output_rate as usize,
+                chunk_in,
+                channels,
+                FixedSync::Both,
+            )
+            .unwrap(),
         )
-        .unwrap();
-        let delay = r.output_delay();
-        (LegacyResampler::Fft(r), delay)
     } else if output_rate < input_rate {
         let chunk = 4096.max(input_rate.div_ceil(output_rate) as usize + 257);
-        let r = SincFixedIn::<f32>::new(
-            f64::from(output_rate) / f64::from(input_rate),
-            1.0,
-            params,
-            chunk,
-            channels,
+        Box::new(
+            Async::<f32>::new_sinc(
+                f64::from(output_rate) / f64::from(input_rate),
+                1.0,
+                &params,
+                chunk,
+                channels,
+                FixedAsync::Input,
+            )
+            .unwrap(),
         )
-        .unwrap();
-        let delay = r.output_delay();
-        (LegacyResampler::SincIn(r), delay)
     } else {
-        let r = SincFixedOut::<f32>::new(
-            f64::from(output_rate) / f64::from(input_rate),
-            1.0,
-            params,
-            4096,
-            channels,
+        Box::new(
+            Async::<f32>::new_sinc(
+                f64::from(output_rate) / f64::from(input_rate),
+                1.0,
+                &params,
+                4096,
+                channels,
+                FixedAsync::Output,
+            )
+            .unwrap(),
         )
-        .unwrap();
-        let delay = r.output_delay();
-        (LegacyResampler::SincOut(r), delay)
-    }
+    };
+    let delay = inner.output_delay();
+    (LegacyResampler { inner }, delay)
 }
 /// Interleaved output of resampling the whole asset front to back (equal layouts, mono
 /// duplication and the stereo mean only, which is all the old code supported for these cases).
@@ -212,58 +219,59 @@ fn legacy_prepare(pcm: &Pcm, rate: u32, channels: u16) -> Vec<f32> {
 /// The previous eager Symphonia decode loop (gapless on, default audio track).
 fn legacy_decode(bytes: &[u8]) -> (u32, u16, Vec<f32>) {
     use symphonia::core::{
-        audio::SampleBuffer,
-        codecs::DecoderOptions,
+        codecs::{CodecParameters, audio::AudioDecoderOptions},
         errors::Error as E,
-        formats::FormatOptions,
+        formats::{FormatOptions, TrackType, probe::Hint},
         io::{MediaSourceStream, MediaSourceStreamOptions},
         meta::MetadataOptions,
-        probe::Hint,
     };
     let stream = MediaSourceStream::new(
         Box::new(std::io::Cursor::new(bytes.to_vec())),
         MediaSourceStreamOptions::default(),
     );
     let mut format = symphonia::default::get_probe()
-        .format(
-            &Hint::new(),
+        .probe(
+            &Hint::default(),
             stream,
-            &FormatOptions {
-                enable_gapless: true,
-                ..FormatOptions::default()
-            },
-            &MetadataOptions::default(),
+            FormatOptions::default(),
+            MetadataOptions::default(),
         )
-        .unwrap()
-        .format;
+        .unwrap();
     let track = format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.sample_rate.is_some())
-        .or_else(|| format.default_track())
+        .find(|t| {
+            matches!(&t.codec_params,
+                Some(CodecParameters::Audio(p)) if p.sample_rate.is_some())
+        })
+        .or_else(|| format.default_track(TrackType::Audio))
         .unwrap();
     let id = track.id;
+    let Some(CodecParameters::Audio(params)) = &track.codec_params else {
+        panic!("not an audio track");
+    };
     let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+        .make_audio_decoder(params, &AudioDecoderOptions::default())
         .unwrap();
     let (mut samples, mut spec) = (Vec::new(), None);
+    let mut chunk = Vec::new();
     loop {
         let packet = match format.next_packet() {
-            Ok(p) => p,
+            Ok(Some(p)) => p,
+            Ok(None) => break,
             Err(E::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => panic!("{e}"),
         };
-        if packet.track_id() != id {
+        if packet.track_id != id {
             continue;
         }
         let audio = decoder.decode(&packet).unwrap();
-        spec = Some(*audio.spec());
-        let mut buffer = SampleBuffer::<f32>::new(audio.capacity() as u64, *audio.spec());
-        buffer.copy_interleaved_ref(audio);
-        samples.extend_from_slice(buffer.samples());
+        spec = Some((audio.spec().rate(), audio.spec().channels().count()));
+        audio.copy_to_vec_interleaved::<f32>(&mut chunk);
+        samples.extend_from_slice(&chunk);
     }
-    let spec = spec.unwrap();
-    (spec.rate, spec.channels.count() as u16, samples)
+    let (rate, channels) = spec.unwrap();
+    (rate, channels as u16, samples)
 }
 
 fn lcg(state: &mut u64) -> u64 {
@@ -518,11 +526,12 @@ fn restarting_in_any_segment_reproduces_the_continuous_decode() {
 
 #[test]
 fn opus_decodes_in_ogg_matroska_and_mp4_with_pre_skip_removed() {
-    // `ffmpeg -c:a libopus`: 80 ms and 2.5 s (Ogg), 1 s (Matroska, MP4). The Ogg demuxer trims
-    // the end padding when the file has more than one audio page (the 80 ms file does not, so
-    // it keeps its 648 padding frames); Matroska/MP4 keep up to one packet of trailing padding.
+    // `ffmpeg -c:a libopus`: 80 ms and 2.5 s (Ogg), 1 s (Matroska, MP4). Symphonia's Ogg demuxer
+    // trims the end padding exactly (the 80 ms file decodes to its 3840 frames; Symphonia 0.5
+    // left the 648 padding frames of a single-page file in); Matroska/MP4 keep up to one packet
+    // of trailing padding.
     for (name, expected, channels) in [
-        ("tone.opus", 4488, 1),
+        ("tone.opus", 3840, 1),
         ("long.opus", 120_000, 2),
         ("opus_stereo.mka", 48_648, 2),
         ("opus_stereo.mp4", 48_648, 2),

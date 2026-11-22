@@ -899,7 +899,8 @@ vars) default to none.
 
 A complete clip-source plugin — a filled circle with a keyframeable radius and a
 colour, plus one host log line. This example is built and verified (compiles for
-`wasm32-wasip2`, ~108 KiB `.wasm`, packages as a valid `.amplugin`).
+`wasm32-wasip2`, ~117 KiB `.wasm`, packages as a valid `.amplugin`). Building it needs
+Rust 1.85 or newer, because wit-bindgen 0.63 uses the 2024 edition.
 
 **`plugins/examples/hello/Cargo.toml`**
 
@@ -914,7 +915,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = "0.40.0"
+wit-bindgen = "0.63.0"
 
 [workspace]
 ```

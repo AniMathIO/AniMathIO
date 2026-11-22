@@ -20,10 +20,12 @@ zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 proptest = "1"
 # GPUI Kit's GPUI distribution (lib name `gpui`); the editor uses gpui-component
 # widgets on top of it. Version is pinned to the exact `gpui-pre` release that
-# gpui-component 0.9.x requires, so the widget kit and the app share one GPUI.
+# gpui-component 0.10.x requires, so the widget kit and the app share one GPUI.
 gpui = { package = "gpui-pre", version = "=0.3.12" }
-gpui-component = "0.9.1"
-gpui-kit-assets = "0.9.1"
+gpui-component = "0.10.0"
+# Not re-exported by gpui-component: the editor forces its layout direction (see `style::init_components`).
+gpui-base = "0.10"
+gpui-kit-assets = "0.10.0"
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "wayland", "x11", "runtime_shaders"] }
 rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 

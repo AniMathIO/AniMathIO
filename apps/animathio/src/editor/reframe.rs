@@ -224,6 +224,7 @@ impl Editor {
                 tool_panel::slider_row(
                     "Tracking smoothness",
                     &panel.slider,
+                    &self.focus_handle,
                     format!("{:.0}%", panel.params.smoothness * 100.),
                 )
                 .into_any_element(),
