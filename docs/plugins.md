@@ -1235,8 +1235,8 @@ still declares the older minor and keeps loading on a 1.2 host. LaTeX selects
 `colored-source-plugin` and text `text-layout-source-plugin`; other source plugins retain
 `source-plugin`. Plugin versions: animations 1.2.0, audio-basic 1.2.0, effects-basic 1.1.0
 (the clipped slide), graph 1.4.0, import-manim 1.0.0, latex 1.3.0 (per-path inline color,
-normalized sizing, strict validation and preserved glyph holes), shapes 1.1.0, text 1.4.0
-(per-character slide, weighted and Inter text), trap 1.0.0 and the example 1.0.0. The frozen 1.0
+normalized sizing, strict validation and preserved glyph holes), shapes 1.1.0, text 1.4.1
+(per-character slide, weighted and Inter text, word highlight that keeps the spaces), trap 1.0.0 and the example 1.0.0. The frozen 1.0
 fixture and the explicit 0.2.x adapter retain older binaries; 0.1 packages are rejected.
 `plugins/examples/hello` demonstrates a canvas-coordinate scene. Install the WASI
 target and use `scripts/build-plugins.sh` to package all first-party components.
