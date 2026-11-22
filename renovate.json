@@ -50,6 +50,13 @@
       "groupName": "GPUI stack",
       "automerge": false,
       "labels": ["needs-human"]
+    },
+    {
+      "description": "wasmtime crates pin each other exactly (wasmtime-environ, wiggle): patch and minor bumps must move together.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["wasmtime", "wasmtime-*", "wiggle", "wiggle-*"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "wasmtime"
     }
   ]
 }
