@@ -15,8 +15,9 @@ use animathio_audio::{
     SymphoniaSource, Waveform,
 };
 use animathio_core::*;
+use rubato::audioadapter_buffers::direct::SequentialSliceOfVecs;
 use rubato::{
-    FftFixedInOut, Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters,
+    Async, Fft, FixedAsync, FixedSync, Resampler, SincInterpolationParameters,
     SincInterpolationType, WindowFunction,
 };
 use std::{
@@ -77,25 +78,26 @@ fn noise(rate: u32, channels: u16, frames: usize) -> Pcm {
 // ---------------------------------------------------------------------------------------------
 // Reference: the previous whole-asset implementation, ported verbatim.
 // ---------------------------------------------------------------------------------------------
-enum LegacyResampler {
-    Fft(FftFixedInOut<f32>),
-    SincIn(SincFixedIn<f32>),
-    SincOut(SincFixedOut<f32>),
+/// Reference resampler behind rubato's object-safe trait.
+struct LegacyResampler {
+    inner: Box<dyn Resampler<f32>>,
 }
 impl LegacyResampler {
     fn input_frames_next(&self) -> usize {
-        match self {
-            Self::Fft(r) => r.input_frames_next(),
-            Self::SincIn(r) => r.input_frames_next(),
-            Self::SincOut(r) => r.input_frames_next(),
-        }
+        self.inner.input_frames_next()
     }
     fn process(&mut self, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
-        match self {
-            Self::Fft(r) => r.process(input, None).unwrap(),
-            Self::SincIn(r) => r.process(input, None).unwrap(),
-            Self::SincOut(r) => r.process(input, None).unwrap(),
-        }
+        let channels = input.len();
+        let in_frames = input.first().map_or(0, Vec::len);
+        let out_frames = self.inner.output_frames_next();
+        let mut output = vec![vec![0.0_f32; out_frames]; channels];
+        let input_view = SequentialSliceOfVecs::new(input, channels, in_frames).unwrap();
+        let mut output_view =
+            SequentialSliceOfVecs::new_mut(&mut output, channels, out_frames).unwrap();
+        self.inner
+            .process_into_buffer(&input_view, &mut output_view, None)
+            .unwrap();
+        output
     }
 }
 fn legacy_resampler(
@@ -114,45 +116,50 @@ fn legacy_resampler(
     let fft_out = fft_chunks * (output_rate / a) as usize;
     let params = SincInterpolationParameters {
         sinc_len: 256,
-        f_cutoff: 0.95,
+        f_cutoff: Some(0.95),
         oversampling_factor: 256,
         interpolation: SincInterpolationType::Linear,
         window: WindowFunction::BlackmanHarris2,
     };
-    if fft_in <= 16_384 && fft_out <= 16_384 {
-        let r = FftFixedInOut::<f32>::new(
-            input_rate as usize,
-            output_rate as usize,
-            chunk_in,
-            channels,
+    let inner: Box<dyn Resampler<f32>> = if fft_in <= 16_384 && fft_out <= 16_384 {
+        Box::new(
+            Fft::<f32>::new(
+                input_rate as usize,
+                output_rate as usize,
+                chunk_in,
+                channels,
+                FixedSync::Both,
+            )
+            .unwrap(),
         )
-        .unwrap();
-        let delay = r.output_delay();
-        (LegacyResampler::Fft(r), delay)
     } else if output_rate < input_rate {
         let chunk = 4096.max(input_rate.div_ceil(output_rate) as usize + 257);
-        let r = SincFixedIn::<f32>::new(
-            f64::from(output_rate) / f64::from(input_rate),
-            1.0,
-            params,
-            chunk,
-            channels,
+        Box::new(
+            Async::<f32>::new_sinc(
+                f64::from(output_rate) / f64::from(input_rate),
+                1.0,
+                &params,
+                chunk,
+                channels,
+                FixedAsync::Input,
+            )
+            .unwrap(),
         )
-        .unwrap();
-        let delay = r.output_delay();
-        (LegacyResampler::SincIn(r), delay)
     } else {
-        let r = SincFixedOut::<f32>::new(
-            f64::from(output_rate) / f64::from(input_rate),
-            1.0,
-            params,
-            4096,
-            channels,
+        Box::new(
+            Async::<f32>::new_sinc(
+                f64::from(output_rate) / f64::from(input_rate),
+                1.0,
+                &params,
+                4096,
+                channels,
+                FixedAsync::Output,
+            )
+            .unwrap(),
         )
-        .unwrap();
-        let delay = r.output_delay();
-        (LegacyResampler::SincOut(r), delay)
-    }
+    };
+    let delay = inner.output_delay();
+    (LegacyResampler { inner }, delay)
 }
 /// Interleaved output of resampling the whole asset front to back (equal layouts, mono
 /// duplication and the stereo mean only, which is all the old code supported for these cases).

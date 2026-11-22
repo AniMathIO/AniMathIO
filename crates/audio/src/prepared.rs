@@ -7,10 +7,10 @@
 //! The blocks are bit-identical to what resampling the whole asset front to back produces:
 //!
 //! * Equal rates need no resampling, so a block is a straight copy of native frames.
-//! * The FFT resampler (`FftFixedInOut`) lets output chunk `k` depend only on input chunks `k`
-//!   and `k - 1` (overlap-add of one chunk). A block therefore starts a fresh resampler one
-//!   chunk early and discards that chunk's output, which reproduces the sequential result
-//!   exactly while allowing a seek anywhere.
+//! * The FFT resampler (`Fft` with `FixedSync::Both`) lets output chunk `k` depend only on
+//!   input chunks `k` and `k - 1` (overlap-add of one chunk). A block therefore starts a fresh
+//!   resampler one chunk early and discards that chunk's output, which reproduces the
+//!   sequential result exactly while allowing a seek anywhere.
 //! * The windowed-sinc fallback (extreme rate ratios only) carries a fractional phase from the
 //!   start of the stream, so it runs sequentially and replays from the start on a backward
 //!   seek. It is correct and bounded in memory but a backward seek costs a full pass.
@@ -25,8 +25,9 @@ use crate::{
     layout::ChannelMatrix,
     source::{MAX_INTERLEAVED_SAMPLES, MAX_SAMPLE_RATE},
 };
+use rubato::audioadapter_buffers::direct::SequentialSliceOfVecs;
 use rubato::{
-    FftFixedInOut, Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters,
+    Async, Fft, FixedAsync, FixedSync, Resampler, SincInterpolationParameters,
     SincInterpolationType, WindowFunction,
 };
 use std::{
@@ -329,9 +330,16 @@ impl PreparedSource {
         chunks_per_block: usize,
     ) -> Result<Block, Error> {
         let channels = usize::from(self.asset.info.channels);
-        let mut resampler =
-            FftFixedInOut::<f32>::new(in_rate as usize, out_rate as usize, chunk_in, channels)
-                .map_err(|e| Error::Decode(e.to_string()))?;
+        let mut resampler = PreparedResampler::Fft(Box::new(
+            Fft::<f32>::new(
+                in_rate as usize,
+                out_rate as usize,
+                chunk_in,
+                channels,
+                FixedSync::Both,
+            )
+            .map_err(|e| Error::Decode(e.to_string()))?,
+        ));
         let first_chunk = index * chunks_per_block;
         let warm = usize::from(first_chunk > 0);
         let start_chunk = first_chunk - warm;
@@ -351,9 +359,7 @@ impl PreparedSource {
                     *slot = native[(chunk * chunk_in + n) * channels + channel];
                 }
             }
-            let output = resampler
-                .process(&input, None)
-                .map_err(|e| Error::Decode(e.to_string()))?;
+            let output = resampler.process(&input)?;
             if chunk >= warm {
                 for (plane, data) in raw.iter_mut().zip(output) {
                     plane.extend(data);
@@ -387,7 +393,7 @@ impl PreparedSource {
         let channels = usize::from(self.asset.info.channels);
         loop {
             while seq.pending[0].len() < self.block_frames {
-                let chunk = seq.resampler.input_frames_next();
+                let chunk = seq.resampler.inner().input_frames_next();
                 let input = seq.take_input(&self.asset, chunk, channels)?;
                 let output = seq.resampler.process(&input)?;
                 for (plane, data) in seq.pending.iter_mut().zip(output) {
@@ -493,30 +499,30 @@ impl Cursor<'_> {
 }
 
 enum PreparedResampler {
-    Fft(FftFixedInOut<f32>),
-    SincIn(SincFixedIn<f32>),
-    SincOut(SincFixedOut<f32>),
+    Fft(Box<Fft<f32>>),
+    Sinc(Async<f32>),
 }
 impl PreparedResampler {
-    fn input_frames_next(&self) -> usize {
+    /// The wrapped resampler behind rubato's object-safe trait.
+    fn inner(&mut self) -> &mut dyn Resampler<f32> {
         match self {
-            Self::Fft(resampler) => resampler.input_frames_next(),
-            Self::SincIn(resampler) => resampler.input_frames_next(),
-            Self::SincOut(resampler) => resampler.input_frames_next(),
+            Self::Fft(resampler) => resampler.as_mut(),
+            Self::Sinc(resampler) => resampler,
         }
     }
     fn process(&mut self, input: &[Vec<f32>]) -> Result<Vec<Vec<f32>>, Error> {
-        match self {
-            Self::Fft(resampler) => resampler
-                .process(input, None)
-                .map_err(|e| Error::Decode(e.to_string())),
-            Self::SincIn(resampler) => resampler
-                .process(input, None)
-                .map_err(|e| Error::Decode(e.to_string())),
-            Self::SincOut(resampler) => resampler
-                .process(input, None)
-                .map_err(|e| Error::Decode(e.to_string())),
-        }
+        let channels = input.len();
+        let in_frames = input.first().map_or(0, Vec::len);
+        let out_frames = self.inner().output_frames_next();
+        let mut output = vec![vec![0.0_f32; out_frames]; channels];
+        let input_view = SequentialSliceOfVecs::new(input, channels, in_frames)
+            .map_err(|e| Error::Decode(e.to_string()))?;
+        let mut output_view = SequentialSliceOfVecs::new_mut(&mut output, channels, out_frames)
+            .map_err(|e| Error::Decode(e.to_string()))?;
+        self.inner()
+            .process_into_buffer(&input_view, &mut output_view, None)
+            .map_err(|e| Error::Decode(e.to_string()))?;
+        Ok(output)
     }
 }
 
@@ -537,15 +543,16 @@ fn build_resampler(
     let fft_in = fft_chunks * period;
     let fft_out = fft_chunks * (output_rate / gcd) as usize;
     if fft_in <= MAX_FFT_FRAMES && fft_out <= MAX_FFT_FRAMES {
-        let resampler = FftFixedInOut::<f32>::new(
+        let resampler = Fft::<f32>::new(
             input_rate as usize,
             output_rate as usize,
             chunk_in,
             channels,
+            FixedSync::Both,
         )
         .map_err(|e| Error::Decode(e.to_string()))?;
         let delay = resampler.output_delay();
-        Ok((PreparedResampler::Fft(resampler), delay))
+        Ok((PreparedResampler::Fft(Box::new(resampler)), delay))
     } else if output_rate < input_rate {
         let min_chunk = input_rate.div_ceil(output_rate) as usize + SINC_LEN + 1;
         let chunk = SINC_CHUNK_FRAMES.max(min_chunk);
@@ -554,34 +561,36 @@ fn build_resampler(
                 "sample-rate ratio too extreme for resampling".into(),
             ));
         }
-        let resampler = SincFixedIn::<f32>::new(
+        let resampler = Async::<f32>::new_sinc(
             f64::from(output_rate) / f64::from(input_rate),
             1.0,
-            sinc_params(),
+            &sinc_params(),
             chunk,
             channels,
+            FixedAsync::Input,
         )
         .map_err(|e| Error::Decode(e.to_string()))?;
         let delay = resampler.output_delay();
-        Ok((PreparedResampler::SincIn(resampler), delay))
+        Ok((PreparedResampler::Sinc(resampler), delay))
     } else {
-        let resampler = SincFixedOut::<f32>::new(
+        let resampler = Async::<f32>::new_sinc(
             f64::from(output_rate) / f64::from(input_rate),
             1.0,
-            sinc_params(),
+            &sinc_params(),
             SINC_CHUNK_FRAMES,
             channels,
+            FixedAsync::Output,
         )
         .map_err(|e| Error::Decode(e.to_string()))?;
         let delay = resampler.output_delay();
-        Ok((PreparedResampler::SincOut(resampler), delay))
+        Ok((PreparedResampler::Sinc(resampler), delay))
     }
 }
 
 fn sinc_params() -> SincInterpolationParameters {
     SincInterpolationParameters {
         sinc_len: SINC_LEN,
-        f_cutoff: 0.95,
+        f_cutoff: Some(0.95),
         oversampling_factor: 256,
         interpolation: SincInterpolationType::Linear,
         window: WindowFunction::BlackmanHarris2,
