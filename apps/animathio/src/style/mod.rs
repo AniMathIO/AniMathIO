@@ -74,6 +74,16 @@ impl gpui::AssetSource for Assets {
     }
 }
 
+/// Initialise gpui-component and pin the layout direction to left-to-right.
+///
+/// gpui-component 0.10 mirrors its widgets on right-to-left system locales (ar, he, fa, ur), but
+/// the timeline, inspector and the rest of the editor are not mirrored, so the two would
+/// disagree. Setting the direction after `init` overrides whatever the locale chose.
+pub fn init_components(cx: &mut gpui::App) {
+    gpui_component::init(cx);
+    gpui_base::LayoutDirection::Ltr.set_global(cx);
+}
+
 /// Install the palette, bundled fonts and scaled base size before creating widgets.
 pub fn install_theme(cx: &mut gpui::App, compact: bool, reduce_motion: bool) {
     use gpui::px;
@@ -389,5 +399,27 @@ mod theme_tests {
         assert_eq!(colors.primary_active, hex(color::ACCENT_PRESSED));
         assert_eq!(colors.progress_bar, hex(color::ACCENT));
         assert_eq!(colors.info, hex(color::ACCENT));
+    }
+
+    #[test]
+    fn rtl_system_locales_would_mirror_components() {
+        // The premise of `init_components`: these locales pick right-to-left.
+        for locale in ["ar", "he-IL", "fa", "ur-PK"] {
+            assert!(
+                gpui_base::LayoutDirection::from_locale(locale).is_rtl(),
+                "{locale}"
+            );
+        }
+        assert!(!gpui_base::LayoutDirection::from_locale("en-US").is_rtl());
+    }
+
+    #[gpui::test]
+    fn components_init_forces_left_to_right(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            // A right-to-left locale already chose a direction before init.
+            gpui_base::LayoutDirection::Rtl.set_global(cx);
+            super::init_components(cx);
+            assert!(!gpui_base::LayoutDirection::global(cx).is_rtl());
+        });
     }
 }

@@ -329,7 +329,7 @@ impl Editor {
             .zip(&review.sliders)
             .zip(values)
             .map(|((label, state), value)| {
-                tool_panel::slider_row(label, state, value).into_any_element()
+                tool_panel::slider_row(label, state, &self.focus_handle, value).into_any_element()
             })
             .collect();
 

@@ -116,7 +116,7 @@ impl Ui {
         window_size: Option<gpui::Size<gpui::Pixels>>,
     ) -> Self {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            crate::style::init_components(cx);
             crate::style::install_theme(cx, true, true);
             actions::init(cx);
         });
