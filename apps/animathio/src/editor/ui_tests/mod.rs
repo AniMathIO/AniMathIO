@@ -28,6 +28,15 @@ use std::sync::OnceLock;
 use gpui::{Action, TestAppContext, VisualTestContext};
 
 use super::*;
+
+/// Serializes the scenarios that save `preferences.json`. Preferences resolve their file through
+/// the process-wide config directory, so two such scenarios running in parallel would read each
+/// other's writes.
+pub(super) fn preferences_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 use crate::editor_env::{PluginSource, built_plugins_dir};
 
 mod fixtures;

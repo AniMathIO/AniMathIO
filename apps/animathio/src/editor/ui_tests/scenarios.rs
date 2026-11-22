@@ -337,6 +337,7 @@ fn export_dialog_still_queues_other_paths_while_a_project_is_open(cx: &mut TestA
 
 #[gpui::test]
 fn preferences_enter_saves_and_invalid_input_keeps_the_dialog_open(cx: &mut TestAppContext) {
+    let _preferences = super::preferences_lock();
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
     let original = ui.read(|editor| editor.preferences.clone());
@@ -3578,6 +3579,7 @@ fn dropping_the_assist_panel_cancels_the_request(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn preferences_save_and_every_group_fit_at_720p(cx: &mut TestAppContext) {
+    let _preferences = super::preferences_lock();
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
     ui.cx
