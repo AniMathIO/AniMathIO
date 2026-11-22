@@ -393,6 +393,30 @@ fn graph_golden_frame() {
 }
 
 #[test]
+fn graph_tick_labels_sit_clear_of_the_axes_golden() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut host = PluginHost::new(tmp.path()).unwrap();
+    let graph = load_plugin(&mut host, "graph");
+
+    // Tick labels sit centred below the x axis and right-aligned left of the
+    // y axis with a font-scaled gap; negative ticks are exactly where the old
+    // on-axis placement merged the minus signs into the axis line.
+    let scene = host
+        .render_clip(
+            &graph,
+            &BTreeMap::new(),
+            &json!({
+                "items": "plot y=x^2/2-1",
+                "show_labels": true,
+            }),
+            0,
+            (640, 360),
+        )
+        .unwrap();
+    golden_vector(scene, "graph-tick-labels");
+}
+
+#[test]
 fn graph_styles_survive_the_component_boundary() {
     use animathio_core::{Color, VectorElement};
 
