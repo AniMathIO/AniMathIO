@@ -543,7 +543,7 @@ impl Editor {
                 SegmentedOption::new("beats-scope-clip", "Selected clip", None).unavailable(
                     self.selected
                         .is_none()
-                        .then_some("Select a clip to analyse only that clip"),
+                        .then_some("Select a clip to analyze only that clip"),
                 ),
             ],
             &panel.scope_focus,
@@ -621,7 +621,7 @@ impl Editor {
                 .into_any_element(),
         ];
         if panel.busy {
-            beats.push(tool_panel::note("Analysing audio…").into_any_element());
+            beats.push(tool_panel::note("Analyzing audio…").into_any_element());
         }
         if let Some(error) = &panel.error {
             beats.push(tool_panel::problem(error.clone()).into_any_element());

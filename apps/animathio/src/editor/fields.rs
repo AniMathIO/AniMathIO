@@ -501,7 +501,7 @@ fn sentence_case(value: &str) -> String {
 pub(super) fn display_label(plugin_id: &str, param: &str, value: &str) -> String {
     const MAP: &[(&str, &str, &str, &str)] = &[
         ("*", "*", "off", "Off"),
-        ("*", "*", "normalized", "Normalised"),
+        ("*", "*", "normalized", "Normalized"),
         ("*", "*", "percent", "Percent"),
         ("*", "*", "pixels", "Pixels"),
         ("*", "*", "uniform", "Uniform"),
@@ -597,6 +597,14 @@ fn segmented_fits(plugin_id: &str, param: &str, options: &[String]) -> bool {
 /// as named choices: 100-900 in whole hundreds (docs/design.md, no raw values).
 fn is_font_weight_param(plugin_id: &str, name: &str, min: f64, max: f64) -> bool {
     plugin_id == "org.animathio.text" && name == "font_weight" && min <= 100. && max >= 900.
+}
+
+/// The text plugin's per-character slide directions, stored as 1 to 4.
+const SLIDE_DIRECTIONS: [(f64, &str); 4] =
+    [(1., "Left"), (2., "Right"), (3., "Top"), (4., "Bottom")];
+
+fn is_slide_direction_param(plugin_id: &str, name: &str) -> bool {
+    plugin_id == "org.animathio.text" && name == "char_slide_direction"
 }
 
 /// Whether a plugin parameter is caption-only and the clip's captions are off:
@@ -2390,6 +2398,15 @@ impl Editor {
                 // a bare number (docs/design.md: no raw identifiers as text).
                 if is_font_weight_param(plugin_id, &name, *min, *max) {
                     self.weight_control(id, &name, value, window, cx)
+                } else if is_slide_direction_param(plugin_id, &name) {
+                    self.named_number_control(
+                        id,
+                        &name,
+                        value.round().clamp(1., 4.),
+                        &SLIDE_DIRECTIONS,
+                        window,
+                        cx,
+                    )
                 } else {
                     label = Self::scrub_label_full(
                         &format!("c{}:pn:{name}", id.0),
@@ -2529,15 +2546,28 @@ impl Editor {
             (900., "Black"),
         ];
         // A weight between two steps (a variable-font value) shows the nearest name.
-        let value = nearest_weight(value);
-        let key = format!("c{}:weight:{name}", id.0);
+        self.named_number_control(id, name, nearest_weight(value), &WEIGHTS, window, cx)
+    }
+
+    /// A numeric plugin parameter whose whole-number values have names, as a select
+    /// (docs/design.md: no raw numbers where the value is a choice).
+    fn named_number_control(
+        &mut self,
+        id: ClipId,
+        name: &str,
+        value: f64,
+        options: &[(f64, &str)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let key = format!("c{}:named:{name}", id.0);
         if !self.fields.enums.contains_key(&key) {
-            let selected = WEIGHTS
+            let selected = options
                 .iter()
                 .position(|(weight, _)| (*weight - value).abs() < f64::EPSILON)
                 .map(IndexPath::new);
             let items = SearchableVec::new(
-                WEIGHTS
+                options
                     .iter()
                     .map(|(weight, label)| EnumChoice {
                         value: format!("{weight:.0}"),
@@ -2567,7 +2597,7 @@ impl Editor {
                 },
             );
         }
-        let field = self.fields.enums.get(&key).expect("weight select inserted");
+        let field = self.fields.enums.get(&key).expect("named select inserted");
         let wanted = format!("{value:.0}");
         if field.state.read(cx).selected_value() != Some(&wanted) {
             field.state.update(cx, |state, cx| {

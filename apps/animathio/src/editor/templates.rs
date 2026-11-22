@@ -507,7 +507,7 @@ impl Editor {
                 style::dialog_width::MEDIUM,
                 IconName::LayoutTemplate,
                 "Save as template",
-                Some("Selected clips become labelled placeholders you can fill later."),
+                Some("Selected clips become labeled placeholders you can fill later."),
             )
             .child(
                 super::dialogs::form_body()

@@ -1017,7 +1017,7 @@ impl Editor {
                     &entry.id,
                     vec![
                         ("id", "Plugin id", entry.id.clone()),
-                        ("license", "Licence", entry.license.clone()),
+                        ("license", "License", entry.license.clone()),
                         ("abi", "ABI", entry.min_abi.clone()),
                     ],
                 ));

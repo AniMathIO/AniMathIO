@@ -83,7 +83,7 @@ impl Editor {
             cancel: cancel.clone(),
             progress: progress.clone(),
             busy: true,
-            message: "Analysing video…".into(),
+            message: "Analyzing video…".into(),
             scroll,
             sensitivity_focus,
             min_focus,
@@ -261,7 +261,7 @@ impl Editor {
                         .child(
                             style::secondary_button("scene-track", cx)
                                 .small()
-                                .label("Analyse all video on this track")
+                                .label("Analyze all video on this track")
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.start_scenes(params.clone(), cx);
                                 })),

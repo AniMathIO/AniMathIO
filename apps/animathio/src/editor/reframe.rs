@@ -117,7 +117,7 @@ impl Editor {
         }
         panel.params = params.clone();
         panel.busy = true;
-        panel.message = "Analysing video...".into();
+        panel.message = "Analyzing video...".into();
         panel.cancel = Arc::new(AtomicBool::new(false));
         panel.progress = Arc::new(AtomicU32::new(0));
         let cancel = panel.cancel.clone();

@@ -1093,7 +1093,7 @@ impl Editor {
                 style::dialog_width::MEDIUM,
                 IconName::Settings2,
                 "Project settings",
-                Some("Canvas size, frame rate and background colour of this project."),
+                Some("Canvas size, frame rate and background color of this project."),
             )
             .child(
                 form_body()
