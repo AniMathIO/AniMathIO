@@ -417,8 +417,8 @@ the markers as JSON with times in Nticks and seconds. `markers PROJECT add` take
 `--output` is given (existing separate outputs require `--overwrite`).
 `markers PROJECT chapters` writes the markers as a chapter list (`--format youtube`, `vtt` or
 `ffmetadata`; stdout unless `--output`), and `export --chapters FILE` writes the same list as
-a sidecar for the exported range (the MP4 muxer has no chapter atom; embed an `ffmetadata`
-sidecar with `ffmpeg -i out.mp4 -i out.ffmeta -map_metadata 1 -codec copy final.mp4`).
+a sidecar for the exported range. MP4 exports also embed the markers inside the exported
+range as a Nero `chpl` chapter list by default; `export --no-embed-chapters` leaves them out.
 Markers move with ripple edits and autocut; see
 [architecture](architecture.md#markers-and-beat-sync).
 

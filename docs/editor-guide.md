@@ -447,7 +447,8 @@ take as a WAV asset named "Recording N.wav" in the library and, with "Add to tim
 playhead" on, places an audio clip at the playhead on a free audio track (or a new one); both
 happen as one undo step. **Cancel** discards the take. The project changes only on Stop, and a
 take ends with the project it started in. If the microphone is missing, busy or blocked by
-your system's privacy settings, the card says so. Recording is off when `ANIMATHIO_AUDIO=none`.
+your system's privacy settings, the card says so. The macOS bundle declares
+`NSMicrophoneUsageDescription`, so macOS asks for microphone permission the first time you press Record. Recording is off when `ANIMATHIO_AUDIO=none`.
 
 ![The recorder mid-take, on a scripted tone](../docs/screenshots/editor-record-audio.png)
 
