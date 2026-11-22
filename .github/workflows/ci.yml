@@ -17,6 +17,19 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # The default 360-minute timeout once let a cache-miss Windows run sit for
+    # hours (see "Speech engine" steps below). Every step also carries its own
+    # tighter cap, so this job-level bound is only the last line of defence
+    # (sum of the step caps plus setup overhead stays under it).
+    timeout-minutes: 150
+    # Renovate rebases can push the same branch repeatedly while earlier runs
+    # are still going; each superseded run wasted a full runner and raced the
+    # rust-cache save ("another job may be creating this cache"), which is how
+    # the 2026-11-22 cache-miss cascade started. Cancel superseded runs, but
+    # never a run on main (a push there is already sequential).
+    concurrency:
+      group: ci-check-${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}
+      cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/main') }}
     env:
       CARGO_BUILD_JOBS: 3
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -156,6 +169,11 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         with:
           workspaces: .
+          # Save the target/ directory even when the job fails or is cancelled.
+          # Without this, a cancelled cold-cache run (a maintainer stopping a
+          # slow job) throws away ~1-2 h of compilation and the next run is
+          # cold again — the self-perpetuating 2026-11-22 cascade.
+          cache-on-failure: true
       - name: Build plugins
         if: steps.changes.outputs.docs_only != 'true'
         shell: bash
@@ -172,21 +190,35 @@ jobs:
       - name: Check formatting
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo fmt --all --check
+      # Step timeouts: healthy warm-cache runs need minutes (clippy ~2, tests
+      # ~7-14). A cold cache multiplies them ~4x (measured 2026-11-22: clippy
+      # 18 min, tests 55 min on windows-latest), so the caps sit above the
+      # measured cold-cache worst case and only catch true hangs.
       - name: Clippy
+        timeout-minutes: 25
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
+        timeout-minutes: 60
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo test --workspace --locked --no-fail-fast
       # The whisper.cpp speech engine (cargo feature `whisper`) needs cmake, a C++ toolchain and
       # libclang, so it is not part of the default workspace build. Build, lint and test it
       # here on both OSes; the model-backed test is #[ignore]d, CI never downloads a model.
+      # Warm-cache runs take seconds (12 s - 3 min measured), but the step is
+      # the last build-heavy step in the job, so on a cache miss it compiles
+      # hundreds of crates plus whisper.cpp and can run for 20-40+ min on the
+      # 2-core Windows runners (2026-11-22: two such steps were cancelled after
+      # 20 and 30 min, blocking their jobs for 2-4 h). Cap it far above the
+      # healthy time so a hang fails fast instead of holding the runner.
       - name: Speech engine (whisper feature)
+        timeout-minutes: 30
         if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         run: |
           cargo clippy -p animathio-transcribe -p animathio-cli --features animathio-transcribe/whisper,animathio-cli/whisper --all-targets --locked -- -D warnings
           cargo test -p animathio-transcribe --features whisper --locked
       - name: Speech engine (whisper feature, Windows)
+        timeout-minutes: 40
         if: runner.os == 'Windows' && steps.changes.outputs.docs_only != 'true'
         env:
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
