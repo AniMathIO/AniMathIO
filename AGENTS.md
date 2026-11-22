@@ -198,7 +198,7 @@ it through the curve target `effect:<plugin>:<effect>:<param>`, which `presets.r
 (preferably not bypassed; a bypassed one is re-enabled in the batch) or newly added (`Command::AddEffect`,
 same batch) effect instance. The effect declares in its manifest metadata (`effect.slide.identity`) when it
 is an identity, `EffectProcessor::is_identity` reads that, and the renderer then skips the instance and the
-layer path. Per-character slides live in the text plugin (1.4.0, ABI 1.3): the `char_slide*` parameters,
+layer path. Per-character slides live in the text plugin (1.4.x, ABI 1.3): the `char_slide*` parameters,
 keyframed by the `character-slide-*` presets, use exact glyph units (the `text-layout` host import for wrapped
 text, per-character `shape-text` for fitted/pixel text; weighted or `font = inter` text takes its units from the plugin's
 Inter shaper instead, so the typeface never changes while sliding), stagger by normalized position and are drawn as

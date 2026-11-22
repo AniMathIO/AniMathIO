@@ -815,7 +815,7 @@ impl Guest for TextPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "text".to_string(),
-            version: "1.4.0".to_string(),
+            version: "1.4.1".to_string(),
             description:
                 "Host-shaped text with size, colour, alignment, animated caption styles and per-character slides"
                     .to_string(),
@@ -2080,7 +2080,7 @@ mod weight_tests {
     #[test]
     fn weight_schema_keeps_regular_as_default() {
         let manifest = TextPlugin::describe();
-        assert_eq!(manifest.version, "1.4.0");
+        assert_eq!(manifest.version, "1.4.1");
         let param = manifest
             .params
             .iter()
