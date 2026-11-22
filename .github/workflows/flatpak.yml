@@ -17,8 +17,7 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Seed a writable flatpak system installation on the workspace filesystem
-        id: seed
+      - name: Seed a writable flatpak system installation outside the source tree
         run: |
           # flatpak-builder --install-deps-from=flathub updates the runtimes that
           # are preinstalled in the image's default system installation
@@ -31,31 +30,59 @@ jobs:
           # AWS runner fleet (runner image 20261116.88.1) while the Azure fleet
           # (20261116.202.1) updated the same runtimes fine.
           #
-          # Copy the installation onto the workspace filesystem (one writable
-          # filesystem shared with the .flatpak-builder state dir, repo/ and the
-          # build dir) so runtime updates are ordinary renames on a single
-          # filesystem. The image-baked runtime versions are preserved; flatpak
-          # only pulls deltas on top, as before.
+          # Copy the installation outside the checkout but on the same
+          # filesystem. Container jobs bind-mount the whole host work directory
+          # at /__w, so the checkout's parent (/__w/<owner>, i.e.
+          # $GITHUB_WORKSPACE/..) lies on the same writable, non-overlay
+          # filesystem as the .flatpak-builder state dir, repo/ and the build
+          # dir: runtime updates are ordinary renames there, and ostree keeps
+          # its same-device hardlinking between the installations. It must also
+          # stay out of the source tree: flatpak-builder copies a `dir` source
+          # wholesale and auto-skips only the build dir and its own state dir
+          # (builder_source_dir_get_skip), so an installation inside the
+          # checkout would be re-copied into the module build dir — gigabytes
+          # of avoidable disk and IO. /tmp (the container overlay) and
+          # /__w/_temp (a separate bind mount) are both disqualified by the
+          # same overlay/mount-boundary rename limits this fix works around.
           #
           # $GITHUB_WORKSPACE is the path inside the job container
-          # (/__w/<repo>/<repo>); the ${{ github.workspace }} expression would
-          # give the runner host path, which does not exist in the container.
-          dir="$GITHUB_WORKSPACE/.flatpak-system"
-          mkdir -p "$dir"
+          # (/__w/<owner>/<repo>); the github.workspace expression would give
+          # the runner host path, which does not exist in the container.
+          dir="$GITHUB_WORKSPACE/../.flatpak-system"
+          seeded=false
           if [ -d /var/lib/flatpak ]; then
-            cp -a --reflink=auto /var/lib/flatpak/. "$dir/"
+            # Never let a seeding failure abort the job (this step runs under
+            # `sh -e`): fall back to the image's default installation, exactly
+            # as before this change.
+            set +e
+            mkdir -p "$dir" && cp -a --reflink=auto /var/lib/flatpak/. "$dir/"
+            status=$?
+            if [ "$status" -eq 0 ]; then
+              FLATPAK_SYSTEM_DIR="$dir" flatpak list --system
+              status=$?
+            fi
+            set -e
+            if [ "$status" -eq 0 ]; then
+              seeded=true
+              echo "Seeded a writable flatpak system installation at $dir; the build below updates runtimes there."
+            else
+              echo "::warning::Seeding the flatpak system installation failed (exit status $status); continuing with the image's default installation, which keeps this run exposed to the intermittent EXDEV update failure."
+              rm -rf "$dir" || true
+            fi
           else
-            echo "::warning::/var/lib/flatpak not found in this image; $dir starts empty and the runtimes will be downloaded from flathub."
+            echo "::warning::/var/lib/flatpak not found in this image; continuing with flatpak's own default installation."
           fi
-          FLATPAK_SYSTEM_DIR="$dir" flatpak list --system
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          if [ "$seeded" = true ]; then
+            # Exported only on success. When seeding fails the variable stays
+            # unset for the flatpak-builder step: exporting it empty would not
+            # reliably mean "use the default installation" for every flatpak
+            # consumer, and an empty override installation is broken anyway —
+            # the pinned action only adds the flathub remote when a non-default
+            # repository-url is configured, so --install-deps-from=flathub
+            # depends on the remote coming from the seeded/default installation.
+            echo "FLATPAK_SYSTEM_DIR=$dir" >> "$GITHUB_ENV"
+          fi
       - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6
-        env:
-          # FLATPAK_SYSTEM_DIR is flatpak's documented override of the default
-          # system-wide installation ("If this is not set, /var/lib/flatpak is
-          # used"); every flatpak process in the build, including the dependency
-          # installs and the build sandbox, follows it.
-          FLATPAK_SYSTEM_DIR: ${{ steps.seed.outputs.dir }}
         with:
           bundle: AniMathIO.flatpak
           manifest-path: packaging/flatpak/com.animathio.AniMathIO.yml
