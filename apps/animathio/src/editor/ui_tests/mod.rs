@@ -89,6 +89,11 @@ pub(super) fn test_env() -> EditorEnv {
 fn private_env(name: &str) -> EditorEnv {
     let mut env = test_env();
     let dir = config_dir().join(name);
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => panic!("clear private config dir: {err}"),
+    }
     std::fs::create_dir_all(&dir).expect("private config dir");
     env.config_dir = Some(dir);
     env

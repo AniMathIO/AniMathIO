@@ -268,8 +268,10 @@ Stretch/1:1 in the inspector and any other choice of two to five short options.
 - A `BG` well, `ROW` high, `radius::CONTROL`, padding 0.5 step. Options share the width.
 - Active option: `ACCENT` subtle fill, `ACCENT` edge border, `TEXT`, weight 500. Inactive:
   `TEXT_SECONDARY`, `HOVER` fill on hover. The sliding pill animates in `BASE_MS`.
-- Labels are one word where possible. When labels do not fit, show icons only, with a
-  tooltip on each. Arrow keys, Home and End move between options and move keyboard focus with the selection; a click focuses the option. The focus ring is a constant 2 px edge (transparent at rest), so focusing never shifts the content. The caller owns one `FocusHandle` per option.
+- Labels are one word where possible. The Library can use icons with
+  tooltips in a narrow dock. The inspector Fit row uses compact caption labels
+  at the default width and switches to a Select when the four labels would crowd
+  the row. Arrow keys, Home and End move between options and move keyboard focus with the selection; a click focuses the option. The focus ring is a constant 2 px edge (transparent at rest), so focusing never shifts the content. The caller owns one `FocusHandle` per option.
 - An option that cannot be chosen right now (`SegmentedOption::unavailable(reason)`, for example "Selected clip" with nothing selected) is dimmed to `TEXT_DISABLED`, ignores clicks and keys and explains itself in a tooltip.
 - A heading under a tab strip never repeats the active tab's name.
 
@@ -297,6 +299,7 @@ v [icon] Transform                                    [reset]   ROW, HEADING
   cannot be keyframed, so labels align), the label (`LABEL`, `TEXT_SECONDARY`, fixed 40%
   of the width, truncates; every label has a tooltip with the full text, and long plugin
   labels are shortened for the column, never cut mid-word) and the control (fills the rest).
+  The Fit row uses a narrower label column to give its four options more room.
   Captions, switches and button rows that belong to a section start in the label column.
 - The list ends 14 px short of the right edge: that lane belongs to the overlay scrollbar,
   so no field or divider runs under the thumb.

@@ -29,8 +29,10 @@ const FIELD_W: f32 = 4.5;
 /// fields more, since its labels (Position, Scale, Size) are short.
 const LABEL_FRACTION: f32 = 0.4;
 const PAIR_LABEL_FRACTION: f32 = 0.3;
-/// Inspector width at which all four equal-width Fit segments can show their labels.
-const FIT_LABELS_WIDTH: f32 = 510.;
+/// Inspector width that leaves room for four caption segments, including the
+/// focus borders and padding around the longest label ("Stretch").
+const FIT_LABELS_WIDTH: f32 = 330.;
+const FIT_LABEL_FRACTION: f32 = 0.16;
 /// Width of the keyframe column, in rems: diamond plus hover-revealed arrows.
 const KF_COL: f32 = 3.5;
 /// Widths of the keyframe controls, in rems.
@@ -1359,7 +1361,7 @@ impl Editor {
         key: String,
         items: Vec<(String, String)>,
         selected: usize,
-        compact_icons: Option<&[IconName]>,
+        compact: bool,
         on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -1391,32 +1393,31 @@ impl Editor {
             );
         }
         let entry = &self.fields.segmented[&key];
-        let icon_choices;
-        let choices = if let Some(icons) = compact_icons {
-            icon_choices = entry
-                .choices
-                .iter()
-                .zip(icons)
-                .map(|(option, icon)| {
-                    style::SegmentedOption::new(option.id, option.label, Some(*icon))
-                })
-                .collect::<Vec<_>>();
-            &icon_choices
-        } else {
-            &entry.choices
-        };
-        let control = crate::style::segmented(
-            entry.element_id,
-            choices,
-            &entry.handles,
-            selected,
-            None,
-            compact_icons.is_none(),
-            on_select,
-        );
+        if compact {
+            return div().w_full().child(style::components::segmented_compact(
+                entry.element_id,
+                &entry.choices,
+                &entry.handles,
+                selected,
+                on_select,
+            ));
+        }
+
         // `segmented` frames itself with 8 px padding for panel use; inside a
         // row that padding is cancelled so the row keeps its height.
-        div().w_full().mx(px(-8.)).my(px(-8.)).child(control)
+        div()
+            .w_full()
+            .mx(px(-8.))
+            .my(px(-8.))
+            .child(style::segmented(
+                entry.element_id,
+                &entry.choices,
+                &entry.handles,
+                selected,
+                None,
+                true,
+                on_select,
+            ))
     }
 
     /// A short enum as a segmented control.
@@ -1450,7 +1451,7 @@ impl Editor {
             format!("c{}:seg:{name}", id.0),
             items,
             selected,
-            None,
+            false,
             move |index, _, cx| {
                 if let Some(value) = values.get(index) {
                     editor.update(cx, |this, cx| {
@@ -1474,22 +1475,42 @@ impl Editor {
         cx: &mut Context<Self>,
     ) -> Div {
         let key = format!("c{}:enum:{name}", id.0);
-        if !self.fields.enums.contains_key(&key) {
-            let selected = options
-                .iter()
-                .position(|option| option == current)
-                .map(IndexPath::new);
-            let items = SearchableVec::new(
+        let param = name.to_owned();
+        self.choice_select(
+            key,
+            current,
+            || {
                 options
                     .iter()
                     .map(|option| EnumChoice {
                         value: option.clone(),
                         label: display_label(plugin_id, name, option),
                     })
-                    .collect::<Vec<_>>(),
-            );
+                    .collect()
+            },
+            move |this, value, cx| this.execute_plugin_param(id, param.clone(), json!(value), cx),
+            window,
+            cx,
+        )
+    }
+
+    fn choice_select(
+        &mut self,
+        key: String,
+        current: &str,
+        choices: impl FnOnce() -> Vec<EnumChoice>,
+        on_confirm: impl Fn(&mut Self, &str, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        if !self.fields.enums.contains_key(&key) {
+            let items = choices();
+            let selected = items
+                .iter()
+                .position(|item| item.value == current)
+                .map(IndexPath::new);
+            let items = SearchableVec::new(items);
             let state = cx.new(|cx| SelectState::new(items, selected, window, cx));
-            let param = name.to_owned();
             let subscription = cx.subscribe_in(
                 &state,
                 window,
@@ -1497,7 +1518,7 @@ impl Editor {
                     let SelectEvent::Confirm(Some(value)) = event else {
                         return;
                     };
-                    this.execute_plugin_param(id, param.clone(), json!(value), cx);
+                    on_confirm(this, value, cx);
                 },
             );
             self.fields.enums.insert(
@@ -2022,7 +2043,7 @@ impl Editor {
         };
         let mut rows: Vec<Div> = Vec::new();
         if matches!(clip.kind, ClipKind::Image(_) | ClipKind::Video(_)) {
-            rows.push(self.fit_row(id, clip.fit, cx));
+            rows.push(self.fit_row(id, clip.fit, window, cx));
         }
         // Position and scale share one row per pair (docs/design.md "Inspector").
         for (label, a, b, targets) in [
@@ -2104,40 +2125,66 @@ impl Editor {
     }
 
     /// Fit / Fill / Stretch / 1:1 choice for an image or video clip.
-    fn fit_row(&mut self, id: ClipId, current: Fit, cx: &mut Context<Self>) -> Div {
-        const FIT_ICONS: [IconName; 4] = [
-            IconName::Minimize,
-            IconName::Maximize,
-            IconName::Expand,
-            IconName::Square,
-        ];
-        let items = Fit::ALL
-            .iter()
-            .map(|fit| {
-                (
-                    format!("fit-{}-{}", id.0, fit.name()),
-                    fit_label(*fit).to_owned(),
-                )
-            })
-            .collect();
-        let selected = Fit::ALL
-            .iter()
-            .position(|fit| *fit == current)
-            .unwrap_or(usize::MAX);
-        let editor = cx.entity();
-        let control = self.segmented_pooled(
-            format!("c{}:fit", id.0),
-            items,
-            selected,
-            (self.dock.right_width < FIT_LABELS_WIDTH).then_some(&FIT_ICONS),
-            move |index, _, cx| {
-                if let Some(fit) = Fit::ALL.get(index) {
-                    editor.update(cx, |this, cx| this.set_clip_fit(id, *fit, cx));
-                }
-            },
-            cx,
-        );
-        Self::param_row_flush(
+    fn fit_row(
+        &mut self,
+        id: ClipId,
+        current: Fit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let key = format!("c{}:fit", id.0);
+        let control = if self.dock.right_width < FIT_LABELS_WIDTH {
+            self.choice_select(
+                key,
+                current.name(),
+                || {
+                    Fit::ALL
+                        .iter()
+                        .map(|fit| EnumChoice {
+                            value: fit.name().to_owned(),
+                            label: fit_label(*fit).to_owned(),
+                        })
+                        .collect()
+                },
+                move |this, value, cx| {
+                    if let Some(fit) = Fit::parse(value) {
+                        this.set_clip_fit(id, fit, cx);
+                    }
+                },
+                window,
+                cx,
+            )
+            .debug_selector(move || format!("fit-{}-select", id.0))
+        } else {
+            let items = Fit::ALL
+                .iter()
+                .map(|fit| {
+                    (
+                        format!("fit-{}-{}", id.0, fit.name()),
+                        fit_label(*fit).to_owned(),
+                    )
+                })
+                .collect();
+            let selected = Fit::ALL
+                .iter()
+                .position(|fit| *fit == current)
+                .unwrap_or(usize::MAX);
+            let editor = cx.entity();
+            self.segmented_pooled(
+                key,
+                items,
+                selected,
+                true,
+                move |index, _, cx| {
+                    if let Some(fit) = Fit::ALL.get(index) {
+                        editor.update(cx, |this, cx| this.set_clip_fit(id, *fit, cx));
+                    }
+                },
+                cx,
+            )
+        };
+        Self::row_shell_with(
+            None,
             RowLabel {
                 element: div()
                     .debug_selector(|| "fit-label".into())
@@ -2146,6 +2193,7 @@ impl Editor {
                 tooltip: Some("Fit".into()),
             },
             control,
+            FIT_LABEL_FRACTION,
         )
         .debug_selector(|| "param-Fit".to_owned())
     }
