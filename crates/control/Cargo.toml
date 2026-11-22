@@ -25,9 +25,9 @@ animathio-typeset = { path = "../typeset" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-base64 = "0.22"
+base64 = "0.23"
 directories = "6"
-getrandom = "0.3"
+getrandom = "0.4"
 interprocess = "2.4"
 rustix = { version = "1", features = ["fs", "process"] }
 subtle = "2"
