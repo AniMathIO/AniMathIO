@@ -869,16 +869,27 @@ fn next_flag_x(flag_xs: &[f32], x: f32) -> Option<f32> {
 /// `name`, or its longest prefix followed by "…" that fits in `available` (a name that would
 /// be cut mid-letter by the next flag ends in an ellipsis instead).
 fn fit_name(name: &str, available: Pixels, name_font: &Font, window: &mut Window) -> String {
+    if available <= px(0.) {
+        return String::new();
+    }
     if label_width(name, name_font.clone(), window) <= available {
         return name.to_owned();
     }
+    ellipsize(name, |candidate| {
+        label_width(candidate, name_font.clone(), window) <= available
+    })
+}
+
+/// The longest prefix of `name` (whole characters) that `fits` once "…" is appended, with the
+/// ellipsis; empty when not even one character fits. `name` itself is assumed not to fit.
+fn ellipsize(name: &str, mut fits: impl FnMut(&str) -> bool) -> String {
     let boundaries: Vec<usize> = name.char_indices().map(|(i, _)| i).collect();
-    // Binary search for the longest prefix (in characters) that still fits with the ellipsis.
-    let (mut low, mut high) = (0, boundaries.len());
+    // `low..=high` counts the characters kept; the whole name is already ruled out, so the
+    // most that can be kept is one character fewer, and `boundaries[middle]` is always valid.
+    let (mut low, mut high) = (0, boundaries.len().saturating_sub(1));
     while low < high {
         let middle = (low + high).div_ceil(2);
-        let candidate = format!("{}…", &name[..boundaries[middle]]);
-        if label_width(&candidate, name_font.clone(), window) <= available {
+        if fits(&format!("{}…", &name[..boundaries[middle]])) {
             low = middle;
         } else {
             high = middle - 1;
@@ -979,7 +990,22 @@ pub(super) fn paint_markers(
 
 #[cfg(test)]
 mod tests {
-    use super::next_flag_x;
+    use super::{ellipsize, next_flag_x};
+
+    #[core::prelude::v1::test]
+    fn a_long_name_is_cut_to_the_longest_prefix_that_fits_with_an_ellipsis() {
+        // Each character is one unit wide (the ellipsis too): `limit` units fit.
+        let cut = |name: &str, limit: usize| ellipsize(name, |s| s.chars().count() <= limit);
+        assert_eq!(cut("Introduction", 6), "Intro…");
+        // One short of the whole name: the search must not index past the last character.
+        assert_eq!(cut("Introduction", 12), "Introductio…");
+        assert_eq!(cut("Introduction", 1), "");
+        assert_eq!(cut("Introduction", 0), "");
+        // Multi-byte characters are kept whole.
+        assert_eq!(cut("Übergang", 3), "Üb…");
+        assert_eq!(cut("a", 0), "");
+        assert_eq!(cut("", 0), "");
+    }
 
     #[core::prelude::v1::test]
     fn a_name_stops_at_the_next_flag_to_its_right() {
