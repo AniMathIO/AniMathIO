@@ -691,6 +691,8 @@ pub(crate) struct Editor {
     /// The title last handed to the window, so it is only set when it changes.
     window_title: String,
     panel_focus: [FocusHandle; 4],
+    /// One focus handle per option of the S/M/L track height control.
+    track_height_focus: [FocusHandle; 3],
     timeline_scroll_handle: ScrollHandle,
     /// One scroll handle per Library tab and one for the Inspector, for their scrollbars.
     library_scroll: [ScrollHandle; 5],
@@ -1054,6 +1056,7 @@ impl Editor {
             menu_signature: String::new(),
             window_title: String::new(),
             panel_focus: std::array::from_fn(|_| cx.focus_handle()),
+            track_height_focus: std::array::from_fn(|_| cx.focus_handle()),
             timeline_scroll_handle: ScrollHandle::new(),
             library_scroll: std::array::from_fn(|_| ScrollHandle::new()),
             inspector_scroll: ScrollHandle::new(),

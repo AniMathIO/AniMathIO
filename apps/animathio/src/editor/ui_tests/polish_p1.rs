@@ -267,14 +267,3 @@ fn shape_inspector_hides_the_path_field_until_shape_is_path(cx: &mut TestAppCont
         "path field is shown when shape = path"
     );
 }
-
-#[test]
-fn ruler_labels_under_a_marker_plate_are_hidden() {
-    let plates = [(px(100.), px(180.))];
-    let covers = |l: f32, r: f32| crate::editor::markers::plates_cover(px(l), px(r), &plates);
-    assert!(covers(90., 120.));
-    assert!(covers(170., 200.));
-    assert!(covers(110., 130.));
-    assert!(!covers(10., 100.));
-    assert!(!covers(180., 220.));
-}

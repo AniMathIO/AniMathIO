@@ -1,9 +1,5 @@
 //! Shared pure helpers, drawing and resource adapters.
 
-// Paint helpers still name 2.2 tokens (the gradient start/end, the yellow snap
-// line) until the UI-rework timeline PR (4) retires them (see docs/design.md).
-#![allow(deprecated)]
-
 use super::*;
 use crate::style::{self, color as colors, tokens::TextRole as _};
 use std::collections::HashMap;
@@ -56,21 +52,6 @@ pub(super) fn icon_button(
     }
 }
 
-/// Compact toggle pill for track headers (mute/solo/lock): muted icon when
-/// off, tinted with `tint` (a style token) at the subtle/edge alpha steps when
-/// active. Thin wrapper over `style::icon_toggle` keeping the (id, instance)
-/// id form its callers already use (PR 4 switches them over).
-pub(super) fn header_pill(
-    id: (&'static str, u64),
-    icon: IconName,
-    tooltip: &'static str,
-    active: bool,
-    tint: u32,
-    listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    style::icon_toggle(id, icon, tooltip, active, tint, listener)
-}
-
 /// Which half of the timeline a paint call draws. The ruler and marker lane stay fixed
 /// while the track rows scroll vertically, so each half has its own canvas; both use the
 /// same geometry (the track half is positioned as if the ruler sat above it).
@@ -97,7 +78,8 @@ pub(super) fn paint_timeline(
         snapshot.duration,
         zoom,
         scroll,
-    );
+    )
+    .with_frame_rate(snapshot.frame_rate);
     let background = style::hex(colors::PANEL);
     let ruler_bg = style::hex(colors::BG);
     let border = style::hex(colors::BORDER);
@@ -140,8 +122,8 @@ pub(super) fn paint_timeline(
             } else {
                 "Drop media here"
             };
-            paint_clip_label(
-                label.into(),
+            paint_empty_lane_label(
+                label,
                 point(
                     bounds.left() + px(20.),
                     bounds.top() + px(ruler_height() + row as f32 * snapshot.row_height + 16.),
@@ -166,8 +148,15 @@ pub(super) fn paint_timeline(
             point(bounds.origin.x + px(left), bounds.origin.y + px(top)),
             point(bounds.origin.x + px(right), bounds.origin.y + px(bottom)),
         );
-        window.paint_quad(fill(band, cx.theme().ring.opacity(0.18)));
-        window.paint_quad(outline(band, cx.theme().ring, BorderStyle::Solid));
+        window.paint_quad(fill(
+            band,
+            style::tint(colors::ACCENT, style::Alpha::Subtle),
+        ));
+        window.paint_quad(outline(
+            band,
+            style::hex(colors::ACCENT),
+            BorderStyle::Solid,
+        ));
     }
     for (range, row) in snapshot.autocuts.iter().filter(|_| !ruler_part) {
         let x0 = timeline::time_to_x(&layout, range.start).clamp(0., layout.width);
@@ -182,7 +171,7 @@ pub(super) fn paint_timeline(
                     bounds.origin.y + px(top + snapshot.row_height),
                 ),
             ),
-            style::hex(colors::WARNING).opacity(0.3),
+            style::tint(colors::WARNING, style::Alpha::Body),
         ));
     }
     if snapshot.marks.marked()
@@ -195,12 +184,12 @@ pub(super) fn paint_timeline(
                 point(x0, bounds.origin.y),
                 point(x1, bounds.origin.y + px(ruler_height())),
             ),
-            style::hex(colors::ACCENT).opacity(0.25),
+            style::tint(colors::ACCENT, style::Alpha::Wash),
         ));
         for x in [x0, x1] {
             window.paint_quad(fill(
                 Bounds::new(point(x, bounds.origin.y), size(px(1.), px(height))),
-                style::hex(colors::ACCENT).opacity(0.5),
+                style::hex(colors::ACCENT),
             ));
             window.paint_quad(fill(
                 Bounds::new(point(x, bounds.origin.y), size(px(8.), px(6.))),
@@ -211,15 +200,13 @@ pub(super) fn paint_timeline(
     super::markers::paint_markers(bounds, &layout, snapshot, height, window, cx);
     let head_x = bounds.origin.x + px(timeline::time_to_x(&layout, snapshot.position));
     let playhead = style::hex(colors::PLAYHEAD);
-    for (width, alpha) in [(7.0, 0.06), (3.0, 0.12), (1.0, 1.0)] {
-        window.paint_quad(fill(
-            Bounds::new(
-                point(head_x - px(width / 2.), bounds.top()),
-                size(px(width), px(height)),
-            ),
-            playhead.opacity(alpha),
-        ));
-    }
+    window.paint_quad(fill(
+        Bounds::new(
+            point(head_x - px(0.5), bounds.top()),
+            size(px(1.), px(height)),
+        ),
+        playhead,
+    ));
     let mut head = gpui::Path::new(point(head_x - px(6.), bounds.top()));
     for p in [
         point(head_x + px(6.), bounds.top()),
@@ -237,11 +224,11 @@ pub(super) fn paint_timeline(
             .max(bounds.left());
         let pill = Bounds::new(point(x, bounds.top() + px(2.)), size(px(102.), px(20.)));
         window.paint_quad(
-            fill(pill, style::hex(colors::RAISED)).corner_radii(px(style::radius::CONTROL)),
+            fill(pill, style::hex(colors::RAISED)).corner_radii(px(style::radius::PILL)),
         );
         window.paint_quad(
-            outline(pill, style::hexa(colors::PLAYHEAD, 0.6), BorderStyle::Solid)
-                .corner_radii(px(style::radius::CONTROL)),
+            outline(pill, style::hex(colors::BORDER), BorderStyle::Solid)
+                .corner_radii(px(style::radius::PILL)),
         );
         paint_clip_label(
             timecode::format_timecode(snapshot.position, snapshot.frame_rate).into(),
@@ -256,7 +243,7 @@ pub(super) fn paint_timeline(
         let x = bounds.origin.x + px(timeline::time_to_x(&layout, time));
         window.paint_quad(fill(
             Bounds::new(point(x, bounds.top()), size(px(1.), px(height))),
-            style::hex(colors::SNAP),
+            style::hex(colors::ACCENT),
         ));
         paint_icon(
             IconName::Magnet,
@@ -264,7 +251,7 @@ pub(super) fn paint_timeline(
                 point(x + px(3.), bounds.top() + px(ruler_height() + 3.)),
                 size(px(14.), px(14.)),
             ),
-            style::hex(colors::SNAP),
+            style::hex(colors::ACCENT),
             window,
             cx,
         );
@@ -294,34 +281,23 @@ pub(super) fn paint_clip(
     }
     let dim = if clip.silenced { 0.5 } else { 1.0 };
     let radius = px(style::radius::CLIP);
-    if clip.selected {
-        for (spread, alpha) in [(4.0, 0.05), (2.0, 0.12)] {
-            let glow = Bounds::from_corners(
-                point(x0 - px(spread), y0 - px(spread)),
-                point(x1 + px(spread), y1 + px(spread)),
-            );
-            window.paint_quad(
-                fill(glow, style::hexa(colors::ACCENT, alpha)).corner_radii(radius + px(spread)),
-            );
-        }
-    }
     window.paint_quad(fill(block, style::hex(colors::RAISED)).corner_radii(radius));
+    let body_alpha = if clip.hovered {
+        CLIP_HOVER_ALPHA
+    } else {
+        style::Alpha::Body.value()
+    };
+    window.paint_quad(fill(block, kind_color.opacity(body_alpha * dim)).corner_radii(radius));
     window.paint_quad(
-        fill(
+        outline(
             block,
-            kind_color.opacity(if clip.hovered { 0.43 * dim } else { 0.30 * dim }),
+            style::tint(colors::BORDER, style::Alpha::Edge),
+            BorderStyle::Solid,
         )
         .corner_radii(radius),
     );
-    window.paint_quad(
-        outline(block, kind_color.opacity(0.45 * dim), BorderStyle::Solid).corner_radii(radius),
-    );
-    let highlight = Bounds::from_corners(point(x0 + px(5.), y0), point(x1 - px(5.), y0 + px(1.)));
-    if x1 - x0 > px(10.) {
-        window.paint_quad(fill(highlight, kind_color.opacity(0.65)));
-    }
     window.paint_quad(fill(
-        Bounds::from_corners(point(x0, y0 + px(5.)), point(x0 + px(3.), y1 - px(5.))),
+        Bounds::from_corners(point(x0, y0), point(x0 + px(3.), y1)),
         kind_color,
     ));
     paint_filmstrip(bounds, clip, (x0, x1, y0, y1), window);
@@ -360,7 +336,7 @@ pub(super) fn paint_clip(
     }
     if clip.selected {
         window.paint_quad(
-            outline(block, style::hex(colors::ACCENT), BorderStyle::Solid).corner_radii(radius),
+            outline(block, style::hex(colors::TEXT), BorderStyle::Solid).corner_radii(radius),
         );
         window.paint_quad(
             outline(
@@ -368,7 +344,7 @@ pub(super) fn paint_clip(
                     point(x0 + px(1.0), y0 + px(1.0)),
                     point(x1 - px(1.0), y1 - px(1.0)),
                 ),
-                style::hex(colors::ACCENT),
+                style::hex(colors::TEXT),
                 BorderStyle::Solid,
             )
             .corner_radii((radius - px(1.)).max(px(0.))),
@@ -389,7 +365,9 @@ pub(super) fn paint_clip(
     }
     // Kind icon and label, only when the block is wide enough to hold them.
     if x1 - x0 > px(28.0) {
-        let icon_bounds = Bounds::new(point(lx + px(7.0), y0 + px(3.0)), size(px(12.0), px(12.0)));
+        // Centre the 12 px icon on the Caption text, which `paint_text_line` centres in a
+        // Label-height line from `y0 + 3` (centre about `y0 + 11.5`).
+        let icon_bounds = Bounds::new(point(lx + px(7.0), y0 + px(5.5)), size(px(12.0), px(12.0)));
         paint_icon(clip.icon, icon_bounds, cx.theme().foreground, window, cx);
         let warned = clip.effect_warning && x1 - x0 > px(64.0);
         if warned {
@@ -398,18 +376,22 @@ pub(super) fn paint_clip(
             window.paint_quad(fill(badge, style::hex(colors::WARNING)).corner_radii(px(4.0)));
             paint_icon(
                 IconName::TriangleAlert,
-                Bounds::new(point(lx + px(25.0), y0 + px(3.0)), size(px(12.0), px(12.0))),
+                Bounds::new(point(lx + px(25.0), y0 + px(5.5)), size(px(12.0), px(12.0))),
                 style::hex(colors::BG),
                 window,
                 cx,
             );
         }
         if !clip.label.is_empty() {
-            paint_clip_label(
-                clip.label.clone(),
-                point(lx + px(if warned { 44.0 } else { 22.0 }), y0 + px(3.0)),
-                x1 - px(4.0),
-                font(cx.theme().font_family.clone()),
+            let label_x = lx + px(if warned { 44.0 } else { 22.0 });
+            let available_w = x1 - label_x - px(4.0);
+            paint_clip_name_and_duration(
+                &clip.label,
+                layout
+                    .frame_rate
+                    .map(|rate| timecode::short_duration(Time(clip.end.0 - clip.start.0), rate)),
+                point(label_x, y0 + px(3.0)),
+                available_w,
                 window,
                 cx,
             );
@@ -422,8 +404,7 @@ pub(super) fn paint_clip(
         );
         paint_icon(IconName::Lock, lock, cx.theme().foreground, window, cx);
     }
-    // Keyframe diamonds: rotated squares with a dark rim so they read over
-    // thumbnails and waveforms.
+    // Keyframe diamonds: 8 px rotated squares with BG 1 px outline, resting TEXT and selected ACCENT.
     let diamond = |kx: Pixels, cy: Pixels, half: Pixels| {
         let mut path = gpui::Path::new(point(kx, cy - half));
         path.line_to(point(kx + half, cy));
@@ -435,13 +416,13 @@ pub(super) fn paint_clip(
     for keyframe in &clip.keyframes {
         let kx = bounds.origin.x + px(timeline::time_to_x(layout, keyframe.time));
         let cy = y1 - px(10.0);
-        window.paint_path(diamond(kx, cy, px(6.0)), style::hexa(colors::BG, 0.85));
+        window.paint_path(diamond(kx, cy, px(5.0)), style::hex(colors::BG));
         window.paint_path(
-            diamond(kx, cy, px(4.5)),
+            diamond(kx, cy, px(4.0)),
             if keyframe.selected {
-                style::hex(colors::TEXT)
-            } else {
                 style::hex(colors::ACCENT)
+            } else {
+                style::hex(colors::TEXT)
             },
         );
     }
@@ -559,7 +540,10 @@ fn paint_filmstrip(
                 0,
                 false,
             );
-            window.paint_quad(fill(tile.intersect(&mask), style::hexa(colors::BG, 0.18)));
+            window.paint_quad(fill(
+                tile.intersect(&mask),
+                style::tint(colors::BG, style::Alpha::Wash),
+            ));
         }
     }
 }
@@ -581,25 +565,33 @@ fn paint_transition(
     let top = bounds.top() + px(ruler_height() + transition.row as f32 * layout.row_height + 3.);
     let bottom = top + px((layout.row_height - 6.).max(8.));
     let area = Bounds::from_corners(point(left, top), point(right, bottom));
-    // Outgoing-to-incoming gradient over the overlap, with a soft accent rim.
+    // The overlap is a hatched `TEXT` wash with a hairline rim: it reads on every
+    // clip colour and carries no accent.
     window.paint_quad(
-        fill(
-            area,
-            gpui::linear_gradient(
-                90.,
-                gpui::linear_color_stop(style::hexa(colors::ACCENT_FROM, 0.55), 0.),
-                gpui::linear_color_stop(style::hexa(colors::ACCENT_TO, 0.55), 1.),
-            ),
-        )
-        .corner_radii(px(4.)),
+        fill(area, style::tint(colors::TEXT, style::Alpha::Wash))
+            .corner_radii(px(style::radius::CLIP)),
     );
+    window.with_content_mask(Some(ContentMask { bounds: area }), |window| {
+        let hatch = style::tint(colors::TEXT, style::Alpha::Subtle);
+        let (width, height) = (f32::from(area.size.width), f32::from(area.size.height));
+        let mut offset = -height;
+        while offset < width {
+            let mut stroke = gpui::PathBuilder::stroke(px(1.));
+            stroke.move_to(point(area.left() + px(offset), area.bottom()));
+            stroke.line_to(point(area.left() + px(offset + height), area.top()));
+            if let Ok(path) = stroke.build() {
+                window.paint_path(path, hatch);
+            }
+            offset += 8.;
+        }
+    });
     window.paint_quad(
         outline(
             area,
-            style::hexa(colors::ACCENT_TO, 0.7),
+            style::tint(colors::TEXT, style::Alpha::Subtle),
             BorderStyle::Solid,
         )
-        .corner_radii(px(4.)),
+        .corner_radii(px(style::radius::CLIP)),
     );
     if right - left > px(18.) {
         let icon = Bounds::new(
@@ -611,12 +603,14 @@ fn paint_transition(
                 Bounds::new(icon.origin - point(px(3.), px(3.)), size(px(20.), px(20.))),
                 style::hex(colors::RAISED),
             )
-            .corner_radii(px(4.)),
+            .corner_radii(px(style::radius::CLIP)),
         );
         paint_icon(IconName::Blend, icon, style::hex(colors::TEXT), window, cx);
     }
 }
 
+/// The overview strip: every clip as a thin lane block, the visible range as an accent
+/// window, inside a `BORDER` frame. It carries no text label.
 pub(super) fn paint_overview(
     bounds: Bounds<Pixels>,
     clips: &[(usize, TimeRange, Hsla)],
@@ -627,28 +621,32 @@ pub(super) fn paint_overview(
     window: &mut Window,
 ) {
     let ppt = f32::from(bounds.size.width) / duration.max(1) as f32;
-    let lane = 14. / rows.max(1) as f32;
+    let inner_h = (f32::from(bounds.size.height) - 2.).max(1.);
+    let lane = inner_h / rows.max(1) as f32;
     for (row, range, color) in clips {
+        let top = bounds.top() + px(1. + *row as f32 * lane);
         let area = Bounds::from_corners(
-            point(
-                bounds.left() + px(range.start.0 as f32 * ppt),
-                bounds.top() + px(4. + *row as f32 * lane),
-            ),
+            point(bounds.left() + px(range.start.0 as f32 * ppt), top),
             point(
                 bounds.left() + px(range.end.0 as f32 * ppt),
-                bounds.top() + px(4. + (*row + 1) as f32 * lane - 0.5),
+                top + px((lane - 0.5).max(1.)),
             ),
         );
-        window.paint_quad(fill(area, color.opacity(0.55)).corner_radii(px(1.)));
+        window.paint_quad(fill(area, color.opacity(style::Alpha::Edge.value())));
     }
     let view = Bounds::new(
-        point(bounds.left() + px(scroll / zoom), bounds.top() + px(2.)),
-        size(bounds.size.width / zoom, bounds.size.height - px(4.)),
+        point(bounds.left() + px(scroll / zoom), bounds.top()),
+        size(bounds.size.width / zoom, bounds.size.height),
     );
-    window.paint_quad(fill(view, style::hexa(colors::ACCENT, 0.10)).corner_radii(px(3.)));
-    window.paint_quad(
-        outline(view, style::hexa(colors::ACCENT, 0.75), BorderStyle::Solid).corner_radii(px(3.)),
-    );
+    window.paint_quad(fill(
+        view,
+        style::tint(colors::ACCENT, style::Alpha::Subtle),
+    ));
+    window.paint_quad(outline(
+        bounds,
+        style::hex(colors::BORDER),
+        BorderStyle::Solid,
+    ));
 }
 
 /// Paint a Lucide icon (from the registered asset source) into `bounds`.
@@ -792,7 +790,7 @@ fn paint_speed_ramp(
             point(x0 + px(4.), guide_y),
             point(x1 - px(4.), guide_y + px(1.)),
         ),
-        style::hexa(colors::TEXT, 0.18),
+        style::tint(colors::TEXT, style::Alpha::Subtle),
     ));
     if clip.ramp_keys.is_empty() {
         return;
@@ -809,7 +807,7 @@ fn paint_speed_ramp(
         curve.line_to(point(x1, px(lane.y(last.speed))));
     }
     if let Ok(path) = curve.build() {
-        window.paint_path(path, style::hexa(colors::TEXT, 0.85));
+        window.paint_path(path, style::hex(colors::TEXT));
     }
     for key in clip.ramp_keys.iter().filter(|key| key.handle) {
         let kx = bounds.origin.x + px(timeline::time_to_x(layout, key.time));
@@ -820,7 +818,7 @@ fn paint_speed_ramp(
         let (outer, inner) = (px(5.5), px(4.0));
         window.paint_quad(fill(
             Bounds::from_corners(point(kx - outer, ky - outer), point(kx + outer, ky + outer)),
-            style::hexa(colors::BG, 0.85),
+            style::hex(colors::BG),
         ));
         window.paint_quad(fill(
             Bounds::from_corners(point(kx - inner, ky - inner), point(kx + inner, ky + inner)),
@@ -848,7 +846,7 @@ pub(super) fn paint_fades(
     if width < 40.0 {
         return;
     }
-    let shade = style::hexa(colors::BG, 0.42);
+    let shade = style::tint(colors::BG, style::Alpha::Edge);
     let ppt = width / (clip.end.0 - clip.start.0).max(1) as f32;
     let fade_in_px = (clip.fade_in as f32 * ppt).min(width);
     let fade_out_px = (clip.fade_out as f32 * ppt).min(width);
@@ -889,7 +887,7 @@ pub(super) fn paint_fades(
             line.line_to(*p);
         }
         if let Ok(path) = line.build() {
-            window.paint_path(path, style::hexa(colors::TEXT, 0.7));
+            window.paint_path(path, style::tint(colors::TEXT, style::Alpha::Scrim));
         }
     }
     if clip.selected || clip.hovered {
@@ -918,6 +916,9 @@ pub(super) fn paint_fades(
 }
 
 /// Paint timecode ticks and labels on the ruler, adapting the interval to the zoom.
+///
+/// The ruler has two rows: marker flags and names (drawn by `markers::paint_markers`) on
+/// the top row, tick numbers on the bottom row, so a marker name never covers a number.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint_ruler(
     bounds: Bounds<Pixels>,
@@ -935,15 +936,20 @@ pub(super) fn paint_ruler(
         snapshot.frame_rate,
     );
     let minor = (step / 4).max(1);
-    // Marker name plates share the ruler's top line with the timecodes: a label that a plate
-    // would cover (even partly) is left out instead of leaving stray digits beside the flag.
-    let plates = super::markers::marker_name_spans(bounds.origin.x, layout, snapshot, window);
-    let mono = font(snapshot.theme.mono_font_family.clone());
+    let number_font = tabular_font(snapshot.theme.font_family.clone(), FontWeight(400.));
+    let line = window.rem_size() * style::Role::Caption.line_height().0;
+    let label_top = bounds.origin.y + px(ruler_height()) - line;
+    // Minor ticks share the bottom row with the tick numbers: skip the ones that would run
+    // through the previous number.
+    let mut label_end = bounds.origin.x - px(1.0);
     for tick in timeline::ruler_ticks(layout, minor) {
         let x = bounds.origin.x + px(timeline::time_to_x(layout, Time(tick)));
         let is_major = tick % step == 0;
-        let mark_top =
-            bounds.origin.y + px((if is_major { 19.0 } else { 24.0 }) * style::ui_scale());
+        if !is_major && x < label_end {
+            continue;
+        }
+        let mark_top = bounds.origin.y
+            + px(ruler_height() - (if is_major { 10.0 } else { 5.0 }) * style::ui_scale());
         let mark = Bounds::from_corners(
             point(x, mark_top),
             point(x + px(1.0), bounds.origin.y + px(ruler_height())),
@@ -956,16 +962,18 @@ pub(super) fn paint_ruler(
             } else {
                 timecode::format_timecode(Time(tick), snapshot.frame_rate)
             };
-            let label_left = x + px(5.0);
-            let label_right = label_left + label_width(&label, mono.clone(), window);
-            if super::markers::plates_cover(label_left, label_right, &plates) {
-                continue;
-            }
-            paint_clip_label(
+            // Tabular digits: about 0.62 em per character, plus the 5 px inset and a gap.
+            let char_width = window.rem_size() * style::Role::Caption.size().0 * 0.62;
+            label_end = x + px(8.0) + char_width * label.chars().count() as f32;
+            paint_text_line(
                 label.into(),
-                point(label_left, bounds.origin.y + px(3.0)),
+                point(x + px(5.0), label_top),
                 x + px(width),
-                mono.clone(),
+                number_font.clone(),
+                TextStyle::new(
+                    style::type_size::CAPTION,
+                    style::hex(colors::TEXT_SECONDARY),
+                ),
                 window,
                 cx,
             );
@@ -1011,9 +1019,9 @@ pub(super) fn clip_color(kind: &animathio_core::ClipKind, _theme: &gpui_componen
                 colors::CLIP_TEXT
             } else if plugin_id == "org.animathio.shapes" || plugin_id == "shapes" {
                 colors::CLIP_SHAPE
-            } else if plugin_id.contains("latex") || plugin_id.contains("math") {
+            } else if plugin_id == "org.animathio.latex" || plugin_id == "latex" {
                 colors::CLIP_LATEX
-            } else if plugin_id.contains("graph") {
+            } else if plugin_id == "org.animathio.graph" || plugin_id == "graph" {
                 colors::CLIP_GRAPH
             } else {
                 colors::CLIP_PLUGIN
@@ -1024,16 +1032,48 @@ pub(super) fn clip_color(kind: &animathio_core::ClipKind, _theme: &gpui_componen
     })
 }
 
+/// Size and colour of one line of canvas text (see [`paint_text_line`]). The weight and
+/// features live on the `Font` (see [`tabular_font`]).
+#[derive(Clone, Copy)]
+pub(super) struct TextStyle {
+    size: Rems,
+    color: Hsla,
+}
+
+impl TextStyle {
+    pub(super) fn new(size: Rems, color: Hsla) -> Self {
+        Self { size, color }
+    }
+}
+
+/// A canvas font with tabular figures (`tnum`) at `weight`, so timecodes and durations do
+/// not jitter while the timeline scrolls.
+pub(super) fn tabular_font(family: SharedString, weight: FontWeight) -> Font {
+    let mut tabular = font(family);
+    tabular.weight = weight;
+    tabular.features = FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)]));
+    tabular
+}
+
+/// Hover step of a clip body: the body step plus 0.04. A larger step would push the
+/// duration under 4.5:1 on the shape and graph colours (see the contrast test below).
+pub(super) const CLIP_HOVER_ALPHA: f32 = 0.36;
+
 /// Width of one line of label text as [`paint_clip_label`] would draw it.
 ///
 /// The ruler measures every marker name plate and every major tick label on every
-/// repaint — including every frame of playback — so widths are cached per (font, size,
+/// repaint, including every frame of playback, so widths are cached per (font, size,
 /// text) in a small table private to the paint thread. The measurement only changes
 /// when the label text, the theme fonts or the UI scale change, and each of those
 /// changes the key. Cleared wholesale once it outgrows its bound: the visible label
 /// set at any one zoom level is small, so the bound is only reached after many edits
 /// across zoom levels, where clearing is cheaper than bounding per font.
 pub(super) fn label_width(label: &str, label_font: Font, window: &mut Window) -> Pixels {
+    text_width(label, label_font, style::type_size::LABEL, window)
+}
+
+/// Width of one line of `label` at `size` rems (cached like [`label_width`]).
+pub(super) fn text_width(label: &str, label_font: Font, size: Rems, window: &mut Window) -> Pixels {
     use std::cell::RefCell;
 
     thread_local! {
@@ -1042,7 +1082,7 @@ pub(super) fn label_width(label: &str, label_font: Font, window: &mut Window) ->
     if label.is_empty() {
         return px(0.);
     }
-    let font_size = window.rem_size() * 0.8;
+    let font_size = window.rem_size() * size.0;
     WIDTHS.with(|widths| {
         widths
             .borrow_mut()
@@ -1108,12 +1148,13 @@ fn shape_label_width(
         .width
 }
 
-/// Paint a single line of clip text, clipped to the right edge.
-pub(super) fn paint_clip_label(
+/// Paint a single line of text in `text_style`, clipped to the right edge.
+pub(super) fn paint_text_line(
     label: SharedString,
     origin: Point<Pixels>,
     right_edge: Pixels,
     label_font: Font,
+    text_style: TextStyle,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -1123,15 +1164,16 @@ pub(super) fn paint_clip_label(
     let run = TextRun {
         len: label.len(),
         font: label_font,
-        color: style::hex(colors::TEXT),
+        color: text_style.color,
         background_color: None,
         underline: None,
         strikethrough: None,
     };
+    let font_size = window.rem_size() * text_style.size.0;
     let line = window
         .text_system()
-        .shape_line(label, window.rem_size() * 0.8, &[run], None);
-    let line_height = window.rem_size() * 1.2;
+        .shape_line(label, font_size, &[run], None);
+    let line_height = window.rem_size() * style::Role::Label.line_height().0;
     // Clip the text to the block so long labels never spill into the next clip.
     let mask = ContentMask {
         bounds: Bounds::from_corners(
@@ -1142,6 +1184,91 @@ pub(super) fn paint_clip_label(
     window.with_content_mask(Some(mask), |window| {
         let _ = line.paint(origin, line_height, TextAlign::Left, None, window, cx);
     });
+}
+
+/// Paint a single line of clip text, clipped to the right edge.
+pub(super) fn paint_clip_label(
+    label: SharedString,
+    origin: Point<Pixels>,
+    right_edge: Pixels,
+    label_font: Font,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    paint_text_line(
+        label,
+        origin,
+        right_edge,
+        label_font,
+        TextStyle::new(style::type_size::LABEL, style::hex(colors::TEXT)),
+        window,
+        cx,
+    );
+}
+
+/// The hint on a track lane that holds no clip (`Role::Label`, `TEXT_MUTED`).
+pub(super) fn paint_empty_lane_label(
+    label: &str,
+    origin: Point<Pixels>,
+    right_edge: Pixels,
+    label_font: Font,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    paint_text_line(
+        label.to_owned().into(),
+        origin,
+        right_edge,
+        label_font,
+        TextStyle::new(style::type_size::LABEL, style::hex(colors::TEXT_MUTED)),
+        window,
+        cx,
+    );
+}
+
+/// A clip's name (`CAPTION`, weight 500, `TEXT`) and, only when both fit in `available`,
+/// its duration after it in the muted tint. The duration is never allowed to push the name
+/// out: when it does not fit, the name is clipped alone.
+pub(super) fn paint_clip_name_and_duration(
+    name: &str,
+    duration: Option<String>,
+    origin: Point<Pixels>,
+    available: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    const GAP: f32 = 8.0;
+    let family = cx.theme().font_family.clone();
+    let name_font = tabular_font(family.clone(), FontWeight(500.));
+    let right = origin.x + available.max(px(0.));
+    let size = style::type_size::CAPTION;
+    let name_width = text_width(name, name_font.clone(), size, window);
+    paint_text_line(
+        name.to_owned().into(),
+        origin,
+        right,
+        name_font,
+        TextStyle::new(size, style::hex(colors::TEXT)),
+        window,
+        cx,
+    );
+    let Some(duration) = duration else {
+        return;
+    };
+    let duration_font = tabular_font(family, FontWeight(400.));
+    let duration_width = text_width(&duration, duration_font.clone(), size, window);
+    if name_width + px(GAP) + duration_width > available {
+        return;
+    }
+    paint_text_line(
+        duration.into(),
+        origin + point(name_width + px(GAP), px(0.)),
+        right,
+        duration_font,
+        TextStyle::new(size, style::tint(colors::TEXT, style::Alpha::Scrim)),
+        window,
+        cx,
+    );
 }
 
 pub(super) fn field_value(clip: &Clip, field: &Field) -> f64 {
@@ -1802,5 +1929,98 @@ mod tests {
         }
         let clips: usize = project.tracks().iter().map(|t| t.clips().len()).sum();
         assert_eq!(clips, 6);
+    }
+}
+
+#[cfg(test)]
+mod clip_paint_tests {
+    use super::*;
+
+    fn luminance(rgb: u32) -> f64 {
+        let channel = |shift: u32| {
+            let value = f64::from((rgb >> shift) & 0xFF) / 255.0;
+            if value <= 0.03928 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+    }
+
+    fn contrast(a: u32, b: u32) -> f64 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// `fg` at `alpha` over `bg`, composited in sRGB space like the framebuffer blend.
+    fn composite(fg: u32, alpha: f64, bg: u32) -> u32 {
+        (0..3).fold(0u32, |acc, step| {
+            let shift = (2 - step) * 8;
+            let front = f64::from((fg >> shift) & 0xFF);
+            let back = f64::from((bg >> shift) & 0xFF);
+            (acc << 8) | ((front * alpha + back * (1. - alpha)).round() as u32 & 0xFF)
+        })
+    }
+
+    const KINDS: [(&str, u32); 9] = [
+        ("video", colors::CLIP_VIDEO),
+        ("image", colors::CLIP_IMAGE),
+        ("audio", colors::CLIP_AUDIO),
+        ("text", colors::CLIP_TEXT),
+        ("latex", colors::CLIP_LATEX),
+        ("shape", colors::CLIP_SHAPE),
+        ("graph", colors::CLIP_GRAPH),
+        ("plugin", colors::CLIP_PLUGIN),
+        ("error", colors::CLIP_ERROR),
+    ];
+
+    /// The name stays at 7:1 on the resting body and at AA on the hovered one, and the
+    /// duration (`TEXT` at the scrim step) stays at AA (4.5:1) on both, for every kind.
+    #[core::prelude::v1::test]
+    fn clip_name_and_duration_are_readable_on_resting_and_hovered_bodies() {
+        let duration_alpha = f64::from(style::Alpha::Scrim.value());
+        for (kind, token) in KINDS {
+            for (state, alpha, name_min) in [
+                ("resting", f64::from(style::Alpha::Body.value()), 7.0),
+                ("hovered", f64::from(CLIP_HOVER_ALPHA), 6.5),
+            ] {
+                let body = composite(token, alpha, colors::RAISED);
+                let name = contrast(colors::TEXT, body);
+                assert!(name >= name_min, "{kind} {state}: name {name:.2}:1");
+                let duration_ink = composite(colors::TEXT, duration_alpha, body);
+                let duration = contrast(duration_ink, body);
+                assert!(duration >= 4.5, "{kind} {state}: duration {duration:.2}:1");
+            }
+        }
+    }
+
+    #[core::prelude::v1::test]
+    fn graph_and_latex_clips_have_their_own_colours() {
+        let theme = gpui_component::Theme::default();
+        let plugin = |id: &str| ClipKind::Plugin {
+            plugin_id: id.into(),
+            params: serde_json::Value::Null,
+        };
+        assert_eq!(
+            clip_color(&plugin("org.animathio.graph"), &theme),
+            style::hex(colors::CLIP_GRAPH)
+        );
+        assert_eq!(
+            clip_color(&plugin("org.animathio.latex"), &theme),
+            style::hex(colors::CLIP_LATEX)
+        );
+        assert_eq!(
+            clip_color(&plugin("org.animathio.text"), &theme),
+            style::hex(colors::CLIP_TEXT)
+        );
+        assert_eq!(
+            clip_color(&plugin("org.animathio.shapes"), &theme),
+            style::hex(colors::CLIP_SHAPE)
+        );
+        assert_eq!(
+            clip_color(&plugin("io.example.thing"), &theme),
+            style::hex(colors::CLIP_PLUGIN)
+        );
     }
 }

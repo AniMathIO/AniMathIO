@@ -36,6 +36,7 @@ mod polish_inspector;
 mod polish_p1;
 mod polish_plugins;
 mod polish_retime;
+mod polish_timeline;
 mod recording;
 mod scenarios;
 

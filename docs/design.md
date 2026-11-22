@@ -113,7 +113,7 @@ the logo.
 | scrim | 0.78 | `BG` behind a modal dialog |
 
 **Clip kinds.** Muted so a timeline full of clips stays calm, hue-separated from each
-other, from the accent and from the playhead. `TEXT` on the resting clip body reaches 7:1 or more. The hovered body (+0.08 alpha) is lower (about 6.2:1 for shape and graph), and the clip duration in `TEXT_SECONDARY` reaches only about 3.9-4.9:1 on some bodies; the timeline PR (UI rework PR 4), which paints clips, must lift both (a lighter duration colour or a darker hover step) and extend the test.
+other, from the accent and from the playhead. `TEXT` on the resting clip body reaches 7:1 or more. The hovered body is the body step plus 0.04 (`CLIP_HOVER_ALPHA`, 0.36; the name stays above 6.5:1), and the clip duration is `TEXT` at the scrim step, not `TEXT_SECONDARY` (which would fall to 3.9:1 on the shape and graph colours); `clip_name_and_duration_are_readable_on_resting_and_hovered_bodies` asserts 4.5:1 for every kind.
 
 | Token | hex | Kind |
 |---|---|---|
@@ -464,15 +464,15 @@ them).
   then `ROW_XS` pills for mute (tint `WARNING`), solo (tint `ACCENT`) and lock (tint
   `TEXT_SECONDARY`), using the edge and subtle alpha steps when on. Visual-only tracks
   show hide and lock. The gain slider follows the same slider rule as the inspector.
-- **Ruler:** numbers in `CAPTION` with tabular figures. The overview strip above it
-  has no text label. Marker flags and their names sit
-  in the marker lane under the ruler and never overprint tick labels; a name that does not
-  fit before the next marker is truncated.
+- **Ruler:** two rows. Marker flags and their names sit on the top row and the tick
+  numbers, in `CAPTION` with tabular figures, on the bottom row, so a name never overprints
+  a number. The overview strip above it is 0.5rem high inside a `BORDER` frame, has no text
+  label and shows the visible range as an `ACCENT` window at the subtle step.
 - **Clips:** body is the kind colour at the body alpha over `RAISED`, a 3 px band in the
   kind colour at the left, `radius::CLIP`, the name in `CAPTION` weight 500 `TEXT`, and
   the content preview (filmstrip, waveform, snippet) below it. The duration follows the
-  name in `TEXT_SECONDARY` only when the clip is wide enough for both; it is never
-  allowed to push the name out. Math clips use their kind's colour: graphs are
+  name in `TEXT` at the scrim step only when the clip is wide enough for both (`0:03:00`,
+  no hour field when it is zero); it is never allowed to push the name out. Math clips use their kind's colour: graphs are
   `CLIP_GRAPH`, not the LaTeX colour. Selected: a 2 px `TEXT`
   outline, which reads on every kind colour (the accent would vanish on some). Disabled
   or hidden: 50% opacity.
@@ -480,6 +480,8 @@ them).
   outline; a selected keyframe is `ACCENT`.
 - **Playhead:** `PLAYHEAD` head and 1 px line; while scrubbing a pill shows the
   timecode in JetBrains Mono.
+- **Toolbar:** tools, in/out, snap and link, S/M/L (a segmented control) and zoom, each
+  group separated by a 1 px `BORDER` divider, buttons at `Size::Small`.
 - **In/out range** shades with `ACCENT` at the wash step and draws `ACCENT` edges.
   **Snapping** draws a 1 px `ACCENT` line and the magnet icon.
 - Fades are curves with handles, transitions a hatched overlap in `TEXT` at the wash step,
@@ -489,8 +491,13 @@ them).
 
 The canvas sits centred on `STAGE`. Safe areas, the gizmo and the zoom control use
 `TEXT` at reduced alpha and `ACCENT` for the active handle; they never use clip colours.
-The transport row under the viewer: ghost icon buttons, the timecode in `TIMECODE`, and
-the zoom select at the right.
+The viewer header shows the canvas size and zoom percent in `LABEL` with tabular figures
+(no mono); the empty project shows the shared empty state over the stage.
+The transport row under the viewer: ghost icon buttons around a solid `ACCENT` play
+circle, the timecode in `TIMECODE`, the duration in mono `LABEL` and the shuttle speed as
+a status chip. The row drops parts that do not fit rather than overlapping them: below
+about 46rem of viewer width the volume slider goes, below 40rem also the edit jumps, the
+speed chip and the duration (the timecode, step, play, loop and mute stay).
 
 ### Launcher
 
@@ -513,7 +520,7 @@ The launcher is a start page, not a landing page.
 | List row, card | `HOVER` fill | `PRESSED` fill | `ACCENT` subtle fill, 1 px `ACCENT` border | 2 px `ACCENT` ring | 50% opacity |
 | Tab option | `HOVER` fill | `PRESSED` fill | sliding `ACCENT` pill | 2 px `ACCENT` ring | `TEXT_DISABLED` |
 | Input | `BORDER_STRONG` outline | n/a | n/a | `ACCENT` outline and ring | `BG` fill, `TEXT_DISABLED` |
-| Clip | lighter body (+0.08 alpha) | n/a | 2 px `TEXT` outline | n/a | 50% opacity |
+| Clip | lighter body (+0.04 alpha) | n/a | 2 px `TEXT` outline | n/a | 50% opacity |
 
 A disabled control keeps its place and has a tooltip that says why ("Select a clip to
 add an effect"). Never hide a control only because it is disabled, except on the

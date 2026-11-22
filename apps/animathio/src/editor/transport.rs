@@ -1,9 +1,12 @@
 //! Transport.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{self, color, hex, hexa};
+use crate::style::{self, color, hex, tokens::TextRole as _};
 use gpui_component::tooltip::Tooltip;
+
+/// The timecode input while editing and the monitor volume slider, in rems.
+const TIMECODE_INPUT_WIDTH: Rems = Rems(11.733);
+const VOLUME_SLIDER_WIDTH: Rems = Rems(5.6);
 
 impl Editor {
     pub(super) fn toggle_play(&mut self, cx: &mut Context<Self>) {
@@ -234,11 +237,30 @@ impl Editor {
         cx.notify();
     }
 
+    /// How much of the transport row fits: the full row, one without the volume
+    /// slider, or the essentials only. Chosen from the viewer panel's width (the window
+    /// minus the open docks and gutters), so the pieces never overlap at 1024 px.
+    fn transport_tier(&self, window: &Window) -> TransportTier {
+        let scale = style::ui_scale();
+        let mut width = f32::from(window.viewport_size().width);
+        for (open, dock_width) in [
+            (self.dock.left_open, self.dock.left_width),
+            (self.dock.right_open, self.dock.right_width),
+        ] {
+            if open {
+                width -= dock_width * scale;
+            }
+        }
+        width -= 4. * f32::from(style::gutter());
+        TransportTier::for_rems(width / f32::from(window.rem_size()))
+    }
+
     pub(super) fn transport_controls(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        let tier = self.transport_tier(window);
         let value = timecode::format_timecode(self.position, self.project.frame_rate());
         let mono = cx.theme().mono_font_family.clone();
         let timecode_el = if self.viewer_state.timecode_editing {
@@ -248,28 +270,25 @@ impl Editor {
                 window.focus(&handle, cx);
             }
             div()
-                .w(gpui::rems(11.733))
+                .w(TIMECODE_INPUT_WIDTH)
                 .font_family(mono.clone())
                 .child(gpui_component::input::Input::new(&state))
                 .into_any_element()
         } else {
             div()
                 .id("timecode-display")
-                .h(gpui::rems(2.4))
+                .debug_selector(|| "timecode-display".into())
+                .h(style::size::ROW_MD)
                 .px_2()
                 .flex()
                 .items_center()
+                .flex_shrink_0()
                 .rounded(px(style::radius::CONTROL))
                 .cursor_text()
                 .font_family(mono.clone())
-                .text_size(if self.compact_height {
-                    crate::style::type_size::SM
-                } else {
-                    crate::style::type_size::LG
-                })
-                .font_weight(FontWeight::SEMIBOLD)
+                .text_size(style::type_size::TIMECODE)
                 .text_color(hex(color::TEXT))
-                .hover(|this| this.bg(hexa(color::HOVER, 0.7)))
+                .hover(|this| this.bg(hex(color::HOVER)))
                 .tooltip(|window, cx| Tooltip::new("Click to type a timecode").build(window, cx))
                 .child(value)
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -279,8 +298,9 @@ impl Editor {
                 }))
                 .into_any_element()
         };
-        let volume =
-            self.slider_control("monitor-volume", None, self.viewer_state.volume, window, cx);
+        let volume = tier.volume_slider().then(|| {
+            self.slider_control("monitor-volume", None, self.viewer_state.volume, window, cx)
+        });
         let duration = timecode::format_timecode(
             Time(timeline::project_duration(&self.project)),
             self.project.frame_rate(),
@@ -293,8 +313,9 @@ impl Editor {
         let speed_active = self.playing && speed != "1x";
         let muted = self.viewer_state.volume == 0.;
         let compact = self.compact_height;
+        let play_size = Rems(if compact { 2.0 } else { 2.5 });
         div()
-            .h(gpui::rems(if compact { 3.0 } else { 4.0 }))
+            .h(Rems(if compact { 3.0 } else { 3.6 }))
             .w_full()
             .flex_shrink_0()
             .flex()
@@ -305,26 +326,33 @@ impl Editor {
             .border_t_1()
             .border_color(hex(color::BORDER))
             .child(
+                // The side columns share what the buttons leave and clip rather than
+                // overlap them.
                 div()
+                    .debug_selector(|| "transport-left".into())
                     .flex_1()
                     .min_w_0()
+                    .overflow_hidden()
                     .flex()
                     .items_center()
                     .child(timecode_el),
             )
             .child(
                 div()
+                    .debug_selector(|| "transport-center".into())
                     .flex_shrink_0()
                     .flex()
                     .items_center()
                     .justify_center()
                     .gap_1()
-                    .child(icon_button(
-                        "prev-edit",
-                        icons::icon(IconName::SkipBack),
-                        "Previous edit (Up)",
-                        cx.listener(|this, _, _, cx| this.step_edit(-1, cx)),
-                    ))
+                    .when(tier.edit_jumps(), |row| {
+                        row.child(icon_button(
+                            "prev-edit",
+                            icons::icon(IconName::SkipBack),
+                            "Previous edit (Up)",
+                            cx.listener(|this, _, _, cx| this.step_edit(-1, cx)),
+                        ))
+                    })
                     .child(icon_button(
                         "step-back",
                         icons::icon(IconName::StepBack),
@@ -335,9 +363,8 @@ impl Editor {
                         div().px_1().child(
                             style::primary_button("play", cx)
                                 .rounded_full()
-                                .w(gpui::rems(if compact { 2.2 } else { 2.8 }))
-                                .h(gpui::rems(if compact { 2.2 } else { 2.8 }))
-                                .shadow_md()
+                                .w(play_size)
+                                .h(play_size)
                                 .icon(
                                     icons::icon(if self.playing {
                                         IconName::Pause
@@ -360,12 +387,14 @@ impl Editor {
                         "Next frame (Right)",
                         cx.listener(|this, _, _, cx| this.step_frame(1, cx)),
                     ))
-                    .child(icon_button(
-                        "next-edit",
-                        icons::icon(IconName::SkipForward),
-                        "Next edit (Down)",
-                        cx.listener(|this, _, _, cx| this.step_edit(1, cx)),
-                    ))
+                    .when(tier.edit_jumps(), |row| {
+                        row.child(icon_button(
+                            "next-edit",
+                            icons::icon(IconName::SkipForward),
+                            "Next edit (Down)",
+                            cx.listener(|this, _, _, cx| this.step_edit(1, cx)),
+                        ))
+                    })
                     .child(
                         icon_button(
                             "loop",
@@ -375,49 +404,41 @@ impl Editor {
                         )
                         .selected(self.loop_playback),
                     )
-                    .child(
-                        div()
-                            .id("shuttle-speed")
-                            .min_w(gpui::rems(2.267))
-                            .h(gpui::rems(1.467))
-                            .px_2()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .bg(if speed_active {
-                                hexa(color::ACCENT, 0.18)
-                            } else {
-                                hex(color::RAISED)
-                            })
-                            .text_size(crate::style::type_size::XS)
-                            .font_family(mono.clone())
-                            .text_color(if speed_active {
-                                hex(color::ACCENT)
-                            } else {
-                                hex(color::TEXT_SECONDARY)
-                            })
-                            .tooltip(|window, cx| {
-                                Tooltip::new("Shuttle speed (J / K / L)").build(window, cx)
-                            })
-                            .child(speed),
-                    ),
+                    .when(tier.edit_jumps(), |row| {
+                        row.child(
+                            style::chip("shuttle-speed", None, speed)
+                                .tabular()
+                                .when(speed_active, |chip| {
+                                    chip.bg(style::tint(color::ACCENT, style::Alpha::Subtle))
+                                        .text_color(hex(color::ACCENT))
+                                })
+                                .tooltip(|window, cx| {
+                                    Tooltip::new("Shuttle speed (J / K / L)").build(window, cx)
+                                }),
+                        )
+                    }),
             )
             .child(
                 div()
+                    .debug_selector(|| "transport-right".into())
                     .flex_1()
                     .min_w_0()
+                    .overflow_hidden()
                     .flex()
                     .items_center()
                     .justify_end()
                     .gap_2()
-                    .child(
-                        div()
-                            .font_family(mono)
-                            .text_size(crate::style::type_size::SM)
-                            .text_color(hex(color::TEXT_MUTED))
-                            .child(duration),
-                    )
+                    .when(tier.duration(), |row| {
+                        row.child(
+                            div()
+                                .debug_selector(|| "transport-duration".into())
+                                .flex_shrink_0()
+                                .font_family(mono)
+                                .text_role(style::Role::Label)
+                                .tabular()
+                                .child(duration),
+                        )
+                    })
                     .child(
                         icon_button(
                             "monitor-mute",
@@ -437,7 +458,48 @@ impl Editor {
                         )
                         .selected(muted),
                     )
-                    .child(div().w(gpui::rems(5.6)).child(volume)),
+                    .children(volume.map(|slider| div().w(VOLUME_SLIDER_WIDTH).child(slider))),
             )
+    }
+}
+
+/// What the transport row shows at a given viewer width (see
+/// [`Editor::transport_tier`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransportTier {
+    /// Everything: edit jumps, shuttle chip, duration and the volume slider.
+    Full,
+    /// The volume slider is dropped (the mute button stays).
+    NoVolumeSlider,
+    /// Step, play, loop, the timecode and mute only.
+    Essential,
+}
+
+impl TransportTier {
+    /// Viewer widths in rems at which the row loses a part. They leave the sum of the
+    /// widest parts (timecode, buttons, duration, mute and slider) and the gaps free.
+    const FULL_MIN: f32 = 46.;
+    const NO_SLIDER_MIN: f32 = 40.;
+
+    fn for_rems(width: f32) -> Self {
+        if width >= Self::FULL_MIN {
+            Self::Full
+        } else if width >= Self::NO_SLIDER_MIN {
+            Self::NoVolumeSlider
+        } else {
+            Self::Essential
+        }
+    }
+
+    fn volume_slider(self) -> bool {
+        self == Self::Full
+    }
+
+    fn duration(self) -> bool {
+        self != Self::Essential
+    }
+
+    fn edit_jumps(self) -> bool {
+        self != Self::Essential
     }
 }
