@@ -69,7 +69,7 @@ fn main() {
     gpui_platform::application()
         .with_assets(style::Assets)
         .run(move |cx: &mut App| {
-            gpui_component::init(cx);
+            style::init_components(cx);
             let preferences = preferences::Preferences::load();
             style::install_theme(cx, preferences.compact, preferences.reduce_motion);
             cx.on_window_closed(|cx, _window_id| {

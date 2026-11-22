@@ -595,7 +595,10 @@ impl Editor {
                 );
             }
             if index == 0 || timing_open {
-                settings.push(tool_panel::slider_row(label, state, value).into_any_element());
+                settings.push(
+                    tool_panel::slider_row(label, state, &self.focus_handle, value)
+                        .into_any_element(),
+                );
             }
         }
         settings.push(

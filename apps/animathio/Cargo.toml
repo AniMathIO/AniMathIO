@@ -31,6 +31,7 @@ semver = "1"
 sha2 = "0.10"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 gpui.workspace = true
+gpui-base.workspace = true
 gpui-component.workspace = true
 gpui-kit-assets.workspace = true
 gpui-platform.workspace = true

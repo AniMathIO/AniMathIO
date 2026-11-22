@@ -83,10 +83,25 @@ pub(super) fn choice(
         .debug_selector(move || id.to_string())
 }
 
+/// A horizontal slider that leaves keyboard focus with the editor. gpui-component 0.10 sliders
+/// take key focus on a click and swallow the arrows, Home and End, which would stop the timeline
+/// keys until another click; they are also kept out of the Tab order, and focus returns to
+/// `editor_focus` when the mouse is released.
+pub(super) fn slider(state: &Entity<SliderState>, editor_focus: &FocusHandle) -> Div {
+    let editor_focus = editor_focus.clone();
+    div()
+        .w_full()
+        .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+            window.focus(&editor_focus, cx);
+        })
+        .child(Slider::new(state).horizontal().tab_stop(false))
+}
+
 /// A slider with its exact value at the right (`Label`, tabular, right-aligned).
 pub(super) fn slider_row(
     label: &'static str,
     state: &Entity<SliderState>,
+    editor_focus: &FocusHandle,
     value: impl Into<SharedString>,
 ) -> Div {
     style::form_row(
@@ -95,12 +110,7 @@ pub(super) fn slider_row(
             .flex()
             .items_center()
             .gap_2()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(Slider::new(state).horizontal()),
-            )
+            .child(div().flex_1().min_w_0().child(slider(state, editor_focus)))
             .child(
                 div()
                     .w(VALUE_WIDTH)
