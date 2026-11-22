@@ -783,7 +783,10 @@ fn caption_scene(
                 _ => (color, false),
             };
             if pill {
-                let pad_x = base_font * 0.22 * k;
+                // The pill belongs to the word: it pads the word's own glyphs, but it
+                // must not swallow the inter-word spaces. Cap it at half of the gap so
+                // a clear space stays visible between the pill and each neighbour.
+                let pad_x = gap * 0.5 * k;
                 let pad_y = base_font * 0.5 * k;
                 canvas.pill(
                     x - pad_x,
@@ -1948,6 +1951,130 @@ mod weight_tests {
     fn width(contours: &[Vec<PathVerb>]) -> f32 {
         let xs = contours.iter().flatten().map(verb_x);
         xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+    }
+
+    /// The word-highlight pill wraps the active word's own glyphs. It must leave part
+    /// of the inter-word gap visible on both sides, so a caption never reads as
+    /// `third[harmonic]at` instead of `third [harmonic] at`.
+    #[test]
+    fn the_word_highlight_pill_leaves_the_inter_word_spaces_visible() {
+        let accent = Color {
+            r: 255,
+            g: 214,
+            b: 10,
+            a: 255,
+        };
+        let ms = 705_600i64;
+        let timings = (0..4)
+            .map(|i| format!("{}:{}", i * 500 * ms, (i + 1) * 500 * ms))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let params = vec![
+            ParamEntry {
+                id: "caption_style".into(),
+                value: ParamValue::String("word-highlight".into()),
+            },
+            ParamEntry {
+                id: "words".into(),
+                value: ParamValue::String(timings),
+            },
+            ParamEntry {
+                id: "accent".into(),
+                value: ParamValue::Color(accent),
+            },
+        ];
+        let size = Size {
+            width: 960,
+            height: 540,
+        };
+        let (box_w, box_h) = (0.9 * size.width as f32, 0.9 * size.height as f32);
+        let scene = caption_scene(
+            CaptionStyle::WordHighlight,
+            &params,
+            "Math is beautiful today",
+            0.09,
+            // An outlined face so shaping runs natively (the regular face shapes
+            // through the host, which only exists inside the component).
+            Typeface {
+                weight: 700.0,
+                inter: true,
+            },
+            0.9,
+            0.9,
+            Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+            700 * ms, // the second word, "is", is active
+            size,
+        )
+        .unwrap();
+        // Normalized ink bounding box of one fill: (x0, x1, y0, y1).
+        let span = |verbs: &[PathVerb]| -> (f32, f32, f32, f32) {
+            let mut acc = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+            for verb in verbs {
+                let pts: Vec<Point> = match verb {
+                    PathVerb::MoveTo(p) | PathVerb::LineTo(p) => vec![*p],
+                    PathVerb::QuadTo((c, p)) => vec![*c, *p],
+                    PathVerb::CubicTo((a, b, p)) => vec![*a, *b, *p],
+                    PathVerb::Close => continue,
+                };
+                for p in pts {
+                    acc.0 = acc.0.min(p.x);
+                    acc.1 = acc.1.max(p.x);
+                    acc.2 = acc.2.min(p.y);
+                    acc.3 = acc.3.max(p.y);
+                }
+            }
+            acc
+        };
+        let fills: Vec<_> = scene.elements.iter().filter_map(|element| match element {
+            DrawCommand::FillPath((verbs, color)) => Some((span(verbs), *color)),
+            _ => None,
+        }).collect();
+        // The pill is the only accent-coloured fill: the active word's glyphs are
+        // drawn in the contrast colour on top of it, the other words in `color`.
+        let same = |a: &Color, b: &Color| (a.r, a.g, a.b, a.a) == (b.r, b.g, b.b, b.a);
+        let pill_index = fills
+            .iter()
+            .position(|(_, color)| same(color, &accent))
+            .expect("the pill fill");
+        let pill = fills[pill_index].0;
+        let mut before = (f32::MAX, f32::MIN);
+        let mut after = (f32::MAX, f32::MIN);
+        for (index, ((x0, x1, _, _), _)) in fills.iter().enumerate() {
+            if index == pill_index {
+                continue;
+            }
+            if *x1 <= pill.0 {
+                before = (before.0.min(*x0), before.1.max(*x1));
+            } else if *x0 >= pill.1 {
+                after = (after.0.min(*x0), after.1.max(*x1));
+            }
+        }
+        assert!(
+            before.1 > f32::MIN && after.0 < f32::MAX,
+            "a word must sit on each side of the highlighted one"
+        );
+        // The pill is exactly one em tall (half an em of padding above and below
+        // the line), and the caption's inter-word gap is 0.28 em at the same scale.
+        let em = (pill.3 - pill.2) * box_h;
+        let gap = 0.28 * em;
+        let left = (pill.0 - before.1) * box_w;
+        let right = (after.0 - pill.1) * box_w;
+        // Most of each space must stay visible around the pill (the old 0.22 em
+        // padding ate all but 0.06 em of the 0.28 em gap, so the caption read
+        // `Math[is]beautiful` with the spaces swallowed).
+        assert!(
+            left >= 0.4 * gap,
+            "left space swallowed: {left:.3} px, gap {gap:.3} px"
+        );
+        assert!(
+            right >= 0.4 * gap,
+            "right space swallowed: {right:.3} px, gap {gap:.3} px"
+        );
     }
 
     #[test]
