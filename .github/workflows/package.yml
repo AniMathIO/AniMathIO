@@ -322,6 +322,8 @@ jobs:
           mounted_app="$(find "$mountroot" -maxdepth 2 -name '*.app' -print -quit)"
           test -n "$mounted_app"
           plutil -p "$mounted_app/Contents/Info.plist"
+          # Record audio opens the microphone; without this key macOS kills the app.
+          plutil -p "$mounted_app/Contents/Info.plist" | grep -q NSMicrophoneUsageDescription || { echo "Info.plist lacks NSMicrophoneUsageDescription" >&2; exit 1; }
           check_bundle "$mounted_app"
       - name: Attest build provenance
         # `id-token: write` is not granted to pull requests from forks.
