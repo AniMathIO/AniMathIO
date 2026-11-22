@@ -7,7 +7,7 @@ use super::fixtures::*;
 use super::helpers::{ruler_point, seek};
 use super::{
     BTreeMap, BTreeSet, ClipId, Command, Interpolation, Project, Target, TestAppContext, Time,
-    TransformProperty, Track, Ui, private_env, ruler_height,
+    Track, TransformProperty, Ui, private_env, ruler_height,
 };
 use crate::editor::actions::{AddMarker, Redo, Undo};
 use crate::editor::markers::marker_name_bounds;

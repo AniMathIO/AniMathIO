@@ -3,8 +3,8 @@
 use super::fixtures::{sample, voice_and_music};
 use super::helpers::{dialog_ready, edit_dialog_field, last_error};
 use super::{ClipId, Command, Editor, TestAppContext, Ui};
-use crate::editor::support::project_size;
 use crate::editor::actions::Undo;
+use crate::editor::support::project_size;
 
 #[gpui::test]
 fn preferences_enter_saves_and_invalid_input_keeps_the_dialog_open(cx: &mut TestAppContext) {
