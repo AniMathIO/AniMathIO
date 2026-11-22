@@ -9,7 +9,6 @@
 //! when the panel is built, because that can raise a keyring unlock prompt. The result replaces the formula field, so the live
 //! LaTeX preview validates it and the user edits it before **Add** inserts it as one undoable
 //! command, the same path as typing LaTeX. All provider logic is in `animathio-assist`.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,10 +19,11 @@ use animathio_assist::{
 use gpui::{prelude::*, *};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_component::{ActiveTheme, Disableable, Sizable};
+use gpui_component::{Disableable, Sizable};
 
+use super::tool_panel;
 use crate::icons::{self, IconName};
-use crate::style::{self, color, hex};
+use crate::style::{self, TextRole as _, color, hex};
 
 /// Whether the "Describe in words" disclosure was left open; remembered for the app's lifetime
 /// (an app global, so separate test windows never share it) so a user who works with it does not
@@ -632,7 +632,7 @@ impl Render for AssistPanel {
                 .items_center()
                 .gap_1()
                 .cursor_pointer()
-                .font_weight(FontWeight::SEMIBOLD)
+                .text_role(style::Role::Heading)
                 .child(
                     icons::icon(if open {
                         IconName::ChevronDown
@@ -652,21 +652,15 @@ impl Render for AssistPanel {
         if configured {
             panel = panel
                 .child(Textarea::new(&self.prose))
-                .child(
-                    div()
-                        .text_size(style::type_size::XS)
-                        .text_color(secondary)
-                        .child(self.notice(&key)),
-                )
+                .child(tool_panel::note(self.notice(&key)))
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap_2()
                         .child(
-                            Button::new("assist-convert")
+                            style::secondary_button("assist-convert", cx)
                                 .small()
-                                .primary()
                                 .icon(icons::icon(IconName::Sparkles))
                                 .label(if self.converting {
                                     "Converting…"
@@ -678,7 +672,7 @@ impl Render for AssistPanel {
                         )
                         .when(self.converting, |row| {
                             row.child(
-                                Button::new("assist-cancel")
+                                style::secondary_button("assist-cancel", cx)
                                     .small()
                                     .icon(icons::icon(IconName::X))
                                     .label("Cancel")
@@ -695,16 +689,11 @@ impl Render for AssistPanel {
                         ),
                 );
         } else {
-            panel = panel.child(
-                div()
-                    .text_size(style::type_size::XS)
-                    .text_color(secondary)
-                    .child(
-                        "Turn a description into LaTeX with a model you choose: OpenAI, Gemini or \
-                         a local server such as Ollama. Off until you set it up; nothing is sent \
-                         without pressing Convert.",
-                    ),
-            );
+            panel = panel.child(tool_panel::note(
+                "Turn a description into LaTeX with a model you choose: OpenAI, Gemini or \
+                 a local server such as Ollama. Off until you set it up; nothing is sent \
+                 without pressing Convert.",
+            ));
         }
         if self.setup_open || !configured {
             let mut presets = div().flex().flex_wrap().gap_1();
@@ -718,77 +707,63 @@ impl Render for AssistPanel {
                         })),
                 );
             }
+            // The provider settings are form rows, so labels and fields line up and wrap
+            // inside the dialog body instead of running past its edge.
             panel = panel.child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_1()
-                    .p_2()
-                    .rounded(px(6.))
+                    .gap_2()
+                    .p_3()
+                    .rounded(px(style::radius::CARD))
                     .border_1()
                     .border_color(hex(color::BORDER))
-                    .child(div().text_color(secondary).child("Start from"))
-                    .child(presets)
-                    .child(
-                        div()
-                            .text_color(secondary)
-                            .child("Base URL (OpenAI-compatible)"),
-                    )
-                    .child(Input::new(&self.base_url).small())
-                    .child(div().text_color(secondary).child("Model"))
-                    .child(Input::new(&self.model).small())
-                    .child(div().text_color(secondary).child("API key"))
-                    .child(Input::new(&self.api_key).small().mask_toggle())
-                    .child(
-                        div()
-                            .text_size(style::type_size::XS)
-                            .text_color(secondary)
-                            .child(self.key_line(&key)),
-                    )
-                    .child(
-                        div()
-                            .text_size(style::type_size::XS)
-                            .text_color(secondary)
-                            .child(
-                                "The key is stored in your system keyring, never in project or \
-                                 settings files. Leave the fields empty and save to turn AI \
-                                 assist off.",
-                            ),
-                    )
+                    .child(style::form_row("Start from", presets))
+                    .child(style::form_row(
+                        "Base URL",
+                        Input::new(&self.base_url).small(),
+                    ))
+                    .child(tool_panel::note("Any OpenAI-compatible endpoint works."))
+                    .child(style::form_row("Model", Input::new(&self.model).small()))
+                    .child(style::form_row(
+                        "API key",
+                        Input::new(&self.api_key).small().mask_toggle(),
+                    ))
+                    .child(tool_panel::note(self.key_line(&key)))
+                    .child(tool_panel::note(
+                        "The key is stored in your system keyring, never in project or \
+                         settings files. Leave the fields empty and save to turn AI \
+                         assist off.",
+                    ))
                     .child(
                         div()
                             .flex()
+                            .justify_end()
                             .gap_2()
                             .child(
-                                Button::new("assist-save")
-                                    .small()
-                                    .primary()
-                                    .label("Save")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.save_setup(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("assist-remove-key")
+                                style::secondary_button("assist-remove-key", cx)
                                     .small()
                                     .label("Remove saved key")
                                     .disabled(key != KeyStatus::Saved)
                                     .on_click(cx.listener(|this, _, _, cx| this.remove_key(cx))),
+                            )
+                            .child(
+                                style::secondary_button("assist-save", cx)
+                                    .small()
+                                    .label("Save")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.save_setup(window, cx);
+                                    })),
                             ),
                     ),
             );
         }
         match &self.message {
             Some(Message::Error(text)) => {
-                panel = panel.child(div().text_color(cx.theme().danger).child(text.clone()));
+                panel = panel.child(tool_panel::problem(text.clone()));
             }
             Some(Message::Info(text)) => {
-                panel = panel.child(
-                    div()
-                        .text_size(style::type_size::XS)
-                        .text_color(secondary)
-                        .child(text.clone()),
-                );
+                panel = panel.child(tool_panel::note(text.clone()));
             }
             None => {}
         }

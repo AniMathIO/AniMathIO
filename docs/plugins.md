@@ -50,11 +50,12 @@ the control handler all read the same file. `ANIMATHIO_PLUGIN_SETTINGS` override
 ### Browse and install in the editor
 
 The Library's Plugins tab holds the one global switch (Preferences only reports it and links
-there). A permanent caption under the switch says "Third-party · sandboxed · not audited";
-turning the switch on adds a trust card, and the Installed and Browse tabs appear. Installed
-community plugins use the same card layout as first-party ones (icon, name, version, id,
-kinds, author, Source link) with one Enabled switch and a danger-styled Remove that asks for
-confirmation first. A registry install shows "SHA-256 verified". Install from a local file
+there). A permanent caption under the switch says "Community plugins run sandboxed and are
+not reviewed."; turning the switch on adds a short note, and the Installed and Browse tabs
+appear. Installed community plugins use the same card layout as built-in ones (icon, name,
+one switch, a description, an origin and version caption, Source link; the plugin id, package
+file and ABI sit behind Details) and a danger-styled Remove that asks for confirmation
+first. A registry install shows "SHA-256 verified". Install from a local file
 is the + button at the top of the Library while the Plugins tab is open. First-party plugins
 remain on and cannot be removed here. Search by name, author, description or id; inspect the licence, version,
 minimum ABI, incompatibility reason and source link before installing. Installs start

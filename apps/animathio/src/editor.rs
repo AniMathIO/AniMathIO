@@ -70,6 +70,7 @@ mod templates;
 mod timeline_thumbnails;
 mod timeline_view;
 mod titles;
+mod tool_panel;
 mod transport;
 #[cfg(test)]
 mod ui_tests;
@@ -1363,13 +1364,13 @@ impl Render for Editor {
         if let Some(panel) = self.export_queue_panel(window, cx) {
             root = root.child(panel);
         }
-        if let Some(panel) = self.scene_view(cx) {
+        if let Some(panel) = self.scene_view(window, cx) {
             root = root.child(panel);
         }
-        if let Some(panel) = self.reframe_view(cx) {
+        if let Some(panel) = self.reframe_view(window, cx) {
             root = root.child(panel);
         }
-        if let Some(panel) = self.autocut_panel(cx) {
+        if let Some(panel) = self.autocut_panel(window, cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.duck_panel(window, cx) {
@@ -1378,7 +1379,7 @@ impl Render for Editor {
         if let Some(panel) = self.subtitle_panel(cx) {
             root = root.child(panel);
         }
-        if let Some(panel) = self.marker_panel(cx) {
+        if let Some(panel) = self.marker_panel(window, cx) {
             root = root.child(panel);
         }
         if let Some(menu) = self.context_menu_dropdown(window, cx) {

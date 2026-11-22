@@ -15,12 +15,8 @@
 /// `apps/animathio/src`.
 #[cfg(test)]
 const BASELINE: &[(&str, usize)] = &[
-    ("editor/assist.rs", 1),
-    ("editor/community_plugins.rs", 2),
-    ("editor/markers.rs", 3),
-    ("editor/math.rs", 2),
-    ("editor/reframe.rs", 1),
-    ("editor/scenes.rs", 1),
+    // `fields::to_hsla(` matches the `hsla(` pattern; no ad-hoc literal remains.
+    ("editor/math.rs", 1),
 ];
 
 /// The number of ad-hoc literals in a source file (see the module docs). All

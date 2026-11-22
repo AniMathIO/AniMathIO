@@ -1,9 +1,8 @@
 //! Math library and a reusable, draft-based object editor. Preview never mutates the project.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::assist::{AssistEvent, AssistPanel};
 use super::*;
-use crate::style::{self, color, hex};
+use crate::style::{self, TextRole as _, color, hex};
 use animathio_control::{
     LATEX_SNIPPETS, LATEX_TEMPLATES, MathObjectDraft, MathObjectKind, math_object_command,
     math_object_draft, math_object_range,
@@ -199,19 +198,19 @@ impl Editor {
         let size = project_size(&self.project);
         let panel = cx
             .new(|cx| MathEditor::new(draft, editor, session, range, edit, true, size, window, cx));
-        // Wide enough for the two-column LaTeX layout when the window allows it.
-        let wide = kind == animathio_control::MathObjectKind::Latex
-            && f32::from(window.viewport_size().width)
-                >= MATH_TWO_COLUMN_MIN_WIDTH * style::ui_scale();
-        let width = ((if wide { 920. } else { 720. }) * style::ui_scale())
+        // The large dialog width; the LaTeX palette sits beside the form when the window allows.
+        let width = f32::from(style::dialog_width::of(style::dialog_width::LARGE))
             .min(f32::from(window.viewport_size().width) - 32.);
         super::dialogs::open_dialog(window, cx, move |dialog, _, _| {
             dialog
-                .title(if edit.is_some() {
-                    "Edit math object"
-                } else {
-                    "Add math object"
-                })
+                .title(super::dialogs::heading(
+                    IconName::Sigma,
+                    if edit.is_some() {
+                        "Edit math object"
+                    } else {
+                        "Add math object"
+                    },
+                ))
                 .width(px(width))
                 .child(panel.clone())
                 .on_ok({
@@ -282,7 +281,7 @@ impl Editor {
             cards = cards.child(
                 div()
                     .w_full()
-                    .text_size(style::type_size::XS)
+                    .text_size(style::type_size::LABEL)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child("Click to configure, + adds, drag to place."),
             );
@@ -295,7 +294,7 @@ impl Editor {
                     div()
                         .w_full()
                         .pt_2()
-                        .text_size(style::type_size::XS)
+                        .text_size(style::type_size::LABEL)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(hex(color::TEXT_SECONDARY))
                         .child(group),
@@ -328,7 +327,7 @@ impl Editor {
                         _ => 1.,
                     }))
                     .min_w_0()
-                    .rounded(px(6.))
+                    .rounded(px(style::radius::CARD))
                     .overflow_hidden()
                     .border_1()
                     .border_color(hex(color::BORDER))
@@ -374,7 +373,7 @@ impl Editor {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .text_size(style::type_size::XS)
+                                    .text_size(style::type_size::LABEL)
                                     .child(kind.label()),
                             )
                             .child(
@@ -400,7 +399,9 @@ impl Editor {
 /// Window width from which the Add math object dialog puts the LaTeX palette beside the form.
 pub(super) const MATH_TWO_COLUMN_MIN_WIDTH: f32 = 960.;
 /// Width of the palette column in that layout.
-const MATH_PALETTE_WIDTH: f32 = 330.;
+const MATH_PALETTE_WIDTH: f32 = 264.;
+/// Height of the live preview stage.
+const PREVIEW_HEIGHT: f32 = 160.;
 
 pub(super) struct MathEditor {
     draft: MathObjectDraft,
@@ -798,12 +799,15 @@ impl Render for MathEditor {
             .flex_col()
             .gap_2()
             .p_2()
-            .text_size(style::type_size::SM)
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.draft.kind.label()),
-            );
+            .text_size(style::type_size::BODY)
+            // The dialog title already names the object; the inspector keeps the heading.
+            .when(!self.dialog, |form| {
+                form.child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(self.draft.kind.label()),
+                )
+            });
         for spec in self.draft.specs() {
             form = form.child(
                 div()
@@ -859,7 +863,12 @@ impl Render for MathEditor {
                 );
             } else if spec.id == "source" {
                 if let Some(source) = &self.source {
-                    form = form.child(Textarea::new(source));
+                    // LaTeX source is code: set it in the mono face.
+                    form = form.child(
+                        div()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .child(Textarea::new(source)),
+                    );
                 }
             } else if let Some(state) = self.fields.get(spec.id) {
                 form = if spec.numeric {
@@ -928,13 +937,30 @@ impl Render for MathEditor {
                 ("Snippets", LATEX_SNIPPETS, false),
                 ("Templates", LATEX_TEMPLATES, true),
             ] {
-                palette = palette.child(div().text_color(hex(color::TEXT_SECONDARY)).child(title));
+                palette = palette.child(
+                    div()
+                        .text_role(style::Role::Heading)
+                        .text_color(hex(color::TEXT))
+                        .child(title),
+                );
                 let mut buttons = div().flex().flex_wrap().gap_1();
                 for &(label, value) in items {
                     buttons = buttons.child(
-                        Button::new(SharedString::from(format!("{title}-{label}")))
-                            .small()
-                            .label(label)
+                        div()
+                            .id(SharedString::from(format!("{title}-{label}")))
+                            .h(style::size::ROW_SM)
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .rounded(px(style::radius::CONTROL))
+                            .border_1()
+                            .border_color(hex(color::BORDER))
+                            .bg(hex(color::RAISED))
+                            .text_role(style::Role::Label)
+                            .text_color(hex(color::TEXT))
+                            .cursor_pointer()
+                            .hover(|chip| chip.bg(hex(color::HOVER)))
+                            .child(label)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.snippet(value, replace, window, cx);
                             })),
@@ -952,22 +978,26 @@ impl Render for MathEditor {
             .relative()
             .child(form)
             .child(Scrollbar::vertical(&self.form_scroll));
-        let mut image = div()
-            .w_full()
-            .h(px(160.))
+        // The stage has the canvas aspect, so the preview shows what the frame will frame.
+        let aspect = self.size.0.max(1) as f32 / self.size.1.max(1) as f32;
+        let mut stage = div()
+            .h(px(PREVIEW_HEIGHT))
+            .w(px(PREVIEW_HEIGHT * aspect))
+            .max_w_full()
             .flex_shrink_0()
-            .bg(hex(color::BG))
+            .bg(hex(color::STAGE))
             .flex()
             .items_center()
             .justify_center();
         if let Some(preview) = &self.image {
-            image = image.child(
+            stage = stage.child(
                 img(preview.clone())
                     .max_w_full()
                     .max_h_full()
                     .object_fit(ObjectFit::Contain),
             );
         }
+        let image = div().w_full().flex().justify_center().child(stage);
         let left = div()
             .flex_1()
             .min_w_0()
@@ -978,12 +1008,21 @@ impl Render for MathEditor {
             .child(image)
             .child(
                 div()
-                    .text_size(style::type_size::XS)
+                    .id("math-preview-caption")
+                    .flex()
+                    .justify_center()
+                    .text_role(style::Role::Label)
                     .text_color(hex(color::TEXT_SECONDARY))
                     .child(if self.busy {
                         "Updating preview…"
                     } else {
-                        "Live preview; ten units across the short edge, positive Y upward"
+                        "Live preview"
+                    })
+                    .tooltip(|window, cx| {
+                        gpui_component::tooltip::Tooltip::new(
+                            "Ten units across the short edge, positive Y upward",
+                        )
+                        .build(window, cx)
                     }),
             );
         let mut result = div().flex().flex_col().gap_2().child(
@@ -1002,7 +1041,7 @@ impl Render for MathEditor {
                                     .overflow_y_scroll()
                                     .track_scroll(&self.palette_scroll)
                                     .p_2()
-                                    .text_size(style::type_size::SM)
+                                    .text_size(style::type_size::BODY)
                                     .child(palette),
                             )
                             .child(Scrollbar::vertical(&self.palette_scroll)),
@@ -1020,14 +1059,13 @@ impl Render for MathEditor {
                 .gap_2()
                 .when(self.dialog, |row| {
                     row.child(
-                        Button::new("math-cancel")
+                        style::secondary_button("math-cancel", cx)
                             .label("Cancel")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                 })
                 .child(
-                    Button::new("math-apply")
-                        .primary()
+                    style::primary_button("math-apply", cx)
                         .label(if self.edit.is_some() { "Apply" } else { "Add" })
                         .disabled(self.busy || self.error.is_some())
                         .on_click(cx.listener(Self::apply_click)),

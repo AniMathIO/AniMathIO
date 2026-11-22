@@ -101,7 +101,7 @@ ad-hoc colour or size literals beyond its recorded baseline.
 `apps/animathio/src/editor.rs` owns view state and composes implementation modules
 under `editor/`: `menus`, `workspace`, `viewer`, `transport`, `timeline_view`,
 `fields`, `audio_effects` (inspector audio-effect cards), `animations` (the inspector
-Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `inspector_units` (how the inspector shows numbers and colors: one hex format, degrees, font size as a percentage of the short edge, framed swatches), `media_pool`, `recording` (the Media tab's "Record audio" card), `math` (Elements cards, typed object dialog and inspector), `titles` (Titles tab), `dialogs`, `export_panel`
+Animations section and the Effects-tab preset library), `video_effects` (inspector video-effect cards), `inspector_view`, `inspector_units` (how the inspector shows numbers and colors: one hex format, degrees, font size as a percentage of the short edge, framed swatches), `media_pool`, `recording` (the Media tab's "Record audio" card), `math` (Elements cards, typed object dialog and inspector), `tool_panel` (the pieces the floating tool panels share: body, sections, status lines, the segmented choice, slider rows and check rows around `style::ToolPanel`), `titles` (Titles tab), `dialogs`, `export_panel`
 (export queue popover), `start_screen`, `templates`, `clip_ops`, `commands`, `project_io`,
 `control_bridge`, `playback_glue`, `timeline_thumbnails`, `actions` and `update_check`
 (at most one GitHub releases lookup per 24 h, a dismissable newer-release notice,
