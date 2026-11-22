@@ -158,13 +158,111 @@ fn export_dialog_shows_custom_times_only_for_custom_and_summarises(cx: &mut Test
     assert!(visible(&mut ui, "export-output-caption"));
 }
 
+#[gpui::test]
+fn export_format_selector_picks_webm_and_rewrites_the_extension(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    // Keep the default output folder inside a temp dir, never the real export folder.
+    let dir = tempfile::tempdir().unwrap();
+    let project_file = dir.path().join("talk.amio");
+    ui.update(|editor, _window, _cx| editor.path = Some(project_file.clone()));
+    ui.update(Editor::open_export_dialog);
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    assert!(visible(&mut ui, "export-format-select"));
+    assert!(visible(&mut ui, "export-format-note"));
+
+    // The default is MP4. Open the selector and move to WebM like a keyboard user would.
+    let select = ui.cx.debug_bounds("export-format-select").unwrap();
+    ui.click(select.center(), gpui::Modifiers::default());
+    ui.press("down");
+    ui.press("enter");
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    assert!(
+        visible(&mut ui, "export-format-select"),
+        "choosing a format keeps the dialog open"
+    );
+
+    // Export now: the job writes `talk.webm`, the extension followed the selector.
+    let export_now = ui.cx.debug_bounds("export-now").expect("Export now button");
+    ui.click(export_now.center(), gpui::Modifiers::default());
+    ui.settle();
+    let (output, id) = ui.read(|editor| {
+        let job = editor.export_queue.jobs().first().expect("a queued export");
+        (job.output.clone(), job.id)
+    });
+    assert_eq!(output, dir.path().join("talk.webm"));
+    ui.update(|editor, _window, _cx| editor.export_queue.cancel(id));
+}
+
+#[gpui::test]
+fn export_dialog_refuses_a_file_name_that_contradicts_the_format(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let dir = tempfile::tempdir().unwrap();
+    for (format, name, needle) in [
+        (animathio_export::Format::Mp4, "clip.webm", "ends in .webm"),
+        (animathio_export::Format::Webm, "clip.mp4", "ends in .mp4"),
+    ] {
+        let outcome = ui.update(|editor, _window, cx| {
+            editor.submit_export(
+                None,
+                format,
+                "Whole project",
+                None,
+                None,
+                dir.path().join(name),
+                false,
+                cx,
+            )
+        });
+        assert!(matches!(
+            outcome,
+            crate::editor::dialogs::Submitted::Invalid
+        ));
+        ui.read(|editor| {
+            assert!(
+                editor
+                    .last_error
+                    .as_deref()
+                    .is_some_and(|e| e.contains(needle)),
+                "{:?}",
+                editor.last_error
+            );
+        });
+        assert!(ui.read(|editor| editor.export_queue.is_empty()));
+    }
+    // A matching WebM job queues, and is then cancelled before it writes anything.
+    let outcome = ui.update(|editor, _window, cx| {
+        editor.submit_export(
+            None,
+            animathio_export::Format::Webm,
+            "Whole project",
+            None,
+            None,
+            dir.path().join("clip.webm"),
+            false,
+            cx,
+        )
+    });
+    assert!(matches!(outcome, crate::editor::dialogs::Submitted::Queued));
+    let id = ui.read(|editor| editor.export_queue.jobs()[0].id);
+    ui.update(|editor, _window, _cx| editor.export_queue.cancel(id));
+}
+
 #[test]
 fn export_summary_and_path_truncation() {
     assert_eq!(
-        export_summary((640, 360), "30 fps", 3),
+        export_summary((640, 360), "30 fps", 3, animathio_export::Format::Webm),
+        "640×360 · 30 fps · WebM · no chapters (WebM)"
+    );
+    assert_eq!(
+        export_summary((640, 360), "30 fps", 3, animathio_export::Format::Mp4),
         "640×360 · 30 fps · MP4 · chapters on"
     );
-    assert!(export_summary((640, 360), "30 fps", 0).contains("no chapters"));
+    assert!(
+        export_summary((640, 360), "30 fps", 0, animathio_export::Format::Mp4)
+            .contains("no chapters")
+    );
     assert_eq!(middle_truncate("/a/b.mp4", 40), "/a/b.mp4");
     let long = "/home/someone/Videos/a/very/deep/folder/structure/that/keeps/going/final-cut.mp4";
     let short = middle_truncate(long, 40);

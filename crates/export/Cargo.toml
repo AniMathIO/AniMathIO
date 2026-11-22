@@ -19,6 +19,7 @@ tempfile = "3"
 animathio-plugin-api = { path = "../plugin-api" }
 animathio-plugin-host = { path = "../plugin-host", features = ["test-support"] }
 serde_json.workspace = true
+filmcraft-matroska = "0.9.0"
 
 [lints]
 workspace = true

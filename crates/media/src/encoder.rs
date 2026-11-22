@@ -426,7 +426,7 @@ fn unit_table() -> [f64; 256] {
 /// Convert straight-alpha RGBA8 to planar 4:2:0 YUV with BT.709 limited-range coefficients and
 /// 2×2 chroma averaging. Output is independent of the worker count:
 /// each band of two luma rows is converted by exactly the same arithmetic.
-fn rgba_to_yuv420(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+pub(crate) fn rgba_to_yuv420(rgba: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let (w, h) = (width as usize, height as usize);
     let (cw, ch) = (w / 2, h / 2);
     let mut y = vec![0u8; w * h];

@@ -389,6 +389,51 @@ fn media_edit_save_reopen_and_export() {
             .video
             .unwrap();
     assert_eq!((portrait_info.width, portrait_info.height), (90, 160));
+    // WebM through the same tool: chosen by extension or by `format`, and clear errors otherwise.
+    let portrait_webm = dir.path().join("portrait.webm");
+    session.tool("export_video", json!({"path": portrait_webm}));
+    let webm = animathio_media::MediaBackend::probe(
+        &animathio_media::FilmCraftBackend::new(),
+        &portrait_webm,
+    )
+    .unwrap();
+    assert_eq!(webm.container, "WebM");
+    let webm_video = webm.video.unwrap();
+    assert_eq!(webm_video.codec, "VP9");
+    assert_eq!((webm_video.width, webm_video.height), (90, 160));
+    let by_format = dir.path().join("by-format.bin");
+    session.tool("export_video", json!({"path": by_format, "format": "webm"}));
+    assert!(
+        std::fs::read(&by_format)
+            .unwrap()
+            .starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
+    );
+    for (arguments, needle) in [
+        (
+            json!({"path": dir.path().join("a.webm"), "format": "mp4"}),
+            "ends in .webm",
+        ),
+        (
+            json!({"path": dir.path().join("b.mp4"), "format": "webm"}),
+            "ends in .mp4",
+        ),
+        (
+            json!({"path": dir.path().join("c.mp4"), "format": "avi"}),
+            "mp4 and webm",
+        ),
+    ] {
+        let response = session.request(
+            "tools/call",
+            json!({"name": "export_video", "arguments": arguments}),
+        );
+        let text = response.to_string();
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "{text}"
+        );
+        assert!(text.contains(needle), "{text}");
+    }
+    assert!(!dir.path().join("a.webm").exists());
     drop(session);
     assert!(child.wait().unwrap().success());
     let info = animathio_media::FilmCraftBackend::new()
