@@ -444,20 +444,7 @@ impl Editor {
             position,
         } = saving;
         let placement = add_to_timeline.then(|| (self.next_clip_id(), position));
-        let command = match recording_command(
-            &self.project,
-            id.clone(),
-            recording_name(&self.project),
-            duration,
-            placement,
-        ) {
-            Ok(command) => command,
-            Err(error) => {
-                self.error = Some(error);
-                cx.notify();
-                return;
-            }
-        };
+        let name = recording_name(&self.project);
         let known = self.assets.contains_key(&id);
         if !known {
             if let Some(source) = &source {
@@ -465,20 +452,63 @@ impl Editor {
             }
             Arc::make_mut(&mut self.assets).insert(id.clone(), wav);
         }
-        if self.try_execute(&command, cx) {
+        // The take is the user's work: when it cannot be placed on the timeline, keep it as
+        // a library-only asset instead of dropping the audio.
+        let first = self.apply_take(&id, &name, duration, placement, cx);
+        let (applied, placed, failure) = match first {
+            Ok(()) => (true, placement.is_some(), None),
+            Err(error) if placement.is_some() => {
+                match self.apply_take(&id, &name, duration, None, cx) {
+                    Ok(()) => (true, false, None),
+                    Err(_) => (false, false, Some(error)),
+                }
+            }
+            Err(error) => (false, false, Some(error)),
+        };
+        if applied {
             self.worker.load(self.assets.clone());
-            self.notices
-                .push(crate::style::Toast::info(if add_to_timeline {
-                    "Recording added to the library and the timeline."
-                } else {
-                    "Recording added to the library. Click it or drag it to the timeline."
-                }));
-        } else if !known {
-            Arc::make_mut(&mut self.assets).remove(&id);
-            // The decode went into the pool for a clip that never existed: prune it.
-            self.pool.collect(&self.project);
+            self.notices.push(crate::style::Toast::info(if placed {
+                "Recording added to the library and the timeline."
+            } else if add_to_timeline {
+                "The recording could not be placed on the timeline, but it is in the Library. Drag it to the timeline."
+            } else {
+                "Recording added to the library. Click it or drag it to the timeline."
+            }));
+        } else {
+            self.error = failure;
+            if !known {
+                Arc::make_mut(&mut self.assets).remove(&id);
+                // The decode went into the pool for a clip that never existed: prune it.
+                self.pool.collect(&self.project);
+            }
         }
         cx.notify();
+    }
+
+    /// Run the command that adds the finished take (and its clip, when `placement` is set).
+    fn apply_take(
+        &mut self,
+        id: &AssetId,
+        name: &str,
+        duration: Time,
+        placement: Option<(ClipId, Time)>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let command = recording_command(
+            &self.project,
+            id.clone(),
+            name.to_owned(),
+            duration,
+            placement,
+        )?;
+        if self.try_execute(&command, cx) {
+            Ok(())
+        } else {
+            Err(self
+                .error
+                .take()
+                .unwrap_or_else(|| "the edit was refused".into()))
+        }
     }
 
     /// Whether a take is being captured or its save is still pending: closing the editor asks

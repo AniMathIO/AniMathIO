@@ -400,11 +400,9 @@ fn a_save_for_a_replaced_project_never_registers_the_wrong_take(cx: &mut TestApp
 }
 
 #[gpui::test]
-fn a_take_that_cannot_be_placed_leaves_nothing_behind(cx: &mut TestAppContext) {
+fn a_take_that_cannot_be_placed_stays_in_the_library(cx: &mut TestAppContext) {
     let capture = desk_and_usb();
     let mut ui = open_recorder(cx, &capture);
-    let assets_before = ui.read(|e| e.assets.len());
-    let pool_before = ui.read(|e| e.pool.len());
     ui.update(|e, _, cx| e.start_recording(cx));
     ui.advance_clock(TICK);
     // A position at the end of time: the clip would run past the supported timeline.
@@ -412,10 +410,17 @@ fn a_take_that_cannot_be_placed_leaves_nothing_behind(cx: &mut TestAppContext) {
     ui.update(|e, _, cx| e.stop_recording(cx));
     ui.settle();
     ui.read(|e| {
-        assert!(e.last_error.is_some(), "the failure is reported");
-        assert_eq!(e.assets.len(), assets_before, "no orphan asset bytes");
-        assert_eq!(e.pool.len(), pool_before, "no orphan pool entry");
-        assert_eq!(wav_assets(e), 0);
+        assert!(
+            e.error.is_none(),
+            "the take was saved, so no error: {:?}",
+            e.error
+        );
+        assert_eq!(wav_assets(e), 1, "the recording is kept as a library asset");
+        assert!(audio_clips(e).is_empty(), "no clip was placed");
+        assert!(
+            e.assets.values().any(|asset| !asset.is_empty()),
+            "the WAV bytes were kept"
+        );
         assert!(e.record_panel.as_ref().unwrap().saving.is_none());
     });
 }
