@@ -1,4 +1,5 @@
 //! UI polish for community plugins, Preferences, Export and the launcher.
+
 use std::collections::BTreeMap;
 
 use animathio_plugin_host::CommunityStore;
@@ -6,7 +7,8 @@ use gpui::TestAppContext;
 use gpui_component::WindowExt;
 
 use super::fixtures::*;
-use super::{Ui, config_dir};
+use super::{Ui, config_dir, require_plugins};
+use crate::editor::actions::NewProject;
 use crate::editor::dialogs::{export_summary, middle_truncate};
 use crate::editor::{Editor, LeftTab, Project};
 
@@ -402,4 +404,100 @@ fn browse_card_details_disclose_and_hide_the_plugin_facts(cx: &mut TestAppContex
         .expect("the link stays");
     ui.click(link.center(), gpui::Modifiers::default());
     assert!(!visible(&mut ui, facts), "Hide details closes them again");
+}
+
+/// The launcher shows no canvas yet, so the status bar hides the placeholder
+/// resolution/duration chips until a project exists.
+#[gpui::test]
+fn launcher_status_bar_hides_placeholder_resolution_and_duration(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    assert!(ui.read(Editor::is_start_screen));
+    ui.read(|editor| assert!(!editor.status_summary_visible()));
+    ui.dispatch(NewProject);
+    ui.press("enter");
+    ui.read(|editor| {
+        assert!(!editor.is_start_screen());
+        assert!(editor.status_summary_visible());
+        assert_eq!(editor.project.tracks().len(), 1);
+    });
+}
+
+/// Community plugins start off. Switching them on and enabling one loads it into the running
+/// editor (its clip source appears in the plugin list); turning the switch off unloads it
+/// again. No restart, and the headless harness uses a private plugin folder and settings.
+#[gpui::test]
+fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
+    const HELLO: &[u8] =
+        include_bytes!("../../../../../crates/plugin-host/tests/fixtures/hello-1.0.0.amplugin");
+    const ID: &str = "com.example.hello";
+    if !require_plugins("community_plugins_load_and_unload_without_restart") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.settle();
+    // A private store of this test: the shared one in the test config directory also holds the
+    // `community-plugins.json` that other scenarios (Preferences) write concurrently.
+    let root = tempfile::tempdir().unwrap();
+    let store = animathio_plugin_host::CommunityStore::new(
+        root.path().join("plugins"),
+        root.path().join("community-plugins.json"),
+    );
+    ui.update(|editor, _, _| editor.community.store = Some(store.clone()));
+    let has_hello = |ui: &Ui| ui.read(|editor| editor.plugins.iter().any(|plugin| plugin.id == ID));
+    assert!(!store.settings().enabled, "community plugins start off");
+    assert!(!has_hello(&ui));
+
+    // Installed plugins start disabled, so even a switched-on editor does not load them.
+    store.install_bytes(HELLO, None, false).unwrap();
+    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(true, cx).unwrap());
+    assert!(!has_hello(&ui), "installed but not enabled");
+
+    // Enabling the plugin (the CLI or a future Browse UI) and re-syncing loads it live.
+    store.set_plugin_enabled(ID, true).unwrap();
+    ui.update(|editor, _, cx| editor.sync_community_plugins(cx));
+    assert!(has_hello(&ui), "enabled plugin is loaded without a restart");
+
+    // Switching the global switch off unloads it, and the project is unaffected.
+    let before = ui.read(|editor| editor.project.clone());
+    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(false, cx).unwrap());
+    assert!(!has_hello(&ui), "switch off unloads community plugins");
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.read(|editor| {
+        let host = editor.plugin_host.as_ref().expect("plugin host");
+        assert!(host.get_plugin(ID).is_none());
+    });
+
+    store.uninstall(ID).unwrap();
+}
+
+#[gpui::test]
+fn launcher_actions_and_canvas_cards_are_in_view_at_720p(cx: &mut TestAppContext) {
+    let mut ui = Ui::open(cx, Project::default(), BTreeMap::new());
+    assert!(ui.read(Editor::is_start_screen));
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.settle();
+    for selector in ["start-new", "start-open", "start-import", "canvas-preset-0"] {
+        let bounds = ui
+            .cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is rendered"));
+        // Above the status bar and the window edge, without scrolling the launcher.
+        assert!(bounds.bottom() <= gpui::px(680.), "{selector}: {bounds:?}");
+        assert!(bounds.right() <= gpui::px(1280.), "{selector}: {bounds:?}");
+        assert!(bounds.size.width > gpui::px(40.), "{selector}: {bounds:?}");
+    }
+    // The two imports live in the Import… menu.
+    let import = ui.cx.debug_bounds("start-import").unwrap();
+    ui.click(import.center(), gpui::Modifiers::default());
+    ui.advance_clock(std::time::Duration::from_millis(400));
+    for selector in ["start-v1", "start-manim"] {
+        let bounds = ui
+            .cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is in the menu"));
+        assert!(bounds.bottom() <= gpui::px(720.), "{selector}: {bounds:?}");
+        assert!(bounds.size.width > gpui::px(40.), "{selector}: {bounds:?}");
+    }
 }

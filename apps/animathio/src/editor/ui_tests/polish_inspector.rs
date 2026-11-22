@@ -3,13 +3,14 @@
 
 use animathio_control::MathObjectKind;
 use animathio_core::{ClipKind, ClipSpeed, Rounding};
-use gpui::{px, size};
+use gpui::{Focusable as _, px, size};
 
 use super::fixtures::*;
 use super::{
-    Clip, ClipId, Command, LeftTab, TICKS_PER_SECOND, Time, TimeRange, Track, TrackId, Ui, actions,
-    require_plugins,
+    Clip, ClipId, Command, LeftTab, TICKS_PER_SECOND, TestAppContext, Time, TimeRange, Track,
+    TrackId, Ui, actions, require_plugins,
 };
+use crate::editor::actions::{Redo, Undo};
 use crate::editor::support::project_size;
 use crate::editor::timeline_view::track_has_audio;
 
@@ -725,4 +726,256 @@ fn add_effect_menu_belongs_to_its_selection(cx: &mut gpui::TestAppContext) {
         ui.read(|e| e.fields.add_menu.is_none()),
         "moving the selection closes the menu"
     );
+}
+
+#[gpui::test]
+fn media_fit_picker_change_and_undo(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let id = ui.read(|e| {
+        e.project
+            .tracks()
+            .iter()
+            .flat_map(|t| t.clips().values())
+            .find(|c| {
+                matches!(
+                    c.kind,
+                    animathio_core::ClipKind::Image(_) | animathio_core::ClipKind::Video(_)
+                )
+            })
+            .expect("sample media clip")
+            .id
+    });
+    let before = ui.read(|e| e.project.clone());
+    ui.update(|e, _, cx| {
+        e.select_only(id, cx);
+        e.set_clip_fit(id, animathio_core::Fit::Cover, cx);
+    });
+    assert_eq!(
+        ui.read(|e| e.find_clip(id).unwrap().fit),
+        animathio_core::Fit::Cover
+    );
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+/// Font weight is a schema parameter of the text plugin and edits go through commands.
+#[gpui::test]
+fn text_font_weight_edit_is_a_command_with_undo(cx: &mut TestAppContext) {
+    if !require_plugins("text_font_weight_edit_is_a_command_with_undo") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_title_preset("typography_body", Time(0), cx));
+    let id = ui.read(|e| e.selected.expect("selected"));
+    let weight = |ui: &Ui| ui.read(|e| e.plugin_number_value(id, "font_weight"));
+    assert!((weight(&ui) - 400.0).abs() < 1e-9);
+    assert!(
+        ui.read(|e| e
+            .plugin_model(id, "font_weight")
+            .is_some_and(|model| matches!(
+                model,
+                crate::inspector::ParamModel::Number { min, max, .. } if (min - 100.0).abs() < 1e-9 && (max - 900.0).abs() < 1e-9
+            ))),
+        "the inspector builds a 100-900 Font weight field from the schema"
+    );
+    assert!(
+        ui.read(|e| e.plugin_model(id, "font").is_some_and(|model| matches!(
+            model,
+            crate::inspector::ParamModel::Enum { options, default, .. }
+                if options == ["dejavu", "inter"] && default == "dejavu"
+        ))),
+        "the inspector builds a Font dropdown (dejavu | inter) from the schema"
+    );
+    let before = ui.read(|e| e.project.clone());
+    // The inspector's number field commits through this command; out-of-range input clamps.
+    ui.update(|e, _, cx| {
+        let command = e
+            .plugin_number_command(id, "font_weight", 700.0)
+            .expect("edit command");
+        e.execute(&command, cx);
+    });
+    assert!((weight(&ui) - 700.0).abs() < 1e-9);
+    let edited = ui.read(|e| e.project.clone());
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(ui.read(|e| e.project.clone()), edited);
+    ui.update(|e, _, cx| {
+        let command = e
+            .plugin_number_command(id, "font_weight", 5000.0)
+            .expect("edit command");
+        e.execute(&command, cx);
+    });
+    assert!((weight(&ui) - 900.0).abs() < 1e-9);
+}
+
+#[gpui::test]
+fn enter_and_escape_in_an_inspector_field_return_the_keyboard_to_the_timeline(
+    cx: &mut TestAppContext,
+) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let id = ui.read(|e| e.project.tracks()[0].clips().values().next().unwrap().id);
+    ui.update(|editor, _, cx| editor.select_only(id, cx));
+    ui.update(|_, window, _| window.refresh());
+    let state = ui
+        .read(|editor| editor.fields.first_input())
+        .expect("the inspector has an input for the selected clip");
+    let focus_field = |ui: &mut Ui| {
+        let state = state.clone();
+        ui.update(move |_, window, cx| {
+            let handle = state.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        });
+    };
+    let field_focused =
+        |ui: &mut Ui| ui.update(|editor, window, cx| editor.fields.any_focused(window, cx));
+    let timeline_focused =
+        |ui: &mut Ui| ui.update(|editor, window, _| editor.panel_focus[0].is_focused(window));
+
+    // Escape drops the typed-but-uncommitted text and leaves the field.
+    focus_field(&mut ui);
+    assert!(field_focused(&mut ui), "the field took focus");
+    let original = state.read_with(ui.cx, |s, _| s.value().to_string());
+    ui.update(|_, window, cx| {
+        state.update(cx, |s, cx| s.set_value("999", window, cx));
+    });
+    ui.press("escape");
+    assert!(!field_focused(&mut ui), "escape leaves the field");
+    assert!(timeline_focused(&mut ui), "focus returns to the timeline");
+    assert_eq!(
+        state.read_with(ui.cx, |s, _| s.value().to_string()),
+        original,
+        "the unsaved edit was dropped"
+    );
+
+    // Enter commits and leaves the field too, so Space and Delete work again.
+    focus_field(&mut ui);
+    let before = ui.read(|e| e.project.clone());
+    let typed = original.parse::<f64>().expect("a numeric field") + 7.0;
+    ui.update(|_, window, cx| {
+        state.update(cx, |s, cx| s.set_value(typed.to_string(), window, cx));
+    });
+    ui.press("enter");
+    assert!(!field_focused(&mut ui), "enter leaves the field");
+    assert!(timeline_focused(&mut ui));
+    let after = ui.read(|e| e.project.clone());
+    assert_ne!(
+        after, before,
+        "enter committed the typed value to the model"
+    );
+    ui.dispatch(Undo);
+    assert_eq!(
+        ui.read(|e| e.project.clone()),
+        before,
+        "one undo reverts it"
+    );
+}
+
+#[gpui::test]
+fn escape_in_a_multiline_inspector_field_returns_the_keyboard_to_the_timeline(
+    cx: &mut TestAppContext,
+) {
+    if !require_plugins("escape_in_a_multiline_inspector_field") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_plugin_clip_by_id("org.animathio.text", cx));
+    let latex = ui.read(|e| {
+        e.selected.or_else(|| {
+            e.project
+                .tracks()
+                .iter()
+                .flat_map(|t| t.clips().values())
+                .find(|c| matches!(c.kind, animathio_core::ClipKind::Plugin { .. }))
+                .map(|c| c.id)
+        })
+    });
+    let latex = latex.expect("the text clip was added");
+    ui.update(|editor, _, cx| editor.select_only(latex, cx));
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+    ui.update(|_, window, _| window.refresh());
+    let state = ui
+        .read(|editor| editor.fields.first_textarea())
+        .expect("the text clip has a multi-line content field");
+    {
+        let state = state.clone();
+        ui.update(move |_, window, cx| {
+            let handle = state.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        });
+    }
+    assert!(ui.update(|editor, window, cx| editor.fields.any_focused(window, cx)));
+
+    // Enter still inserts a newline in a multi-line field.
+    let lines = |ui: &Ui| state.read_with(ui.cx, |s, _| s.value().matches('\n').count());
+    let before = lines(&ui);
+    ui.press("enter");
+    assert_eq!(lines(&ui), before + 1, "enter inserts a newline");
+    assert!(ui.update(|editor, window, cx| editor.fields.any_focused(window, cx)));
+
+    // Escape hands the keyboard back to the timeline.
+    ui.press("escape");
+    assert!(!ui.update(|editor, window, cx| editor.fields.any_focused(window, cx)));
+    assert!(ui.update(|editor, window, _| editor.panel_focus[0].is_focused(window)));
+}
+
+#[gpui::test]
+fn inspector_leads_with_content_for_generated_clips_and_audio_for_audio_clips(
+    cx: &mut TestAppContext,
+) {
+    if !require_plugins(
+        "inspector_leads_with_content_for_generated_clips_and_audio_for_audio_clips",
+    ) {
+        return;
+    }
+    let top = |ui: &mut Ui, section: &str| {
+        ui.cx
+            .debug_bounds(Box::leak(format!("section-{section}").into_boxed_str()))
+            .map(|bounds| f32::from(bounds.origin.y))
+    };
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let text = ui.read(|editor| {
+        editor
+            .project
+            .tracks()
+            .iter()
+            .flat_map(|track| track.clips().values())
+            .find(|clip| {
+                matches!(&clip.kind, animathio_core::ClipKind::Plugin { plugin_id, .. }
+                    if plugin_id == "org.animathio.text")
+            })
+            .map(|clip| clip.id)
+            .expect("the sample has a text clip")
+    });
+    ui.update(|editor, _, cx| editor.select_only(text, cx));
+    ui.update(|_, window, _| window.refresh());
+    let (params, transform) = (top(&mut ui, "params"), top(&mut ui, "transform"));
+    assert!(
+        params.is_some() && transform.is_some(),
+        "content and transform sections render"
+    );
+    assert!(
+        params < transform,
+        "a text clip leads with its text, not Speed"
+    );
+    if let Some(speed) = top(&mut ui, "speed") {
+        assert!(
+            speed > transform.unwrap(),
+            "Speed follows for generated clips"
+        );
+    }
+
+    let (project, assets) = voice_and_music();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|editor, _, cx| editor.select_only(VOICE_CLIP, cx));
+    ui.update(|_, window, _| window.refresh());
+    let speed = top(&mut ui, "speed").expect("an audio clip shows Speed");
+    let audio = top(&mut ui, "audio").expect("and its Audio section");
+    assert!(audio < speed, "audio clips lead with their Audio section");
 }

@@ -90,6 +90,7 @@ Rules that keep the layers honest:
 playback clock, CPU preview, built plugins or no plugins, private settings/cache paths).
 `editor/ui_tests` mounts the real editor in gpui's test window and exercises actions and
 shared panel handlers, asserting project and view state without devices or pixel snapshots.
+The test modules are grouped by feature and share the `Ui` harness and project fixtures.
 
 `apps/animathio/src/style/` holds the UI design tokens (`tokens.rs`: colour, radius, row
 height, type roles, alpha steps, dialog widths) and the shared components (`components.rs`:

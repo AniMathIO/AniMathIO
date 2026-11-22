@@ -7,7 +7,6 @@ use animathio_control::{MathObjectDraft, MathObjectKind, math_object_range};
 use gpui_component::WindowExt;
 
 use super::fixtures::*;
-use super::scenarios::scenes_fixture;
 use super::{Ui, actions};
 use crate::editor::math::MathEditor;
 use crate::editor::support::project_size;
