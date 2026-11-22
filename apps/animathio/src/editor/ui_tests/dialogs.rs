@@ -2,8 +2,9 @@
 
 use super::fixtures::{sample, voice_and_music};
 use super::helpers::{dialog_ready, edit_dialog_field, last_error};
-use super::{ClipId, Editor, TestAppContext, Ui};
+use super::{ClipId, Command, Editor, TestAppContext, Ui};
 use crate::editor::actions::Undo;
+use crate::editor::support::project_size;
 
 #[gpui::test]
 fn preferences_enter_saves_and_invalid_input_keeps_the_dialog_open(cx: &mut TestAppContext) {
@@ -87,6 +88,46 @@ fn project_settings_dialog_enter_validates_applies_and_escape_cancels(cx: &mut T
 }
 
 #[gpui::test]
+fn editing_either_canvas_dimension_switches_a_size_preset_to_custom(cx: &mut TestAppContext) {
+    let (mut project, assets) = sample();
+    Command::SetSettings {
+        width: 1920,
+        height: 1080,
+        frame_rate: animathio_core::FrameRate::new(30, 1).unwrap(),
+        background: project.background(),
+        duration: project.duration(),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut ui = Ui::open(cx, project, assets);
+    for (field, value, expected) in [
+        ("project-width", "1280", (1280, 2160)),
+        ("project-height", "720", (3840, 720)),
+    ] {
+        ui.update(Editor::open_settings);
+        dialog_ready(&mut ui);
+        let preset = ui
+            .cx
+            .debug_bounds("project-size-preset")
+            .expect("preset control");
+        ui.click(preset.center(), gpui::Modifiers::default());
+        ui.press("down enter");
+        assert!(
+            ui.cx
+                .debug_bounds("project-size-preset-4K 3840x2160 30fps")
+                .is_some()
+        );
+
+        edit_dialog_field(&mut ui, field, value);
+        assert!(ui.cx.debug_bounds("project-size-preset-Custom").is_some());
+        ui.press("enter");
+        dialog_ready(&mut ui);
+        assert_eq!(ui.read(|e| project_size(&e.project)), expected);
+        ui.dispatch(Undo);
+    }
+}
+
+#[gpui::test]
 fn invalid_export_and_named_preset_dialogs_stay_open_on_enter(cx: &mut TestAppContext) {
     let (project, assets) = sample();
     let before = project.clone();
@@ -128,9 +169,29 @@ fn invalid_export_and_named_preset_dialogs_stay_open_on_enter(cx: &mut TestAppCo
     edit_dialog_field(&mut ui, "template-name", "");
     ui.press("enter");
     assert!(ui.cx.debug_bounds("template-name").is_some());
+    assert!(ui.cx.debug_bounds("dialog-validation-error").is_some());
     ui.press("escape");
     dialog_ready(&mut ui);
     assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn fill_template_applies_with_enter_from_the_placeholder_field(cx: &mut TestAppContext) {
+    let template = animathio_control::project_templates().unwrap().remove(0);
+    let id = template.manifest.placeholders[0].clip;
+    let selector = Box::leak(format!("placeholder-text-{}", id.0).into_boxed_str());
+    let mut ui = Ui::open(cx, template.project.clone(), template.assets.clone());
+    ui.update(|_, window, cx| Editor::fill_template_dialog(template, window, cx));
+    dialog_ready(&mut ui);
+    let replacement = "Replacement from Enter";
+    edit_dialog_field(&mut ui, selector, replacement);
+    ui.press("enter");
+    dialog_ready(&mut ui);
+    assert!(ui.cx.debug_bounds(selector).is_none());
+    assert_eq!(
+        ui.read(|e| e.find_clip(id).unwrap().params.get("text").cloned()),
+        Some(animathio_core::ParamValue::String(replacement.to_owned()))
+    );
 }
 
 #[gpui::test]

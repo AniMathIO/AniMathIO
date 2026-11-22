@@ -208,6 +208,47 @@ pub fn segmented(
     labelled: bool,
     on_select: impl Fn(usize, &mut gpui::Window, &mut gpui::App) + Clone + 'static,
 ) -> gpui::Stateful<gpui::Div> {
+    segmented_with_role(
+        id,
+        options,
+        focus,
+        selected,
+        slide,
+        labelled.then_some(Role::Label),
+        on_select,
+    )
+}
+
+/// A text-only segmented control for the value column of an inspector row.
+pub fn segmented_compact(
+    id: &'static str,
+    options: &[SegmentedOption],
+    focus: &[gpui::FocusHandle],
+    selected: usize,
+    on_select: impl Fn(usize, &mut gpui::Window, &mut gpui::App) + Clone + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    segmented_with_role(
+        id,
+        options,
+        focus,
+        selected,
+        None,
+        Some(Role::Caption),
+        on_select,
+    )
+}
+
+fn segmented_with_role(
+    id: &'static str,
+    options: &[SegmentedOption],
+    focus: &[gpui::FocusHandle],
+    selected: usize,
+    slide: Option<(usize, std::time::Instant, bool)>,
+    label_role: Option<Role>,
+    on_select: impl Fn(usize, &mut gpui::Window, &mut gpui::App) + Clone + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    let labelled = label_role.is_some();
+    let compact = label_role == Some(Role::Caption);
     debug_assert_eq!(options.len(), focus.len(), "one focus handle per option");
     let count = options.len().max(1) as f32;
     let focus: std::rc::Rc<[gpui::FocusHandle]> = focus.iter().cloned().collect();
@@ -235,7 +276,7 @@ pub fn segmented(
         .bg(tint(color::ACCENT, Alpha::Subtle))
         .border_1()
         .border_color(tint(color::ACCENT, Alpha::Edge));
-    gpui::div().id(id).p_2().child(
+    gpui::div().id(id).when(!compact, gpui::Styled::p_2).child(
         gpui::div()
             .relative()
             .flex()
@@ -290,13 +331,15 @@ pub fn segmented(
                         }
                     })
                     .relative()
-                    .px_2()
+                    .when(labelled && !compact, gpui::Styled::px_2)
+                    .when(compact, |this| this.min_w_0().px(gpui::rems(0.0625)))
                     .flex_1()
                     .flex()
                     .items_center()
                     .justify_center()
                     .gap_1()
                     .when(unavailable.is_none(), gpui::Styled::cursor_pointer)
+                    .when(compact, |this| this.text_role(Role::Caption))
                     .text_color(if unavailable.is_some() {
                         hex(color::TEXT_DISABLED)
                     } else if selected_option {
@@ -304,7 +347,7 @@ pub fn segmented(
                     } else {
                         hex(color::TEXT_SECONDARY)
                     })
-                    .text_role(Role::Label)
+                    .when(!compact, |this| this.text_role(Role::Label))
                     .when(selected_option, |this| {
                         this.font_weight(gpui::FontWeight(500.))
                     })
@@ -325,7 +368,19 @@ pub fn segmented(
                         }
                     })
                     .children(option_icon.map(|icon_name| icon(icon_name).xsmall()))
-                    .when(labelled, |this| this.child(label))
+                    .when(labelled, |this| {
+                        if compact {
+                            this.child(
+                                gpui::div()
+                                    .flex_shrink_0()
+                                    .whitespace_nowrap()
+                                    .debug_selector(|| format!("{option_id}-label-{label}"))
+                                    .child(label),
+                            )
+                        } else {
+                            this.child(label)
+                        }
+                    })
             })),
     )
 }

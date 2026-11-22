@@ -362,7 +362,7 @@ impl Editor {
             return None;
         }
         let row = ((y - layout.ruler_height) / layout.row_height.max(1.0)) as usize;
-        let key_y = layout.ruler_height + (row + 1) as f32 * layout.row_height - 13.0;
+        let key_y = keyframe_center_y(layout, row);
         if (y - key_y).abs() > 7.0 {
             return None;
         }
@@ -1869,6 +1869,7 @@ impl Editor {
                 div()
                     // A per-track id scopes the buttons' hover/tooltip state.
                     .id(("track-header", id.0))
+                    .debug_selector(move || format!("track-header-{}", id.0))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {

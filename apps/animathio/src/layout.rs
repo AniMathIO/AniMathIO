@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::editor_env::EditorEnv;
+
 /// Persisted timeline density (logical pixels per track).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrackHeight {
@@ -97,14 +99,14 @@ impl DockLayout {
 
     /// Config file under the XDG config dir, next to the recent-files list.
     #[must_use]
-    pub fn config_path() -> Option<PathBuf> {
-        crate::editor_env::config_file("dock-layout.json")
+    pub(crate) fn config_path(env: &EditorEnv) -> Option<PathBuf> {
+        env.config_file("dock-layout.json")
     }
 
     /// Load the persisted layout, falling back to the default and clamping.
     #[must_use]
-    pub fn load() -> Self {
-        let mut layout = Self::config_path()
+    pub(crate) fn load(env: &EditorEnv) -> Self {
+        let mut layout = Self::config_path(env)
             .and_then(|path| std::fs::read_to_string(path).ok())
             .map_or_else(Self::default, |text| Self::from_json(&text));
         layout.clamp();
@@ -112,8 +114,8 @@ impl DockLayout {
     }
 
     /// Persist the layout, ignoring IO errors (best effort, like autosave).
-    pub fn save(&self) {
-        let Some(path) = Self::config_path() else {
+    pub(crate) fn save(&self, env: &EditorEnv) {
+        let Some(path) = Self::config_path(env) else {
             return;
         };
         if let Some(dir) = path.parent() {

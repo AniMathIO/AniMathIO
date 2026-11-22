@@ -295,6 +295,9 @@ gallery images below predate the Library reorganization and still show the
 | ![Media fit modes](../docs/screenshots/media-fit-modes.png) |
 | ![Fit control in the inspector](../docs/screenshots/editor-media-fit.png) |
 
+The inspector shows **Fit**, **Fill**, **Stretch** and **1:1** side by side at
+the default width. In a narrow inspector, choose the same modes from the **Fit** dropdown.
+
 
 The preview renders on the GPU (Vello on wgpu) when an adapter is available and
 falls back to the CPU reference otherwise. Toggle it with **View → GPU preview**
@@ -438,8 +441,9 @@ track to place it, or click it to add at the playhead. Use **Add track** in the 
 header to create an empty foreground layer at the top; adding a track is undoable.
 Foreground visual tracks appear above background tracks, with audio-only tracks below.
 Track headers, drops, selection and reorder gestures use this same display order; the
-project file keeps its existing back-to-front layer order. The ruler and marker lane
-stay fixed while track rows scroll vertically.
+project file keeps its existing back-to-front layer order. The 34 px ruler at
+100% UI scale has two rows, with marker names above the time ticks and numbers.
+It stays fixed while track rows scroll vertically.
 **Record audio** (the microphone button in Library → Media, or File → Record audio…) opens a
 recorder card. Pick an input (or leave "System default"), press **Record**, and watch the
 level meter: it turns red at full scale, which means the take is distorted. **Stop** saves the
@@ -483,10 +487,12 @@ any other weight switches to Inter, so keyframing the weight of such a clip chan
 choose `inter` for a weight that varies smoothly.
 
 New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
-launcher. The launcher puts **New project**, **Open project…** and an **Import…** menu (AniMathIO 1.x
-project…, Manim scene…) under its heading, so they stay visible in a 1280 × 720 window. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
+launcher. The launcher puts **New project**, **Open project…** and an **Import…** menu under
+its heading, so they stay visible in a 1280 × 720 window. The Import and File menus both
+offer **Import AniMathIO 1.x project…** and **Import Manim scene…**. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
 another tile starts that format. The launcher, project settings and export dialog
-share 1080p, 4K, 9:16, square and 4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
+share 1080p, 4K, 9:16, square and 4:5 choices. In project settings, editing the width or
+height after choosing a preset switches the size preset to **Custom**. MCP clients can use `list_title_presets` and `add_title` with `preset`
 and `fields`; see [the control guide](mcp.md#title-preset-library).
 
 

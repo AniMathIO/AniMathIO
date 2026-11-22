@@ -8,27 +8,11 @@ use gpui::{Focusable as _, px, size};
 use super::fixtures::*;
 use super::{
     Clip, ClipId, Command, LeftTab, TICKS_PER_SECOND, TestAppContext, Time, TimeRange, Track,
-    TrackId, Ui, actions, require_plugins,
+    TrackId, Ui, actions, private_env, require_plugins,
 };
 use crate::editor::actions::{Redo, Undo};
 use crate::editor::support::project_size;
 use crate::editor::timeline_view::track_has_audio;
-
-/// An environment with its own config directory. (The first environment of a process decides the
-/// config directory for helpers without an editor handle, so scenarios here never save the dock
-/// layout: that would leak a track height into every other scenario.)
-fn private_env(name: &str) -> super::EditorEnv {
-    let dir = super::config_dir().join(name);
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("config dir");
-    super::EditorEnv::headless(
-        crate::editor_env::built_plugins_dir().map_or(
-            crate::editor_env::PluginSource::None,
-            crate::editor_env::PluginSource::Dir,
-        ),
-        dir,
-    )
-}
 
 /// The top y of an inspector section, by its debug selector (`inspector-section-<name>`).
 fn section_top(ui: &mut Ui, selector: &'static str) -> Option<f32> {
@@ -39,6 +23,69 @@ fn section_top(ui: &mut Ui, selector: &'static str) -> Option<f32> {
 
 fn select_clip(ui: &mut Ui, id: ClipId) {
     ui.update(|e, _, cx| e.select_only(id, cx));
+}
+
+#[gpui::test]
+fn image_fit_segment_sits_beside_its_label_at_720p(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let env = private_env("fit-default-inspector");
+    let mut ui = Ui::open_sized(cx, project, assets, env, Some(size(px(1280.), px(720.))));
+    assert_eq!(ui.read(|e| e.dock.right_width), 340.);
+    let image = ClipId(2);
+    select_clip(&mut ui, image);
+    ui.update(|_, window, _| window.refresh());
+
+    let row = ui.cx.debug_bounds("param-Fit").expect("Fit row");
+    let label = ui.cx.debug_bounds("fit-label").expect("Fit label");
+    let position = ui.cx.debug_bounds("param-Position").expect("Position row");
+    let fill = ui.cx.debug_bounds("fit-2-cover").expect("Fill segment");
+    assert!((label.center().y - fill.center().y).abs() <= px(1.));
+    assert!(label.left() > row.left() && label.right() < fill.left());
+    assert_eq!(row.left(), position.left());
+    assert!(fill.right() <= row.right());
+    assert!(ui.cx.debug_bounds("fit-2-select").is_none());
+    let stretch = ui
+        .cx
+        .debug_bounds("fit-2-stretch")
+        .expect("Stretch segment");
+    ui.click(stretch.center(), gpui::Modifiers::default());
+    for (segment, text) in [
+        ("fit-2-contain", "fit-2-contain-label-Fit"),
+        ("fit-2-cover", "fit-2-cover-label-Fill"),
+        ("fit-2-stretch", "fit-2-stretch-label-Stretch"),
+        ("fit-2-original", "fit-2-original-label-1:1"),
+    ] {
+        let segment = ui.cx.debug_bounds(segment).expect("Fit option");
+        let bounds = ui.cx.debug_bounds(text).expect(text);
+        assert!(bounds.left() >= segment.left() + px(2.), "{text}");
+        assert!(bounds.right() <= segment.right() - px(2.), "{text}");
+        assert!(segment.right() <= row.right(), "{text}");
+    }
+    ui.click(fill.center(), gpui::Modifiers::default());
+    assert_eq!(
+        ui.read(|e| e.find_clip(image).unwrap().fit),
+        animathio_core::Fit::Cover
+    );
+}
+
+#[gpui::test]
+fn image_fit_uses_a_select_at_the_minimum_inspector_width(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let env = private_env("fit-narrow-inspector");
+    crate::layout::DockLayout {
+        right_width: 200.,
+        ..Default::default()
+    }
+    .save(&env);
+    let mut ui = Ui::open_sized(cx, project, assets, env, Some(size(px(1280.), px(720.))));
+    select_clip(&mut ui, ClipId(2));
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+
+    let row = ui.cx.debug_bounds("param-Fit").expect("Fit row");
+    let select = ui.cx.debug_bounds("fit-2-select").expect("Fit select");
+    assert!(select.right() <= row.right());
+    assert!(ui.cx.debug_bounds("fit-2-cover").is_none());
 }
 
 /// Text, formulas and shapes select with a box around what they draw, not around the canvas.

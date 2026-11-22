@@ -29,7 +29,7 @@ impl Editor {
                     this.dock.right_width = f32::from(*size) / style::ui_scale();
                 }
                 this.dock.clamp();
-                this.dock.save();
+                this.dock.save(&this.env);
             },
         ));
         if self.dock.left_open {
@@ -110,7 +110,7 @@ impl Editor {
                                     .tooltip("Hide inspector")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.dock.right_open = false;
-                                        this.dock.save();
+                                        this.dock.save(&this.env);
                                         cx.notify();
                                     })),
                             ))
@@ -170,7 +170,7 @@ impl Editor {
                 {
                     this.dock.bottom_height = f32::from(*size) / style::ui_scale();
                     this.dock.clamp();
-                    this.dock.save();
+                    this.dock.save(&this.env);
                 }
             },
         ));

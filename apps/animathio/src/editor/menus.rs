@@ -7,6 +7,9 @@ use gpui_component::{
     TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar, status_bar::StatusBar,
 };
 
+pub(super) const IMPORT_V1_LABEL: &str = "Import AniMathIO 1.x project…";
+pub(super) const IMPORT_MANIM_LABEL: &str = "Import Manim scene…";
+
 /// Title bar height in rems (the kit `TitleBar` has no default height).
 const TITLE_BAR_HEIGHT_REMS: f32 = 3.067;
 /// Minimum width of the app-menu area, in rems, so the centred project title
@@ -138,8 +141,8 @@ impl Editor {
                 MenuItem::separator(),
                 MenuItem::action("Import media…", ImportMedia),
                 MenuItem::action("Record audio…", RecordAudio),
-                MenuItem::action("Import v1…", ImportV1),
-                MenuItem::action("Import Manim scene…", ImportManim),
+                MenuItem::action(IMPORT_V1_LABEL, ImportV1),
+                MenuItem::action(IMPORT_MANIM_LABEL, ImportManim),
                 MenuItem::action("Export…", ExportVideo),
                 MenuItem::separator(),
                 MenuItem::action("Project settings…", ProjectSettings),

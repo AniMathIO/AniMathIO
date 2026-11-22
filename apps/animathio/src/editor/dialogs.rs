@@ -10,7 +10,7 @@ use crate::style::{self, Role, TextRole as _};
 use animathio_control::ExportPreset;
 use gpui_component::dialog::{Cancel, Confirm, Dialog};
 use gpui_component::form::Field as FormField;
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::select::{Select, SelectState};
 use gpui_component::{IndexPath, WindowExt};
 
@@ -267,6 +267,15 @@ pub(super) fn cancel_button(id: &'static str, app: &App) -> Button {
         .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx))
 }
 
+pub(super) fn submit_button(label: &'static str, app: &App) -> Button {
+    style::primary_button("dialog-apply", app)
+        .debug_selector(|| "dialog-apply".into())
+        .label(label)
+        .on_click(|_, window, cx| {
+            window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
+        })
+}
+
 /// Route custom footer buttons through the same Confirm/Cancel actions as Enter/Escape.
 pub(super) fn submit_footer(label: &'static str, app: &App) -> Div {
     footer_row(
@@ -275,14 +284,7 @@ pub(super) fn submit_footer(label: &'static str, app: &App) -> Div {
             .flex()
             .gap_2()
             .child(cancel_button("dialog-cancel", app))
-            .child(
-                style::primary_button("dialog-apply", app)
-                    .debug_selector(|| "dialog-apply".into())
-                    .label(label)
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(Confirm { secondary: false }), cx);
-                    }),
-            ),
+            .child(submit_button(label, app)),
     )
 }
 
@@ -1024,6 +1026,28 @@ impl Editor {
                             state.set_value(preset_height.to_string(), window, cx);
                         });
                     }
+                    window.refresh();
+                },
+            )
+            .detach();
+        }
+        // Programmatic preset fills use set_value, which only notifies the view.
+        // A Change event here comes from editing the field.
+        for field in [&width, &height] {
+            let presets = presets.downgrade();
+            cx.subscribe_in(
+                field,
+                window,
+                move |_, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        let custom = IndexPath::new(ExportPreset::ALL.len());
+                        let _ = presets.update(cx, |state, cx| {
+                            if state.selected_index(cx) != Some(custom) {
+                                state.set_selected_index(Some(custom), window, cx);
+                                window.refresh();
+                            }
+                        });
+                    }
                 },
             )
             .detach();
@@ -1097,7 +1121,17 @@ impl Editor {
             )
             .child(
                 form_body()
-                    .child(style::form_row("Preset", Select::new(&presets)))
+                    .child(style::form_row(
+                        "Preset",
+                        tagged_input(
+                            "project-size-preset",
+                            div()
+                                .debug_selector(|| {
+                                    format!("project-size-preset-{}", selected(&presets, cx))
+                                })
+                                .child(Select::new(&presets)),
+                        ),
+                    ))
                     .child(style::form_row(
                         "Size",
                         div()

@@ -136,6 +136,14 @@ impl EditorEnv {
         let _ = PROCESS.set((self.plugins.clone(), self.config_dir.clone()));
     }
 
+    /// A configuration file for this editor, including in independently configured windows.
+    pub(crate) fn config_file(&self, name: &str) -> Option<PathBuf> {
+        self.config_dir
+            .as_ref()
+            .map(|dir| dir.join(name))
+            .or_else(|| config_file(name))
+    }
+
     /// A fresh playback clock on this environment's audio output.
     pub(crate) fn make_clock(&self, project: &Project, pool: &AudioPool) -> Box<dyn Clock> {
         match self.audio {
