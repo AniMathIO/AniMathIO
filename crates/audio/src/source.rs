@@ -8,13 +8,15 @@ use std::{
     time::Duration,
 };
 use symphonia::core::{
-    audio::SampleBuffer,
-    codecs::{CODEC_TYPE_OPUS, Decoder, DecoderOptions},
+    codecs::{
+        CodecParameters,
+        audio::{AudioDecoder, AudioDecoderOptions, well_known::CODEC_ID_OPUS},
+    },
     errors::Error as DecodeError,
-    formats::{FormatOptions, FormatReader, Packet},
+    formats::{FormatOptions, FormatReader, TrackType, probe::Hint},
     io::{MediaSourceStream, MediaSourceStreamOptions},
     meta::MetadataOptions,
-    probe::Hint,
+    packet::Packet,
     units::TimeBase,
 };
 
@@ -536,7 +538,7 @@ fn guard_codec<T>(f: impl FnOnce() -> Result<T, Error>) -> Result<T, Error> {
         .unwrap_or_else(|_| Err(Error::Invalid("unsupported or corrupt media".into())))
 }
 enum FrameDecoder {
-    Symphonia(Box<dyn Decoder>),
+    Symphonia(Box<dyn AudioDecoder>),
     Opus(filmcraft_opus::Decoder),
 }
 impl Stream {
@@ -562,31 +564,33 @@ impl Stream {
             Origin::Bytes(bytes) => Box::new(std::io::Cursor::new(Arc::clone(bytes))),
         };
         let stream = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
+        // Gapless trimming is the default of both the demuxers and `AudioDecoderOptions`.
         let format = symphonia::default::get_probe()
-            .format(
+            .probe(
                 &hint,
                 stream,
-                &FormatOptions {
-                    enable_gapless: true,
-                    ..FormatOptions::default()
-                },
-                &MetadataOptions::default(),
+                FormatOptions::default(),
+                MetadataOptions::default(),
             )
-            .map_err(decode_error)?
-            .format;
+            .map_err(decode_error)?;
         let track = format
             .tracks()
             .iter()
-            .find(|track| track.codec_params.sample_rate.is_some())
-            .or_else(|| format.default_track())
+            .find(|track| {
+                matches!(&track.codec_params,
+                    Some(CodecParameters::Audio(params)) if params.sample_rate.is_some())
+            })
+            .or_else(|| format.default_track(TrackType::Audio))
             .ok_or_else(|| Error::Unsupported("no audio track".into()))?;
+        let Some(CodecParameters::Audio(codec_params)) = &track.codec_params else {
+            return Err(Error::Unsupported("no audio track".into()));
+        };
         let track_id = track.id;
-        let time_base = track.codec_params.time_base;
+        let time_base = track.time_base;
         let mut ts_shift = 0;
         let mut spec = spec;
-        let decoder = if track.codec_params.codec == CODEC_TYPE_OPUS {
-            let head = track
-                .codec_params
+        let decoder = if codec_params.codec == CODEC_ID_OPUS {
+            let head = codec_params
                 .extra_data
                 .as_deref()
                 .ok_or_else(|| Error::Invalid("Opus track without OpusHead".into()))?;
@@ -617,7 +621,7 @@ impl Stream {
         } else {
             FrameDecoder::Symphonia(
                 symphonia::default::get_codecs()
-                    .make(&track.codec_params, &DecoderOptions::default())
+                    .make_audio_decoder(codec_params, &AudioDecoderOptions::default())
                     .map_err(decode_error)?,
             )
         };
@@ -642,8 +646,12 @@ impl Stream {
 
     fn skip_unguarded(&mut self, ordinal: u64) -> Result<(), Error> {
         while self.ordinal < ordinal {
-            let packet = self.format.next_packet().map_err(decode_error)?;
-            if packet.track_id() == self.track_id {
+            let packet = self
+                .format
+                .next_packet()
+                .map_err(decode_error)?
+                .ok_or_else(|| Error::Decode("stream ended before the restart packet".into()))?;
+            if packet.track_id == self.track_id {
                 self.ordinal += 1;
             }
         }
@@ -660,13 +668,14 @@ impl Stream {
     fn next_unguarded(&mut self, tolerate_before: u64) -> Result<Option<Decoded>, Error> {
         loop {
             let packet = match self.format.next_packet() {
-                Ok(packet) => packet,
+                Ok(Some(packet)) => packet,
+                Ok(None) => return Ok(None),
                 Err(DecodeError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     return Ok(None);
                 }
                 Err(e) => return Err(decode_error(e)),
             };
-            if packet.track_id() != self.track_id {
+            if packet.track_id != self.track_id {
                 continue;
             }
             self.ordinal += 1;
@@ -681,7 +690,8 @@ impl Stream {
                         Some(channels) if soft && self.position < tolerate_before => {
                             // The duration comes from the container: bound the silence by the
                             // longest packet any supported codec produces (Opus: 120 ms).
-                            let frames = self.packet_frames(packet.dur).min(MAX_PACKET_FRAMES);
+                            let frames =
+                                self.packet_frames(packet.dur.get()).min(MAX_PACKET_FRAMES);
                             self.scratch.clear();
                             self.scratch.resize(frames * channels, 0.0);
                             self.position += frames as u64;
@@ -698,10 +708,10 @@ impl Stream {
     fn packet_frames(&self, dur: u64) -> usize {
         let rate = self.spec.as_ref().map_or(1, |s| u128::from(s.0));
         let frames = match self.time_base {
-            Some(tb) if tb.denom != 0 => {
-                u128::from(dur) * u128::from(tb.numer) * rate / u128::from(tb.denom)
+            Some(tb) => {
+                u128::from(dur) * u128::from(tb.numer.get()) * rate / u128::from(tb.denom.get())
             }
-            _ => u128::from(dur),
+            None => u128::from(dur),
         };
         usize::try_from(frames).unwrap_or(0)
     }
@@ -715,23 +725,17 @@ impl Stream {
                     let soft = matches!(e, DecodeError::DecodeError(_));
                     (decode_error(e), soft)
                 })?;
-                let spec = *audio.spec();
-                let channels = u16::try_from(spec.channels.count())
+                let spec = audio.spec();
+                let channels = u16::try_from(spec.channels().count())
                     .map_err(|e| (Error::Invalid(e.to_string()), false))?;
-                let mut buffer = SampleBuffer::<f32>::new(audio.capacity() as u64, spec);
-                buffer.copy_interleaved_ref(audio);
-                self.scratch.extend_from_slice(buffer.samples());
-                (
-                    spec.rate,
-                    channels,
-                    ChannelLayout::from_symphonia(spec.channels),
-                    0,
-                    0,
-                )
+                let rate = spec.rate();
+                let layout = ChannelLayout::from_symphonia(spec.channels());
+                audio.copy_to_vec_interleaved::<f32>(&mut self.scratch);
+                (rate, channels, layout, 0, 0)
             }
             FrameDecoder::Opus(decoder) => {
                 let planar = decoder
-                    .decode(Some(&packet.data))
+                    .decode(Some(&packet.data[..]))
                     .map_err(|e| (opus_error(e), true))?;
                 let frames = planar.first().map_or(0, Vec::len);
                 for frame in 0..frames {
@@ -747,7 +751,7 @@ impl Stream {
                 self.opus_raw += frames as u64;
                 let skip = usize::try_from(lead)
                     .unwrap_or(usize::MAX)
-                    .max(packet.trim_start as usize);
+                    .max(usize::try_from(packet.trim_start.get()).unwrap_or(usize::MAX));
                 let spec = self.spec.clone().unwrap_or_else(|| {
                     (
                         decoder.sample_rate(),
@@ -755,7 +759,13 @@ impl Stream {
                         ChannelLayout::default_for(channels),
                     )
                 });
-                (spec.0, channels, spec.2, skip, packet.trim_end as usize)
+                (
+                    spec.0,
+                    channels,
+                    spec.2,
+                    skip,
+                    usize::try_from(packet.trim_end.get()).unwrap_or(usize::MAX),
+                )
             }
         };
         if rate == 0 || rate > MAX_SAMPLE_RATE {

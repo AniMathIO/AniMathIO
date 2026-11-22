@@ -7,7 +7,7 @@
 
 use crate::Error;
 use std::f32::consts::FRAC_1_SQRT_2;
-use symphonia::core::audio::Channels;
+use symphonia::core::audio::{Channels, Position};
 
 /// One loudspeaker position.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -115,24 +115,28 @@ impl ChannelLayout {
         };
         Self(list.to_vec())
     }
-    /// Speakers in interleave order, from Symphonia's channel flags (ascending bit order is the
-    /// interleave order of every Symphonia decoder).
+    /// Speakers in interleave order, from Symphonia's channel set (ascending bit order is the
+    /// interleave order of every Symphonia decoder). Channel sets without speaker positions
+    /// (discrete, ambisonic, labelled) take the default layout for their count.
     #[must_use]
-    pub fn from_symphonia(channels: Channels) -> Self {
+    pub fn from_symphonia(channels: &Channels) -> Self {
+        let Channels::Positioned(positions) = channels else {
+            return Self::default_for(u16::try_from(channels.count()).unwrap_or(u16::MAX));
+        };
         let mut list = Vec::new();
-        for flag in channels.iter() {
+        for flag in positions.iter() {
             list.push(match flag {
-                Channels::FRONT_LEFT => Speaker::FrontLeft,
-                Channels::FRONT_RIGHT => Speaker::FrontRight,
-                Channels::FRONT_CENTRE => Speaker::FrontCentre,
-                Channels::LFE1 | Channels::LFE2 => Speaker::Lfe,
-                Channels::REAR_LEFT => Speaker::BackLeft,
-                Channels::REAR_RIGHT => Speaker::BackRight,
-                Channels::REAR_CENTRE => Speaker::BackCentre,
-                Channels::SIDE_LEFT => Speaker::SideLeft,
-                Channels::SIDE_RIGHT => Speaker::SideRight,
-                Channels::FRONT_LEFT_CENTRE => Speaker::FrontLeftCentre,
-                Channels::FRONT_RIGHT_CENTRE => Speaker::FrontRightCentre,
+                Position::FRONT_LEFT => Speaker::FrontLeft,
+                Position::FRONT_RIGHT => Speaker::FrontRight,
+                Position::FRONT_CENTER => Speaker::FrontCentre,
+                Position::LFE1 | Position::LFE2 => Speaker::Lfe,
+                Position::REAR_LEFT => Speaker::BackLeft,
+                Position::REAR_RIGHT => Speaker::BackRight,
+                Position::REAR_CENTER => Speaker::BackCentre,
+                Position::SIDE_LEFT => Speaker::SideLeft,
+                Position::SIDE_RIGHT => Speaker::SideRight,
+                Position::FRONT_LEFT_CENTER => Speaker::FrontLeftCentre,
+                Position::FRONT_RIGHT_CENTER => Speaker::FrontRightCentre,
                 _ => Speaker::Other,
             });
         }

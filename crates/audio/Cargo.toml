@@ -11,10 +11,10 @@ animathio-core.workspace = true
 thiserror.workspace = true
 arc-swap = "1"
 filmcraft-opus = "0.9.0"
-cpal = "0.16"
+cpal = "0.18"
 rtrb = "0.3"
 rubato = "0.16"
-symphonia = { version = "0.5.5", features = ["all"] }
+symphonia = { version = "0.6.1", features = ["all"] }
 
 [dev-dependencies]
 proptest.workspace = true
