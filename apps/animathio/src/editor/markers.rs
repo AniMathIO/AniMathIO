@@ -804,38 +804,6 @@ impl Editor {
 /// Horizontal padding inside a marker name plate.
 const PLATE_PAD: f32 = 6.0;
 
-/// Horizontal extent `(left, right)` of every visible marker's name plate, in window pixels,
-/// measured from the real text width (the ruler hides timecodes that these would cover).
-pub(super) fn marker_name_spans(
-    origin_x: Pixels,
-    layout: &TimelineLayout,
-    snapshot: &TimelineSnapshot,
-    window: &mut Window,
-) -> Vec<(Pixels, Pixels)> {
-    let name_font = font(snapshot.theme.font_family.clone());
-    let mut spans = Vec::new();
-    for marker in &snapshot.markers {
-        if marker.name.is_empty() {
-            continue;
-        }
-        let x = timeline::time_to_x(layout, marker.time);
-        if x > layout.width || x < -FLAG_W - 400.0 {
-            continue;
-        }
-        let left = origin_x + px(x + FLAG_W + 1.0);
-        let width = label_width(&marker.name, name_font.clone(), window) + px(PLATE_PAD);
-        spans.push((left, left + width));
-    }
-    spans
-}
-
-/// Whether a ruler label spanning `left..right` touches any marker name plate.
-pub(super) fn plates_cover(left: Pixels, right: Pixels, plates: &[(Pixels, Pixels)]) -> bool {
-    plates
-        .iter()
-        .any(|(plate_left, plate_right)| left < *plate_right && right > *plate_left)
-}
-
 /// Paint ranges, lines and flags for every visible marker over the whole timeline.
 pub(super) fn paint_markers(
     bounds: Bounds<Pixels>,

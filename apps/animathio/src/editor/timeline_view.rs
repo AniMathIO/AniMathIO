@@ -1,7 +1,14 @@
 //! Timeline view.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
+use crate::style::{self, tokens::TextRole as _};
+
+/// The clickable overview strip (the painted strip is 0.5rem inside it), the track header
+/// gain slider, the toolbar divider and the S/M/L control, in rems so they scale.
+const OVERVIEW_CLICK_HEIGHT: Rems = Rems(0.867);
+const GAIN_SLIDER_WIDTH: Rems = Rems(4.133);
+const DIVIDER_HEIGHT: Rems = Rems(1.0);
+const TRACK_HEIGHT_WIDTH: Rems = Rems(6.0);
 
 impl Editor {
     pub(super) fn edit_tool_feedback(&self) -> String {
@@ -1081,12 +1088,7 @@ impl Editor {
                     end,
                     selected: selected.contains(&clip.id),
                     hovered: self.hovered_clip == Some(clip.id),
-                    label: format!(
-                        "{}   {}",
-                        clip_title(&self.project, clip, layout.row_height),
-                        timecode::format_timecode(Time(end.0 - start.0), self.project.frame_rate())
-                    )
-                    .into(),
+                    label: clip_title(&self.project, clip, layout.row_height).into(),
                     preview: timeline_content_preview(clip).into(),
                     thumbnails,
                     kind: clip.kind.clone(),
@@ -1212,15 +1214,17 @@ impl Editor {
             .bg(cx.theme().background)
             .child(
                 div()
-                    .h(gpui::rems(2.4))
+                    .h(style::size::HEADER)
                     .flex_shrink_0()
                     .w_full()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap_2()
+                    .gap_1()
                     .px_2()
-                    .bg(cx.theme().background)
+                    .bg(style::hex(style::color::PANEL))
+                    .border_b_1()
+                    .border_color(style::hex(style::color::BORDER))
                     .children(
                         [
                             (
@@ -1244,7 +1248,7 @@ impl Editor {
                             (
                                 Tool::RateStretch,
                                 IconName::Gauge,
-                                "Rate Stretch (R)",
+                                "Rate stretch (R)",
                                 "tool-rate-stretch",
                             ),
                             (
@@ -1262,7 +1266,7 @@ impl Editor {
                             (
                                 Tool::Rolling,
                                 IconName::ChevronsLeftRight,
-                                "Rolling Edit (N)",
+                                "Rolling edit (N)",
                                 "tool-rolling",
                             ),
                             (Tool::Hand, IconName::Hand, "Pan (H)", "tool-hand"),
@@ -1281,6 +1285,7 @@ impl Editor {
                             .selected(self.tool == tool)
                         }),
                     )
+                    .child(toolbar_divider())
                     .child(icon_button(
                         "mark-in",
                         icons::icon(IconName::LogIn),
@@ -1299,14 +1304,7 @@ impl Editor {
                             cx.notify();
                         }),
                     ))
-                    .child(icon_button(
-                        "zoom-fit",
-                        icons::icon(IconName::Maximize),
-                        "Zoom to fit",
-                        cx.listener(|this, _, _, cx| {
-                            this.animate_timeline_zoom(1.0, 0.0, cx);
-                        }),
-                    ))
+                    .child(toolbar_divider())
                     .child(
                         icon_button(
                             "snap",
@@ -1337,30 +1335,17 @@ impl Editor {
                         .selected(ripple_all)
                         .toggled(ripple_all),
                     )
-                    .child({
-                        use crate::layout::TrackHeight;
-                        let heights = [
-                            (TrackHeight::Small, "S", "Small"),
-                            (TrackHeight::Medium, "M", "Medium"),
-                            (TrackHeight::Large, "L", "Large"),
-                        ];
-                        gpui_component::button::ButtonGroup::new("track-height")
-                            .outline()
-                            .compact()
-                            .children(heights.map(|(height, label, name)| {
-                                Button::new(SharedString::from(format!("track-height-{label}")))
-                                    .label(label)
-                                    .selected(self.dock.track_height == height)
-                                    .tooltip(format!("Track height: {name}"))
-                            }))
-                            .on_click(cx.listener(move |this, picked: &Vec<usize>, _, cx| {
-                                if let Some((height, ..)) =
-                                    picked.first().and_then(|index| heights.get(*index))
-                                {
-                                    this.set_track_height(*height, cx);
-                                }
-                            }))
-                    })
+                    .child(toolbar_divider())
+                    .child(self.track_height_control(cx))
+                    .child(toolbar_divider())
+                    .child(icon_button(
+                        "zoom-fit",
+                        icons::icon(IconName::Maximize),
+                        "Zoom to fit",
+                        cx.listener(|this, _, _, cx| {
+                            this.animate_timeline_zoom(1.0, 0.0, cx);
+                        }),
+                    ))
                     .child(icon_button(
                         "zoom-out",
                         icons::icon(IconName::ZoomOut),
@@ -1369,12 +1354,17 @@ impl Editor {
                             this.zoom_timeline(0.8, cx);
                         }),
                     ))
-                    .child(div().text_color(cx.theme().muted_foreground).child(format!(
-                        "{:.1} s",
-                        timeline::timeline_span(&self.project) as f64
-                            / TICKS_PER_SECOND as f64
-                            / f64::from(zoom)
-                    )))
+                    .child(
+                        div()
+                            .text_role(style::Role::Label)
+                            .tabular()
+                            .child(format!(
+                                "{:.1} s",
+                                timeline::timeline_span(&self.project) as f64
+                                    / TICKS_PER_SECOND as f64
+                                    / f64::from(zoom)
+                            )),
+                    )
                     .child(icon_button(
                         "zoom-in",
                         icons::icon(IconName::ZoomIn),
@@ -1387,20 +1377,12 @@ impl Editor {
             .when(!self.compact_height, |timeline| {
                 timeline.child(
                 div()
-                    .h(gpui::rems(1.467))
+                    .h(OVERVIEW_CLICK_HEIGHT)
                     .flex_shrink_0()
                     .flex()
                     .flex_row()
                     .bg(crate::style::hex(crate::style::color::BG))
-                    .child(
-                        div()
-                            .w(px(track_header_width()))
-                            .flex_shrink_0()
-                            .px_2()
-                            .text_size(crate::style::type_size::XS)
-                            .text_color(crate::style::hex(crate::style::color::TEXT_MUTED))
-                            .child("OVERVIEW"),
-                    )
+                    .child(div().w(px(track_header_width())).flex_shrink_0())
                     .child(
                         div()
                             .id("timeline-overview")
@@ -1443,6 +1425,15 @@ impl Editor {
                                 canvas(
                                     |_, _, _| {},
                                     move |bounds, (), window, _| {
+                                        // The strip is 0.5rem high inside its click area.
+                                        let strip_h = window.rem_size() * 0.5;
+                                        let bounds = Bounds::new(
+                                            point(
+                                                bounds.left(),
+                                                bounds.center().y - strip_h / 2.,
+                                            ),
+                                            size(bounds.size.width, strip_h),
+                                        );
                                         paint_overview(
                                             bounds,
                                             &overview,
@@ -1601,7 +1592,7 @@ impl Editor {
                                 .px_2()
                                 .py_1()
                                 .bg(cx.theme().popover)
-                                .text_size(crate::style::type_size::XS)
+                                .text_role(style::Role::Label)
                                 .child(self.edit_tool_feedback()),
                         )
                     })
@@ -1641,21 +1632,17 @@ impl Editor {
             let solo = track.is_solo();
             let locked = track.is_locked();
             let controls = div()
-                .w_full()
-                .when(
-                    self.dock.track_height == crate::layout::TrackHeight::Small,
-                    |row| row.w(px(148. * crate::style::ui_scale())).flex_shrink_0(),
-                )
-                .h(px(24. * crate::style::ui_scale()))
+                .flex_shrink_0()
                 .flex()
                 .flex_row()
                 .items_center()
+                .gap_1()
                 .when(has_audio, |controls| {
                     controls.child(
                         div()
                             .id(("track-gain", id.0))
-                            .w(px(62. * crate::style::ui_scale()))
-                            .h(px(22. * crate::style::ui_scale()))
+                            .w(GAIN_SLIDER_WIDTH)
+                            .h(style::size::ROW_XS)
                             .flex_shrink_0()
                             .cursor_pointer()
                             .tooltip(move |window, cx| {
@@ -1739,7 +1726,7 @@ impl Editor {
                                                     point(left, y - px(1.5)),
                                                     point(x, y + px(1.5)),
                                                 ),
-                                                color,
+                                                crate::style::hex(crate::style::color::ACCENT),
                                             )
                                             .corner_radii(px(2.)),
                                         );
@@ -1759,9 +1746,8 @@ impl Editor {
                             ),
                     )
                 })
-                .child(div().flex_1())
                 .child(if has_audio {
-                    header_pill(
+                    style::icon_toggle(
                         ("track-mute", id.0),
                         if muted {
                             IconName::VolumeX
@@ -1778,7 +1764,7 @@ impl Editor {
                 } else {
                     // A muted layer is hidden from rendering, so a picture-only track gets a
                     // visibility toggle in place of the audio controls.
-                    header_pill(
+                    style::icon_toggle(
                         ("track-mute", id.0),
                         if muted {
                             IconName::EyeOff
@@ -1795,17 +1781,17 @@ impl Editor {
                 })
                 // Solo also hides every other track from the picture (`evaluate` skips non-solo
                 // tracks while any is soloed), so picture-only tracks keep the pill.
-                .child(header_pill(
+                .child(style::icon_toggle(
                     ("track-solo", id.0),
                     IconName::Headphones,
                     if solo { "Unsolo track" } else { "Solo track" },
                     solo,
-                    crate::style::color::SUCCESS,
+                    crate::style::color::ACCENT,
                     cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.execute(&Command::SetTrackSolo { id, solo: !solo }, cx);
                     }),
                 ))
-                .child(header_pill(
+                .child(style::icon_toggle(
                     ("track-lock", id.0),
                     if locked {
                         IconName::Lock
@@ -1814,7 +1800,7 @@ impl Editor {
                     },
                     if locked { "Unlock track" } else { "Lock track" },
                     locked,
-                    crate::style::color::ACCENT,
+                    crate::style::color::TEXT_SECONDARY,
                     cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.execute(
                             &Command::SetTrackLocked {
@@ -1841,8 +1827,9 @@ impl Editor {
             let name_label = if let Some(input) = renaming {
                 div()
                     .id(("track-rename", id.0))
-                    .w_full()
-                    .h(px(22. * crate::style::ui_scale()))
+                    .flex_1()
+                    .min_w_0()
+                    .h(style::size::ROW_SM)
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                         if event.keystroke.key == "escape" {
                             this.finish_track_rename(false, cx);
@@ -1857,11 +1844,11 @@ impl Editor {
             } else {
                 div()
                     .id(("track-name", id.0))
-                    .w_full()
-                    .h(px(14. * crate::style::ui_scale()))
+                    .debug_selector(move || format!("track-name-{}", id.0))
+                    .flex_1()
+                    .min_w_0()
                     .truncate()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(cx.theme().foreground)
+                    .text_role(style::Role::Body)
                     .flex()
                     .flex_row()
                     .items_center()
@@ -1902,12 +1889,9 @@ impl Editor {
                     .flex_shrink_0()
                     .w_full()
                     .flex()
-                    .when(
-                        self.dock.track_height != crate::layout::TrackHeight::Small,
-                        gpui::Styled::flex_col,
-                    )
+                    .flex_row()
                     .items_center()
-                    .justify_center()
+                    .gap_2()
                     .px_2()
                     .border_l(px(3.))
                     .border_color(color)
@@ -1917,6 +1901,58 @@ impl Editor {
             );
         }
         header
+    }
+}
+
+/// A 1 px vertical divider between toolbar groups.
+fn toolbar_divider() -> Div {
+    div()
+        .w(px(1.))
+        .h(DIVIDER_HEIGHT)
+        .mx_1()
+        .flex_shrink_0()
+        .bg(style::hex(style::color::BORDER))
+}
+
+impl Editor {
+    /// The S/M/L track height control (a segmented control, `docs/design.md`).
+    fn track_height_control(&self, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        use crate::layout::TrackHeight;
+        const HEIGHTS: [(TrackHeight, &str, &str); 3] = [
+            (TrackHeight::Small, "S", "track-height-S"),
+            (TrackHeight::Medium, "M", "track-height-M"),
+            (TrackHeight::Large, "L", "track-height-L"),
+        ];
+        let options = HEIGHTS.map(|(_, label, id)| style::SegmentedOption::new(id, label, None));
+        let selected = HEIGHTS
+            .iter()
+            .position(|(height, ..)| *height == self.dock.track_height)
+            .unwrap_or(0);
+        let weak = cx.entity().downgrade();
+        div()
+            .id("track-height")
+            .w(TRACK_HEIGHT_WIDTH)
+            .flex_shrink_0()
+            .tooltip(|window, cx| {
+                gpui_component::tooltip::Tooltip::new("Track height: small, medium or large")
+                    .build(window, cx)
+            })
+            .child(
+                style::segmented(
+                    "track-height-control",
+                    &options,
+                    &self.track_height_focus,
+                    selected,
+                    None,
+                    true,
+                    move |index, _, cx| {
+                        if let Some((height, ..)) = HEIGHTS.get(index) {
+                            let _ = weak.update(cx, |this, cx| this.set_track_height(*height, cx));
+                        }
+                    },
+                )
+                .p_0(),
+            )
     }
 }
 

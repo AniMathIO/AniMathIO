@@ -1,8 +1,7 @@
 //! Canvas presentation and command-based transform gestures.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{color, hex, hexa};
+use crate::style::{self, color, hex, tint, tokens::TextRole as _};
 
 pub(super) struct ViewerState {
     bounds: Bounds<Pixels>,
@@ -471,8 +470,7 @@ fn dragged_transform(
 }
 
 /// Shown over the viewer while the project has no clips.
-pub(super) const EMPTY_CANVAS_HINT: &str =
-    "This project is empty. Import media, or add text, a formula or a shape from the Library.";
+const EMPTY_CANVAS_HINT: &str = "Import media or add an element from the Library.";
 
 impl Editor {
     pub(super) fn selected_visual(&mut self) -> Option<(ClipId, Transform, Transform)> {
@@ -599,7 +597,7 @@ impl Editor {
             .w_full()
             .relative()
             .overflow_hidden()
-            .bg(hex(color::VIEWER_STAGE))
+            .bg(hex(color::STAGE))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
@@ -715,7 +713,10 @@ impl Editor {
                                 frame.origin - point(px(inset), px(inset - 4.)),
                                 frame.bottom_right() + point(px(inset), px(inset + 4.)),
                             );
-                            window.paint_quad(fill(shadow, hexa(color::VIEWER_SHADOW, 0.22)));
+                            window.paint_quad(fill(
+                                shadow,
+                                tint(color::VIEWER_SHADOW, style::Alpha::Body),
+                            ));
                         }
                         window.with_content_mask(
                             Some(ContentMask {
@@ -750,7 +751,7 @@ impl Editor {
                                                 frame.origin.x + frame.size.width * fraction,
                                                 frame.bottom_right().y,
                                             ),
-                                            hexa(color::TEXT, 0.3),
+                                            tint(color::TEXT, style::Alpha::Subtle),
                                             window,
                                         );
                                         line(
@@ -762,7 +763,7 @@ impl Editor {
                                                 frame.bottom_right().x,
                                                 frame.origin.y + frame.size.height * fraction,
                                             ),
-                                            hexa(color::TEXT, 0.3),
+                                            tint(color::TEXT, style::Alpha::Subtle),
                                             window,
                                         );
                                     }
@@ -778,7 +779,7 @@ impl Editor {
                 .size_full(),
             );
         let header = div()
-            .h(gpui::rems(2.533))
+            .h(style::size::HEADER)
             .px_3()
             .flex()
             .items_center()
@@ -794,11 +795,10 @@ impl Editor {
             .child(
                 div()
                     .flex_1()
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(hex(color::TEXT_SECONDARY))
+                    .text_role(style::Role::Label)
+                    .tabular()
                     .child(format!(
-                        "{} x {}  {:.0}%",
+                        "{} × {}  {:.0}%",
                         project_size(&self.project).0,
                         project_size(&self.project).1,
                         f64::from(f32::from(self.viewer_state.bounds.size.width))
@@ -809,7 +809,7 @@ impl Editor {
             .child(
                 Button::new("viewer-fit")
                     .ghost()
-                    .compact()
+                    .small()
                     .label(match fit {
                         ViewerFit::Contain => "Fit",
                         ViewerFit::Fill => "Fill",
@@ -852,6 +852,7 @@ impl Editor {
                 )
                 .selected(checker),
             );
+        let transport_rems = if self.compact_height { 3.0 } else { 3.6 };
         let mut root = div()
             .w_full()
             .min_w_0()
@@ -866,28 +867,33 @@ impl Editor {
             .child(viewport)
             .child(self.transport_controls(window, cx));
         if let Some((_, _, t)) = selected {
+            // The pill's labels are text; only the numbers are mono.
+            let mono = cx.theme().mono_font_family.clone();
+            let part = |name: &'static str, value: String| {
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(name)
+                    .child(div().font_family(mono.clone()).child(value))
+            };
             root = root.child(
                 div()
                     .absolute()
-                    .bottom(px(66.))
-                    .left(px(16.))
+                    .bottom(Rems(transport_rems + 0.8))
+                    .left(Rems(1.0))
                     .px_2()
-                    .py_1()
-                    .rounded(px(6.))
-                    .bg(hexa(color::RAISED, 0.95))
-                    .border_1()
-                    .border_color(hex(color::BORDER))
-                    .text_size(crate::style::type_size::XS)
-                    .font_family(cx.theme().mono_font_family.clone())
-                    .text_color(hex(color::TEXT_SECONDARY))
-                    .child(format!(
-                        "X {:.3}   Y {:.3}   S {:.2} / {:.2}   R {:.1}°",
-                        t.x,
-                        t.y,
-                        t.scale_x,
-                        t.scale_y,
-                        t.rotation.to_degrees()
-                    )),
+                    .h(style::size::ROW_XS)
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .rounded(px(style::radius::PILL))
+                    .bg(tint(color::BG, style::Alpha::Scrim))
+                    .text_role(style::Role::Label)
+                    .tabular()
+                    .child(part("X", format!("{:.3}", t.x)))
+                    .child(part("Y", format!("{:.3}", t.y)))
+                    .child(part("S", format!("{:.2} / {:.2}", t.scale_x, t.scale_y)))
+                    .child(part("R", format!("{:.1}°", t.rotation.to_degrees()))),
             );
         }
         if self
@@ -902,8 +908,8 @@ impl Editor {
                     .id("viewer-empty-hint")
                     .debug_selector(|| "viewer-empty-hint".into())
                     .absolute()
-                    .top(gpui::rems(2.8))
-                    .bottom(px(96.))
+                    .top(style::size::HEADER)
+                    .bottom(Rems(transport_rems))
                     .left_0()
                     .right_0()
                     .flex()
@@ -911,9 +917,11 @@ impl Editor {
                     .justify_center()
                     .px_4()
                     .text_center()
-                    .text_size(crate::style::type_size::SM)
-                    .text_color(hexa(color::TEXT, 0.55))
-                    .child(div().max_w(px(180.)).child(EMPTY_CANVAS_HINT)),
+                    .child(style::empty_state(
+                        Some(IconName::Clapperboard),
+                        EMPTY_CANVAS_HINT,
+                        None,
+                    )),
             );
         }
         if self.viewer_menu_open {
@@ -927,10 +935,10 @@ impl Editor {
         let scale = crate::style::ui_scale();
         let mut menu = div()
             .absolute()
-            .top(gpui::rems(2.533))
+            .top(style::size::HEADER)
             .right(px(104. * scale))
             .w(px(140. * scale))
-            .rounded(px(6.))
+            .rounded(px(style::radius::OVERLAY))
             .bg(hex(color::RAISED))
             .border_1()
             .border_color(hex(color::BORDER))
@@ -1001,7 +1009,7 @@ fn paint_gizmo(t: Transform, canvas: Bounds<Pixels>, dragging: bool, window: &mu
             line(
                 canvas.origin + point(canvas.size.width * guide as f32, px(0.)),
                 canvas.origin + point(canvas.size.width * guide as f32, canvas.size.height),
-                hexa(color::ACCENT, 0.6),
+                tint(color::ACCENT, style::Alpha::Edge),
                 window,
             );
         }
@@ -1012,7 +1020,7 @@ fn paint_gizmo(t: Transform, canvas: Bounds<Pixels>, dragging: bool, window: &mu
             line(
                 canvas.origin + point(px(0.), canvas.size.height * guide as f32),
                 canvas.origin + point(canvas.size.width, canvas.size.height * guide as f32),
-                hexa(color::ACCENT, 0.6),
+                tint(color::ACCENT, style::Alpha::Edge),
                 window,
             );
         }

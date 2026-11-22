@@ -27,6 +27,14 @@ pub fn format_timecode(time: Time, rate: FrameRate) -> String {
     format!("{hour:02}:{minute:02}:{second:02}:{frame:02}")
 }
 
+/// A clip duration for the timeline: `format_timecode` without the hour field when it is
+/// zero and without a leading zero (`0:03:00`, `1:02:03:15`).
+pub fn short_duration(time: Time, rate: FrameRate) -> String {
+    let full = format_timecode(time, rate);
+    let rest = full.strip_prefix("00:").unwrap_or(&full);
+    rest.strip_prefix('0').unwrap_or(rest).to_owned()
+}
+
 /// Parse `HH:MM:SS:FF` into a tick position. Rejects a wrong field count,
 /// out-of-range fields and a frame field at or past the rate's frame count.
 pub fn parse_timecode(text: &str, rate: FrameRate) -> Option<Time> {
@@ -66,6 +74,18 @@ mod tests {
 
     fn rate(n: u32) -> FrameRate {
         FrameRate::new(n, 1).unwrap()
+    }
+
+    #[test]
+    fn short_durations_drop_empty_hours_and_the_leading_zero() {
+        let at = |seconds: i64, frames: i64| {
+            Time(seconds * TICKS_PER_SECOND + frames * TICKS_PER_SECOND / 30)
+        };
+        assert_eq!(short_duration(at(3, 0), rate(30)), "0:03:00");
+        assert_eq!(short_duration(at(2, 15), rate(30)), "0:02:15");
+        assert_eq!(short_duration(Time(0), rate(30)), "0:00:00");
+        assert_eq!(short_duration(at(600, 0), rate(30)), "10:00:00");
+        assert_eq!(short_duration(at(3600 + 62, 3), rate(30)), "1:01:02:03");
     }
 
     #[test]
