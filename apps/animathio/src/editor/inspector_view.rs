@@ -2,7 +2,7 @@
 #![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{TextRole, color, hex, size};
 
 impl Editor {
     pub(super) fn toggle_keyframe(&mut self, id: ClipId, target: Target, cx: &mut Context<Self>) {
@@ -110,6 +110,10 @@ impl Editor {
     }
 
     /// [`Self::section`] with an explicit header icon instead of the one implied by `name`.
+    /// One flat section: no card, a [`style::size::ROW`] header (chevron, icon, title in
+    /// `Heading`, reset at the right) and the content below. Sections are separated by the
+    /// hairlines that the body builder draws between them, not by boxes (docs/design.md
+    /// "Inspector").
     pub(super) fn section_with_icon(
         &self,
         name: &'static str,
@@ -139,17 +143,12 @@ impl Editor {
             "transform" | "opacity" | "params" | "audio" | "effects" | "transition" | "shared"
         );
         div()
-            .mx_2()
-            .mt_2()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(hex(color::BORDER))
-            .bg(hex(color::RAISED))
+            .flex()
+            .flex_col()
             .child(
                 div()
-                    .h(gpui::rems(2.267))
-                    .pl_2()
-                    .pr_1()
+                    .h(size::ROW)
+                    .px_2()
                     .flex()
                     .items_center()
                     .gap_1()
@@ -171,8 +170,7 @@ impl Editor {
                             )
                             .child(
                                 div()
-                                    .text_size(crate::style::type_size::SM)
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_role(crate::style::Role::Heading)
                                     .child(title.to_owned()),
                             )
                             .on_click(
@@ -183,9 +181,9 @@ impl Editor {
                         header.child(
                             Button::new(SharedString::from(format!("reset-{name}")))
                                 .ghost()
-                                .compact()
+                                .xsmall()
                                 .icon(icons::icon(IconName::RotateCcw).xsmall())
-                                .tooltip("Reset section (including keyframes)")
+                                .tooltip(SharedString::from(format!("Reset {title}")))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.reset_inspector_section(name, cx);
                                 })),
@@ -195,7 +193,7 @@ impl Editor {
             .child(
                 gpui_component::collapsible::Collapsible::new()
                     .open(open)
-                    .content(div().pb_2().child(content)),
+                    .content(div().pb_1().child(content)),
             )
     }
 

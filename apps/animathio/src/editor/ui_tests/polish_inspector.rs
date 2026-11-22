@@ -479,3 +479,250 @@ fn first_run_in_a_short_window_starts_with_small_tracks(cx: &mut gpui::TestAppCo
         crate::layout::TrackHeight::Small
     );
 }
+
+/// The id of the first clip of `kind` in the project.
+fn first_clip(ui: &mut Ui, matches: impl Fn(&ClipKind) -> bool) -> ClipId {
+    ui.read(|e| {
+        e.project
+            .tracks()
+            .iter()
+            .flat_map(animathio_core::Track::clips)
+            .find(|(_, clip)| matches(&clip.kind))
+            .map(|(id, _)| *id)
+            .expect("the sample has a clip of that kind")
+    })
+}
+
+/// The flat inspector fits Transform, down to Rotation, in a 720p window without scrolling.
+#[gpui::test]
+fn image_inspector_shows_rotation_without_scrolling_at_720p(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx.simulate_resize(size(px(1280.), px(720.)));
+    ui.settle();
+    let image = first_clip(&mut ui, |kind| matches!(kind, ClipKind::Image(_)));
+    select_clip(&mut ui, image);
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+    for row in ["param-Position", "param-Scale", "param-Rotation"] {
+        let bounds = ui
+            .cx
+            .debug_bounds(row)
+            .unwrap_or_else(|| panic!("{row} is drawn"));
+        assert!(
+            bounds.bottom() <= px(720.),
+            "{row} is below the 720p window: {bounds:?}"
+        );
+    }
+}
+
+/// LaTeX clips use the same sections as every other visual clip.
+#[gpui::test]
+fn latex_inspector_has_the_standard_sections(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("latex_inspector_has_the_standard_sections") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_math_default(MathObjectKind::Latex, Time(0), cx));
+    ui.settle();
+    for section in ["section-params", "section-transform", "section-opacity"] {
+        assert!(
+            ui.cx.debug_bounds(section).is_some(),
+            "{section} is part of a LaTeX clip's inspector"
+        );
+    }
+}
+
+/// Caption-only parameters stay hidden while `caption_style` is off, and come back with a style.
+#[gpui::test]
+fn caption_rows_hide_while_captions_are_off(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("caption_rows_hide_while_captions_are_off") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_math_default(MathObjectKind::Text, Time(0), cx));
+    ui.settle();
+    let text = ui
+        .update(|e, _, _| e.selected)
+        .expect("the new text clip is selected");
+    assert!(
+        ui.cx.debug_bounds("param-accent").is_none(),
+        "accent has no effect without a caption style"
+    );
+    ui.update(|e, _, cx| {
+        e.execute_plugin_param(text, "caption_style".into(), serde_json::json!("pop"), cx);
+    });
+    ui.settle();
+    assert!(
+        ui.cx.debug_bounds("param-accent").is_some(),
+        "accent shows once a caption style is chosen"
+    );
+}
+
+/// The overlay scrollbar owns the right edge of the inspector: value fields end left of its
+/// lane, so none runs under the thumb (1280x720).
+#[gpui::test]
+fn inspector_rows_stay_left_of_the_scrollbar_lane(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx.simulate_resize(size(px(1280.), px(720.)));
+    ui.settle();
+    let image = first_clip(&mut ui, |kind| matches!(kind, ClipKind::Image(_)));
+    select_clip(&mut ui, image);
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+    for row in [
+        "param-Position",
+        "param-Scale",
+        "param-Rotation",
+        "param-Opacity",
+    ] {
+        let bounds = ui
+            .cx
+            .debug_bounds(row)
+            .unwrap_or_else(|| panic!("{row} is drawn"));
+        assert!(
+            bounds.right() <= px(1280.) - crate::editor::fields::SCROLLBAR_GUTTER,
+            "{row} runs under the scrollbar lane: {bounds:?}"
+        );
+    }
+}
+
+/// A formula that does not typeset shows its error under its own source; a valid one shows none.
+#[gpui::test]
+fn latex_errors_show_under_the_formula_of_that_clip(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("latex_errors_show_under_the_formula_of_that_clip") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_math_default(MathObjectKind::Latex, Time(0), cx));
+    ui.settle();
+    let latex = ui
+        .update(|e, _, _| e.selected)
+        .expect("the new formula is selected");
+    assert!(
+        ui.cx.debug_bounds("typeset-error").is_none(),
+        "the default formula typesets"
+    );
+    ui.update(|e, _, cx| {
+        e.execute_plugin_param(latex, "source".into(), serde_json::json!(r"\frac{1}{"), cx);
+    });
+    ui.settle();
+    assert!(
+        ui.cx.debug_bounds("typeset-error").is_some(),
+        "an unfinished fraction is reported under the source"
+    );
+    ui.update(|e, _, cx| {
+        e.execute_plugin_param(
+            latex,
+            "source".into(),
+            serde_json::json!(r"\frac{1}{2}"),
+            cx,
+        );
+    });
+    ui.settle();
+    assert!(
+        ui.cx.debug_bounds("typeset-error").is_none(),
+        "a valid formula clears the error"
+    );
+    // Another clip's failure never shows under this formula.
+    ui.update(|e, _, _| e.effect_warning = Some("plugin produced an invalid scene: boom".into()));
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+    assert!(ui.cx.debug_bounds("typeset-error").is_none());
+}
+
+/// Units and alignment of a formula stay reachable in the collapsed "More" group.
+#[gpui::test]
+fn latex_more_group_keeps_units_and_alignment_reachable(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("latex_more_group_keeps_units_and_alignment_reachable") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_math_default(MathObjectKind::Latex, Time(0), cx));
+    ui.settle();
+    assert!(ui.cx.debug_bounds("param-units").is_none());
+    ui.update(|e, _, cx| {
+        e.fields.more_open = true;
+        cx.notify();
+    });
+    ui.settle();
+    for row in ["param-units", "param-align"] {
+        assert!(ui.cx.debug_bounds(row).is_some(), "{row} is in More");
+    }
+}
+
+/// The graph leads with its function, then the ranges, then the colour.
+#[gpui::test]
+fn graph_inspector_leads_with_the_function(cx: &mut gpui::TestAppContext) {
+    if !require_plugins("graph_inspector_leads_with_the_function") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.update(|e, _, cx| e.add_math_default(MathObjectKind::Plot, Time(0), cx));
+    ui.settle();
+    let top = |ui: &mut Ui, row: &'static str| {
+        ui.cx
+            .debug_bounds(row)
+            .unwrap_or_else(|| panic!("{row} is drawn"))
+            .origin
+            .y
+    };
+    let items = top(&mut ui, "param-items");
+    let range = top(&mut ui, "param-X range");
+    let color = top(&mut ui, "param-color");
+    assert!(
+        items < range && range < color,
+        "{items:?} {range:?} {color:?}"
+    );
+}
+
+/// The Add effect menu opens for one target, closes with Escape and when the selection moves.
+#[gpui::test]
+fn add_effect_menu_belongs_to_its_selection(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    let image = first_clip(&mut ui, |kind| matches!(kind, ClipKind::Image(_)));
+    select_clip(&mut ui, image);
+    ui.settle();
+    // The audio menu of that clip is not the video menu: it stays shut.
+    ui.update(|e, _, cx| {
+        e.fields.add_menu = Some(super::super::fields::EffectTarget::Audio(
+            animathio_core::AudioChain::Clip(image),
+        ));
+        cx.notify();
+    });
+    ui.settle();
+    assert!(ui.cx.debug_bounds("add-effect-menu").is_none());
+    ui.update(|e, _, cx| {
+        e.fields.add_menu = Some(super::super::fields::EffectTarget::Video(image));
+        cx.notify();
+    });
+    ui.settle();
+    if require_plugins("add_effect_menu_belongs_to_its_selection") {
+        assert!(ui.cx.debug_bounds("add-effect-menu").is_some());
+    }
+    ui.dispatch(actions::ClearSelection);
+    ui.settle();
+    assert!(
+        ui.read(|e| e.fields.add_menu.is_none()),
+        "Escape closes the menu"
+    );
+    ui.update(|e, _, cx| {
+        e.fields.add_menu = Some(super::super::fields::EffectTarget::Video(image));
+        cx.notify();
+    });
+    let other = first_clip(&mut ui, |kind| !matches!(kind, ClipKind::Image(_)));
+    select_clip(&mut ui, other);
+    ui.update(|_, window, _| window.refresh());
+    ui.settle();
+    assert!(
+        ui.read(|e| e.fields.add_menu.is_none()),
+        "moving the selection closes the menu"
+    );
+}

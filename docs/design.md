@@ -283,8 +283,8 @@ effect-controls list.
 
 ```
 v [icon] Transform                                    [reset]   ROW, HEADING
-  <> o  Position     [ X  960     px ] [ Y  540     px ]         ROW
-  <> o  Scale        [ 100.0    % ] [link]
+  <> o  Position     [ X  50      % ] [ Y  50      % ]         ROW
+  <> o  Scale        [ X  100     % ] [ Y  100     % ]
   <> o  Rotation     [ 0.0        ° ]
 --------------------------------------------------------------  BORDER divider
 > [icon] Compositing                                  [reset]
@@ -298,11 +298,18 @@ v [icon] Transform                                    [reset]   ROW, HEADING
 - **Row:** `ROW` minimum height, `px_2`. Three columns: the keyframe column (fixed
   width, holds the diamond toggle and previous/next arrows; empty but present on rows that
   cannot be keyframed, so labels align), the label (`LABEL`, `TEXT_SECONDARY`, fixed 40%
-  of the width, truncates with a tooltip) and the control (fills the rest).
+  of the width, truncates; every label has a tooltip with the full text, and long plugin
+  labels are shortened for the column, never cut mid-word) and the control (fills the rest).
+  Captions, switches and button rows that belong to a section start in the label column.
+- The list ends 14 px short of the right edge: that lane belongs to the overlay scrollbar,
+  so no field or divider runs under the thumb.
 - Pairs that belong together (X/Y, width/height, start/end) share one row with two
   half-width fields, each with a one-letter prefix inside the field.
 - Units live inside the field as a suffix in `TEXT_MUTED`: `px`, `%`, `°`, `dB`, `s`,
-  `fps`. A value is never shown without its unit.
+  `fps`. A value is never shown without its unit. Position, scale and opacity are canvas
+  fractions shown as percents (the model keeps the fraction); shape lengths show `px`
+  while the shape is in pixel units. Label dragging moves the value by the step in the
+  shown unit (1 % per pixel for position, 5 % for opacity).
 - Dragging a numeric label scrubs the value (Shift coarse, Ctrl fine), as today. That is
   the only drag affordance: inspector number fields have no separate grip icon and no
   "−"/"+" stepper buttons (arrow keys step the focused field). A slider, when a parameter
@@ -312,7 +319,13 @@ v [icon] Transform                                    [reset]   ROW, HEADING
   Enter or focus loss like every other field (no separate Apply button), and they do not
   draw a second preview, because the viewer already shows the clip.
 - Parameters that only matter in one mode stay hidden until the mode is on (caption
-  styling appears when a caption style is chosen).
+  styling appears when a caption style is chosen). Rarely changed options of a clip kind
+  (a formula's units and alignment) sit in a collapsed "More" row of its section.
+- A formula or graph that does not typeset shows the plugin's message in a `DANGER` row
+  under its source field, for that clip only; the viewer keeps the last good render.
+- "Add effect" opens a popover menu (placed under the button or above it when there is
+  no room, closed by a click away, Escape, a choice or a change of selection). The
+  video and the audio Effects sections each have their own.
 - Help text for a section sits under its header in `LABEL` `TEXT_MUTED`, at most two
   lines.
 
@@ -322,7 +335,7 @@ v [icon] Transform                                    [reset]   ROW, HEADING
   `Size::Medium` in dialogs. `RAISED` fill, `BORDER` outline, `ACCENT` focus ring.
   Placeholder in `TEXT_MUTED` says what to type ("Search media", "Paste LaTeX"), never
   "Enter value".
-- **Sliders:** a slider is always paired with a numeric field (width 4rem) holding the
+- **Sliders:** a slider is always paired with a numeric field (width 4.5rem) holding the
   exact value. Track `BORDER`, fill `ACCENT`, thumb `TEXT`.
 - **Toggles:** a kit `Switch` for settings that apply immediately, a `Checkbox` inside
   forms that are submitted. Label to the left on the same row, control at the right edge;

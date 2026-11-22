@@ -4,7 +4,7 @@
 #![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{TextRole, color, hex};
 use animathio_control::{
     CaptionPosition, CaptionPreset, CaptionStyleParams, SubtitleStyleParams, caption_style_command,
     caption_styles, clip_caption_style,
@@ -97,11 +97,33 @@ pub(super) fn caption_style_picker(
     let font = look.font_size.unwrap_or(info.font_size);
     let words = look.max_words.unwrap_or(info.max_words);
     let position = look.position.unwrap_or(CaptionPosition::Bottom);
-    let label = |text: &str| {
+    // Rows use the inspector row shape, so the caption labels line up with the
+    // label column of every other section (docs/design.md "Inspector").
+    let row = |label: &str, control: gpui::AnyElement| {
         div()
-            .text_size(crate::style::type_size::XS)
-            .text_color(hex(color::TEXT_SECONDARY))
-            .child(text.to_owned())
+            .min_h(crate::style::size::ROW)
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .child(
+                div()
+                    .w(gpui::relative(0.4))
+                    .flex_shrink_0()
+                    .truncate()
+                    .text_role(crate::style::Role::Label)
+                    .child(label.to_owned()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .child(control),
+            )
     };
     let choose = |id: String, text: String, selected: bool, change: LookChange| {
         let editor = editor.clone();
@@ -242,70 +264,37 @@ pub(super) fn caption_style_picker(
         .flex_col()
         .gap_2()
         .child(styles)
+        .child(row("Presets", preset_row.into_any_element()))
         .child(
             div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(label("Presets"))
-                .child(preset_row),
-        )
-        .child(
-            div()
-                .text_size(crate::style::type_size::XS)
-                .text_color(hex(color::TEXT_SECONDARY))
+                .px_2()
+                .text_role(crate::style::Role::Label)
+                .text_color(hex(color::TEXT_MUTED))
                 .child(info.description),
         )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(label("Position"))
-                .child(positions),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(label("Font size"))
-                .child(stepper(
-                    "font",
-                    format!("{:.1}%", font * 100.0),
-                    LookChange::FontDelta(-0.005),
-                    LookChange::FontDelta(0.005),
-                )),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(label("Words per line"))
-                .child(stepper(
-                    "words",
-                    words_label,
-                    LookChange::WordsDelta(-1),
-                    LookChange::WordsDelta(1),
-                )),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(label("Text colour"))
-                .child(texts),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(label("Accent"))
-                .child(accents),
-        )
+        .child(row("Position", positions.into_any_element()))
+        .child(row(
+            "Font size",
+            stepper(
+                "font",
+                format!("{:.1}%", font * 100.0),
+                LookChange::FontDelta(-0.005),
+                LookChange::FontDelta(0.005),
+            )
+            .into_any_element(),
+        ))
+        .child(row(
+            "Words per line",
+            stepper(
+                "words",
+                words_label,
+                LookChange::WordsDelta(-1),
+                LookChange::WordsDelta(1),
+            )
+            .into_any_element(),
+        ))
+        .child(row("Text colour", texts.into_any_element()))
+        .child(row("Accent", accents.into_any_element()))
 }
 
 fn caption_library() -> std::path::PathBuf {

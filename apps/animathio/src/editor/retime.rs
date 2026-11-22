@@ -2,7 +2,7 @@
 #![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style;
+use crate::style::{TextRole, color, hex};
 use animathio_core::{ClipSpeed, FrameRate, SpeedPoint};
 
 pub(super) fn percent(value: &str) -> Result<ClipSpeed, String> {
@@ -307,62 +307,105 @@ impl Editor {
                 Rounding::Nearest,
             )
             .unwrap_or(0);
+        let editor = cx.entity();
+        let summary = |value: String| {
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_role(crate::style::Role::Label)
+                .text_color(hex(color::TEXT))
+                .tabular()
+                .child(value)
+        };
         if clip.time_map.hold {
             return div()
-                .text_size(style::type_size::SM)
-                .px_3()
-                .py_2()
-                .child(format!(
-                    "Frame hold · {frames} frames. Trim edges to change duration; audio is silent."
+                .flex()
+                .flex_col()
+                .child(Self::param_row_flush(
+                    "Speed",
+                    summary(format!("Hold, {frames} frames")),
+                ))
+                .child(Self::label_column(
+                    div()
+                        .text_role(crate::style::Role::Caption)
+                        .text_color(hex(color::TEXT_MUTED))
+                        .child("Trim edges to change duration; audio is silent."),
                 ));
         }
         div()
-            .text_size(style::type_size::SM)
             .flex()
             .flex_col()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .child(format!(
-                "{}{} · {frames} frames",
-                speed_summary(&clip.time_map),
-                if clip.time_map.reverse {
-                    " reverse"
-                } else {
-                    ""
-                }
+            .child(Self::param_row_flush(
+                "Speed",
+                summary(format!(
+                    "{}{}, {frames} frames",
+                    speed_summary(&clip.time_map),
+                    if clip.time_map.reverse {
+                        ", reverse"
+                    } else {
+                        ""
+                    }
+                )),
             ))
-            .child(if clip.time_map.ramps.is_empty() {
-                "Constant speed"
-            } else {
-                "Linear speed ramp"
-            })
+            .child(Self::label_column(
+                div()
+                    .text_role(crate::style::Role::Caption)
+                    .text_color(hex(color::TEXT_MUTED))
+                    .child(if clip.time_map.ramps.is_empty() {
+                        "Constant speed"
+                    } else {
+                        "Linear speed ramp"
+                    }),
+            ))
             .child(
-                Button::new("edit-speed").label("Speed/Duration…").on_click(
-                    cx.listener(|this, _, window, cx| this.open_speed_duration(window, cx)),
-                ),
-            )
-            .child(
-                Button::new("add-speed-key")
-                    .icon(icons::icon(IconName::Plus))
-                    .label("Add speed key at playhead")
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.add_speed_key_at_playhead(id, cx)),
+                // The actions side by side at `Size::Small`, never full width.
+                div()
+                    .px_2()
+                    .pt_1()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        Button::new("edit-speed")
+                            .outline()
+                            .small()
+                            .label("Speed/Duration…")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_speed_duration(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("add-speed-key")
+                            .outline()
+                            .small()
+                            .icon(icons::icon(IconName::Plus).small())
+                            .label("Add speed key")
+                            .tooltip("Add a speed key at the playhead")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.add_speed_key_at_playhead(id, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("insert-hold")
+                            .outline()
+                            .small()
+                            .label("Insert frame hold…")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_frame_hold(window, cx)),
+                            ),
                     ),
             )
-            .child(
-                gpui_component::checkbox::Checkbox::new("maintain-pitch")
-                    .label("Maintain pitch")
-                    .checked(clip.maintain_pitch)
-                    .on_change(cx.listener(move |this, checked: &bool, _, cx| {
-                        this.set_maintain_pitch(id, *checked, cx);
-                    })),
-            )
-            .child(
-                Button::new("insert-hold")
-                    .label("Insert frame hold…")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_frame_hold(window, cx))),
-            )
+            .child(Self::label_column(crate::style::switch_row(
+                "maintain-pitch",
+                "Maintain pitch",
+                None,
+                clip.maintain_pitch,
+                move |checked, _, cx| {
+                    editor.update(cx, |this, cx| this.set_maintain_pitch(id, *checked, cx));
+                },
+            )))
     }
 }
 /// A percentage without trailing zeros: `100%`, `62.5%`.

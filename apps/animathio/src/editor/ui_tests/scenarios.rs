@@ -752,12 +752,12 @@ fn clipped_slide_options_choose_the_edge_and_apply_as_one_undoable_batch(cx: &mu
         assert_eq!(controls[0].id(), "direction");
         // default -> left -> right -> top
         let direction = controls[0].clone();
-        assert!(e.option_label(&direction).ends_with("default"));
+        assert!(e.option_label(&direction).ends_with("Default"));
         e.cycle_preset_option(&direction, cx);
-        assert!(e.option_label(&direction).ends_with("left"));
+        assert!(e.option_label(&direction).ends_with("Left"));
         e.cycle_preset_option(&direction, cx);
         e.cycle_preset_option(&direction, cx);
-        assert!(e.option_label(&direction).ends_with("top"));
+        assert!(e.option_label(&direction).ends_with("Top"));
         e.apply_animation_preset("org.animathio.animations", "clipped-slide-in", cx);
     });
     let direction_keys = ui.read(|e| {

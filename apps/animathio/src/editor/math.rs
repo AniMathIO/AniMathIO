@@ -395,44 +395,6 @@ impl Editor {
         }
         cards
     }
-    pub(super) fn math_inspector(
-        &mut self,
-        id: ClipId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<Div> {
-        let draft = self
-            .find_clip(id)
-            .and_then(|clip| math_object_draft(clip, project_size(&self.project)))?;
-        let signature =
-            serde_json::to_string(&(self.project_session, project_size(&self.project), &draft))
-                .ok()?;
-        if self
-            .math_inspector
-            .as_ref()
-            .is_none_or(|(clip, s, _)| *clip != id || *s != signature)
-        {
-            let range = self.find_clip(id)?.range;
-            let editor = cx.entity().downgrade();
-            let session = self.project_session;
-            let size = project_size(&self.project);
-            let state = cx.new(|cx| {
-                MathEditor::new(
-                    draft,
-                    editor,
-                    session,
-                    range,
-                    Some(id),
-                    false,
-                    size,
-                    window,
-                    cx,
-                )
-            });
-            self.math_inspector = Some((id, signature, state));
-        }
-        Some(div().child(self.math_inspector.as_ref()?.2.clone()))
-    }
 }
 
 /// Window width from which the Add math object dialog puts the LaTeX palette beside the form.

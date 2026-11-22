@@ -217,12 +217,13 @@ impl Editor {
     }
 
     /// What the option's button shows: `default` until a value is picked.
+    /// Choice values read like the inspector's enum labels, not raw ids.
     pub(super) fn option_label(&self, control: &OptionControl) -> String {
         let value = match self.option_value(control) {
-            None => "default".to_owned(),
-            Some(Value::Bool(true)) => "on".to_owned(),
-            Some(Value::Bool(false)) => "off".to_owned(),
-            Some(Value::String(text)) => text.clone(),
+            None => "Default".to_owned(),
+            Some(Value::Bool(true)) => "On".to_owned(),
+            Some(Value::Bool(false)) => "Off".to_owned(),
+            Some(Value::String(text)) => super::fields::display_label("", "", text),
             Some(other) => other.to_string(),
         };
         format!("{}: {value}", control.label)

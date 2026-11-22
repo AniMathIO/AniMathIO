@@ -10,7 +10,7 @@ use gpui_component::switch::Switch;
 
 use super::audio_effects::{CardModel, ParamRow, card_models};
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{TextRole, color, hex};
 
 /// Why an effect card shows a warning, if it does: its plugin is not loaded, or the last
 /// preview frame failed inside the clip's effect chain.
@@ -120,7 +120,7 @@ impl Editor {
             let bypassed = model.bypassed;
             let warning = card_warning(&model, failed);
             let header = div()
-                .h(gpui::rems(1.867))
+                .h(crate::style::size::ROW)
                 .px_2()
                 .flex()
                 .flex_row()
@@ -146,8 +146,7 @@ impl Editor {
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(crate::style::type_size::SM)
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_role(crate::style::Role::Label)
                         .text_color(hex(if bypassed {
                             color::TEXT_MUTED
                         } else {
@@ -218,17 +217,9 @@ impl Editor {
                             }
                         })),
                 );
-            let mut card = div()
-                .mx_2()
-                .my_1()
-                .pb_1()
-                .rounded(px(crate::style::radius::CARD))
-                .border_1()
-                .border_color(hex(color::BORDER))
-                .bg(hex(color::RAISED))
-                .flex()
-                .flex_col()
-                .child(header);
+            // Flat group: the effect header and its rows, divided from the
+            // next effect by the hairline the section draws between them.
+            let mut card = div().flex().flex_col().pb_1().child(header);
             if let Some(text) = warning {
                 let text = if model.plugin_missing {
                     format!("Plugin {} is not loaded", instances[index].plugin)
@@ -265,19 +256,20 @@ impl Editor {
                     name: name.clone(),
                 };
                 let field = format!("{key}:{name}");
-                let mut control =
-                    self.number_control(&field, input.clone(), value, step, window, cx);
-                if let Some(range) = range.filter(|(min, max)| max > min) {
-                    control =
-                        control.child(div().pl(px(18.)).pb_1().child(self.range_slider_control(
-                            &format!("{field}-slider"),
-                            Some(input.clone()),
-                            value,
-                            (range.0, range.1, step.max(1e-6)),
-                            window,
-                            cx,
-                        )));
-                }
+                let control = self.number_control(&field, input.clone(), value, step, window, cx);
+                let control = if let Some(range) = range.filter(|(min, max)| max > min) {
+                    let slider = self.range_slider_control(
+                        &format!("{field}-slider"),
+                        Some(input.clone()),
+                        value,
+                        (range.0, range.1, step.max(1e-6)),
+                        window,
+                        cx,
+                    );
+                    Self::slider_field_row(Some(slider), control)
+                } else {
+                    control
+                };
                 let mut label = div()
                     .flex()
                     .flex_row()
@@ -306,36 +298,6 @@ impl Editor {
             }
             rows.push(card);
         }
-        rows.push(if available.is_empty() {
-            div()
-                .px_3()
-                .text_size(crate::style::type_size::XS)
-                .text_color(hex(color::TEXT_MUTED))
-                .child("No effect plugins loaded")
-        } else {
-            div()
-                .px_2()
-                .pt_1()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap_1()
-                .children(available.into_iter().map(|descriptor| {
-                    let (plugin, effect) = (descriptor.plugin_id, descriptor.effect_id);
-                    Button::new(SharedString::from(format!(
-                        "add-fx-c{}-{plugin}-{effect}",
-                        id.0
-                    )))
-                    .ghost()
-                    .compact()
-                    .icon(icons::icon(IconName::Plus).xsmall())
-                    .label(descriptor.name)
-                    .tooltip(descriptor.description)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.add_effect_to_clip(id, &plugin, &effect, cx);
-                    }))
-                }))
-        });
         rows
     }
 }

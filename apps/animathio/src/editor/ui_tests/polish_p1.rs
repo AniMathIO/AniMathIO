@@ -44,7 +44,8 @@ fn audio_gain_defaults_to_unity_in_the_inspector(cx: &mut TestAppContext) {
     let shown = ui
         .cx
         .update(|_, cx| ui.editor.read(cx).fields.input_text(&key, cx));
-    assert_eq!(shown.as_deref(), Some("1"), "gain field of a fresh clip");
+    // The field shows decibels: unity gain is 0 dB.
+    assert_eq!(shown.as_deref(), Some("0.0"), "gain field of a fresh clip");
 }
 
 #[test]
@@ -195,7 +196,7 @@ fn content_section_is_named_after_the_clip() {
     );
     assert_eq!(
         plugin_section_identity(&plugin("org.animathio.graph")).0,
-        "Graph"
+        "Plot"
     );
     assert_eq!(
         plugin_section_identity(&plugin("io.example.thing")).0,
