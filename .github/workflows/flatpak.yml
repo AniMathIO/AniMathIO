@@ -17,7 +17,45 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Seed a writable flatpak system installation on the workspace filesystem
+        id: seed
+        run: |
+          # flatpak-builder --install-deps-from=flathub updates the runtimes that
+          # are preinstalled in the image's default system installation
+          # (/var/lib/flatpak, baked into the image's read-only overlay layers).
+          # flatpak's update path retires the old deployed runtime directory with
+          # a plain rename(2) into <system-dir>/removed/ (flatpak_dir_remove_deploy_dir
+          # in common/flatpak-dir.c), and overlayfs cannot rename a lower-layer
+          # directory, so the update fails with "Invalid cross-device link" (EXDEV)
+          # and flatpak-builder crashes (xvfb-run exit 139). Observed on GitHub's
+          # AWS runner fleet (runner image 20261116.88.1) while the Azure fleet
+          # (20261116.202.1) updated the same runtimes fine.
+          #
+          # Copy the installation onto the workspace filesystem (one writable
+          # filesystem shared with the .flatpak-builder state dir, repo/ and the
+          # build dir) so runtime updates are ordinary renames on a single
+          # filesystem. The image-baked runtime versions are preserved; flatpak
+          # only pulls deltas on top, as before.
+          #
+          # $GITHUB_WORKSPACE is the path inside the job container
+          # (/__w/<repo>/<repo>); the ${{ github.workspace }} expression would
+          # give the runner host path, which does not exist in the container.
+          dir="$GITHUB_WORKSPACE/.flatpak-system"
+          mkdir -p "$dir"
+          if [ -d /var/lib/flatpak ]; then
+            cp -a --reflink=auto /var/lib/flatpak/. "$dir/"
+          else
+            echo "::warning::/var/lib/flatpak not found in this image; $dir starts empty and the runtimes will be downloaded from flathub."
+          fi
+          FLATPAK_SYSTEM_DIR="$dir" flatpak list --system
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
       - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6
+        env:
+          # FLATPAK_SYSTEM_DIR is flatpak's documented override of the default
+          # system-wide installation ("If this is not set, /var/lib/flatpak is
+          # used"); every flatpak process in the build, including the dependency
+          # installs and the build sandbox, follows it.
+          FLATPAK_SYSTEM_DIR: ${{ steps.seed.outputs.dir }}
         with:
           bundle: AniMathIO.flatpak
           manifest-path: packaging/flatpak/com.animathio.AniMathIO.yml
