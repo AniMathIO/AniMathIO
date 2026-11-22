@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "animathio-core"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "blake3",
  "serde",
@@ -14,7 +14,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-import-manim"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "animathio-core",
  "animathio-plugin-api",
@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-plugin-api"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "animathio-core",
  "semver",
