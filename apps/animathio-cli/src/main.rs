@@ -728,12 +728,24 @@ fn context(assets: BTreeMap<AssetId, Vec<u8>>) -> Result<RenderCtx> {
     Ok(RenderCtx::from_assets(assets)?)
 }
 
+/// Open an input file, with a clear error for a directory (the OS says only "Invalid argument").
+fn open_input(path: &Path) -> Result<File> {
+    if path.is_dir() {
+        return Err(format!(
+            "{} is a directory, expected a .amio or project file",
+            path.display()
+        )
+        .into());
+    }
+    Ok(File::open(path)?)
+}
+
 fn read_import_input(path: &Path) -> Result<Vec<u8>> {
     // The raw .animathio payload is deflated; bound it to the inflate budget
     // so an untrusted file cannot force a larger read than the importer allows.
     let limit = animathio_import_v1::ImportLimits::default().inflated_bytes;
     let mut bytes = Vec::new();
-    File::open(path)?
+    open_input(path)?
         .take(limit.saturating_add(1))
         .read_to_end(&mut bytes)?;
     if u64::try_from(bytes.len())? > limit {
@@ -743,7 +755,7 @@ fn read_import_input(path: &Path) -> Result<Vec<u8>> {
 }
 
 fn load(path: &Path) -> Result<Bundle> {
-    let reader = BufReader::new(File::open(path)?);
+    let reader = BufReader::new(open_input(path)?);
     if path
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("amio"))

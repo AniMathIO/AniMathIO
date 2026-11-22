@@ -854,3 +854,22 @@ fn png_outputs_cannot_overwrite_the_project() {
         assert_eq!(std::fs::read(&project).unwrap(), original);
     }
 }
+
+#[test]
+fn a_directory_as_project_path_is_a_clear_error() {
+    let dir = tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_animathio-cli"))
+        .args(["render"])
+        .arg(dir.path())
+        .args(["--frame", "0", "-o"])
+        .arg(dir.path().join("out.png"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("is a directory, expected a .amio or project file"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("os error"), "{stderr}");
+}
