@@ -267,3 +267,117 @@ fn shape_inspector_hides_the_path_field_until_shape_is_path(cx: &mut TestAppCont
         "path field is shown when shape = path"
     );
 }
+
+/// Queue `count` waiting jobs and open the export queue panel (nothing is started: the queue is
+/// not pumped, so no export worker runs).
+fn open_export_queue(ui: &mut Ui, count: usize) {
+    ui.update(|e, _, cx| {
+        for index in 0..count {
+            e.export_queue.enqueue(
+                crate::export_queue::JobSpec {
+                    project: animathio_core::Project::new(FrameRate::new(30, 1).unwrap()),
+                    assets: std::sync::Arc::default(),
+                    params: animathio_control::ExportParams {
+                        output: format!("/tmp/animathio-ui-test/export-{index}.mp4").into(),
+                        from: animathio_core::Time(0),
+                        to: None,
+                        settings: animathio_export::Settings::default(),
+                        overwrite: false,
+                    },
+                    summary: "1080p, 00:00:00:00 to 00:00:05:00".into(),
+                },
+                false,
+            );
+        }
+        e.export_queue_open = true;
+        cx.notify();
+    });
+    ui.settle();
+}
+
+#[gpui::test]
+fn export_queue_panel_sits_on_the_status_bar_and_scrolls(cx: &mut TestAppContext) {
+    for (width, height) in [(1280., 720.), (1920., 1080.)] {
+        let (project, assets) = sample();
+        let mut ui = Ui::open(cx, project, assets);
+        ui.cx.simulate_resize(size(px(width), px(height)));
+        open_export_queue(&mut ui, 30);
+        let window = Bounds::new(point(px(0.), px(0.)), size(px(width), px(height)));
+        let panel = ui.cx.debug_bounds("export-queue-panel").expect("panel");
+        let chip = ui.cx.debug_bounds("status-export-queue").expect("chip");
+        assert!(
+            panel.left() >= window.left()
+                && panel.right() <= window.right()
+                && panel.top() >= window.top()
+                && panel.bottom() <= window.bottom(),
+            "{panel:?} is inside the {width}x{height} window"
+        );
+        // Hugs the chip's right edge (the panel keeps its 0.75rem inset; the status bar's
+        // own padding is 0.75rem too) and rests on the status bar, with no gap above it.
+        assert!(
+            (f32::from(panel.right()) - f32::from(chip.right())).abs() < 1.5,
+            "right edges: panel {}, chip {}",
+            panel.right(),
+            chip.right()
+        );
+        let bar_top = height - 28.;
+        assert!(
+            f32::from(chip.top()) > bar_top && f32::from(chip.bottom()) <= height,
+            "the chip sits inside the 28px status bar"
+        );
+        assert!(
+            (f32::from(panel.bottom()) - bar_top).abs() < 1.0,
+            "panel bottom {} vs status bar top {bar_top}",
+            panel.bottom()
+        );
+        // Many jobs scroll inside the panel; the footer stays put.
+        let list = ui.cx.debug_bounds("export-queue-list").expect("list");
+        let clear = ui.cx.debug_bounds("export-queue-clear").expect("footer");
+        assert!(list.size.height > panel.size.height, "the list overflows");
+        assert!(clear.bottom() <= panel.bottom());
+        let top = list.top();
+        ui.cx.simulate_event(gpui::ScrollEvent {
+            position: panel.center(),
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-300.))),
+            ..Default::default()
+        });
+        ui.settle();
+        let list = ui.cx.debug_bounds("export-queue-list").expect("list");
+        assert!(
+            list.top() < top - px(100.),
+            "scrolled: {} -> {}",
+            top,
+            list.top()
+        );
+        assert_eq!(ui.cx.debug_bounds("export-queue-clear"), Some(clear));
+    }
+}
+
+#[gpui::test]
+fn record_stop_and_cancel_are_visible_at_720p_while_recording(cx: &mut TestAppContext) {
+    use animathio_audio::{SyntheticCapture, SyntheticDevice};
+    let capture = SyntheticCapture::new(vec![SyntheticDevice::tone(
+        "Desk mic", 48_000, 1, 2.0, 0.5, 4800,
+    )]);
+    let mut env = super::test_env();
+    env.capture = std::sync::Arc::new(capture);
+    let (project, assets) = sample();
+    let mut ui = Ui::open_with_env(cx, project, assets, env);
+    ui.cx.simulate_resize(size(px(1280.), px(720.)));
+    ui.dispatch(actions::RecordAudio);
+    ui.settle();
+    ui.update(|e, _, cx| e.start_recording(cx));
+    ui.advance_clock(std::time::Duration::from_millis(25));
+    let body = ui.cx.debug_bounds("library-body").expect("library body");
+    for id in ["record-stop", "record-cancel"] {
+        let button = ui
+            .cx
+            .debug_bounds(id)
+            .unwrap_or_else(|| panic!("{id} is rendered while recording"));
+        assert!(
+            button.top() >= body.top() && button.bottom() <= body.bottom(),
+            "{id} {button:?} is inside the Library body {body:?} without scrolling"
+        );
+        assert!(button.bottom() <= px(720.));
+    }
+}

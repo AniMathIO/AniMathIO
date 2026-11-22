@@ -1,5 +1,4 @@
 //! Resizable workspace. Only view state is written to the layout sidecar.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::style::{self, color};
@@ -44,22 +43,19 @@ impl Editor {
                                 .size_full()
                                 .flex()
                                 .flex_col()
-                                .child(style::panel_header(
+                                .child(style::panel_header_full(
                                     IconName::Library,
-                                    if self.dock.left_width >= LIBRARY_TABS_LABEL_WIDTH {
-                                        "Library"
-                                    } else {
-                                        self.left_tab.header()
-                                    },
+                                    "Library",
+                                    Some(self.left_tab.label().into()),
                                     // The + follows the tab: Plugins installs a .amplugin file,
                                     // everything else imports media.
                                     if self.left_tab == LeftTab::Plugins {
                                         Button::new("library-install-plugin")
                                             .debug_selector(|| "library-install-plugin".into())
                                             .ghost()
-                                            .compact()
+                                            .small()
                                             .icon(icons::icon(IconName::Plus))
-                                            .tooltip("Install plugin from file...")
+                                            .tooltip("Install plugin from file…")
                                             .disabled(self.community.busy)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.install_community_file(cx);
@@ -68,7 +64,7 @@ impl Editor {
                                         Button::new("library-import")
                                             .debug_selector(|| "library-import".into())
                                             .ghost()
-                                            .compact()
+                                            .small()
                                             .icon(icons::icon(IconName::Plus))
                                             .tooltip("Import media")
                                             .on_click(
@@ -90,14 +86,7 @@ impl Editor {
                         .size_full()
                         .flex()
                         .flex_col()
-                        .child(style::panel_header(
-                            IconName::MonitorPlay,
-                            "Preview",
-                            div()
-                                .text_size(crate::style::type_size::XS)
-                                .text_color(style::hex(color::TEXT_SECONDARY))
-                                .child("PROGRAM"),
-                        ))
+                        .child(style::panel_header(IconName::MonitorPlay, "Preview", div()))
                         .child(div().flex_1().min_h_0().child(self.viewer(window, cx))),
                 )),
         );
@@ -116,7 +105,7 @@ impl Editor {
                                 "Inspector",
                                 Button::new("inspector-hide")
                                     .ghost()
-                                    .compact()
+                                    .small()
                                     .icon(icons::icon(IconName::PanelRightClose))
                                     .tooltip("Hide inspector")
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -154,29 +143,21 @@ impl Editor {
                             .size_full()
                             .flex()
                             .flex_col()
-                            .child(style::panel_header(
+                            .child(style::panel_header_full(
                                 IconName::Film,
                                 "Timeline",
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .text_size(crate::style::type_size::XS)
-                                    .text_color(style::hex(color::TEXT_SECONDARY))
-                                    .child(count_label(self.project.tracks().len(), "track"))
-                                    .child(
-                                        Button::new("timeline-add-track")
-                                            .debug_selector(|| "timeline-add-track".into())
-                                            .ghost()
-                                            .compact()
-                                            .icon(icons::icon(IconName::Plus))
-                                            .label("Add track")
-                                            .tooltip("Add an empty foreground track")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.add_timeline_track(cx);
-                                                window.focus(&this.panel_focus[0], cx);
-                                            })),
-                                    ),
+                                Some(count_label(self.project.tracks().len(), "track").into()),
+                                Button::new("timeline-add-track")
+                                    .debug_selector(|| "timeline-add-track".into())
+                                    .ghost()
+                                    .small()
+                                    .icon(icons::icon(IconName::Plus))
+                                    .label("Add track")
+                                    .tooltip("Add an empty foreground track")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.add_timeline_track(cx);
+                                        window.focus(&this.panel_focus[0], cx);
+                                    })),
                             ))
                             .child(div().flex_1().min_h_0().child(self.timeline_panel(cx))),
                     )),
@@ -196,7 +177,7 @@ impl Editor {
         div()
             .flex_1()
             .min_h_0()
-            .p(px(style::space::GUTTER / 2.))
+            .p(style::gutter() / 2.)
             .bg(style::hex(color::BG))
             .flex()
             .flex_col()
@@ -210,121 +191,63 @@ impl Editor {
 /// Dock width (logical px) from which the Library tabs show their labels next to the icons.
 pub(super) const LIBRARY_TABS_LABEL_WIDTH: f32 = 400.;
 
+/// The Library tab strip: one option per tab (see `style::segmented`).
+static LIBRARY_TABS: [style::SegmentedOption; 5] = [
+    style::SegmentedOption::new("library-tab-media", "Media", Some(IconName::Images)),
+    style::SegmentedOption::new("library-tab-elements", "Elements", Some(IconName::Shapes)),
+    style::SegmentedOption::new("library-tab-titles", "Titles", Some(IconName::Type)),
+    style::SegmentedOption::new("library-tab-effects", "Effects", Some(IconName::Sparkles)),
+    style::SegmentedOption::new("library-tab-plugins", "Plugins", Some(IconName::Puzzle)),
+];
+
 impl Editor {
-    /// Sliding pill only schedules frames for the 180ms after a tab change.
+    /// The Library tab strip. The sliding pill only schedules frames for the
+    /// 180ms after a tab change.
     pub(super) fn library_tabs(&self, cx: &mut Context<Self>) -> Div {
-        let index = |tab| match tab {
-            LeftTab::Media => 0.,
-            LeftTab::Plugins => 4.,
-            LeftTab::Effects => 3.,
-            LeftTab::Titles => 2.,
-            LeftTab::Elements => 1.,
-        };
         // Five labels only fit side by side in a wide dock; below that the tabs are icon-only
         // (each has a tooltip), which covers the default dock width.
         let labelled = self.dock.left_width >= LIBRARY_TABS_LABEL_WIDTH;
-        let from = index(self.previous_left_tab);
-        let to = index(self.left_tab);
-        let elapsed = self.tab_changed.elapsed().as_secs_f32();
-        let progress = if self.preferences.reduce_motion {
-            1.
-        } else {
-            (elapsed / (style::motion::BASE_MS as f32 / 1000.)).min(1.)
-        };
-        let eased = 1. - (1. - progress).powi(3);
-        let indicator = div()
-            .absolute()
-            .left(relative((from + (to - from) * eased) / 5.))
-            .w(relative(1. / 5.))
-            .h_full()
-            .rounded(px(style::radius::CONTROL))
-            .bg(style::hexa(color::ACCENT, 0.16))
-            .border_1()
-            .border_color(style::hexa(color::ACCENT, 0.28));
-        div().p_2().child(
-            div()
-                .relative()
-                .flex()
-                .h(gpui::rems(2.0))
-                .rounded(px(style::radius::CONTROL))
-                .bg(style::hex(color::BG))
-                .child(indicator)
-                .children(
-                    [
-                        (LeftTab::Media, "Media", IconName::Images),
-                        (LeftTab::Elements, "Elements", IconName::Shapes),
-                        (LeftTab::Titles, "Titles", IconName::Type),
-                        (LeftTab::Effects, "Effects", IconName::Sparkles),
-                        (LeftTab::Plugins, "Plugins", IconName::Puzzle),
-                    ]
-                    .map(|(tab, label, icon)| {
-                        let selected = self.left_tab == tab;
-                        div()
-                            .id(label)
-                            .debug_selector(move || format!("library-tab-{}", label.to_lowercase()))
-                            .track_focus(&self.media_view.tab_focus[tab as usize])
-                            .tab_index(0)
-                            .focus_visible(|this| {
-                                this.border_1().border_color(style::hex(color::ACCENT))
-                            })
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    // Arrows move from the focused tab (Tab can focus one that is
-                                    // not selected), as in a WAI-ARIA tab list.
-                                    let index = tab as usize;
-                                    let next = match event.keystroke.key.as_str() {
-                                        "enter" | "space" => Some(tab),
-                                        "right" => Some(LeftTab::ALL[(index + 1) % 5]),
-                                        "left" => Some(LeftTab::ALL[(index + 4) % 5]),
-                                        "home" => Some(LeftTab::Media),
-                                        "end" => Some(LeftTab::Plugins),
-                                        _ => None,
-                                    };
-                                    if let Some(next) = next {
-                                        this.select_left_tab(next, cx);
-                                        window.focus(&this.media_view.tab_focus[next as usize], cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .relative()
-                            .flex_1()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap_1()
-                            .rounded(px(style::radius::CONTROL))
-                            .cursor_pointer()
-                            .text_size(crate::style::type_size::XS)
-                            .text_color(style::hex(if selected {
-                                color::TEXT
-                            } else {
-                                color::TEXT_SECONDARY
-                            }))
-                            .hover(|this| this.bg(style::hexa(color::HOVER, 0.7)))
-                            .child(icons::icon(icon).small())
-                            .when(labelled, |tab| tab.child(label))
-                            .tooltip(move |window, cx| {
-                                gpui_component::tooltip::Tooltip::new(label).build(window, cx)
-                            })
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_left_tab(tab, cx);
-                                window.focus(&this.media_view.tab_focus[tab as usize], cx);
-                            }))
-                    }),
+        let slide = Some((
+            self.previous_left_tab as usize,
+            self.tab_changed,
+            self.preferences.reduce_motion,
+        ));
+        let changed = self.tab_changed;
+        let reduce_motion = self.preferences.reduce_motion;
+        let editor = cx.entity();
+        div()
+            .relative()
+            .child(style::segmented(
+                "library-tabs",
+                &LIBRARY_TABS,
+                &self.media_view.tab_focus,
+                self.left_tab as usize,
+                slide,
+                labelled,
+                move |index, window, cx| {
+                    editor.update(cx, |this, cx| {
+                        this.select_left_tab(LeftTab::ALL[index], cx);
+                        if let Some(handle) = this.media_view.tab_focus.get(index) {
+                            window.focus(handle, cx);
+                        }
+                    });
+                },
+            ))
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |_, (), window, _| {
+                        // Keep painting while the pill slides to the new tab.
+                        if !reduce_motion
+                            && changed.elapsed().as_secs_f32()
+                                < style::motion::BASE_MS as f32 / 1000.
+                        {
+                            window.request_animation_frame();
+                        }
+                    },
                 )
-                .child(
-                    canvas(
-                        |_, _, _| {},
-                        move |_, (), window, _| {
-                            if progress < 1. {
-                                window.request_animation_frame();
-                            }
-                        },
-                    )
-                    .absolute()
-                    .size_full(),
-                ),
-        )
+                .absolute()
+                .size_full(),
+            )
     }
 }

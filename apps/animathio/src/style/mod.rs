@@ -19,9 +19,9 @@ pub mod tokens;
 // components themselves) stay unused until their PR adopts them.
 #[allow(unused_imports)]
 pub use components::{
-    SegmentedOption, Toast, ToolPanel, chip, destructive_button, empty_state, form_group, form_row,
-    icon_toggle, panel, panel_header, panel_header_full, primary_button, secondary_button,
-    segmented, switch_row,
+    PanelAnchor, SegmentedOption, Toast, ToolPanel, chip, destructive_button, empty_state,
+    form_group, form_row, icon_toggle, panel, panel_header, panel_header_full, primary_button,
+    secondary_button, segmented, switch_row,
 };
 #[allow(unused_imports)]
 pub use tokens::{

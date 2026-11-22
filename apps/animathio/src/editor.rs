@@ -185,16 +185,6 @@ impl LeftTab {
             Self::Plugins => "Plugins",
         }
     }
-    /// The Library panel title when the tab strip is icon-only: names the active tab.
-    const fn header(self) -> &'static str {
-        match self {
-            Self::Media => "Library \u{b7} Media",
-            Self::Elements => "Library \u{b7} Elements",
-            Self::Titles => "Library \u{b7} Titles",
-            Self::Effects => "Library \u{b7} Effects",
-            Self::Plugins => "Library \u{b7} Plugins",
-        }
-    }
 }
 
 /// Viewer zoom modes for the preview image.
@@ -637,6 +627,8 @@ pub(crate) struct Editor {
     preview: crate::preview_settings::PreviewSettings,
     export_queue: crate::export_queue::ExportQueue,
     export_queue_open: bool,
+    /// Scroll position of the export queue panel's job list.
+    export_queue_scroll: ScrollHandle,
     /// The automatic-subtitle job, running or finished (see `editor/subtitles.rs`).
     subtitle_job: Option<crate::subtitle_job::SubtitleJob>,
     /// Remembered caption look: used for new subtitles and by the caption inspector.
@@ -1012,6 +1004,7 @@ impl Editor {
             preview,
             export_queue: crate::export_queue::ExportQueue::default(),
             export_queue_open: false,
+            export_queue_scroll: ScrollHandle::new(),
             subtitle_job: None,
             caption_look: animathio_control::CaptionStyleParams::default(),
             caption_presets: Vec::new(),
@@ -1369,7 +1362,7 @@ impl Render for Editor {
             .child(self.menu_bar(window, cx))
             .child(workspace);
         root = root.child(self.status_line(cx));
-        if let Some(panel) = self.export_queue_panel(cx) {
+        if let Some(panel) = self.export_queue_panel(window, cx) {
             root = root.child(panel);
         }
         if let Some(panel) = self.scene_view(cx) {

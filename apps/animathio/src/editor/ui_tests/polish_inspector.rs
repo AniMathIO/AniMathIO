@@ -407,13 +407,14 @@ fn short_windows_hide_the_overview_and_compact_the_transport(cx: &mut gpui::Test
     assert!(ui.cx.debug_bounds("timeline-overview").is_some());
 }
 
-/// An icon-only Library names its active tab in the panel header.
+/// The Library panel header is "Library" with the active tab as its context
+/// at every dock width (see `docs/design.md` "Docked panels").
 #[gpui::test]
 fn narrow_library_names_the_active_tab(cx: &mut gpui::TestAppContext) {
     let (project, assets) = sample();
     let mut ui = Ui::open(cx, project, assets);
     ui.update(|e, _, cx| e.select_left_tab(LeftTab::Elements, cx));
-    assert_eq!(LeftTab::Elements.header(), "Library \u{b7} Elements");
+    assert_eq!(LeftTab::Elements.label(), "Elements");
     assert!(ui.read(|e| e.dock.left_width < crate::editor::workspace::LIBRARY_TABS_LABEL_WIDTH));
 }
 

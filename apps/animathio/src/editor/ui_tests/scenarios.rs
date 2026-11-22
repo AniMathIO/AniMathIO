@@ -3644,10 +3644,47 @@ fn library_tabs_are_icon_only_at_the_default_dock_width_and_fit(cx: &mut TestApp
 #[test]
 fn element_cards_use_the_dock_width() {
     use crate::editor::math::element_card_columns;
-    assert_eq!(element_card_columns(200.), 1);
-    assert_eq!(element_card_columns(260.), 2);
-    assert_eq!(element_card_columns(340.), 3);
-    assert_eq!(element_card_columns(640.), 3);
+    let rem = gpui::px(16.);
+    assert_eq!(element_card_columns(rem, 200.), 1);
+    assert_eq!(element_card_columns(rem, 260.), 2);
+    assert_eq!(element_card_columns(rem, 400.), 3);
+    assert_eq!(element_card_columns(rem, 640.), 3);
+}
+
+/// The Library grids never clip a card at the panel's right edge (see
+/// `docs/design.md` "Library cards and lists"): at 1280x720 the second
+/// element card ends inside the Library body.
+#[gpui::test]
+fn element_cards_stay_inside_the_library_panel_at_720p(cx: &mut TestAppContext) {
+    if !require_plugins("element_cards_stay_inside_the_library_panel_at_720p") {
+        return;
+    }
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.update(|e, _, cx| e.select_left_tab(LeftTab::Elements, cx));
+    ui.settle();
+    let card = ui
+        .cx
+        .debug_bounds("element-card-1")
+        .expect("the second element card is rendered");
+    let panel = ui
+        .cx
+        .debug_bounds("library-body")
+        .expect("the Library body is rendered");
+    assert!(
+        card.right() <= panel.right() + gpui::px(1.),
+        "element-card-1 ends at {}, past the Library panel edge at {}",
+        f32::from(card.right()),
+        f32::from(panel.right())
+    );
+    assert!(
+        card.left() >= panel.left(),
+        "element-card-1 starts at {}, left of the Library panel edge at {}",
+        f32::from(card.left()),
+        f32::from(panel.left())
+    );
 }
 
 /// The Add math object dialog at `width` x `height`: every control is laid out inside the dialog
