@@ -63,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install --quiet flatpak-cargo-generator==0.1.5 tomlkit==0.13.2
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet flatpak-cargo-generator==0.1.5 tomlkit==0.15.2
           "$RUNNER_TEMP/venv/bin/python" packaging/flatpak/generate-sources.py
           python3 scripts/check-flatpak-sources.py
       - name: Commit and push
