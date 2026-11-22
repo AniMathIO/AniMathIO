@@ -33,6 +33,23 @@
       "matchUpdateTypes": ["major"],
       "automerge": false,
       "labels": ["needs-human"]
+    },
+    {
+      "description": "In 0.x crates a minor bump is a breaking change (Cargo semver): review it like a major.",
+      "matchManagers": ["cargo"],
+      "matchCurrentVersion": "<1.0.0",
+      "matchUpdateTypes": ["minor"],
+      "groupName": "Rust 0.x minor updates (breaking)",
+      "automerge": false,
+      "labels": ["needs-human"]
+    },
+    {
+      "description": "The GPUI crates are exact-pinned pre-releases that move together: one reviewed PR.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["gpui-pre", "gpui-pre-platform", "gpui-component", "gpui-kit-assets"],
+      "groupName": "GPUI stack",
+      "automerge": false,
+      "labels": ["needs-human"]
     }
   ]
 }
