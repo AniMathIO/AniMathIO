@@ -39,7 +39,20 @@ pub(super) fn preferences_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 use crate::editor_env::{PluginSource, built_plugins_dir};
 
+mod analysis;
+mod assist;
+mod audio;
+mod captions;
+mod dialogs;
+mod effects;
+mod export;
 mod fixtures;
+mod helpers;
+mod keymap;
+mod launcher;
+mod library;
+mod markers;
+mod math;
 mod polish_audio;
 mod polish_inspector;
 mod polish_p1;
@@ -48,7 +61,8 @@ mod polish_retime;
 mod polish_timeline;
 mod polish_tool_panels;
 mod recording;
-mod scenarios;
+mod timeline;
+mod workspace;
 
 /// A private config directory (settings, recent files, plugin cache), wiped once per process, so
 /// tests never read or write the user's real settings.

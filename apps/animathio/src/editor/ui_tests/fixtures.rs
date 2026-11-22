@@ -160,3 +160,37 @@ pub(super) fn caption_command(project: &Project) -> Command {
     .expect("caption command")
     .0
 }
+
+/// A project with one four-second video clip of the three-shot test movie, and its bytes.
+pub(super) fn scenes_fixture() -> (Project, BTreeMap<animathio_core::AssetId, Vec<u8>>) {
+    use animathio_core::{Asset, AssetId, Clip, ClipKind, TICKS_PER_SECOND, TimeRange, TrackId};
+    let bytes = include_bytes!("../../../../../crates/control/tests/scenes.mp4").to_vec();
+    let asset = AssetId::of(&bytes);
+    let mut project = Project::default();
+    Command::AddAsset {
+        id: asset.clone(),
+        asset: Asset {
+            name: "scenes.mp4".into(),
+            media_type: "video/mp4".into(),
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddTrack {
+        track: Track::new(TrackId(1), "Video"),
+        index: 0,
+    }
+    .apply(&mut project)
+    .unwrap();
+    Command::AddClip {
+        track: TrackId(1),
+        clip: Clip::new(
+            ClipId(1),
+            ClipKind::Video(asset.clone()),
+            TimeRange::new(Time(0), Time(4 * TICKS_PER_SECOND)).unwrap(),
+        ),
+    }
+    .apply(&mut project)
+    .unwrap();
+    (project, BTreeMap::from([(asset, bytes)]))
+}

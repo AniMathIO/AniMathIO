@@ -1,10 +1,13 @@
 //! The 2.3 timeline, transport and viewer: no overlap in the transport row at common window
 //! sizes, one-row track headers, the S/M/L control and clip labels without a repeated duration.
 
+use crate::timeline;
 use gpui::{Bounds, Pixels, px, size};
 
-use super::Ui;
 use super::fixtures::*;
+use super::helpers::{ruler_point, seek};
+use super::{BTreeMap, BTreeSet, ClipId, Command, Project, TestAppContext, Time, Track, Ui};
+use crate::editor::actions::{AddMarker, Redo, Undo};
 use crate::layout::TrackHeight;
 
 fn bounds(ui: &mut Ui, id: &'static str) -> Option<Bounds<Pixels>> {
@@ -137,4 +140,178 @@ fn clip_labels_no_longer_repeat_the_duration(cx: &mut gpui::TestAppContext) {
     for label in labels {
         assert!(!label.contains("00:00:"), "{label}");
     }
+}
+
+#[gpui::test]
+fn add_track_button_is_reachable_at_720p_and_undoable(cx: &mut TestAppContext) {
+    let (project, assets) = sample();
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx
+        .simulate_resize(gpui::size(gpui::px(1280.), gpui::px(720.)));
+    ui.settle();
+    let bounds = ui
+        .cx
+        .debug_bounds("timeline-add-track")
+        .expect("visible Add track button");
+    assert!(bounds.bottom() <= gpui::px(720.));
+    assert!(bounds.right() <= gpui::px(1280.));
+    ui.click(bounds.center(), gpui::Modifiers::default());
+    ui.read(|editor| {
+        assert_eq!(editor.project.tracks().len(), before.tracks().len() + 1);
+        assert!(editor.project.tracks().last().unwrap().clips().is_empty());
+        assert_eq!(
+            &editor.project.tracks()[..before.tracks().len()],
+            before.tracks()
+        );
+    });
+    let added = ui.read(|editor| editor.project.clone());
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), before);
+    ui.dispatch(Redo);
+    assert_eq!(ui.read(|editor| editor.project.clone()), added);
+}
+
+#[gpui::test]
+fn foreground_rows_match_hits_drops_selection_and_track_moves(cx: &mut TestAppContext) {
+    let (mut project, assets) = voice_and_music();
+    for (index, id) in [3, 4, 5].into_iter().enumerate() {
+        Command::AddTrack {
+            track: Track::new(animathio_core::TrackId(id), format!("V{id}")),
+            index: index + 2,
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: animathio_core::TrackId(id),
+            clip: animathio_core::Clip::new(
+                ClipId(id + 20),
+                animathio_core::ClipKind::Error("visual".into()),
+                animathio_core::TimeRange::new(Time(0), Time(1000 * MS)).unwrap(),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let before = project.clone();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.read(|e| {
+        let ids: Vec<_> = timeline::display_tracks(&e.project)
+            .iter()
+            .map(|t| t.id().0)
+            .collect();
+        assert_eq!(ids, [5, 4, 3, 1, 2]);
+        let layout = e.current_layout();
+        let y = layout.ruler_height + layout.row_height / 2.;
+        assert_eq!(
+            timeline::hit_test(&layout, &e.project, 10., y).map(|hit| hit.clip),
+            Some(ClipId(25))
+        );
+        assert_eq!(
+            timeline::drop_placement(&layout, &e.project, 10., y, Time(0), false)
+                .unwrap()
+                .0,
+            animathio_core::TrackId(5)
+        );
+        assert_eq!(
+            crate::selection::marquee(&layout, &e.project, (0., layout.ruler_height), (20., y)),
+            BTreeSet::from([ClipId(25)])
+        );
+    });
+    ui.update(|e, _, cx| e.move_track_to_row(animathio_core::TrackId(3), 0, cx));
+    assert_eq!(
+        ui.read(|e| timeline::display_tracks(&e.project)[0].id().0),
+        3
+    );
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+    ui.update(|e, _, cx| e.move_track_by(animathio_core::TrackId(5), 1, cx));
+    assert_eq!(
+        ui.read(|e| timeline::display_tracks(&e.project)[1].id().0),
+        5
+    );
+    ui.dispatch(Undo);
+    ui.update(|e, _, cx| e.add_timeline_track(cx));
+    assert_eq!(
+        ui.read(|e| timeline::display_tracks(&e.project)[0].id().0),
+        6
+    );
+    ui.dispatch(Undo);
+    assert_eq!(ui.read(|e| e.project.clone()), before);
+}
+
+#[gpui::test]
+fn ruler_and_marker_lane_stay_fixed_when_tracks_scroll(cx: &mut TestAppContext) {
+    let mut project = Project::default();
+    for id in 1..=12 {
+        Command::AddTrack {
+            track: Track::new(animathio_core::TrackId(id), format!("V{id}")),
+            index: usize::try_from(id - 1).unwrap(),
+        }
+        .apply(&mut project)
+        .unwrap();
+        Command::AddClip {
+            track: animathio_core::TrackId(id),
+            clip: animathio_core::Clip::new(
+                ClipId(id + 20),
+                animathio_core::ClipKind::Error("visual".into()),
+                animathio_core::TimeRange::new(Time(0), Time(2000 * MS)).unwrap(),
+            ),
+        }
+        .apply(&mut project)
+        .unwrap();
+    }
+    let mut ui = Ui::open(cx, project, BTreeMap::new());
+    seek(&mut ui, 1000);
+    ui.dispatch(AddMarker);
+    let marker = ui.read(|e| e.project.markers()[0].id);
+    let ruler_before = ruler_point(&ui, Time(1000 * MS));
+    let top_before = ui.read(|e| e.timeline_tracks_top);
+    ui.update(|e, _, cx| {
+        e.timeline_scroll_handle.set_offset(gpui::point(
+            gpui::px(0.),
+            gpui::px(-e.dock.track_height.pixels() * 3.),
+        ));
+        cx.notify();
+    });
+    let ruler_after = ruler_point(&ui, Time(1000 * MS));
+    assert_eq!(ruler_before, ruler_after);
+    assert!(ui.read(|e| e.timeline_tracks_top) < top_before - 1.);
+    ui.click(ruler_after, gpui::Modifiers::default());
+    assert_eq!(
+        ui.read(|e| e.marker_selection.clone()),
+        BTreeSet::from([marker])
+    );
+    let (point, expected) = ui.read(|e| {
+        let layout = e.current_layout();
+        let point = gpui::point(
+            e.timeline_bounds.origin.x + gpui::px(timeline::time_to_x(&layout, Time(500 * MS))),
+            e.timeline_bounds.origin.y + gpui::px(layout.ruler_height + layout.row_height / 2.),
+        );
+        let row = ((f32::from(point.y) - e.timeline_tracks_top) / layout.row_height) as usize;
+        (
+            point,
+            timeline::display_tracks(&e.project)[row]
+                .clips()
+                .values()
+                .next()
+                .unwrap()
+                .id,
+        )
+    });
+    assert_eq!(expected, ClipId(29), "three rows scrolled: V9 is now first");
+    ui.click(point, gpui::Modifiers::default());
+    assert_eq!(ui.read(|e| e.selected), Some(expected));
+    ui.read(|e| {
+        let (x, y) = e.timeline_relative(point);
+        let layout = e.current_layout();
+        let hit = timeline::hit_test(&layout, &e.project, x, y).unwrap();
+        assert_eq!(hit.clip, expected);
+        assert_eq!(
+            timeline::drop_placement(&layout, &e.project, x, y, e.position, false)
+                .unwrap()
+                .0,
+            hit.track
+        );
+    });
 }

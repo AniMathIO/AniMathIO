@@ -117,7 +117,8 @@ tests never open a window on the desktop, so they do not go through `scripts/vir
   config dir under `target/ui-test-config`, so tests never touch the user's settings. Settings
   and plugin loading go through `editor_env::{config_file, plugin_source, plugin_cache_dir}`:
   new code must use them instead of `ProjectDirs`/`BaseDirs`.
-- A test is a `#[gpui::test] fn name(cx: &mut TestAppContext)` in `ui_tests/scenarios.rs`.
+- Put `#[gpui::test] fn name(cx: &mut TestAppContext)` in the relevant topic module under
+  `ui_tests/` and declare new modules in `ui_tests/mod.rs`.
   `Ui::open(cx, project, assets)` mounts the editor in a `Root`; then `ui.dispatch(Action)`
   (like a menu item), `ui.press("m")` (through the keymap), `ui.update(|editor, window, cx| ..)`
   to call editor methods, `ui.settle()` for background work (analysis, audio prep) and
