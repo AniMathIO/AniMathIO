@@ -41,7 +41,7 @@ enum MarkersAction {
         /// Display name.
         #[arg(long, default_value = "")]
         name: String,
-        /// Palette colour: red, orange, yellow, green, cyan, blue, purple or pink.
+        /// Palette color: red, orange, yellow, green, cyan, blue, purple or pink.
         #[arg(long, default_value = "blue", value_parser = parse_color)]
         color: MarkerColor,
         /// Free-form note.
@@ -203,10 +203,10 @@ pub(crate) fn run_markers(args: MarkersArgs) -> Result<()> {
 pub(crate) struct BeatsArgs {
     /// Input project archive or project.json.
     project: PathBuf,
-    /// Analyse a clip, including linked audio for a video clip.
+    /// Analyze a clip, including linked audio for a video clip.
     #[arg(long, conflicts_with = "track")]
     clip: Option<u64>,
-    /// Analyse this track's audio mix.
+    /// Analyze this track's audio mix.
     #[arg(long)]
     track: Option<u64>,
     /// Inclusive analysis start in seconds or Nticks (requires --to).
@@ -237,7 +237,7 @@ pub(crate) struct BeatsArgs {
     /// With --add-markers: only mark downbeats.
     #[arg(long, requires = "add_markers")]
     downbeats_only: bool,
-    /// With --add-markers: marker colour.
+    /// With --add-markers: marker color.
     #[arg(long, default_value = "cyan", value_parser = parse_color, requires = "add_markers")]
     color: MarkerColor,
     /// Save an edited archive here instead of changing the input.

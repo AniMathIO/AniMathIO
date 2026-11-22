@@ -17,11 +17,11 @@ pub(crate) struct SceneArgs {
     /// Detect only, split linked clips, or add markers.
     #[arg(value_enum)]
     mode: Mode,
-    /// Analyse this video clip.
+    /// Analyze this video clip.
     #[arg(long, conflicts_with = "track", required_unless_present = "track")]
     clip: Option<u64>,
     #[arg(long)]
-    /// Analyse all video on this track.
+    /// Analyze all video on this track.
     track: Option<u64>,
     #[arg(long, default_value_t = 0.5)]
     /// Sensitivity in 0..=1; higher detects smaller changes.

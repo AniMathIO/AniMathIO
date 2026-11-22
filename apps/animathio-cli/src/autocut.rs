@@ -31,10 +31,10 @@ pub(crate) struct AutocutArgs {
     /// Silence retained after speech, in seconds or Nticks.
     #[arg(long, default_value = "0.1", value_parser = parse_time)]
     padding_after: Time,
-    /// Analyse a clip, including linked audio for a video clip.
+    /// Analyze a clip, including linked audio for a video clip.
     #[arg(long, conflicts_with = "track")]
     clip: Option<u64>,
-    /// Analyse this track's audio mix.
+    /// Analyze this track's audio mix.
     #[arg(long)]
     track: Option<u64>,
     /// Inclusive analysis start in seconds or Nticks (requires --to).

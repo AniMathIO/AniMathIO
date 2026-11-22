@@ -65,7 +65,7 @@ pub(crate) struct TranscribeArgs {
     /// Caption placement: `top`, `middle` or `bottom` (style default when omitted).
     #[arg(long)]
     position: Option<String>,
-    /// Accent colour of the active word, `#RRGGBB[AA]`.
+    /// Accent color of the active word, `#RRGGBB[AA]`.
     #[arg(long)]
     accent: Option<String>,
     /// Words per line for the caption style (0 fits the box width).

@@ -393,7 +393,7 @@ Options:
       --max-lines <MAX_LINES>  Most lines per subtitle
       --style <STYLE>          Caption style for the clips added with `--output`: `classic` (default), `word-highlight`, `karaoke`, `pop`, `one-word` or `bold-outline` [default: classic]
       --position <POSITION>    Caption placement: `top`, `middle` or `bottom` (style default when omitted)
-      --accent <ACCENT>        Accent colour of the active word, `#RRGGBB[AA]`
+      --accent <ACCENT>        Accent color of the active word, `#RRGGBB[AA]`
       --max-words <MAX_WORDS>  Words per line for the caption style (0 fits the box width)
       --overwrite              Replace existing output files
   -h, --help                   Print help
@@ -474,8 +474,8 @@ Arguments:
   <PROJECT>  Input project archive or project.json
 
 Options:
-      --clip <CLIP>                    Analyse a clip, including linked audio for a video clip
-      --track <TRACK>                  Analyse this track's audio mix
+      --clip <CLIP>                    Analyze a clip, including linked audio for a video clip
+      --track <TRACK>                  Analyze this track's audio mix
       --from <FROM>                    Inclusive analysis start in seconds or Nticks (requires --to)
       --to <TO>                        Exclusive analysis end in seconds or Nticks (requires --from)
       --min-bpm <MIN_BPM>              Slowest tempo considered, in beats per minute [default: 60]
@@ -485,7 +485,7 @@ Options:
       --add-markers                    Add a marker at each selected beat, saving atomically to the input unless --output is given
       --every <EVERY>                  With --add-markers: use every Nth beat [default: 1]
       --downbeats-only                 With --add-markers: only mark downbeats
-      --color <COLOR>                  With --add-markers: marker colour [default: cyan]
+      --color <COLOR>                  With --add-markers: marker color [default: cyan]
   -o, --output <OUTPUT>                Save an edited archive here instead of changing the input
       --overwrite                      Replace an existing output archive
   -h, --help                           Print help
@@ -617,9 +617,9 @@ Options:
       --padding-after <PADDING_AFTER>
           Silence retained after speech, in seconds or Nticks [default: 0.1]
       --clip <CLIP>
-          Analyse a clip, including linked audio for a video clip
+          Analyze a clip, including linked audio for a video clip
       --track <TRACK>
-          Analyse this track's audio mix
+          Analyze this track's audio mix
       --from <FROM>
           Inclusive analysis start in seconds or Nticks (requires --to)
       --to <TO>
@@ -967,9 +967,9 @@ Arguments:
 
 Options:
       --clip <CLIP>
-          Analyse this video clip
+          Analyze this video clip
       --track <TRACK>
-          Analyse all video on this track
+          Analyze all video on this track
       --sensitivity <SENSITIVITY>
           Sensitivity in 0..=1; higher detects smaller changes [default: 0.5]
       --min-shot-frames <MIN_SHOT_FRAMES>
