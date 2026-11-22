@@ -498,7 +498,8 @@ them).
   outline, which reads on every kind colour (the accent would vanish on some). Disabled
   or hidden: 50% opacity.
 - **Keyframes:** 8 px diamonds on the selected clip only, `TEXT` fill with a 1 px `BG`
-  outline; a selected keyframe is `ACCENT`.
+  outline. On compact tracks where the diamond reaches the label row, the label stops
+  before the first diamond it would touch. A selected keyframe is `ACCENT`.
 - **Playhead:** `PLAYHEAD` head and 1 px line; while scrubbing a pill shows the
   timecode in JetBrains Mono.
 - **Toolbar:** tools, in/out, snap and link, S/M/L (a segmented control) and zoom, each

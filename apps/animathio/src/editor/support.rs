@@ -269,12 +269,8 @@ pub(super) fn paint_clip(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let x0 = bounds.origin.x + px(timeline::time_to_x(layout, clip.start));
-    let x1 = bounds.origin.x + px(timeline::time_to_x(layout, clip.end));
-    let y0 = bounds.origin.y + px(ruler_height() + clip.row as f32 * layout.row_height + 3.0);
-    let y1 =
-        bounds.origin.y + px(ruler_height() + (clip.row as f32 + 1.0) * layout.row_height - 3.0);
-    let block = Bounds::from_corners(point(x0, y0), point(x1, y1));
+    let block = clip_block_bounds(bounds, layout, clip);
+    let (x0, x1, y0, y1) = (block.left(), block.right(), block.top(), block.bottom());
     let kind_color = clip_color(&clip.kind, cx.theme());
     if !timeline::visible_span(layout, clip.start, clip.end) {
         return;
@@ -365,8 +361,7 @@ pub(super) fn paint_clip(
     }
     // Kind icon and label, only when the block is wide enough to hold them.
     if x1 - x0 > px(28.0) {
-        // Centre the 12 px icon on the Caption text, which `paint_text_line` centres in a
-        // Label-height line from `y0 + 3` (centre about `y0 + 11.5`).
+        // Centre the kind icon beside the clip name.
         let icon_bounds = Bounds::new(point(lx + px(7.0), y0 + px(5.5)), size(px(12.0), px(12.0)));
         paint_icon(clip.icon, icon_bounds, cx.theme().foreground, window, cx);
         let warned = clip.effect_warning && x1 - x0 > px(64.0);
@@ -384,14 +379,14 @@ pub(super) fn paint_clip(
         }
         if !clip.label.is_empty() {
             let label_x = lx + px(if warned { 44.0 } else { 22.0 });
-            let available_w = x1 - label_x - px(4.0);
+            let label = clip_label_bounds(bounds, layout, clip, block, label_x, window.rem_size());
             paint_clip_name_and_duration(
                 &clip.label,
                 layout
                     .frame_rate
                     .map(|rate| timecode::short_duration(Time(clip.end.0 - clip.start.0), rate)),
-                point(label_x, y0 + px(3.0)),
-                available_w,
+                label.origin,
+                label.size.width,
                 window,
                 cx,
             );
@@ -415,8 +410,11 @@ pub(super) fn paint_clip(
     };
     for keyframe in &clip.keyframes {
         let kx = bounds.origin.x + px(timeline::time_to_x(layout, keyframe.time));
-        let cy = y1 - px(10.0);
-        window.paint_path(diamond(kx, cy, px(5.0)), style::hex(colors::BG));
+        let cy = bounds.top() + px(keyframe_center_y(layout, clip.row));
+        window.paint_path(
+            diamond(kx, cy, KEYFRAME_OUTLINE_HALF),
+            style::hex(colors::BG),
+        );
         window.paint_path(
             diamond(kx, cy, px(4.0)),
             if keyframe.selected {
@@ -426,6 +424,55 @@ pub(super) fn paint_clip(
             },
         );
     }
+}
+
+pub(super) const KEYFRAME_OUTLINE_HALF: Pixels = px(5.0);
+
+pub(super) fn clip_block_bounds(
+    timeline: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    clip: &ClipPaint,
+) -> Bounds<Pixels> {
+    let row_top = timeline.top() + px(layout.ruler_height + clip.row as f32 * layout.row_height);
+    Bounds::from_corners(
+        point(
+            timeline.left() + px(timeline::time_to_x(layout, clip.start)),
+            row_top + px(3.),
+        ),
+        point(
+            timeline.left() + px(timeline::time_to_x(layout, clip.end)),
+            row_top + px(layout.row_height - 3.),
+        ),
+    )
+}
+
+pub(super) fn keyframe_center_y(layout: &TimelineLayout, row: usize) -> f32 {
+    layout.ruler_height + (row + 1) as f32 * layout.row_height - 13.0
+}
+
+/// A compact track can put diamonds in the label's vertical span. In that case the
+/// label ends before the first diamond it would touch, including the diamond's outline.
+pub(super) fn clip_label_bounds(
+    timeline: Bounds<Pixels>,
+    layout: &TimelineLayout,
+    clip: &ClipPaint,
+    block: Bounds<Pixels>,
+    left: Pixels,
+    rem: Pixels,
+) -> Bounds<Pixels> {
+    let top = block.top() + px(3.);
+    let height = rem * style::Role::Caption.line_height().0;
+    let mut right = block.right() - px(4.);
+    let center = timeline.top() + px(keyframe_center_y(layout, clip.row));
+    if center - KEYFRAME_OUTLINE_HALF < top + height && center + KEYFRAME_OUTLINE_HALF > top {
+        for key in &clip.keyframes {
+            let x = timeline.left() + px(timeline::time_to_x(layout, key.time));
+            if x + KEYFRAME_OUTLINE_HALF > left {
+                right = right.min(x - KEYFRAME_OUTLINE_HALF);
+            }
+        }
+    }
+    Bounds::new(point(left, top), size((right - left).max(px(0.)), height))
 }
 
 /// Content labels are kept here so plugin migration touches one small match.
@@ -937,8 +984,7 @@ pub(super) fn paint_ruler(
     );
     let minor = (step / 4).max(1);
     let number_font = tabular_font(snapshot.theme.font_family.clone(), FontWeight(400.));
-    let line = window.rem_size() * style::Role::Caption.line_height().0;
-    let label_top = bounds.origin.y + px(ruler_height()) - line;
+    let label_top = ruler_tick_label_top(bounds.top() + px(ruler_height()), window.rem_size());
     // Minor ticks share the bottom row with the tick numbers: skip the ones that would run
     // through the previous number.
     let mut label_end = bounds.origin.x - px(1.0);
@@ -970,15 +1016,16 @@ pub(super) fn paint_ruler(
                 point(x + px(5.0), label_top),
                 x + px(width),
                 number_font.clone(),
-                TextStyle::new(
-                    style::type_size::CAPTION,
-                    style::hex(colors::TEXT_SECONDARY),
-                ),
+                TextStyle::new(style::Role::Caption, style::hex(colors::TEXT_SECONDARY)),
                 window,
                 cx,
             );
         }
     }
+}
+
+pub(super) fn ruler_tick_label_top(ruler_bottom: Pixels, rem: Pixels) -> Pixels {
+    ruler_bottom - rem * style::Role::Caption.line_height().0
 }
 
 /// Choose a ruler interval with room for a full timecode at the current UI scale.
@@ -1036,13 +1083,13 @@ pub(super) fn clip_color(kind: &animathio_core::ClipKind, _theme: &gpui_componen
 /// features live on the `Font` (see [`tabular_font`]).
 #[derive(Clone, Copy)]
 pub(super) struct TextStyle {
-    size: Rems,
+    role: style::Role,
     color: Hsla,
 }
 
 impl TextStyle {
-    pub(super) fn new(size: Rems, color: Hsla) -> Self {
-        Self { size, color }
+    pub(super) fn new(role: style::Role, color: Hsla) -> Self {
+        Self { role, color }
     }
 }
 
@@ -1169,11 +1216,11 @@ pub(super) fn paint_text_line(
         underline: None,
         strikethrough: None,
     };
-    let font_size = window.rem_size() * text_style.size.0;
+    let font_size = window.rem_size() * text_style.role.size().0;
     let line = window
         .text_system()
         .shape_line(label, font_size, &[run], None);
-    let line_height = window.rem_size() * style::Role::Label.line_height().0;
+    let line_height = window.rem_size() * text_style.role.line_height().0;
     // Clip the text to the block so long labels never spill into the next clip.
     let mask = ContentMask {
         bounds: Bounds::from_corners(
@@ -1200,7 +1247,7 @@ pub(super) fn paint_clip_label(
         origin,
         right_edge,
         label_font,
-        TextStyle::new(style::type_size::LABEL, style::hex(colors::TEXT)),
+        TextStyle::new(style::Role::Label, style::hex(colors::TEXT)),
         window,
         cx,
     );
@@ -1220,7 +1267,7 @@ pub(super) fn paint_empty_lane_label(
         origin,
         right_edge,
         label_font,
-        TextStyle::new(style::type_size::LABEL, style::hex(colors::TEXT_MUTED)),
+        TextStyle::new(style::Role::Label, style::hex(colors::TEXT_MUTED)),
         window,
         cx,
     );
@@ -1248,7 +1295,7 @@ pub(super) fn paint_clip_name_and_duration(
         origin,
         right,
         name_font,
-        TextStyle::new(size, style::hex(colors::TEXT)),
+        TextStyle::new(style::Role::Caption, style::hex(colors::TEXT)),
         window,
         cx,
     );
@@ -1265,7 +1312,10 @@ pub(super) fn paint_clip_name_and_duration(
         origin + point(name_width + px(GAP), px(0.)),
         right,
         duration_font,
-        TextStyle::new(size, style::tint(colors::TEXT, style::Alpha::Scrim)),
+        TextStyle::new(
+            style::Role::Caption,
+            style::tint(colors::TEXT, style::Alpha::Scrim),
+        ),
         window,
         cx,
     );

@@ -1,14 +1,22 @@
 //! The 2.3 timeline, transport and viewer: no overlap in the transport row at common window
 //! sizes, one-row track headers, the S/M/L control and clip labels without a repeated duration.
 
-use crate::timeline;
-use gpui::{Bounds, Pixels, px, size};
+use gpui::{Bounds, Modifiers, Pixels, point, px, size};
 
 use super::fixtures::*;
 use super::helpers::{ruler_point, seek};
-use super::{BTreeMap, BTreeSet, ClipId, Command, Project, TestAppContext, Time, Track, Ui};
+use super::{
+    BTreeMap, BTreeSet, ClipId, Command, Interpolation, Project, Target, TestAppContext, Time,
+    TransformProperty, Track, Ui, private_env, ruler_height,
+};
 use crate::editor::actions::{AddMarker, Redo, Undo};
+use crate::editor::markers::marker_name_bounds;
+use crate::editor::support::{
+    KEYFRAME_OUTLINE_HALF, clip_block_bounds, clip_label_bounds, keyframe_center_y,
+    ruler_tick_label_top,
+};
 use crate::layout::TrackHeight;
+use crate::timeline;
 
 fn bounds(ui: &mut Ui, id: &'static str) -> Option<Bounds<Pixels>> {
     ui.cx.debug_bounds(id)
@@ -60,6 +68,28 @@ fn transport_parts_never_overlap_at_common_window_sizes(cx: &mut gpui::TestAppCo
     }
 }
 
+#[gpui::test]
+fn timecode_input_fits_and_seeks_at_1024x768(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let mut ui = Ui::open(cx, project, assets);
+    ui.cx.simulate_resize(size(px(1024.), px(768.)));
+    ui.settle();
+    let display = bounds(&mut ui, "timecode-display").expect("timecode display");
+    ui.click(display.center(), Modifiers::default());
+
+    let input = bounds(&mut ui, "timecode-edit").expect("timecode input");
+    let left = bounds(&mut ui, "transport-left").expect("left column");
+    let center = bounds(&mut ui, "transport-center").expect("transport buttons");
+    assert!(input.left() >= left.left() && input.right() <= left.right());
+    assert!(input.size.width >= display.size.width && input.right() < center.left());
+
+    ui.press("secondary-a");
+    ui.cx.simulate_input("00:00:01:00");
+    ui.press("enter");
+    assert!(bounds(&mut ui, "timecode-display").is_some());
+    assert_eq!(ui.read(|e| e.position), Time(1000 * MS));
+}
+
 /// A track header is one row: the name and the first control share a vertical centre at the
 /// large track height (the 2.2 header put the name at the top and the controls at the bottom).
 #[gpui::test]
@@ -97,16 +127,22 @@ fn track_header_name_and_pills_share_a_row_at_every_height(cx: &mut gpui::TestAp
     }
 }
 
-/// S, M and L are one segmented control, reachable in the toolbar. (Clicking an option calls
-/// `set_track_height`, which saves the dock layout; that is covered by `polish_inspector`.)
+/// S, M and L are one segmented control, reachable in the toolbar.
 #[gpui::test]
-fn the_track_height_segments_are_in_the_toolbar(cx: &mut gpui::TestAppContext) {
+fn clicking_the_track_height_segments_resizes_tracks(cx: &mut gpui::TestAppContext) {
     let (project, assets) = sample();
-    let mut ui = Ui::open(cx, project, assets);
+    let env = private_env("track-height-segments");
+    let mut ui = Ui::open_with_env(cx, project, assets, env.clone());
     ui.cx.simulate_resize(size(px(1280.), px(900.)));
     ui.settle();
+    let track = ui.read(|e| timeline::display_tracks(&e.project)[0].id());
+    let header_id = Box::leak(format!("track-header-{}", track.0).into_boxed_str());
     let mut previous: Option<Bounds<Pixels>> = None;
-    for id in ["track-height-S", "track-height-M", "track-height-L"] {
+    for (id, height) in [
+        ("track-height-S", TrackHeight::Small),
+        ("track-height-M", TrackHeight::Medium),
+        ("track-height-L", TrackHeight::Large),
+    ] {
         let option = bounds(&mut ui, id).unwrap_or_else(|| panic!("{id} is rendered"));
         assert!(
             option.right() <= px(1280.) && option.bottom() <= px(900.),
@@ -119,7 +155,75 @@ fn the_track_height_segments_are_in_the_toolbar(cx: &mut gpui::TestAppContext) {
             );
         }
         previous = Some(option);
+        ui.click(option.center(), Modifiers::default());
+        assert_eq!(ui.read(|e| e.dock.track_height), height);
+        assert_eq!(crate::layout::DockLayout::load(&env).track_height, height);
+        let header = bounds(&mut ui, header_id).expect("track header");
+        assert!((header.size.height - px(height.pixels())).abs() <= px(1.));
     }
+}
+
+#[gpui::test]
+fn compact_clip_label_ends_before_a_keyframe_diamond(cx: &mut gpui::TestAppContext) {
+    let (mut project, assets) = sample();
+    let image = ClipId(2);
+    // At this zoom the extra key falls inside the clip's duration label.
+    let time = Time(750 * MS);
+    Command::AddKeyframe {
+        id: image,
+        target: Target::Transform(TransformProperty::Rotation),
+        time,
+        keyframe: animathio_core::Keyframe {
+            value: 0.0.into(),
+            interpolation: Interpolation::Linear,
+        },
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut ui = Ui::open_sized(
+        cx,
+        project,
+        assets,
+        super::test_env(),
+        Some(size(px(1280.), px(720.))),
+    );
+    ui.update(|e, _, cx| {
+        e.dock.track_height = TrackHeight::Small;
+        e.select_only(image, cx);
+    });
+    ui.cx.update(|window, cx| {
+        let editor = ui.editor.read(cx);
+        let layout = editor.current_layout();
+        let snapshot = editor.build_timeline_snapshot(cx);
+        let clip = snapshot.clips.iter().find(|clip| clip.selected).unwrap();
+        assert!(clip.keyframes.iter().any(|key| key.time == time));
+        let timeline = Bounds::new(point(px(240.), px(435.)), size(px(layout.width), px(200.)));
+        let block = clip_block_bounds(timeline, &layout, clip);
+        let left = block.left() + px(22.);
+        let diamond_x = timeline.left() + px(timeline::time_to_x(&layout, time));
+        let diamond_y = timeline.top() + px(keyframe_center_y(&layout, clip.row));
+        assert!(diamond_x + KEYFRAME_OUTLINE_HALF < block.right() - px(4.));
+        let label = clip_label_bounds(timeline, &layout, clip, block, left, window.rem_size());
+        assert!(label.bottom() > diamond_y - KEYFRAME_OUTLINE_HALF);
+        assert!((label.right() - (diamond_x - KEYFRAME_OUTLINE_HALF)).abs() < px(0.05));
+    });
+}
+
+#[gpui::test]
+fn marker_name_plate_stays_above_the_ruler_tick_numbers(cx: &mut gpui::TestAppContext) {
+    let (project, assets) = sample();
+    let ui = Ui::open(cx, project, assets);
+    ui.cx.update(|window, _| {
+        let top = px(400.);
+        let tick_label_top = ruler_tick_label_top(top + px(ruler_height()), window.rem_size());
+        // Give the name the full remainder of the ruler as for a long, last marker.
+        let plate = marker_name_bounds(point(px(240.), top), px(1200.), window.rem_size());
+        assert!(plate.right() > px(300.));
+        assert!(
+            plate.bottom() <= tick_label_top,
+            "{plate:?} crosses the tick row at {tick_label_top:?}"
+        );
+    });
 }
 
 /// The clip label is the name alone: the duration is painted after it only when it fits.

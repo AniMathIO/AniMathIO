@@ -941,7 +941,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         self.dock.track_height = height;
-        self.dock.save();
+        self.dock.save(&self.env);
         cx.notify();
     }
 }

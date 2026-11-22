@@ -483,10 +483,12 @@ any other weight switches to Inter, so keyframing the weight of such a clip chan
 choose `inter` for a weight that varies smoothly.
 
 New project (Ctrl/Cmd+Alt+N or the File menu) opens the same canvas chooser as the
-launcher. The launcher puts **New project**, **Open project…** and an **Import…** menu (AniMathIO 1.x
-project…, Manim scene…) under its heading, so they stay visible in a 1280 × 720 window. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
+launcher. The launcher puts **New project**, **Open project…** and an **Import…** menu under
+its heading, so they stay visible in a 1280 × 720 window. The Import and File menus both
+offer **Import AniMathIO 1.x project…** and **Import Manim scene…**. Enter accepts the default 1080p 16:9 canvas (1920 × 1080 at 30 fps); choosing
 another tile starts that format. The launcher, project settings and export dialog
-share 1080p, 4K, 9:16, square and 4:5 choices. MCP clients can use `list_title_presets` and `add_title` with `preset`
+share 1080p, 4K, 9:16, square and 4:5 choices. In project settings, editing the width or
+height after choosing a preset switches the size preset to **Custom**. MCP clients can use `list_title_presets` and `add_title` with `preset`
 and `fields`; see [the control guide](mcp.md#title-preset-library).
 
 

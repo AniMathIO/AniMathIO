@@ -156,7 +156,7 @@ impl Editor {
                                                 div()
                                                     .id("start-v1")
                                                     .debug_selector(|| "start-v1".into())
-                                                    .child("AniMathIO 1.x project…")
+                                                    .child(super::menus::IMPORT_V1_LABEL)
                                             })
                                             .on_click(move |_, _, cx| {
                                                 let _ = v1.update(cx, |this, cx| {
@@ -169,7 +169,7 @@ impl Editor {
                                                 div()
                                                     .id("start-manim")
                                                     .debug_selector(|| "start-manim".into())
-                                                    .child("Manim scene…")
+                                                    .child(super::menus::IMPORT_MANIM_LABEL)
                                             })
                                             .on_click(move |_, window, cx| {
                                                 let _ = manim.update(cx, |this, cx| {

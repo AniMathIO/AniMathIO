@@ -85,8 +85,9 @@ pub(crate) use support::{
     color_from_json, load_plugins, point_from_json, read_project_with_recovery,
 };
 
+/// A marker-name line and a tick-number line, with room between them at either density.
 fn ruler_height() -> f32 {
-    28. * crate::style::ui_scale()
+    34. * crate::style::ui_scale()
 }
 fn track_header_width() -> f32 {
     240. * crate::style::ui_scale()
@@ -1030,11 +1031,11 @@ impl Editor {
             last_autosave: Instant::now(),
             next_id: initial_next_id,
             recent: RecentFiles::load(),
-            dock: DockLayout::load(),
+            dock: DockLayout::load(&env),
             compact_height: false,
             density_decided: false,
             density_probe: None,
-            dock_persisted: DockLayout::config_path().is_some_and(|path| path.exists()),
+            dock_persisted: DockLayout::config_path(&env).is_some_and(|path| path.exists()),
             left_tab: LeftTab::Media,
             previous_left_tab: LeftTab::Media,
             tab_changed: Instant::now()

@@ -5,10 +5,7 @@ use crate::style::{self, Role, TextRole as _, color, hex};
 use animathio_control::{
     MediaFill, Placeholder, ProjectTemplate, TemplateFill, TemplateManifest, template_catalog,
 };
-use gpui_component::{
-    WindowExt,
-    input::{Input, InputState},
-};
+use gpui_component::input::{Input, InputState};
 
 /// Media chosen for each placeholder in the open Fill placeholders dialog.
 #[derive(Default)]
@@ -223,7 +220,7 @@ impl Editor {
         true
     }
 
-    fn fill_template_dialog(
+    pub(super) fn fill_template_dialog(
         template: ProjectTemplate,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -317,7 +314,11 @@ impl Editor {
                     })
                     .child(div().text_role(Role::Heading).child(label.clone()));
                 if let Some(text) = text {
-                    row = row.child(Input::new(text));
+                    row = row.child(
+                        div()
+                            .debug_selector(move || format!("placeholder-text-{}", id.0))
+                            .child(Input::new(text)),
+                    );
                 }
                 let pick = {
                     let media = media.clone();
@@ -415,26 +416,10 @@ impl Editor {
                 div()
                     .flex()
                     .gap_2()
-                    .child(
-                        style::secondary_button("fill-skip", cx)
-                            .label("Skip")
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    )
-                    .child(
-                        style::primary_button("fill-template", cx)
-                            .label("Apply")
-                            .on_click({
-                                let apply_fill = apply_fill.clone();
-                                move |_, window, cx| {
-                                    if apply_fill(cx) {
-                                        window.close_dialog(cx);
-                                    }
-                                }
-                            }),
-                    ),
+                    .child(super::dialogs::cancel_button("fill-skip", cx).label("Skip"))
+                    .child(super::dialogs::submit_button("Apply", cx)),
             ));
-            // Enter applies the template, like the primary button.
-            super::dialogs::on_enter(dialog, move |_, cx| apply_fill(cx))
+            dialog.on_ok(move |_, _, cx| apply_fill(cx))
         });
     }
 
@@ -516,32 +501,8 @@ impl Editor {
                         super::dialogs::tagged_input("template-name", Input::new(&name)),
                     ))
                     .child(style::form_row("Category", Input::new(&category))),
-            )
-            .footer(super::dialogs::footer_row(
-                cx,
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        style::secondary_button("save-template-cancel", cx)
-                            .label("Cancel")
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    )
-                    .child(
-                        style::primary_button("save-template", cx)
-                            .label("Save")
-                            .on_click({
-                                let save_template = save_template.clone();
-                                move |_, window, cx| {
-                                    if save_template(cx) {
-                                        window.close_dialog(cx);
-                                    }
-                                }
-                            }),
-                    ),
-            ));
-            // Enter saves the template.
-            super::dialogs::on_enter(dialog, move |_, cx| save_template(cx))
+            );
+            super::dialogs::form_dialog(dialog, "Save", cx, save_template)
         });
     }
 }

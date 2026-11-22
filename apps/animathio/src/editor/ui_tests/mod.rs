@@ -85,6 +85,15 @@ pub(super) fn test_env() -> EditorEnv {
     EditorEnv::headless(plugins, config_dir())
 }
 
+/// An editor with its own on-disk settings for workflows that persist view state.
+fn private_env(name: &str) -> EditorEnv {
+    let mut env = test_env();
+    let dir = config_dir().join(name);
+    std::fs::create_dir_all(&dir).expect("private config dir");
+    env.config_dir = Some(dir);
+    env
+}
+
 /// Whether plugin-backed scenarios can run; logs why not.
 pub(super) fn require_plugins(test: &str) -> bool {
     let ok = built_plugins_dir().is_some();

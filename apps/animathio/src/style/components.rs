@@ -290,7 +290,7 @@ pub fn segmented(
                         }
                     })
                     .relative()
-                    .px_2()
+                    .when(labelled, gpui::Styled::px_2)
                     .flex_1()
                     .flex()
                     .items_center()

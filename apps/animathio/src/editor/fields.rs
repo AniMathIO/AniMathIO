@@ -20,7 +20,7 @@ use super::inspector_units::{
     size_to_display, size_to_model,
 };
 use super::*;
-use crate::style::{Role, TextRole, color, hex, size};
+use crate::style::{self, Role, TextRole, color, hex, size};
 
 /// Width of the value field next to a slider, in rems (the field holds the
 /// exact value with its unit suffix, which 4rem clipped).
@@ -29,6 +29,8 @@ const FIELD_W: f32 = 4.5;
 /// fields more, since its labels (Position, Scale, Size) are short.
 const LABEL_FRACTION: f32 = 0.4;
 const PAIR_LABEL_FRACTION: f32 = 0.3;
+/// Inspector width at which all four equal-width Fit segments can show their labels.
+const FIT_LABELS_WIDTH: f32 = 510.;
 /// Width of the keyframe column, in rems: diamond plus hover-revealed arrows.
 const KF_COL: f32 = 3.5;
 /// Widths of the keyframe controls, in rems.
@@ -1357,6 +1359,7 @@ impl Editor {
         key: String,
         items: Vec<(String, String)>,
         selected: usize,
+        compact_icons: Option<&[IconName]>,
         on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -1388,13 +1391,27 @@ impl Editor {
             );
         }
         let entry = &self.fields.segmented[&key];
+        let icon_choices;
+        let choices = if let Some(icons) = compact_icons {
+            icon_choices = entry
+                .choices
+                .iter()
+                .zip(icons)
+                .map(|(option, icon)| {
+                    style::SegmentedOption::new(option.id, option.label, Some(*icon))
+                })
+                .collect::<Vec<_>>();
+            &icon_choices
+        } else {
+            &entry.choices
+        };
         let control = crate::style::segmented(
             entry.element_id,
-            &entry.choices,
+            choices,
             &entry.handles,
             selected,
             None,
-            true,
+            compact_icons.is_none(),
             on_select,
         );
         // `segmented` frames itself with 8 px padding for panel use; inside a
@@ -1433,6 +1450,7 @@ impl Editor {
             format!("c{}:seg:{name}", id.0),
             items,
             selected,
+            None,
             move |index, _, cx| {
                 if let Some(value) = values.get(index) {
                     editor.update(cx, |this, cx| {
@@ -2087,6 +2105,12 @@ impl Editor {
 
     /// Fit / Fill / Stretch / 1:1 choice for an image or video clip.
     fn fit_row(&mut self, id: ClipId, current: Fit, cx: &mut Context<Self>) -> Div {
+        const FIT_ICONS: [IconName; 4] = [
+            IconName::Minimize,
+            IconName::Maximize,
+            IconName::Expand,
+            IconName::Square,
+        ];
         let items = Fit::ALL
             .iter()
             .map(|fit| {
@@ -2105,6 +2129,7 @@ impl Editor {
             format!("c{}:fit", id.0),
             items,
             selected,
+            (self.dock.right_width < FIT_LABELS_WIDTH).then_some(&FIT_ICONS),
             move |index, _, cx| {
                 if let Some(fit) = Fit::ALL.get(index) {
                     editor.update(cx, |this, cx| this.set_clip_fit(id, *fit, cx));
@@ -2112,23 +2137,17 @@ impl Editor {
             },
             cx,
         );
-        // Four options need the whole row width, so the control sits under its
-        // label (in the label column) instead of beside it.
-        div()
-            .flex()
-            .flex_col()
-            .child(Self::label_column(
-                div().pt_1().text_role(Role::Label).child("Fit"),
-            ))
-            .child(
-                div()
-                    .min_h(size::ROW)
-                    .flex()
-                    .items_center()
-                    .px_2()
-                    .child(div().flex_1().min_w_0().child(control)),
-            )
-            .debug_selector(|| "param-Fit".to_owned())
+        Self::param_row_flush(
+            RowLabel {
+                element: div()
+                    .debug_selector(|| "fit-label".into())
+                    .child("Fit")
+                    .into_any_element(),
+                tooltip: Some("Fit".into()),
+            },
+            control,
+        )
+        .debug_selector(|| "param-Fit".to_owned())
     }
 
     pub(super) fn numeric_param_rows(

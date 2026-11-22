@@ -9,6 +9,10 @@ const TIMECODE_INPUT_WIDTH: Rems = Rems(11.733);
 const VOLUME_SLIDER_WIDTH: Rems = Rems(5.6);
 
 impl Editor {
+    pub(super) fn transport_height(&self) -> Rems {
+        Rems(if self.compact_height { 3.0 } else { 3.6 })
+    }
+
     pub(super) fn toggle_play(&mut self, cx: &mut Context<Self>) {
         if self.playing {
             if let Err(error) = self.clock.pause() {
@@ -145,7 +149,7 @@ impl Editor {
             PanelSide::Right => self.dock.right_open = !self.dock.right_open,
             PanelSide::Bottom => self.dock.bottom_open = !self.dock.bottom_open,
         }
-        self.dock.save();
+        self.dock.save(&self.env);
         cx.notify();
     }
 
@@ -270,7 +274,10 @@ impl Editor {
                 window.focus(&handle, cx);
             }
             div()
+                .debug_selector(|| "timecode-edit".into())
                 .w(TIMECODE_INPUT_WIDTH)
+                .max_w_full()
+                .min_w_0()
                 .font_family(mono.clone())
                 .child(gpui_component::input::Input::new(&state))
                 .into_any_element()
@@ -315,7 +322,7 @@ impl Editor {
         let compact = self.compact_height;
         let play_size = Rems(if compact { 2.0 } else { 2.5 });
         div()
-            .h(Rems(if compact { 3.0 } else { 3.6 }))
+            .h(self.transport_height())
             .w_full()
             .flex_shrink_0()
             .flex()

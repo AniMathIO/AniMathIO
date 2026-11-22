@@ -994,22 +994,32 @@ pub(super) fn paint_markers(
         if !marker.name.is_empty() {
             // The name sits on the ruler's top row, beside the flag, and stops before the
             // next marker's flag so two neighbouring names never overlap.
-            let name_left = left + px(FLAG_W + 3.0);
             let limit = next_flag_x(&flag_xs, x).map_or(bounds.right(), |next| {
                 (bounds.origin.x + px(next - NAME_GAP)).min(bounds.right())
             });
+            let plate = marker_name_bounds(point(left, bounds.top()), limit, window.rem_size());
             let name_font = font(snapshot.theme.font_family.clone());
-            let name = fit_name(&marker.name, limit - name_left, &name_font, window);
+            let name = fit_name(&marker.name, plate.size.width, &name_font, window);
             paint_clip_label(
                 name.into(),
-                point(name_left, bounds.top() + px(1.0)),
-                limit,
+                plate.origin,
+                plate.right(),
                 name_font,
                 window,
                 cx,
             );
         }
     }
+}
+
+pub(super) fn marker_name_bounds(
+    flag_origin: Point<Pixels>,
+    right: Pixels,
+    rem: Pixels,
+) -> Bounds<Pixels> {
+    let origin = flag_origin + point(px(FLAG_W + 3.), px(1.));
+    let line_height = rem * style::Role::Label.line_height().0;
+    Bounds::new(origin, size((right - origin.x).max(px(0.)), line_height))
 }
 
 #[cfg(test)]

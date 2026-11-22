@@ -852,7 +852,7 @@ impl Editor {
                 )
                 .selected(checker),
             );
-        let transport_rems = if self.compact_height { 3.0 } else { 3.6 };
+        let transport_height = self.transport_height();
         let mut root = div()
             .w_full()
             .min_w_0()
@@ -879,7 +879,7 @@ impl Editor {
             root = root.child(
                 div()
                     .absolute()
-                    .bottom(Rems(transport_rems + 0.8))
+                    .bottom(transport_height + Rems(0.8))
                     .left(Rems(1.0))
                     .px_2()
                     .h(style::size::ROW_XS)
@@ -909,7 +909,7 @@ impl Editor {
                     .debug_selector(|| "viewer-empty-hint".into())
                     .absolute()
                     .top(style::size::HEADER)
-                    .bottom(Rems(transport_rems))
+                    .bottom(transport_height)
                     .left_0()
                     .right_0()
                     .flex()
