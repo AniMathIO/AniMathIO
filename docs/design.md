@@ -644,7 +644,7 @@ Clip > Markers and beat sync. `--screenshot-panel=duck` selects the first audio 
 audio tracks are suggested as music, then the normal analysis runs), and scrolls the timeline to the bottom so the shaded music rows are visible. `--screenshot-panel=autocut` selects the first audio
 clip in track order and runs the normal asynchronous analysis before showing its
 review. `--screenshot-panel=record` opens the Media tab's recorder mid-take on a scripted tone (never a real input). `--screenshot-panel=media|titles|effects|elements` open those Library tabs and
-`--screenshot-panel=math` opens the Add math object dialog (LaTeX), `--screenshot-panel=export` the Export dialog (give it a project with clips). Unknown
+`--screenshot-panel=math` opens the Add math object dialog (LaTeX). Unknown
 panel names are listed (with the selection and dialog hooks) on stderr. `--screenshot-panel=plugins` opens the Library's Plugins tab, and
 `--screenshot-panel=plugins-browse` also opens Browse, which fetches the community index
 only when the Community plugins switch is already on. Pass a project path as usual; none
