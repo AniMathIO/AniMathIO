@@ -813,7 +813,7 @@ impl Guest for GraphPlugin {
     fn describe() -> Manifest {
         Manifest {
             name: "graph".to_string(),
-            version: "1.4.0".to_string(),
+            version: "1.5.0".to_string(),
             description: "Mafs-like coordinate plane with plots and shapes".to_string(),
             kinds: vec!["clip-source".into()],
             metadata: vec![],
@@ -1097,8 +1097,13 @@ impl Guest for GraphPlugin {
             let step = nice_step((x_max - x_min).max(y_max - y_min));
             // Tick labels sit clear of the axis lines, the way Manim and most
             // plotting tools place them: centred below the x axis, right-aligned
-            // left of the y axis, padded by a fraction of the font size.
+            // left of the y axis, padded by a fraction of the font size. When
+            // the preferred side would leave the clip (axis on an edge or
+            // off-screen), the label moves to the other side of its axis and
+            // is finally clamped into the clip bounds; one that cannot fit at
+            // all is hidden.
             let pad = (0.3 * label_size) as f32;
+            let (clip_w, clip_h) = (size.width as f32, size.height as f32);
             let origin = map_point(0.0, 0.0, bounds, size);
             let y_axis_drawn = show_axes && (x_min..=x_max).contains(&0.0);
             let x_axis_drawn = show_axes && (y_min..=y_max).contains(&0.0);
@@ -1107,9 +1112,15 @@ impl Guest for GraphPlugin {
                 if tick.abs() > f64::EPSILON {
                     let p = map_point(tick, 0.0, bounds, size);
                     let contours = host::shape_text(&tick_label(tick), label_size)?;
-                    if let Some((min_x, min_y, max_x, _)) = label_bbox(&contours) {
+                    if let Some((min_x, min_y, max_x, max_y)) = label_bbox(&contours) {
                         let mut dx = p.x - (min_x + max_x) / 2.0;
-                        let dy = p.y + pad - min_y;
+                        // Preferred: centred below the axis line. An axis on
+                        // the clip's bottom edge or off-screen would push the
+                        // label out, so sit above the line instead.
+                        let mut dy = p.y + pad - min_y;
+                        if dy + min_y < 0.0 || dy + max_y > clip_h {
+                            dy = p.y - pad - max_y;
+                        }
                         // Near the origin the label would run into the y axis;
                         // keep it on its own side, clear of that line too.
                         if y_axis_drawn {
@@ -1125,17 +1136,24 @@ impl Guest for GraphPlugin {
                                 }
                             }
                         }
-                        // One FillPath for the whole label, as the text plugin
-                        // does: the fill rule only cuts out glyph counters
-                        // (0, 4, 8, ...) when all contours share one path.
-                        // Tick labels are short, so the verb cap is not a risk.
-                        let offset: Vec<PathVerb> = contours
-                            .iter()
-                            .flatten()
-                            .map(|verb| offset_verb(verb, dx, dy))
-                            .collect();
-                        if !offset.is_empty() {
-                            elements.push(DrawCommand::FillPath((offset, axis_color)));
+                        // Keep every label inside the clip even when its axis
+                        // sits on an edge or off-screen.
+                        if let Some((dx, dy)) =
+                            clamp_label_offset((min_x, min_y, max_x, max_y), dx, dy, clip_w, clip_h)
+                        {
+                            // One FillPath for the whole label, as the text
+                            // plugin does: the fill rule only cuts out glyph
+                            // counters (0, 4, 8, ...) when all contours share
+                            // one path. Tick labels are short, so the verb cap
+                            // is not a risk.
+                            let offset: Vec<PathVerb> = contours
+                                .iter()
+                                .flatten()
+                                .map(|verb| offset_verb(verb, dx, dy))
+                                .collect();
+                            if !offset.is_empty() {
+                                elements.push(DrawCommand::FillPath((offset, axis_color)));
+                            }
                         }
                     }
                 }
@@ -1146,8 +1164,14 @@ impl Guest for GraphPlugin {
                 if tick.abs() > f64::EPSILON {
                     let p = map_point(0.0, tick, bounds, size);
                     let contours = host::shape_text(&tick_label(tick), label_size)?;
-                    if let Some((_, min_y, max_x, max_y)) = label_bbox(&contours) {
-                        let dx = origin.x - pad - max_x;
+                    if let Some((min_x, min_y, max_x, max_y)) = label_bbox(&contours) {
+                        // Preferred: right-aligned left of the axis line. An
+                        // axis on the clip's left edge or off-screen would
+                        // push the label out, so sit to its right instead.
+                        let mut dx = origin.x - pad - max_x;
+                        if dx + min_x < 0.0 || dx + max_x > clip_w {
+                            dx = origin.x + pad - min_x;
+                        }
                         let mut dy = p.y - (min_y + max_y) / 2.0;
                         // Near the origin the label would run into the x axis;
                         // keep it on its own side, clear of that line too.
@@ -1164,14 +1188,19 @@ impl Guest for GraphPlugin {
                                 }
                             }
                         }
-                        // One FillPath for the whole label, as above.
-                        let offset: Vec<PathVerb> = contours
-                            .iter()
-                            .flatten()
-                            .map(|verb| offset_verb(verb, dx, dy))
-                            .collect();
-                        if !offset.is_empty() {
-                            elements.push(DrawCommand::FillPath((offset, axis_color)));
+                        // Keep every label inside the clip, as above.
+                        if let Some((dx, dy)) =
+                            clamp_label_offset((min_x, min_y, max_x, max_y), dx, dy, clip_w, clip_h)
+                        {
+                            // One FillPath for the whole label, as above.
+                            let offset: Vec<PathVerb> = contours
+                                .iter()
+                                .flatten()
+                                .map(|verb| offset_verb(verb, dx, dy))
+                                .collect();
+                            if !offset.is_empty() {
+                                elements.push(DrawCommand::FillPath((offset, axis_color)));
+                            }
                         }
                     }
                 }
@@ -1331,6 +1360,35 @@ fn label_bbox(contours: &[Vec<PathVerb>]) -> Option<(f32, f32, f32, f32)> {
         }
     }
     bbox
+}
+
+/// Shift a label by `(dx, dy)` so its shaped bounding box
+/// `(min_x, min_y, max_x, max_y)` lands fully inside the clip
+/// `[0, width] x [0, height]`; `None` when the label cannot fit at all.
+fn clamp_label_offset(
+    (min_x, min_y, max_x, max_y): (f32, f32, f32, f32),
+    mut dx: f32,
+    mut dy: f32,
+    width: f32,
+    height: f32,
+) -> Option<(f32, f32)> {
+    let (w, h) = (max_x - min_x, max_y - min_y);
+    if w > width || h > height {
+        return None;
+    }
+    if min_x + dx < 0.0 {
+        dx = -min_x;
+    }
+    if min_x + dx + w > width {
+        dx = width - w - min_x;
+    }
+    if min_y + dy < 0.0 {
+        dy = -min_y;
+    }
+    if min_y + dy + h > height {
+        dy = height - h - min_y;
+    }
+    Some((dx, dy))
 }
 
 fn offset_verb(v: &PathVerb, ox: f32, oy: f32) -> PathVerb {
