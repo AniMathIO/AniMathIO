@@ -586,7 +586,13 @@ impl Editor {
         } else {
             "Save to enable autosave".to_owned()
         };
-        let mut status = StatusBar::new().flex_shrink_0().px_3();
+        // An explicit height (the chips are centred in it): the export queue panel sits on top of
+        // exactly this bar.
+        let mut status = StatusBar::new()
+            .flex_shrink_0()
+            .h(style::size::STATUS_BAR)
+            .py_0()
+            .px_3();
         if self.status_summary_visible() {
             status = status
                 .left(
@@ -617,10 +623,12 @@ impl Editor {
         }
         status = status.right(self.renderer_chip());
         if !start_screen {
-            status = status.right(self.export_queue_button(cx)).right(
-                self.subtitle_status_button(cx)
-                    .map_or_else(|| div().into_any_element(), IntoElement::into_any_element),
-            );
+            status = status.right(self.export_queue_button(cx));
+            // No placeholder when idle: an empty child would add a gap after the queue chip, so
+            // the export queue panel could not line up with the chip's right edge.
+            if let Some(button) = self.subtitle_status_button(cx) {
+                status = status.right(button);
+            }
         }
         status
     }

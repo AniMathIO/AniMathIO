@@ -632,9 +632,18 @@ impl Editor {
                         ),
                 )
                 .child(
-                    div().debug_selector(|| "record-add".into()).child(
+                    div()
+                        .id("record-add-wrap")
+                        .debug_selector(|| "record-add".into())
+                        .tooltip(|window, cx| {
+                            gpui_component::tooltip::Tooltip::new(
+                                "Put the recording on the timeline at the record position when it stops.",
+                            )
+                            .build(window, cx)
+                        })
+                        .child(
                         Switch::new("record-add-to-timeline")
-                            .label("Add to timeline at the record position")
+                            .label("Add to timeline")
                             .checked(panel.add_to_timeline)
                             .disabled(recording)
                             .on_click(cx.listener(|this, checked, _, cx| {
@@ -687,6 +696,7 @@ impl Editor {
                         .when(recording, |row| {
                             row.child(
                                 Button::new("record-stop")
+                                    .debug_selector(|| "record-stop".into())
                                     .primary()
                                     .small()
                                     .icon(icons::icon(IconName::Square))
@@ -697,6 +707,7 @@ impl Editor {
                             )
                             .child(
                                 Button::new("record-cancel")
+                                    .debug_selector(|| "record-cancel".into())
                                     .small()
                                     .icon(icons::icon(IconName::X))
                                     .label("Cancel")

@@ -128,6 +128,9 @@ pub mod size {
     pub const ROW_MD: Rems = Rems(2.0);
     /// Docked panel headers, tool panel headers.
     pub const HEADER: Rems = Rems(2.133);
+    /// The status bar. The export queue panel sits exactly on top of it, so both read
+    /// this one constant.
+    pub const STATUS_BAR: Rems = Rems(1.75);
 }
 
 /// Animation durations in milliseconds.

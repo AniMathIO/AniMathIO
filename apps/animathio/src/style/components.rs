@@ -322,7 +322,8 @@ pub enum PanelAnchor {
 /// Title bar height (the panel's top offset), status line height and the
 /// smallest panel height, all in unscaled pixels.
 const TITLE_BAR: f32 = 56.;
-const STATUS_LINE: f32 = 32.;
+/// The status bar height in unscaled pixels (`size::STATUS_BAR`, which has 16px per rem at 1x).
+const STATUS_LINE: f32 = size::STATUS_BAR.0 * 16.;
 const MIN_HEIGHT: f32 = 160.;
 
 /// The shared frame for non-modal panels over the workspace (Markers and
@@ -1009,10 +1010,16 @@ mod tests {
     fn tool_panel_frame_scales_every_term() {
         let (top, max) = ToolPanel::frame(PanelAnchor::TopLeft, px(900.), 260., 1.5);
         assert_eq!(top, Some(84.));
-        assert_eq!(f32::from(max), 900. - (56. + 32. + 260.) * 1.5);
+        assert_eq!(
+            f32::from(max),
+            900. - (TITLE_BAR + STATUS_LINE + 260.) * 1.5
+        );
         let (top, max) = ToolPanel::frame(PanelAnchor::BottomRight, px(900.), 260., 1.5);
         assert_eq!(top, None);
-        assert_eq!(f32::from(max), 900. - (56. + 32. + 260.) * 1.5);
+        assert_eq!(
+            f32::from(max),
+            900. - (TITLE_BAR + STATUS_LINE + 260.) * 1.5
+        );
         let (_, max) = ToolPanel::frame(PanelAnchor::TopLeft, px(300.), 260., 1.0);
         assert_eq!(f32::from(max), MIN_HEIGHT);
     }

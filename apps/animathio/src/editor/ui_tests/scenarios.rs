@@ -3644,10 +3644,11 @@ fn library_tabs_are_icon_only_at_the_default_dock_width_and_fit(cx: &mut TestApp
 #[test]
 fn element_cards_use_the_dock_width() {
     use crate::editor::math::element_card_columns;
-    assert_eq!(element_card_columns(200.), 1);
-    assert_eq!(element_card_columns(260.), 2);
-    assert_eq!(element_card_columns(340.), 3);
-    assert_eq!(element_card_columns(640.), 3);
+    let rem = gpui::px(16.);
+    assert_eq!(element_card_columns(rem, 200.), 1);
+    assert_eq!(element_card_columns(rem, 260.), 2);
+    assert_eq!(element_card_columns(rem, 400.), 3);
+    assert_eq!(element_card_columns(rem, 640.), 3);
 }
 
 /// The Library grids never clip a card at the panel's right edge (see

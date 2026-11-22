@@ -138,12 +138,8 @@ fn preview(
 }
 
 /// Cards per row in the Library's Elements tab for a dock width in logical pixels.
-pub(super) fn element_card_columns(dock_width: f32) -> usize {
-    match dock_width {
-        w if w >= 340. => 3,
-        w if w >= 240. => 2,
-        _ => 1,
-    }
+pub(super) fn element_card_columns(rem: gpui::Pixels, dock_width: f32) -> usize {
+    super::media_pool::library_columns(rem, dock_width, 7.).min(3)
 }
 
 pub(super) fn element_group(kind: MathObjectKind) -> &'static str {
@@ -244,7 +240,7 @@ impl Editor {
             false
         }
     }
-    pub(super) fn math_cards(&mut self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn math_cards(&mut self, rem: gpui::Pixels, cx: &mut Context<Self>) -> Div {
         if !self.math_library.started {
             self.math_library.started = true;
             cx.spawn(async move |this, cx| {
@@ -279,7 +275,7 @@ impl Editor {
             .detach();
         }
         // Cards use the dock's width: one column when it is very narrow, three when it is wide.
-        let columns = element_card_columns(self.dock.left_width);
+        let columns = element_card_columns(rem, self.dock.left_width);
         let mut cards = div().flex().flex_wrap().gap_2().p_2();
         // The hint costs a row of the short 720p panel; narrow docks get it as a card tooltip.
         if columns >= 3 {

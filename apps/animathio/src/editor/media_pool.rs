@@ -121,9 +121,56 @@ fn media_matches(name: &str, media_type: &str, query: &str, kind: &str) -> bool 
 /// dock (the width model, so a resize never flashes a wrong layout). The grid
 /// shrinks cards to fit, so an estimate that is a pixel off never clips one.
 pub(super) fn library_columns(rem: gpui::Pixels, dock_width: f32, min_rems: f32) -> usize {
-    // Body padding and the scrollbar lane.
-    let inner = dock_width * style::ui_scale() - f32::from(rem) * (0.25 + SCROLLBAR_LANE_REMS);
-    ((inner / (min_rems * f32::from(rem))).floor() as usize).max(1)
+    columns_for(dock_width * style::ui_scale(), f32::from(rem), min_rems)
+}
+
+/// [`library_columns`] on scaled pixels: `n` cards and `n - 1` grid gaps (`gap_2`, half a rem)
+/// fit the body (minus its left padding and the scrollbar lane) when
+/// `n * min + (n - 1) * gap <= inner`, so a card never drops below `min_rems`.
+fn columns_for(dock_px: f32, rem: f32, min_rems: f32) -> usize {
+    let inner = dock_px - rem * (0.25 + SCROLLBAR_LANE_REMS);
+    let gap = rem * 0.5;
+    (((inner + gap) / (min_rems * rem + gap)).floor() as usize).max(1)
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::columns_for;
+
+    /// The dock width in scaled pixels for a logical `width` at UI `scale` (rem = 16 * scale).
+    fn columns(width: f32, scale: f32) -> usize {
+        columns_for(width * scale, 16. * scale, 7.)
+    }
+
+    #[test]
+    fn library_columns_follow_the_dock_width_at_both_scales() {
+        for scale in [1., 1.5] {
+            assert_eq!(columns(240., scale), 1, "240px at {scale}x");
+            assert_eq!(columns(340., scale), 2, "340px at {scale}x");
+            assert_eq!(columns(400., scale), 3, "400px at {scale}x");
+        }
+    }
+
+    #[test]
+    fn library_cards_never_go_below_the_minimum_width() {
+        for scale in [1., 1.5] {
+            let rem = 16. * scale;
+            for width in (200..900).step_by(5) {
+                let dock = width as f32 * scale;
+                let n = columns_for(dock, rem, 7.);
+                if n == 1 {
+                    continue;
+                }
+                let inner = dock - rem * (0.25 + super::SCROLLBAR_LANE_REMS);
+                let card = (inner - (n - 1) as f32 * rem * 0.5) / n as f32;
+                assert!(
+                    card >= 7. * rem - 0.01,
+                    "{n} columns at {width}px, {scale}x: card {card} < {}",
+                    7. * rem
+                );
+            }
+        }
+    }
 }
 
 /// Centre an empty state vertically in the Library body (see `docs/design.md`
@@ -647,7 +694,7 @@ impl Editor {
                 // `w_full` gives the cards' percentage widths a definite parent
                 // width, so a two-column row never runs past the Library edge.
                 body = body
-                    .child(div().w_full().child(self.math_cards(cx)))
+                    .child(div().w_full().child(self.math_cards(window.rem_size(), cx)))
                     .child(self.plugin_element_cards(cx));
             }
             LeftTab::Titles => {
@@ -757,20 +804,28 @@ impl Editor {
                             canvas(
                                 |_, _, _| {},
                                 move |bounds, (), window, _| {
-                                    let width = f32::from(bounds.size.width) / peaks.len() as f32;
+                                    let total = f32::from(bounds.size.width);
+                                    let width = total / peaks.len() as f32;
                                     for (index, peak) in peaks.iter().enumerate() {
+                                        // Clip the bar to the card's inner width: the last
+                                        // one is never cut off at the edge.
+                                        let left = index as f32 * width;
+                                        let bar = (width - 1.).max(1.).min(total - left);
+                                        if bar <= 0. {
+                                            continue;
+                                        }
                                         let height =
                                             f32::from(bounds.size.height) * peak.max(0.02) * 0.8;
                                         window.paint_quad(fill(
                                             Bounds::new(
                                                 bounds.origin
                                                     + point(
-                                                        px(index as f32 * width),
+                                                        px(left),
                                                         px((f32::from(bounds.size.height)
                                                             - height)
                                                             / 2.),
                                                     ),
-                                                size(px((width - 1.).max(1.)), px(height)),
+                                                size(px(bar), px(height)),
                                             ),
                                             hex(color::CLIP_AUDIO),
                                         ));
