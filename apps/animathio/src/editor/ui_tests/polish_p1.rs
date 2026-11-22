@@ -268,7 +268,6 @@ fn shape_inspector_hides_the_path_field_until_shape_is_path(cx: &mut TestAppCont
     );
 }
 
-
 /// Queue `count` waiting jobs and open the export queue panel (nothing is started: the queue is
 /// not pumped, so no export worker runs).
 fn open_export_queue(ui: &mut Ui, count: usize) {
