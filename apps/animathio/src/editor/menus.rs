@@ -1,12 +1,19 @@
 //! Title bar, application menus, context menus and status.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::actions::*;
 use super::*;
-use crate::style::{self, color};
+use crate::style::{self, color, tokens::TextRole as _};
 use gpui_component::{
     TitleBar, WindowExt, global_state::GlobalState, menu::AppMenuBar, status_bar::StatusBar,
 };
+
+/// Title bar height in rems (the kit `TitleBar` has no default height).
+const TITLE_BAR_HEIGHT_REMS: f32 = 3.067;
+/// Minimum width of the app-menu area, in rems, so the centred project title
+/// never overlaps the menus.
+const MENU_AREA_MIN_WIDTH_REMS: f32 = 28.667;
+/// Context-menu width in rems.
+const CONTEXT_MENU_WIDTH_REMS: f32 = 16.0;
 
 /// A track context-menu entry's handler.
 type TrackMenuAction = Box<dyn Fn(&mut Editor, &mut Window, &mut Context<Editor>)>;
@@ -51,7 +58,7 @@ fn clip_menu_entries() -> Vec<ClipMenuEntry> {
         ),
         (
             IconName::Scissors,
-            "Link / unlink",
+            "Link or unlink",
             Some(Box::new(UnlinkClips)),
             Editor::unlink_clip,
         ),
@@ -112,7 +119,7 @@ impl Editor {
             return;
         }
         self.menu_signature = signature;
-        let recent = Menu::new("Open Recent")
+        let recent = Menu::new("Open recent")
             .items(self.recent.paths.iter().map(|path| {
                 MenuItem::action(
                     path.display().to_string(),
@@ -178,7 +185,7 @@ impl Editor {
                 MenuItem::action("Start", GoToStart),
                 MenuItem::action("End", GoToEnd),
                 MenuItem::action("Set in", MarkIn),
-                MenuItem::action("Set out (exclusive)", MarkOut),
+                MenuItem::action("Set out", MarkOut),
                 MenuItem::action("Clear in/out", ClearMarks),
                 MenuItem::action("Go to in", GoToIn),
                 MenuItem::action("Go to out", GoToOut),
@@ -188,10 +195,10 @@ impl Editor {
                 MenuItem::action("Select", SelectTool),
                 MenuItem::action("Blade", BladeTool),
                 MenuItem::action("Ripple", RippleTool),
-                MenuItem::action("Rate Stretch", RateStretchTool),
+                MenuItem::action("Rate stretch", RateStretchTool),
                 MenuItem::action("Slip", SlipTool),
                 MenuItem::action("Slide", SlideTool),
-                MenuItem::action("Rolling Edit", RollingTool),
+                MenuItem::action("Rolling edit", RollingTool),
                 MenuItem::action("Hand", HandTool),
                 MenuItem::separator(),
                 MenuItem::action("Ripple all tracks", ToggleRippleScope)
@@ -201,7 +208,7 @@ impl Editor {
             ]),
             Menu::new("Clip").items([
                 MenuItem::action("Split at playhead", SplitClip).disabled(none_selected),
-                MenuItem::action("Link / unlink clips", UnlinkClips).disabled(none_selected),
+                MenuItem::action("Link or unlink clips", UnlinkClips).disabled(none_selected),
                 MenuItem::action("Default video transition", DefaultVideoTransition)
                     .disabled(none_selected),
                 MenuItem::action("Default audio transition", DefaultAudioTransition)
@@ -268,9 +275,10 @@ impl Editor {
 
     pub(super) fn menu_bar(&self, window: &Window, cx: &mut Context<Self>) -> TitleBar {
         let title = self.project_title();
+        let rem = window.rem_size();
         let close_view = cx.entity().downgrade();
         TitleBar::new()
-            .h(gpui::rems(3.067))
+            .h(rem * TITLE_BAR_HEIGHT_REMS)
             .on_close_window(move |_, window, cx| {
                 let _ = close_view.update(cx, |this, cx| {
                     this.replace_project(ReplaceProject::CloseWindow, window, cx);
@@ -285,11 +293,11 @@ impl Editor {
                     .w_full()
                     .h_full()
                     .px_2()
-                    .child(img("brand.svg").size(gpui::rems(2.0)).flex_shrink_0())
+                    .child(img("brand.svg").size(style::size::ROW_MD).flex_shrink_0())
                     .child(
                         div()
                             .flex_1()
-                            .min_w(gpui::rems(28.667))
+                            .min_w(rem * MENU_AREA_MIN_WIDTH_REMS)
                             .h_full()
                             .child(self.app_menu.clone()),
                     )
@@ -304,7 +312,7 @@ impl Editor {
                                 .items_center()
                                 .justify_center()
                                 .gap_2()
-                                .text_size(crate::style::type_size::SM)
+                                .text_role(style::Role::Body)
                                 .text_color(style::hex(color::TEXT_SECONDARY))
                                 .when(self.dirty && !self.is_start_screen(), |title| {
                                     title.child(
@@ -325,48 +333,7 @@ impl Editor {
                                 .child(div().truncate().child(title)),
                         )
                     })
-                    .child(
-                        div()
-                            .id("mcp-status")
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .px_2()
-                            .py_1()
-                            .rounded_full()
-                            .bg(style::hex(color::RAISED))
-                            .border_1()
-                            .border_color(style::hex(color::BORDER))
-                            .text_size(crate::style::type_size::XS)
-                            .text_color(style::hex(color::TEXT_SECONDARY))
-                            .child(div().size(px(5.)).rounded_full().bg(style::hex(
-                                if self.control.as_ref().is_some_and(|c| c.server.is_some()) {
-                                    color::SUCCESS
-                                } else {
-                                    color::TEXT_MUTED
-                                },
-                            )))
-                            .child(
-                                if self.control.as_ref().is_some_and(|c| c.server.is_some()) {
-                                    "MCP listening"
-                                } else if self.control.as_ref().is_some_and(|c| c.error.is_some()) {
-                                    "MCP unavailable"
-                                } else {
-                                    "MCP off"
-                                },
-                            )
-                            .when_some(
-                                self.control.as_ref().and_then(|c| c.error.clone()),
-                                |chip, error| {
-                                    chip.text_color(style::hex(color::WARNING)).tooltip(
-                                        move |window, cx| {
-                                            gpui_component::tooltip::Tooltip::new(error.clone())
-                                                .build(window, cx)
-                                        },
-                                    )
-                                },
-                            ),
-                    )
+                    .child(self.mcp_status_chip())
                     .when(!self.is_start_screen(), |row| {
                         row.child(
                             style::primary_button("title-export", cx)
@@ -382,6 +349,34 @@ impl Editor {
                         )
                     }),
             )
+    }
+
+    /// The MCP status chip (see `docs/design.md` "Window frame and status
+    /// bar"): a chip that needs attention turns `WARNING`, and the error is
+    /// on its tooltip.
+    fn mcp_status_chip(&self) -> Stateful<Div> {
+        let listening = self.control.as_ref().is_some_and(|c| c.server.is_some());
+        let error = self.control.as_ref().and_then(|c| c.error.clone());
+        let label = if listening {
+            "MCP listening"
+        } else if error.is_some() {
+            "MCP unavailable"
+        } else {
+            "MCP off"
+        };
+        let chip = style::chip("mcp-status", None, label)
+            .when(listening, |chip| {
+                chip.text_color(style::hex(color::SUCCESS))
+            })
+            .when(error.is_some(), |chip| {
+                chip.text_color(style::hex(color::WARNING))
+            });
+        match error {
+            Some(error) => chip.tooltip(move |window, cx| {
+                gpui_component::tooltip::Tooltip::new(error.clone()).build(window, cx)
+            }),
+            None => chip,
+        }
     }
 
     pub(super) fn flush_notices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -416,13 +411,13 @@ impl Editor {
             .min(f32::from(viewport.height) - height)
             .max(8.0);
         let left = f32::from(pos.x)
-            .min(f32::from(viewport.width) - 248.0 * style::ui_scale())
+            .min(f32::from(viewport.width) - f32::from(window.rem_size() * 16.0) - 8.0)
             .max(8.0);
         let mut menu = div()
             .absolute()
             .left(px(left))
             .top(px(top))
-            .w(gpui::rems(16.0))
+            .w(window.rem_size() * CONTEXT_MENU_WIDTH_REMS)
             .bg(cx.theme().popover)
             .border_1()
             .border_color(cx.theme().border)
@@ -581,19 +576,6 @@ impl Editor {
             Time(timeline::project_duration(&self.project)),
             self.project.frame_rate(),
         );
-        let chip = |icon, label: String| {
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_2()
-                .h(gpui::rems(1.467))
-                .rounded(px(style::radius::CONTROL))
-                .bg(style::hex(color::PANEL))
-                .text_color(style::hex(color::TEXT_SECONDARY))
-                .child(icons::icon(icon).small())
-                .child(label)
-        };
         let start_screen = self.is_start_screen();
         let autosave = if self.preferences.autosave_seconds == 0 {
             "Autosave off".to_owned()
@@ -604,32 +586,36 @@ impl Editor {
         } else {
             "Save to enable autosave".to_owned()
         };
-        let mut status = StatusBar::new().h(gpui::rems(2.267)).flex_shrink_0().px_3();
+        let mut status = StatusBar::new().flex_shrink_0().px_3();
         if self.status_summary_visible() {
             status = status
-                .left(chip(IconName::Monitor, format!("{width} x {height}")))
-                .left(chip(
-                    IconName::Clapperboard,
-                    frame_rate_label(self.project.frame_rate()),
-                ))
                 .left(
-                    div()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .child(chip(IconName::Clock, duration)),
-                );
+                    style::chip(
+                        "status-canvas",
+                        Some(IconName::Monitor),
+                        format!("{width} x {height}"),
+                    )
+                    .tabular(),
+                )
+                .left(
+                    style::chip(
+                        "status-fps",
+                        Some(IconName::Clapperboard),
+                        frame_rate_label(self.project.frame_rate()),
+                    )
+                    .tabular(),
+                )
+                .left(style::chip("status-duration", Some(IconName::Clock), duration).tabular());
         }
         if !start_screen {
             // Autosave and the export queue belong to an open project.
-            status = status.right(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(icons::icon(IconName::ShieldCheck).small())
-                    .child(autosave),
-            );
+            status = status.right(style::chip(
+                "status-autosave",
+                Some(IconName::ShieldCheck),
+                autosave,
+            ));
         }
-        status = status.right(self.renderer_chip(chip));
+        status = status.right(self.renderer_chip());
         if !start_screen {
             status = status.right(self.export_queue_button(cx)).right(
                 self.subtitle_status_button(cx)
@@ -649,7 +635,7 @@ impl Editor {
         }
     }
 
-    fn renderer_chip(&self, chip: impl Fn(IconName, String) -> Div) -> Stateful<Div> {
+    fn renderer_chip(&self) -> Stateful<Div> {
         let label = self.renderer_label();
         let tooltip = match label {
             "GPU preview" => {
@@ -660,13 +646,9 @@ impl Editor {
             }
             _ => "The preview is drawn on the CPU. Switch to the GPU in Preferences or View.",
         };
-        div()
-            .id("status-renderer")
-            .debug_selector(|| "status-renderer".into())
-            .child(chip(IconName::Cpu, label.to_owned()))
-            .tooltip(move |window, cx| {
-                gpui_component::tooltip::Tooltip::new(tooltip).build(window, cx)
-            })
+        style::chip("status-renderer", Some(IconName::Cpu), label).tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(tooltip).build(window, cx)
+        })
     }
 }
 

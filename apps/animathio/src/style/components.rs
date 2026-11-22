@@ -164,7 +164,7 @@ pub struct SegmentedOption {
 }
 
 impl SegmentedOption {
-    pub fn new(id: &'static str, label: &'static str, icon: Option<IconName>) -> Self {
+    pub const fn new(id: &'static str, label: &'static str, icon: Option<IconName>) -> Self {
         Self { label, icon, id }
     }
 }
@@ -309,6 +309,16 @@ pub fn segmented(
 /// A header close handler (the header (X) button).
 pub type OnClose = Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static>;
 
+/// Where a floating panel sits (see `docs/design.md` "Floating tool panels").
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PanelAnchor {
+    /// Below the title bar at the left edge (the default; tool panels).
+    TopLeft,
+    /// Above the status line at the right edge, hugging the status chips
+    /// (the export queue).
+    BottomRight,
+}
+
 /// Title bar height (the panel's top offset), status line height and the
 /// smallest panel height, all in unscaled pixels.
 const TITLE_BAR: f32 = 56.;
@@ -337,6 +347,8 @@ pub struct ToolPanel {
     /// Height (in scale units) of the docked area below the viewer; the panel
     /// never grows into it (`ducking.rs` shows the caller side).
     bottom_height: f32,
+    /// Where the panel sits (the export queue hugs the status chips).
+    anchor: PanelAnchor,
     on_close: Option<OnClose>,
     body: Option<AnyElement>,
     footer: Option<AnyElement>,
@@ -351,6 +363,7 @@ impl ToolPanel {
             icon,
             title,
             bottom_height: 0.,
+            anchor: PanelAnchor::TopLeft,
             on_close: None,
             body: None,
             footer: None,
@@ -362,6 +375,14 @@ impl ToolPanel {
     /// the panel must stay above.
     pub fn bottom_height(mut self, bottom_height: f32) -> Self {
         self.bottom_height = bottom_height;
+        self
+    }
+
+    /// Where the panel sits. The default (`TopLeft`) is the shared tool-panel
+    /// spot below the title bar; `BottomRight` anchors the panel above the
+    /// status line at the right edge, next to the status chips.
+    pub fn anchor(mut self, anchor: PanelAnchor) -> Self {
+        self.anchor = anchor;
         self
     }
 
@@ -395,39 +416,50 @@ impl ToolPanel {
         self.render_at_scale(window, super::ui_scale())
     }
 
-    /// The top offset and maximum height of the frame, in pixels, for a
-    /// window `viewport_height` high at UI `scale`. The panel sits below the
-    /// title bar and ends above the timeline dock and the status line, so
-    /// every term (title bar, status line, dock) scales together.
-    fn frame(viewport_height: gpui::Pixels, bottom_height: f32, scale: f32) -> (f32, gpui::Pixels) {
+    /// The panel's top offset (or, for [`PanelAnchor::BottomRight`], nothing:
+    /// it pins to the bottom edge) and maximum height, in pixels, for a
+    /// window `viewport_height` high at UI `scale`. Every panel ends above
+    /// the timeline dock and the status line, so every term (title bar,
+    /// status line, dock) scales together.
+    fn frame(
+        anchor: PanelAnchor,
+        viewport_height: gpui::Pixels,
+        bottom_height: f32,
+        scale: f32,
+    ) -> (Option<f32>, gpui::Pixels) {
         use gpui::px;
-        let top = TITLE_BAR * scale;
         let reserved = (TITLE_BAR + STATUS_LINE + bottom_height) * scale;
-        (top, (viewport_height - px(reserved)).max(px(MIN_HEIGHT)))
+        let max = (viewport_height - px(reserved)).max(px(MIN_HEIGHT));
+        match anchor {
+            PanelAnchor::TopLeft => (Some(TITLE_BAR * scale), max),
+            PanelAnchor::BottomRight => (None, max),
+        }
     }
 
-    /// [`Self::render`] at an explicit UI scale.
     #[allow(clippy::too_many_lines)]
     fn render_at_scale(self, window: &gpui::Window, scale: f32) -> gpui::Stateful<gpui::Div> {
         use gpui::{div, px};
-        let (top, max_height) =
-            Self::frame(window.viewport_size().height, self.bottom_height, scale);
+        let (top, max_height) = Self::frame(
+            self.anchor,
+            window.viewport_size().height,
+            self.bottom_height,
+            scale,
+        );
         let Self {
             id,
             icon: icon_name,
             title,
+            anchor,
             on_close,
             body,
             footer,
             scroll,
             ..
         } = self;
-        gpui::div()
+        let anchored = div()
             .id(id)
             .debug_selector(move || id.to_string())
             .absolute()
-            .left(gpui::rems(0.75))
-            .top(px(top))
             .w(gpui::rems(24.))
             .max_h(max_height)
             .flex()
@@ -439,7 +471,18 @@ impl ToolPanel {
             .border_color(hex(color::BORDER_STRONG))
             .rounded(gpui::px(radius::OVERLAY))
             .shadow_lg()
-            .occlude()
+            .occlude();
+        let anchored = match anchor {
+            PanelAnchor::TopLeft => {
+                let top = top.unwrap_or_default();
+                anchored.left(gpui::rems(0.75)).top(px(top))
+            }
+            // Hug the status chips: the right edge and just above the status line.
+            PanelAnchor::BottomRight => anchored
+                .right(gpui::rems(0.75))
+                .bottom(px(STATUS_LINE * scale)),
+        };
+        anchored
             // Header: HEADER high, title in TITLE, close (X) at the right.
             .child(
                 div()
@@ -964,10 +1007,13 @@ mod tests {
     /// The frame maths alone, including the minimum height.
     #[test]
     fn tool_panel_frame_scales_every_term() {
-        let (top, max) = ToolPanel::frame(px(900.), 260., 1.5);
-        assert_eq!(top, 84.);
+        let (top, max) = ToolPanel::frame(PanelAnchor::TopLeft, px(900.), 260., 1.5);
+        assert_eq!(top, Some(84.));
         assert_eq!(f32::from(max), 900. - (56. + 32. + 260.) * 1.5);
-        let (_, max) = ToolPanel::frame(px(300.), 260., 1.0);
+        let (top, max) = ToolPanel::frame(PanelAnchor::BottomRight, px(900.), 260., 1.5);
+        assert_eq!(top, None);
+        assert_eq!(f32::from(max), 900. - (56. + 32. + 260.) * 1.5);
+        let (_, max) = ToolPanel::frame(PanelAnchor::TopLeft, px(300.), 260., 1.0);
         assert_eq!(f32::from(max), MIN_HEIGHT);
     }
 

@@ -8,10 +8,9 @@
 //! encode, hash and decode check run on a background task ("Saving recording…"); cancelling
 //! or replacing the project while it runs discards the take. Cancelling drops the audio and
 //! closes the device; the project is untouched until Stop.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{self, color, hex};
+use crate::style::{self, color, hex, tokens::TextRole as _};
 use animathio_audio::{InputDevice, Level, Recorder};
 use gpui_component::select::{Select, SelectEvent, SelectState};
 use gpui_component::switch::Switch;
@@ -523,7 +522,7 @@ impl Editor {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .rounded(px(6.))
+                .rounded(px(crate::style::radius::CARD))
                 .border_1()
                 .border_color(hex(color::BORDER))
                 .bg(hex(color::RAISED))
@@ -536,8 +535,8 @@ impl Editor {
                         .child(
                             div()
                                 .flex_1()
-                                .text_size(style::type_size::SM)
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .truncate()
+                                .text_role(style::Role::Heading)
                                 .child("Record audio"),
                         )
                         .child(
@@ -589,7 +588,7 @@ impl Editor {
                                 .debug_selector(|| "record-meter".into())
                                 .flex_1()
                                 .h(px(8.))
-                                .rounded(px(4.))
+                                .rounded(px(crate::style::radius::CONTROL))
                                 .bg(hex(color::BG))
                                 .overflow_hidden()
                                 .child(
@@ -599,8 +598,8 @@ impl Editor {
                         .child(
                             div()
                                 .w(px(52.))
-                                .text_size(style::type_size::XS)
-                                .text_color(hex(color::TEXT_SECONDARY))
+                                .text_role(style::Role::Caption)
+                                .tabular()
                                 .child(if recording && db.is_finite() {
                                     format!("{db:.0} dB")
                                 } else {
@@ -611,13 +610,26 @@ impl Editor {
                 .child(
                     div()
                         .debug_selector(|| "record-time".into())
-                        .text_size(style::type_size::SM)
-                        .text_color(hex(if recording {
-                            color::TEXT
-                        } else {
-                            color::TEXT_SECONDARY
-                        }))
-                        .child(timecode),
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .when(recording, |row| {
+                            // The recording indicator: the logo red (see
+                            // `docs/design.md` "Accent and semantic colours").
+                            row.child(
+                                div().size(px(6.)).rounded_full().bg(hex(color::PLAYHEAD)),
+                            )
+                        })
+                        .child(
+                            div()
+                                .text_size(style::type_size::TIMECODE)
+                                .text_color(hex(if recording {
+                                    color::TEXT
+                                } else {
+                                    color::TEXT_SECONDARY
+                                }))
+                                .child(timecode),
+                        ),
                 )
                 .child(
                     div().debug_selector(|| "record-add".into()).child(
@@ -637,7 +649,7 @@ impl Editor {
                     card.child(
                         div()
                             .debug_selector(|| "record-status".into())
-                            .text_size(style::type_size::XS)
+                            .text_role(style::Role::Caption)
                             .text_color(hex(if problem {
                                 color::DANGER
                             } else {
@@ -650,7 +662,7 @@ impl Editor {
                     card.child(
                         div()
                             .debug_selector(|| "record-dropped".into())
-                            .text_size(style::type_size::XS)
+                            .text_role(style::Role::Caption)
                             .text_color(hex(color::WARNING))
                             .child("Some audio was lost because the app was busy, so the recording has gaps."),
                     )
@@ -663,7 +675,7 @@ impl Editor {
                             row.child(
                                 Button::new("record-start")
                                     .primary()
-                                    .compact()
+                                    .small()
                                     .icon(icons::icon(IconName::Mic))
                                     .label("Record")
                                     .disabled(disabled_reason.is_some())
@@ -676,7 +688,7 @@ impl Editor {
                             row.child(
                                 Button::new("record-stop")
                                     .primary()
-                                    .compact()
+                                    .small()
                                     .icon(icons::icon(IconName::Square))
                                     .label("Stop")
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -685,7 +697,7 @@ impl Editor {
                             )
                             .child(
                                 Button::new("record-cancel")
-                                    .compact()
+                                    .small()
                                     .icon(icons::icon(IconName::X))
                                     .label("Cancel")
                                     .on_click(cx.listener(|this, _, _, cx| {

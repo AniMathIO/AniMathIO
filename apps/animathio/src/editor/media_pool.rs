@@ -1,20 +1,35 @@
 //! Media pool.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{self, color, hex, tokens::TextRole as _};
 use gpui_component::input::{Input, InputEvent, InputState};
+
+/// Right padding of the Library body, in rems: the width of the scrollbar track.
+const SCROLLBAR_LANE_REMS: f32 = 1.1;
 
 /// Search text for the Effects tab's built-in Write on button.
 const WRITE_ON_SEARCH: &str = "Animations Write on LaTeX";
 
-/// Shown at the top of the Effects tab while no clip is selected.
-pub(super) const EFFECTS_HINT: &str = "Select a clip, then click an effect, animation or fade to apply it. You can also drag an effect onto a clip.";
+/// Shown at the top of the Effects tab while no clip is selected; one line
+/// each (see `docs/design.md` "Writing").
+pub(super) const EFFECTS_HINT: &str = "Select a clip, then click an effect.";
+const EFFECTS_HINT_DRAG: &str = "Or drag one onto a clip.";
+
+/// The Media tab's kind filter (see `style::segmented`); the values are the
+/// `media_type` prefixes `media_matches` filters by.
+static KIND_FILTERS: [style::SegmentedOption; 4] = [
+    style::SegmentedOption::new("filter-All", "All", None),
+    style::SegmentedOption::new("filter-Video", "Video", None),
+    style::SegmentedOption::new("filter-Images", "Images", None),
+    style::SegmentedOption::new("filter-Audio", "Audio", None),
+];
+const KIND_VALUES: [&str; 4] = ["", "video/", "image/", "audio/"];
 
 #[derive(Default)]
 pub(super) struct MediaView {
     list: bool,
     pub(super) tab_focus: Vec<FocusHandle>,
+    kind_focus: Vec<FocusHandle>,
     pub(super) queries: [String; 5],
     kind: &'static str,
     pub(super) searches: [Option<Entity<InputState>>; 5],
@@ -100,6 +115,50 @@ fn load_thumbnail(name: &str, media_type: &str, bytes: Vec<u8>) -> MediaThumbnai
 fn media_matches(name: &str, media_type: &str, query: &str, kind: &str) -> bool {
     name.to_lowercase().contains(&query.to_lowercase())
         && (kind.is_empty() || media_type.starts_with(kind))
+}
+
+/// Grid columns for a Library body: as many as fit `min_rems` wide cards in the
+/// dock (the width model, so a resize never flashes a wrong layout). The grid
+/// shrinks cards to fit, so an estimate that is a pixel off never clips one.
+pub(super) fn library_columns(rem: gpui::Pixels, dock_width: f32, min_rems: f32) -> usize {
+    // Body padding and the scrollbar lane.
+    let inner = dock_width * style::ui_scale() - f32::from(rem) * (0.25 + SCROLLBAR_LANE_REMS);
+    ((inner / (min_rems * f32::from(rem))).floor() as usize).max(1)
+}
+
+/// Centre an empty state vertically in the Library body (see `docs/design.md`
+/// "Empty states": the state fills the width; the wrapper gives it the height).
+fn centred_empty_state(state: gpui::Div) -> gpui::Div {
+    div()
+        .min_h(relative(1.))
+        .w_full()
+        .flex()
+        .flex_col()
+        .justify_center()
+        .child(state)
+}
+
+/// A ghost button that empties a Library tab's search (and the Media kind
+/// filter, which can hide everything just as well).
+fn clear_search_button(tab: LeftTab, cx: &mut Context<Editor>) -> Button {
+    Button::new(SharedString::from(format!(
+        "{}-clear-search",
+        tab.label().to_lowercase()
+    )))
+    .ghost()
+    .small()
+    .label("Clear search")
+    .on_click(cx.listener(move |this, _, window, cx| {
+        let index = tab as usize;
+        this.media_view.queries[index].clear();
+        if tab == LeftTab::Media {
+            this.media_view.kind = "";
+        }
+        if let Some(input) = this.media_view.searches[index].clone() {
+            input.update(cx, |state, cx| state.set_value("", window, cx));
+        }
+        cx.notify();
+    }))
 }
 
 impl Editor {
@@ -506,6 +565,10 @@ impl Editor {
                 .map(|_| cx.focus_handle())
                 .collect();
         }
+        if self.media_view.kind_focus.is_empty() {
+            self.media_view.kind_focus =
+                (0..KIND_VALUES.len()).map(|_| cx.focus_handle()).collect();
+        }
         let tab = self.left_tab;
         let index = tab as usize;
         if self.media_view.searches[index].is_none() {
@@ -572,6 +635,8 @@ impl Editor {
             .flex_1()
             .w_full()
             .p_1()
+            // The scrollbar's track is drawn over the body's right edge; keep it off the cards.
+            .pr(window.rem_size() * SCROLLBAR_LANE_REMS)
             .id(("media-body", self.left_tab as usize))
             .debug_selector(|| "library-body".into())
             .overflow_y_scroll()
@@ -579,12 +644,14 @@ impl Editor {
         let this_recording = self.record_panel.is_some();
         match self.left_tab {
             LeftTab::Elements => {
+                // `w_full` gives the cards' percentage widths a definite parent
+                // width, so a two-column row never runs past the Library edge.
                 body = body
-                    .child(self.math_cards(cx))
+                    .child(div().w_full().child(self.math_cards(cx)))
                     .child(self.plugin_element_cards(cx));
             }
             LeftTab::Titles => {
-                body = body.child(self.title_cards(cx));
+                body = body.child(self.title_cards(window, cx));
             }
             LeftTab::Media => {
                 if let Some(card) = self.record_panel_view(cx) {
@@ -603,49 +670,40 @@ impl Editor {
                         )
                     })
                     .collect();
+                // Grid: columns from the dock width (minimum card width 7rem),
+                // so a card is never clipped at the panel edge (docs/design.md
+                // "Library cards and lists"). The dock width model drives this
+                // (see `docs/design.md` "UI scale"), so there is no resize flash.
+                let columns = if self.media_view.list {
+                    1
+                } else {
+                    library_columns(window.rem_size(), self.dock.left_width, 7.)
+                };
+                let rem = window.rem_size();
                 if assets.is_empty() {
-                    body = body.child(
-                        div()
-                            .p_4()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                icons::icon(IconName::FolderOpen)
-                                    .text_color(hex(color::TEXT_MUTED)),
-                            )
-                            .child(div().text_color(hex(color::TEXT)).child(
-                                if self.project.assets().is_empty() {
-                                    "Build your media library"
-                                } else {
-                                    "No matching media"
-                                },
-                            ))
-                            .child(
-                                div()
-                                    .text_size(crate::style::type_size::XS)
-                                    .text_color(hex(color::TEXT_SECONDARY))
-                                    .child(if self.project.assets().is_empty() {
-                                        "Drop video, images or audio here"
-                                    } else {
-                                        "Clear the search box or pick All to see your media again."
-                                    }),
-                            )
-                            .when(self.project.assets().is_empty(), |panel| {
-                                panel.child(
-                                    Button::new("pool-import")
-                                        .primary()
-                                        .icon(icons::icon(IconName::Import))
-                                        .label("Import media")
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.import_media(cx)),
-                                        ),
-                                )
-                            }),
-                    );
+                    let state = if self.project.assets().is_empty() {
+                        style::empty_state(
+                            Some(IconName::FolderOpen),
+                            "Imported media appears here.",
+                            Some(
+                                style::primary_button("pool-import", cx)
+                                    .small()
+                                    .icon(icons::icon(IconName::Import))
+                                    .label("Import media…")
+                                    .on_click(cx.listener(|this, _, _, cx| this.import_media(cx)))
+                                    .into_any_element(),
+                            ),
+                        )
+                    } else {
+                        style::empty_state(
+                            Some(IconName::Search),
+                            "No media matches the search.",
+                            Some(clear_search_button(LeftTab::Media, cx).into_any_element()),
+                        )
+                    };
+                    body = body.child(centred_empty_state(state));
                 }
-                let mut cards = div().flex().flex_wrap().gap_2().w_full();
+                let mut cards = div().grid().grid_cols(columns as u16).gap_2();
                 for (id, asset) in assets {
                     let add_id = id.clone();
                     let drop_id = id.clone();
@@ -729,26 +787,27 @@ impl Editor {
                     let duration = thumb.map_or(Time(0), |t| t.duration);
                     preview = preview
                         .child(
+                            // Kind icon over the thumbnail, not a coloured word.
                             div()
                                 .absolute()
-                                .top(px(4.))
-                                .left(px(4.))
-                                .px_1()
-                                .rounded(px(3.))
-                                .bg(hex(color::RAISED))
-                                .text_size(crate::style::type_size::XS)
-                                .text_color(hex(tint))
-                                .child(asset_kind_label(&asset.media_type)),
+                                .top(rem / 4.)
+                                .left(rem / 4.)
+                                .p_1()
+                                .rounded(px(style::radius::CONTROL))
+                                .bg(style::tint(color::BG, style::Alpha::Scrim))
+                                .child(icons::icon(icon).xsmall().text_color(hex(color::TEXT))),
                         )
                         .when(duration.0 > 0, |p| {
                             p.child(
                                 div()
                                     .absolute()
-                                    .bottom(px(4.))
-                                    .right(px(4.))
+                                    .bottom(rem / 4.)
+                                    .right(rem / 4.)
                                     .px_1()
+                                    .rounded(px(style::radius::CONTROL))
                                     .bg(hex(color::RAISED))
-                                    .text_size(crate::style::type_size::XS)
+                                    .text_role(style::Role::Caption)
+                                    .tabular()
                                     .child(timecode::format_timecode(
                                         duration,
                                         self.project.frame_rate(),
@@ -765,50 +824,52 @@ impl Editor {
                         .absolute()
                         .size_full(),
                     );
-                    let card = div()
+                    let mut card = div()
                         .id(SharedString::from(format!("asset-{}", id.as_str())))
-                        .rounded(px(6.))
+                        .rounded(px(style::radius::CARD))
                         .overflow_hidden()
                         .border_1()
                         .border_color(hex(color::BORDER))
                         .bg(hex(color::RAISED))
                         .hover(|s| s.border_color(hex(color::ACCENT)).bg(hex(color::HOVER)))
                         .cursor_pointer()
-                        .when(self.media_view.list, Styled::w_full)
-                        .when(!self.media_view.list, |s| {
-                            s.flex_1().min_w(gpui::rems(6.933)).max_w(px(176.))
-                        })
                         .child(preview)
                         .child(
                             div()
                                 .p_2()
-                                .text_size(crate::style::type_size::XS)
+                                .flex()
+                                .flex_col()
+                                .gap_0p5()
                                 .child(
                                     div()
                                         .truncate()
+                                        .text_role(style::Role::Label)
                                         .text_color(hex(color::TEXT))
                                         .child(asset.name.clone()),
                                 )
                                 .child(
                                     div()
                                         .truncate()
-                                        .text_size(crate::style::type_size::XS)
-                                        .text_color(hex(color::TEXT_SECONDARY))
+                                        .text_role(style::Role::Caption)
                                         .child(detail),
                                 ),
-                        )
-                        .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                            // Scrub by horizontal position within the card; no continuous timer.
-                            let bounds = hover_bounds.get();
-                            let fraction = f32::from(event.position.x - bounds.origin.x)
-                                / f32::from(bounds.size.width).max(1.);
-                            let frame = (fraction.clamp(0., 0.999) * 8.) as usize;
-                            let next = Some((hover_id.clone(), frame.min(7)));
-                            if this.media_view.hovered != next {
-                                this.media_view.hovered = next;
-                                cx.notify();
-                            }
-                        }))
+                        );
+                    card = card.w_full().min_w_0();
+                    cards = cards.child(
+                        card.on_mouse_move(cx.listener(
+                            move |this, event: &MouseMoveEvent, _, cx| {
+                                // Scrub by horizontal position within the card; no continuous timer.
+                                let bounds = hover_bounds.get();
+                                let fraction = f32::from(event.position.x - bounds.origin.x)
+                                    / f32::from(bounds.size.width).max(1.);
+                                let frame = (fraction.clamp(0., 0.999) * 8.) as usize;
+                                let next = Some((hover_id.clone(), frame.min(7)));
+                                if this.media_view.hovered != next {
+                                    this.media_view.hovered = next;
+                                    cx.notify();
+                                }
+                            },
+                        ))
                         .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                             if !hovered {
                                 this.media_view.hovered = None;
@@ -825,8 +886,8 @@ impl Editor {
                             cx.listener(move |this, _, _, cx| {
                                 this.arm_pool_drag(PoolDrag::Asset(drop_id.clone()), cx);
                             }),
-                        );
-                    cards = cards.child(card);
+                        ),
+                    );
                 }
                 body = body.child(cards);
             }
@@ -865,16 +926,33 @@ impl Editor {
                         && !has_transitions
                         && !self.library_matches(LeftTab::Effects, WRITE_ON_SEARCH)
                     {
-                        body = body.child(
-                            empty_state("No matching effects", cx)
-                                .debug_selector(|| "effects-empty".into()),
-                        );
+                        body = body.child(centred_empty_state(
+                            style::empty_state(
+                                Some(IconName::Sparkles),
+                                "No effects match the search.",
+                                Some(clear_search_button(LeftTab::Effects, cx).into_any_element()),
+                            )
+                            .debug_selector(|| "effects-empty".into()),
+                        ));
                     }
                 } else if no_plugin_rows {
-                    body = body.child(
-                        empty_state("No effect plugins loaded", cx)
-                            .debug_selector(|| "effects-empty".into()),
-                    );
+                    body = body.child(centred_empty_state(
+                        style::empty_state(
+                            Some(IconName::Puzzle),
+                            "No effect plugins are loaded.",
+                            Some(
+                                Button::new("effects-open-plugins")
+                                    .link()
+                                    .small()
+                                    .label("Open Plugins")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.select_left_tab(LeftTab::Plugins, cx);
+                                    }))
+                                    .into_any_element(),
+                            ),
+                        )
+                        .debug_selector(|| "effects-empty".into()),
+                    ));
                 }
                 if self.selected_ids().is_empty() {
                     body = body.child(
@@ -883,9 +961,21 @@ impl Editor {
                             .debug_selector(|| "effects-hint".into())
                             .px_2()
                             .py_1()
-                            .text_size(crate::style::type_size::XS)
-                            .text_color(hex(color::TEXT_SECONDARY))
-                            .child(EFFECTS_HINT),
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_role(style::Role::Label)
+                                    .text_color(hex(color::TEXT_MUTED))
+                                    .child(EFFECTS_HINT),
+                            )
+                            .child(
+                                div()
+                                    .text_role(style::Role::Label)
+                                    .text_color(hex(color::TEXT_MUTED))
+                                    .child(EFFECTS_HINT_DRAG),
+                            ),
                     );
                 }
                 let group = |label: &'static str| {
@@ -893,9 +983,7 @@ impl Editor {
                         .px_2()
                         .pt_2()
                         .pb_1()
-                        .text_size(crate::style::type_size::XS)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(hex(color::TEXT_MUTED))
+                        .text_role(style::Role::Heading)
                         .child(label)
                 };
                 if !effects.is_empty() {
@@ -914,15 +1002,18 @@ impl Editor {
                         div()
                             .id(SharedString::from(format!("effect-item-{plugin}-{effect}")))
                             .px_2()
-                            .py_1()
-                            .cursor_pointer()
-                            .hover(|this| this.bg(cx.theme().muted))
+                            .min_h(style::size::ROW)
                             .flex()
-                            .flex_row()
                             .items_center()
+                            .cursor_pointer()
+                            .hover(|this| this.bg(hex(color::HOVER)))
                             .gap_2()
-                            .text_size(crate::style::type_size::SM)
-                            .child(icons::icon(icon).small())
+                            .text_role(style::Role::Body)
+                            .child(
+                                icons::icon(icon)
+                                    .small()
+                                    .text_color(hex(color::TEXT_SECONDARY)),
+                            )
                             .child(descriptor.name)
                             .debug_selector({
                                 let key = format!("effect-item-{plugin}-{effect}");
@@ -930,7 +1021,7 @@ impl Editor {
                             })
                             .focusable()
                             .tab_index(0)
-                            .focus_visible(|s| s.bg(cx.theme().muted))
+                            .focus_visible(|s| s.bg(hex(color::HOVER)))
                             .on_key_down({
                                 let plugin = plugin.clone();
                                 let effect = effect.clone();
@@ -998,17 +1089,21 @@ impl Editor {
                             .id(SharedString::from(format!("library-transition-{key}")))
                             .debug_selector(move || format!("library-transition-{key}"))
                             .px_2()
-                            .py_1()
+                            .min_h(style::size::ROW)
                             .cursor_pointer()
-                            .hover(|this| this.bg(cx.theme().muted))
-                            .focus_visible(|s| s.bg(cx.theme().muted))
+                            .hover(|this| this.bg(hex(color::HOVER)))
+                            .focus_visible(|s| s.bg(hex(color::HOVER)))
                             .focusable()
                             .tab_index(0)
                             .flex()
-                            .flex_row()
                             .items_center()
                             .gap_2()
-                            .child(icons::icon(icon).small())
+                            .text_role(style::Role::Body)
+                            .child(
+                                icons::icon(icon)
+                                    .small()
+                                    .text_color(hex(color::TEXT_SECONDARY)),
+                            )
                             .child(label)
                             .tooltip(|window, cx| {
                                 gpui_component::tooltip::Tooltip::new(
@@ -1027,6 +1122,8 @@ impl Editor {
                     body = body.child(
                         Button::new("write-on-preset")
                             .debug_selector(|| "library-write-on".into())
+                            .ghost()
+                            .small()
                             .icon(icons::icon(IconName::PenLine))
                             .label("Write on…")
                             .tooltip("Animate the selected LaTeX clip")
@@ -1048,7 +1145,6 @@ impl Editor {
             .h_full()
             .flex()
             .flex_col()
-            .bg(cx.theme().popover)
             .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 this.import_paths(paths.paths(), None, cx);
             }))
@@ -1108,33 +1204,30 @@ impl Editor {
                     }),
             )
             .when(self.left_tab == LeftTab::Media, |pane| {
+                let selected_kind = KIND_VALUES
+                    .iter()
+                    .position(|kind| *kind == self.media_view.kind)
+                    .unwrap_or(0);
+                let editor = cx.entity();
                 pane.child(
                     div()
                         .debug_selector(|| "media-kind-filters".into())
                         .px_2()
                         .pb_2()
-                        .flex()
-                        .gap_1()
-                        .children(
-                            [
-                                ("", "All"),
-                                ("video/", "Video"),
-                                ("image/", "Images"),
-                                ("audio/", "Audio"),
-                            ]
-                            .into_iter()
-                            .map(|(kind, label)| {
-                                Button::new(SharedString::from(format!("filter-{label}")))
-                                    .ghost()
-                                    .compact()
-                                    .label(label)
-                                    .selected(self.media_view.kind == kind)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.media_view.kind = kind;
-                                        cx.notify();
-                                    }))
-                            }),
-                        ),
+                        .child(style::segmented(
+                            "media-kind-filter",
+                            &KIND_FILTERS,
+                            &self.media_view.kind_focus,
+                            selected_kind,
+                            None,
+                            true,
+                            move |index, _window, cx| {
+                                editor.update(cx, |this, cx| {
+                                    this.media_view.kind = KIND_VALUES[index];
+                                    cx.notify();
+                                });
+                            },
+                        )),
                 )
             })
             .child(
@@ -1218,13 +1311,7 @@ impl Editor {
             if sources.is_empty() {
                 continue;
             }
-            cards = cards.child(
-                div()
-                    .text_size(crate::style::type_size::XS)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(hex(color::TEXT_SECONDARY))
-                    .child(label),
-            );
+            cards = cards.child(div().text_role(style::Role::Heading).child(label));
             for descriptor in sources {
                 let id = descriptor.id.clone();
                 let drag = id.clone();
@@ -1236,8 +1323,11 @@ impl Editor {
                     div()
                         .id(SharedString::from(selector.clone()))
                         .debug_selector(move || selector.clone())
+                        .min_h(style::size::ROW)
                         .p_2()
-                        .rounded(px(6.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(style::radius::CARD))
                         .border_1()
                         .border_color(hex(color::BORDER))
                         .bg(hex(color::RAISED))
@@ -1273,20 +1363,23 @@ impl Editor {
                                     } else {
                                         IconName::Puzzle
                                     })
-                                    .small(),
+                                    .small()
+                                    .text_color(hex(color::TEXT_SECONDARY)),
                                 )
                                 .child(
                                     div()
                                         .flex_1()
                                         .min_w_0()
-                                        .text_size(crate::style::type_size::XS)
+                                        .truncate()
+                                        .text_role(style::Role::Label)
+                                        .text_color(hex(color::TEXT))
                                         .child(descriptor.name.clone()),
                                 )
                                 .child(
                                     Button::new(SharedString::from(format!("add-element-{add}")))
                                         .debug_selector(move || format!("add-element-{add}"))
                                         .ghost()
-                                        .compact()
+                                        .small()
                                         .icon(icons::icon(IconName::Plus))
                                         .tooltip("Add with defaults at playhead")
                                         .on_click(cx.listener(move |this, _, _, cx| {

@@ -1384,19 +1384,6 @@ pub(super) fn kind_label(kind: &ClipKind) -> String {
     }
 }
 
-/// Human-readable media-pool label for an asset's declared media type.
-pub(super) fn asset_kind_label(media_type: &str) -> &'static str {
-    if media_type.starts_with("video/") {
-        "video"
-    } else if media_type.starts_with("image/") {
-        "image"
-    } else if media_type.starts_with("audio/") {
-        "audio"
-    } else {
-        "asset"
-    }
-}
-
 /// A themed context-menu item. `shortcut` is the action bound to the same command, shown
 /// right-aligned exactly like the application menu bar does.
 pub(super) fn context_item(
@@ -1425,13 +1412,6 @@ pub(super) fn context_item(
         .children(binding.map(|kbd| kbd.appearance(false)))
         .id(SharedString::from(format!("context-item-{label}")))
         .on_click(listener)
-}
-
-/// Dim placeholder text used for empty panels and unloaded viewports.
-/// Delegates to the shared `style::empty_state` (no icon, no action); PR 2
-/// switches its callers to the full form.
-pub(super) fn empty_state(label: &'static str, _cx: &App) -> Div {
-    crate::style::empty_state(None, label, None)
 }
 
 /// Paint a subtle checkerboard behind transparent viewer regions.

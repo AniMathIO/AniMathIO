@@ -1,14 +1,14 @@
-//! Export Queue popover: opened from the status bar, View menu or the export
+//! Export Queue panel: opened from the status bar, View menu or the export
 //! dialog. Lists every job with progress, ETA, cancel, reveal/open and errors.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
 use crate::export_queue::{JobState, format_duration, open_file, reveal};
+use crate::style::{self, PanelAnchor, ToolPanel, color, tokens::TextRole as _};
 use gpui_component::Disableable;
 use gpui_component::progress::Progress;
 
 impl Editor {
-    /// Status-bar button summarising the queue; toggles the popover.
+    /// Status-bar chip summarising the queue; toggles the panel.
     pub(super) fn export_queue_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let queue = &self.export_queue;
         let label = if let Some(job) = queue.running() {
@@ -28,52 +28,43 @@ impl Editor {
             "Export queue".to_owned()
         };
         let active = queue.is_busy();
-        div()
-            .id("status-export-queue")
-            .debug_selector(|| "status-export-queue".into())
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .h(gpui::rems(1.467))
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(crate::style::hex(crate::style::color::PANEL))
+        style::chip("status-export-queue", Some(IconName::ListVideo), label)
+            .tabular()
             .cursor_pointer()
-            .rounded(px(crate::style::radius::CONTROL))
-            .hover(|this| this.bg(cx.theme().muted))
-            .when(self.export_queue_open, |this| this.bg(cx.theme().muted))
-            .text_color(if active {
-                cx.theme().primary
-            } else {
-                cx.theme().muted_foreground
+            .when(active, |chip| chip.text_color(style::hex(color::ACCENT)))
+            .when(self.export_queue_open, |chip| {
+                chip.bg(style::hex(color::HOVER))
             })
-            .child(icons::icon(IconName::ListVideo).small())
-            .child(label)
+            .hover(|chip| chip.bg(style::hex(color::HOVER)))
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.export_queue_open = !this.export_queue_open;
                 cx.notify();
             }))
     }
 
-    pub(super) fn export_queue_panel(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+    pub(super) fn export_queue_panel(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         if !self.export_queue_open || self.is_start_screen() {
             return None;
         }
-        let theme = cx.theme().clone();
         let mut list = div()
             .id("export-queue-list")
+            .debug_selector(|| "export-queue-list".into())
             .flex()
             .flex_col()
             .gap_2()
-            .max_h(px(360.))
-            .overflow_y_scroll();
+            .px_3()
+            .pb_3()
+            .w_full();
         if self.export_queue.is_empty() {
             list = list.child(
                 div()
                     .py_4()
-                    .text_color(theme.muted_foreground)
+                    .text_role(style::Role::Body)
+                    .text_color(style::hex(color::TEXT_SECONDARY))
                     .child("No exports yet. Use Export, then Add to queue."),
             );
         }
@@ -85,74 +76,44 @@ impl Editor {
             .jobs()
             .iter()
             .any(|job| job.state.is_finished());
+        let clear = style::secondary_button("export-queue-clear", cx)
+            .debug_selector(|| "export-queue-clear".into())
+            .small()
+            .icon(icons::icon(IconName::ListX))
+            .label("Clear finished")
+            .disabled(!finished)
+            .tooltip("Clear finished exports")
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.export_queue.clear_finished();
+                cx.notify();
+            }));
         Some(
-            div()
-                .id("export-queue-panel")
-                .absolute()
-                .right(px(8.))
-                .bottom(px(32.))
-                .w(px(440.))
-                .p_3()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .bg(theme.popover)
-                .text_color(theme.popover_foreground)
-                .border_1()
-                .border_color(theme.border)
-                .rounded(px(crate::style::radius::PANEL))
-                .shadow_lg()
-                .occlude()
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(icons::icon(IconName::ListVideo).small())
-                        .child(div().flex_1().child("Export queue"))
-                        .child(
-                            Button::new("export-queue-clear")
-                                .ghost()
-                                .compact()
-                                .icon(icons::icon(IconName::ListX))
-                                .tooltip("Clear finished")
-                                .disabled(!finished)
-                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                    this.export_queue.clear_finished();
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            Button::new("export-queue-close")
-                                .ghost()
-                                .compact()
-                                .icon(icons::icon(IconName::X))
-                                .tooltip("Close")
-                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                    this.export_queue_open = false;
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .child(list),
+            ToolPanel::new("export-queue-panel", IconName::ListVideo, "Export queue")
+                .anchor(PanelAnchor::BottomRight)
+                .bottom_height(self.dock.bottom_height)
+                .on_close(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.export_queue_open = false;
+                    cx.notify();
+                }))
+                .body(self.export_queue_scroll.clone(), div().w_full().child(list))
+                .footer(clear)
+                .render(window),
         )
     }
 
     fn export_job_row(job: &crate::export_queue::Job, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
         let id = job.id;
         let (state_icon, state_color) = match &job.state {
-            JobState::Queued => (IconName::Clock, theme.muted_foreground),
-            JobState::Running => (IconName::LoaderCircle, theme.primary),
-            JobState::Done(_) => (IconName::CircleCheck, theme.success),
-            JobState::Failed(_) => (IconName::CircleAlert, theme.danger),
-            JobState::Cancelled => (IconName::Ban, theme.muted_foreground),
+            JobState::Queued => (IconName::Clock, color::TEXT_MUTED),
+            JobState::Running => (IconName::LoaderCircle, color::ACCENT),
+            JobState::Done(_) => (IconName::CircleCheck, color::SUCCESS),
+            JobState::Failed(_) => (IconName::CircleAlert, color::DANGER),
+            JobState::Cancelled => (IconName::Ban, color::TEXT_MUTED),
         };
         let button = |suffix: &str, icon: IconName, tooltip: &'static str| {
             Button::new(SharedString::from(format!("export-{suffix}-{id}")))
                 .ghost()
-                .compact()
+                .small()
                 .icon(icons::icon(icon))
                 .tooltip(tooltip)
         };
@@ -210,7 +171,7 @@ impl Editor {
         }
         let detail = match &job.state {
             JobState::Queued => format!("Waiting. {}", job.summary),
-            JobState::Running if job.cancelling => "Cancelling...".to_owned(),
+            JobState::Running if job.cancelling => "Cancelling\u{2026}".to_owned(),
             JobState::Running => {
                 let (done, total) = job.progress();
                 let eta = job
@@ -230,24 +191,34 @@ impl Editor {
             .flex()
             .flex_col()
             .gap_1()
+            .min_h(style::size::ROW)
             .p_2()
-            .rounded(px(crate::style::radius::CONTROL))
-            .border_1()
-            .border_color(theme.border)
+            .rounded(px(style::radius::CONTROL))
+            .bg(style::hex(color::PANEL))
             .child(
                 div()
                     .flex()
-                    .flex_row()
                     .items_center()
                     .gap_2()
-                    .child(icons::icon(state_icon).small().text_color(state_color))
-                    .child(div().flex_1().min_w_0().truncate().child(job.name()))
+                    .child(
+                        icons::icon(state_icon)
+                            .small()
+                            .text_color(style::hex(state_color)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_role(style::Role::Body)
+                            .child(job.name()),
+                    )
                     .child(actions),
             )
             .child(
                 div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.muted_foreground)
+                    .text_role(style::Role::Caption)
+                    .tabular()
                     .child(detail),
             );
         if let JobState::Running = job.state {
@@ -261,8 +232,8 @@ impl Editor {
         if let JobState::Failed(error) = &job.state {
             row = row.child(
                 div()
-                    .text_size(crate::style::type_size::XS)
-                    .text_color(theme.danger)
+                    .text_role(style::Role::Caption)
+                    .text_color(style::hex(color::DANGER))
                     .child(error.clone()),
             );
         }

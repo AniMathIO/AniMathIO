@@ -1,8 +1,7 @@
 //! Title library cards, CPU thumbnail cache and linked text-field inspector.
-#![allow(deprecated)] // 2.2 token aliases still in use (UI-rework PR 2-6 remove these)
 
 use super::*;
-use crate::style::{color, hex};
+use crate::style::{color, hex, tokens::TextRole as _};
 use animathio_control::{TitleAddParams, title_preset_command, title_presets};
 
 #[derive(Default)]
@@ -41,7 +40,7 @@ impl Editor {
         }
     }
 
-    pub(super) fn title_cards(&mut self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn title_cards(&mut self, window: &Window, cx: &mut Context<Self>) -> Div {
         let size = project_size(&self.project);
         if self.title_library.size != size {
             self.title_library.size = size;
@@ -120,13 +119,16 @@ impl Editor {
             })
             .detach();
         }
-        let mut cards = div().flex().flex_wrap().gap_2().p_1().child(
+        // Cards share the responsive Library grid: columns from the dock width, so
+        // a card is never clipped at the panel edge.
+        let columns =
+            super::media_pool::library_columns(window.rem_size(), self.dock.left_width, 7.);
+        let mut cards = div().grid().grid_cols(columns as u16).gap_2().p_1().child(
             div()
-                .w_full()
-                .p_2()
-                .text_size(crate::style::type_size::XS)
-                .text_color(hex(color::TEXT_SECONDARY))
-                .child("Double-click to add at playhead, or drag to timeline"),
+                .col_span_full()
+                .text_role(crate::style::Role::Label)
+                .text_color(hex(color::TEXT_MUTED))
+                .child("Double-click to add at playhead, or drag to the timeline"),
         );
         let mut section = "";
         for preset in title_presets()
@@ -137,12 +139,10 @@ impl Editor {
                 section = &preset.group;
                 cards = cards.child(
                     div()
-                        .w_full()
+                        .col_span_full()
                         .px_1()
                         .pt_1()
-                        .text_size(crate::style::type_size::XS)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(hex(color::TEXT_SECONDARY))
+                        .text_role(crate::style::Role::Heading)
                         .child(if section == "typography" {
                             "Typography"
                         } else {
@@ -161,7 +161,7 @@ impl Editor {
                 .cloned();
             let mut preview = div()
                 .w_full()
-                .h(px(112.))
+                .aspect_ratio(16. / 9.)
                 .bg(hex(color::BG))
                 .flex()
                 .items_center()
@@ -185,7 +185,8 @@ impl Editor {
                         move || format!("title-{id}")
                     })
                     .w_full()
-                    .rounded(px(6.))
+                    .min_w_0()
+                    .rounded(px(crate::style::radius::CARD))
                     .overflow_hidden()
                     .border_1()
                     .border_color(hex(color::BORDER))
@@ -205,7 +206,9 @@ impl Editor {
                     .child(
                         div()
                             .p_2()
-                            .text_size(crate::style::type_size::XS)
+                            .truncate()
+                            .text_role(crate::style::Role::Label)
+                            .text_color(hex(color::TEXT))
                             .child(preset.name.clone()),
                     )
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
@@ -301,7 +304,7 @@ impl Editor {
             rows = rows
                 .child(
                     div()
-                        .text_size(crate::style::type_size::XS)
+                        .text_role(crate::style::Role::Label)
                         .text_color(hex(color::TEXT_SECONDARY))
                         .child(label),
                 )

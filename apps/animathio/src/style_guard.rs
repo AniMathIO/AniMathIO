@@ -19,23 +19,17 @@ const BASELINE: &[(&str, usize)] = &[
     ("editor/audio_effects.rs", 1),
     ("editor/community_plugins.rs", 2),
     ("editor/dialogs.rs", 3),
-    ("editor/export_panel.rs", 1),
     ("editor/fields.rs", 11),
     ("editor/inspector_units.rs", 4),
     ("editor/inspector_view.rs", 2),
     ("editor/markers.rs", 3),
     ("editor/math.rs", 2),
-    ("editor/media_pool.rs", 4),
-    ("editor/menus.rs", 6),
-    ("editor/recording.rs", 2),
     ("editor/reframe.rs", 1),
     ("editor/scenes.rs", 1),
     ("editor/start_screen.rs", 31),
     ("editor/subtitles.rs", 1),
     ("editor/templates.rs", 1),
-    ("editor/titles.rs", 1),
     ("editor/video_effects.rs", 1),
-    ("editor/workspace.rs", 4),
 ];
 
 /// The number of ad-hoc literals in a source file (see the module docs). All
