@@ -21,6 +21,7 @@ fixture.
 | Molecule Studio | `molecule-caffeine` draws a skeletal structure, and `molecule-esterification` reveals the reactants and products of an esterification reaction. |
 | Ray Optics | `optics-lens` traces three principal rays through a converging lens, and `optics-tir` sweeps the incidence angle through the threshold for total internal reflection. |
 | Net Lab | `network-arp` shows ARP and a subsequent ping on a switched LAN, and `network-dns` follows a recursive DNS lookup. |
+| Physics Play | `physics-projectile` compares launch angles, and `physics-dominoes` follows a ball triggering a chain reaction. |
 
 ## Render and test
 
@@ -54,6 +55,7 @@ The community projects use these released bundles:
 - [Molecule Studio 0.1.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.molecule%400.1.0)
 - [Ray Optics 0.1.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.optics%400.1.0)
 - [Net Lab 1.0.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.network%401.0.0)
+- [Physics Play 0.1.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.physics%400.1.0)
 
 Install each bundle from its release with its published SHA-256 using the
 [community plugin instructions](../../docs/plugins.md#installing-community-plugins),

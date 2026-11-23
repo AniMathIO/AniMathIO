@@ -12,7 +12,7 @@ from pathlib import Path
 from PIL import Image, ImageChops
 
 from clips import audio_samples, registry
-from gallery import BACKGROUND, HEIGHT, ROOT, TICKS, WIDTH, Session, cli, run
+from gallery import BACKGROUND, FPS, HEIGHT, ROOT, TICKS, WIDTH, Session, cli, run
 from render import PROJECTS, build_project, enabled_community_plugins, project_data
 
 
@@ -32,7 +32,7 @@ def check_coverage(cards):
         assert loaded == shown, (loaded - shown, shown - loaded)
 
 
-def check_frame(project, at, output):
+def check_frame(project, at, output, *, physics=False):
     result = subprocess.run(
         [cli(), "render", str(project), "--time", f"{at:.3f}", "-o", str(output)],
         capture_output=True, text=True, check=True,
@@ -45,6 +45,11 @@ def check_frame(project, at, output):
         body = image.convert("RGB").crop((0, HEIGHT // 3, WIDTH, HEIGHT))
         canvas = Image.new("RGB", body.size, tuple(BACKGROUND[:3]))
         assert ImageChops.difference(body, canvas).getbbox(), f"Blank demo: {project}"
+        if physics:
+            # The released plugin paints the highlighted projectile or launcher amber.
+            # Ground, trails and readouts can remain visible when the body leaves frame.
+            colors = {rgb: count for count, rgb in body.getcolors(body.width * body.height)}
+            assert colors.get((240, 150, 40), 0) > 30, f"Physics body missing: {project} at {at}s"
 
 
 def probe(media, codec, audio_codec):
@@ -123,12 +128,15 @@ def main():
             assert project_data(source) == rebuilt, f"Regenerate {source.name}"
         poster_time = card.get("poster_time", seconds / 2)
         poster = output / f"{slug}.png"
-        check_frame(project, poster_time, poster)
+        physics = plugin == "io.github.animathio.physics"
+        check_frame(project, poster_time, poster, physics=physics)
         if card.get("community") and poster_time != seconds / 2:
             midpoint = output / f"{slug}-midpoint.png"
-            check_frame(project, seconds / 2, midpoint)
+            check_frame(project, seconds / 2, midpoint, physics=physics)
             with Image.open(poster) as a, Image.open(midpoint) as b:
                 assert ImageChops.difference(a.convert("RGB"), b.convert("RGB")).getbbox(), slug
+        if physics:
+            check_frame(project, seconds - 1 / FPS, output / f"{slug}-end.png", physics=True)
         checked += 1
 
     check_exports(output)

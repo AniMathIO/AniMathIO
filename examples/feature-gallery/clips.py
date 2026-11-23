@@ -43,6 +43,7 @@ COMMUNITY_PLUGINS = {
     "molecule": ("Molecule Studio", "0.1.0"),
     "optics": ("Ray Optics", "0.1.0"),
     "network": ("Net Lab", "1.0.0"),
+    "physics": ("Physics Play", "0.1.0"),
 }
 RECTANGLE = [(0, 0), (1, 0), (1, 1), (0, 1)]
 
@@ -635,11 +636,20 @@ def registry():
         ("network", "arp", "ARP request and reply", None,
          "Net Lab floods an ARP request across a switch, then uses the learned address to ping a peer.",
          {"scenario": "arp", "topology": "single-switch", "table": "arp"},
-         transform(), 5.5, 1.2),
+         transform(), 5.5, 3.8),
         ("network", "dns", "Recursive DNS lookup", None,
          "Net Lab follows a query for example.test from the client to its resolver and the authoritative server.",
          {"scenario": "dns", "topology": "single-switch"},
          transform(), 5.5, 3.7),
+        ("physics", "projectile", "Projectile trajectories", "Physics Play · Launch angles",
+         "Compare launch angles and follow the velocity arrow along the highlighted trajectory.",
+         {"scene": "projectile", "bodies": 5, "duration_s": 2.0},
+         transform(0.5, 0.60, 0.83, 0.83), 4.6, 2.0),
+        ("physics", "dominoes", "Domino chain reaction", "Physics Play · Contact and restitution",
+         "A rolling ball tips the first domino, and each contact carries the motion down the row.",
+         {"scene": "stack", "bodies": 8, "duration_s": 2.4,
+          "restitution": 0.35, "friction": 0.25},
+         transform(0.5, 0.60, 0.83, 0.83), 4.6, 1.8),
     ]:
         name, version = COMMUNITY_PLUGINS[plugin]
         plugin_id = f"io.github.animathio.{plugin}"
