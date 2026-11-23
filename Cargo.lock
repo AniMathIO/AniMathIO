@@ -223,7 +223,7 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "animathio"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-assist",
  "animathio-audio",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-assist"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -268,7 +268,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-audio"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-core",
  "arc-swap",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-cli"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-control",
  "animathio-core",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-control"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-audio",
  "animathio-core",
@@ -339,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-core"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "blake3",
  "proptest",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-export"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-audio",
  "animathio-core",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-format"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-core",
  "animathio-plugin-api",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-import-manim"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-core",
  "animathio-format",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-import-v1"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-core",
  "animathio-format",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-media"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-audio",
  "animathio-core",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-plugin-api"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-core",
  "semver",
@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-plugin-host"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-core",
  "animathio-import-manim",
@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-render"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-core",
  "animathio-format",
@@ -498,14 +498,14 @@ dependencies = [
 
 [[package]]
 name = "animathio-text-layout"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "parley",
 ]
 
 [[package]]
 name = "animathio-transcribe"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "animathio-audio",
  "animathio-core",
@@ -520,7 +520,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-typeset"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "blake3",
  "kurbo 0.13.1",
