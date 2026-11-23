@@ -4,6 +4,17 @@ All notable changes to AniMathIO 2.x are documented in this file. It is generate
 from [Conventional Commits](https://www.conventionalcommits.org) by release-plz and
 git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMathIO/AniMathIO/releases?q=animathio-v1).
 
+## [2.3.1](https://github.com/AniMathIO/AniMathIO/compare/v2.3.0...v2.3.1) - 2026-11-23
+
+### Added
+
+- Reproducible feature gallery projects in `examples/feature-gallery`, including community plugin and audible audio demos ([#379](https://github.com/AniMathIO/AniMathIO/pull/379), [#381](https://github.com/AniMathIO/AniMathIO/pull/381), [#383](https://github.com/AniMathIO/AniMathIO/pull/383))
+
+### Fixed
+
+- Community plugins now load and unload in the preview, audio playback and the Math dialog without restarting the editor ([#385](https://github.com/AniMathIO/AniMathIO/pull/385))
+
+
 ## [2.3.0](https://github.com/AniMathIO/AniMathIO/compare/v2.2.0...v2.3.0) - 2026-11-23
 
 The last feature release of AniMathIO 2: from here on, security fixes and the dependency updates they need.
