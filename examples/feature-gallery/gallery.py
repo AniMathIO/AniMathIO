@@ -322,6 +322,9 @@ AUDIO_NOTES = {
                 (2.28, 0.48, 410, 0.43)],
 }
 
+# Leave room for processing and peaks introduced by the delivery codecs.
+AUDIO_FIXTURE_GAIN_DB = -4.5
+
 
 def audio_fixture(path, effect):
     """Build one three-second mono WAV, repeated unchanged in the two clips."""
@@ -373,7 +376,8 @@ def audio_fixture(path, effect):
             samples[i] += fade * noise
 
     assert max(map(abs, samples)) < 1, f"Clipped {effect} fixture"
-    pcm = array.array("h", (round(sample * 32767) for sample in samples))
+    gain = 10 ** (AUDIO_FIXTURE_GAIN_DB / 20)
+    pcm = array.array("h", (round(sample * gain * 32767) for sample in samples))
     if sys.byteorder != "little":
         pcm.byteswap()
     with wave.open(str(path), "wb") as output:

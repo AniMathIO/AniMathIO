@@ -18,6 +18,7 @@ import subprocess
 import sys
 
 from gallery import (
+    AUDIO_FIXTURE_GAIN_DB,
     AUDIO_HALF,
     AUDIO_RATE,
     BACKGROUND,
@@ -322,15 +323,16 @@ AUDIO_EFFECTS = [
      {"gain_db": 16}),
     ("eq3", "3-band EQ", "Listen for the nasal ring fading out.",
      {"low_freq": 310, "low_gain_db": 5, "mid_freq": 1560, "mid_gain_db": -18, "mid_q": 0.8}),
-    ("compressor", "Compressor", "Listen for the loud notes getting closer to the quiet ones.",
-     {"threshold_db": -34, "ratio": 12, "attack_ms": 0.5, "release_ms": 60, "makeup_db": 11}),
+    ("compressor", "Compressor", "Listen for more even notes at a similar overall level.",
+     {"threshold_db": -35, "ratio": 12, "attack_ms": 0.5, "release_ms": 60, "makeup_db": 24}),
     ("gate", "Noise gate", "Listen for the hiss dropping out between pulses.",
-     {"threshold_db": -20, "attack_ms": 2, "hold_ms": 12, "release_ms": 28, "range_db": 48}),
+     {"threshold_db": -20 + AUDIO_FIXTURE_GAIN_DB,
+      "attack_ms": 2, "hold_ms": 12, "release_ms": 28, "range_db": 48}),
     ("highpass", "High-pass filter", "Listen for the low buzz disappearing.",
      {"frequency": 570}),
     ("voice_cleanup", "Voice cleanup", "Listen for the sharp S sounds getting softer.",
-     {"highpass_hz": 360, "gate_threshold_db": -27,
-      "deess_freq": 4000, "deess_threshold_db": -51, "deess_amount": 1}),
+     {"highpass_hz": 360, "gate_threshold_db": -27 + AUDIO_FIXTURE_GAIN_DB,
+      "deess_freq": 4000, "deess_threshold_db": -51 + AUDIO_FIXTURE_GAIN_DB, "deess_amount": 1}),
     ("denoise", "Denoise", "Listen for the steady static fading even during notes.",
      {"strength": 1, "sensitivity_db": 12, "smoothing": 0.35}),
 ]

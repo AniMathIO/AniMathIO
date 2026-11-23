@@ -47,8 +47,12 @@ The smoke test checks the preset and effect inventory against the loaded
 first-party plugins, rebuilds projects into its output folder, renders
 representative frames and checks MP4 chapters and WebM codecs. For every audio
 card, it checks the visible waveform change and measures levels in the decoded
-AAC and Opus. Use `test.py --audio-only` for the audio cards alone. The `export --chapters` text sidecar follows YouTube's 10-second
-minimum, while the embedded MP4 carries all three short chapter stops.
+AAC and Opus at the delivery frame rate. Both halves have at least 1 dB of
+headroom, measured at 4× oversampling in stereo and after mono downmix. The
+compressor uses makeup gain to keep dry and processed RMS within 3 dB.
+Use `test.py --audio-only` for the audio cards alone. The `export --chapters`
+text sidecar follows YouTube's 10-second minimum, while the embedded MP4
+carries all three short chapter stops.
 
 The community projects use these released bundles:
 

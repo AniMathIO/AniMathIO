@@ -66,6 +66,7 @@ def probe(media, codec, audio_codec):
     (video,) = [s for s in data["streams"] if s["codec_type"] == "video"]
     (audio,) = [s for s in data["streams"] if s["codec_type"] == "audio"]
     assert video["codec_name"] == codec and audio["codec_name"] == audio_codec, media
+    assert audio["channels"] == 2 and int(audio["sample_rate"]) == AUDIO_RATE, media
     assert (video["width"], video["height"]) == (WIDTH, HEIGHT), data
     subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", media, "-f", "null", "-"],
                    check=True)
@@ -111,8 +112,8 @@ AUDIO_CHECKS = {
         AudioCheck("note body", (0.30, 0.65), (220, 400), min_change=0, max_change=5),
     ],
     "compressor": [
-        AudioCheck("loud note", (0.91, 1.15), (150, 3500), max_change=-15),
-        AudioCheck("quiet note", (0.31, 0.53), (150, 3500), min_change=5, max_change=11),
+        AudioCheck("loud note", (0.91, 1.15), (150, 3500), max_change=2),
+        AudioCheck("quiet note", (0.31, 0.53), (150, 3500), min_change=15),
     ],
     "gate": [
         AudioCheck("hiss in gap", (0.78, 0.94), (1700, 6000), max_change=-25),
@@ -149,6 +150,26 @@ def band_dbfs(samples, check):
     return 10 * np.log10(max(mean_square, 1e-14))
 
 
+def check_headroom(media):
+    # Keep the channels separate and oversample to catch intersample peaks.
+    for oversample in (1, 4):
+        raw = subprocess.check_output([
+            "ffmpeg", "-v", "error", "-i", str(media), "-vn",
+            "-af", f"aresample={AUDIO_RATE * oversample}:filter_size=64", "-f", "f32le", "-",
+        ])
+        pcm = np.frombuffer(raw, dtype="<f4").reshape(-1, 2)
+        half = AUDIO_HALF * AUDIO_RATE * oversample
+        # Include a constant-power stereo-to-mono fold, as used by FFmpeg.
+        mono = pcm.sum(axis=1) / np.sqrt(2)
+        for layout, samples in (("stereo", pcm), ("mono fold", mono)):
+            dry_peak = np.max(np.abs(samples[:half]))
+            wet_peak = np.max(np.abs(samples[half:]))
+            result = (f"{media.name} · {oversample}× {layout} peak: "
+                      f"dry {dry_peak:.3f}, wet {wet_peak:.3f}")
+            assert dry_peak <= 0.89 and wet_peak <= 0.89, result
+            print(result, flush=True)
+
+
 def check_audio(effect, mp4, webm):
     levels_by_codec = []
     for media, codecs in ((mp4, ("h264", "aac")), (webm, ("vp9", "opus"))):
@@ -157,7 +178,15 @@ def check_audio(effect, mp4, webm):
         half = AUDIO_HALF * AUDIO_RATE
         # Container padding can extend the decoded stream by one packet.
         assert abs(len(pcm) - 2 * half) <= 1024, (media, len(pcm))
-        assert np.max(np.abs(pcm)) < 0.95, f"No decoded headroom: {media}"
+        check_headroom(media)
+        if effect == "compressor":
+            dry_rms, wet_rms = (
+                np.sqrt(np.mean(samples ** 2)) for samples in (pcm[:half], pcm[half:2 * half])
+            )
+            change = 20 * np.log10(wet_rms / dry_rms)
+            result = f"{media.name} · compressor whole-half RMS change: {change:+.1f} dB"
+            assert abs(change) <= 3, result
+            print(result, flush=True)
         levels = []
         for check in AUDIO_CHECKS[effect]:
             dry, wet = (band_dbfs(samples, check) for samples in (pcm[:half], pcm[half:]))
@@ -244,7 +273,7 @@ def main():
         if effect:
             check_waveforms(poster)
             mp4, webm = (output / f"{slug}.{ext}" for ext in ("mp4", "webm"))
-            export_videos(project, mp4, webm, fps=8)
+            export_videos(source, mp4, webm)
             check_audio(effect, mp4, webm)
         if card.get("community") and poster_time != seconds / 2:
             midpoint = output / f"{slug}-midpoint.png"

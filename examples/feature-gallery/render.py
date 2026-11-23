@@ -57,10 +57,10 @@ def project_data(project):
         return json.loads(archive.read("project.json"))
 
 
-def export_videos(project, mp4, webm, *, fps=FPS):
+def export_videos(project, mp4, webm):
     """Use the CLI encoders' 128 kb/s audio setting in both delivery formats."""
-    run("export", project, "-o", mp4, "--crf", 27, "--fps", fps, "--overwrite")
-    run("export", project, "-o", webm, "--crf", 31, "--fps", fps, "--overwrite")
+    run("export", project, "-o", mp4, "--crf", 27, "--fps", FPS, "--overwrite")
+    run("export", project, "-o", webm, "--crf", 31, "--fps", FPS, "--overwrite")
 
 
 def render_card(card, project, output):
