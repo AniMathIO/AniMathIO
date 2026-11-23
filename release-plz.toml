@@ -42,17 +42,3 @@ git_release_name = "v{{ version }}"
 # Only this package creates the shared tag and release.
 git_tag_enable = true
 git_release_enable = true
-
-# Crates added since the last tag. In git-only mode release-plz 0.4.3 looks each
-# member up in the previous tag's tree and fails ("cannot find package") when it
-# is not there yet, which blocks every release PR update. Analyse them without
-# git-only until a `v2.*` tag contains them; their user-facing commits also touch
-# `animathio`/`animathio-cli`, so the changelog keeps them. Remove these blocks
-# after the release that first ships the crate (v2.3.0).
-[[package]]
-name = "animathio-assist"
-git_only = false
-
-[[package]]
-name = "animathio-text-layout"
-git_only = false
