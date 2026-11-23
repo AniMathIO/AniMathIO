@@ -34,7 +34,10 @@ from gallery import (
 )
 
 DOCS = "https://docs.animathio.com/docs"
-COMMUNITY_RELEASE = "https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.code-snippets%400.1.0"
+COMMUNITY_DOCS = (
+    "https://github.com/AniMathIO/plugins/tree/io.github.animathio.code-snippets%400.1.0"
+    "/community/code-snippets"
+)
 COMMUNITY_ID = "io.github.animathio.code-snippets"
 RECTANGLE = [(0, 0), (1, 0), (1, 1), (0, 1)]
 
@@ -463,8 +466,8 @@ def registry():
             ["math"],
             "org.animathio.latex",
             f"{DOCS}/plugins",
-            "Write-on reveal over two equations, then inline colour from the "
-            "colored-source interface (ABI 1.2).",
+            "Write on Euler’s identity and the Gaussian integral. Inline colors "
+            "highlight parts of the integral.",
             5.0,
             build_latex,
             poster_time=4.1,
@@ -491,7 +494,7 @@ def registry():
             5.0,
             None,
             manim=True,
-            poster_time=3.7,
+            poster_time=4.45,
         ),
         _card(
             "shapes-stroke-fill",
@@ -593,7 +596,7 @@ def registry():
     ]:
         cards.append(_card(
             f"code-snippets-{mode}", title, ["community"], COMMUNITY_ID,
-            COMMUNITY_RELEASE, summary, 5.0,
+            COMMUNITY_DOCS, summary, 5.0,
             lambda b, o, m=mode: build_code_snippets(b, o, m),
             community=True,
         ))
