@@ -13,7 +13,7 @@ from PIL import Image, ImageChops
 
 from clips import audio_samples, registry
 from gallery import BACKGROUND, HEIGHT, ROOT, TICKS, WIDTH, Session, cli, run
-from render import PROJECTS, build_project, community_available, project_data
+from render import PROJECTS, build_project, enabled_community_plugins, project_data
 
 
 def check_coverage(cards):
@@ -99,13 +99,14 @@ def main():
     assert len({c["slug"] for c in cards}) == len(cards), "duplicate card slug"
     assert {p.stem for p in PROJECTS.glob("*.amio")} == {c["slug"] for c in cards}
     check_coverage(cards)
-    have_community = community_available()
+    enabled = enabled_community_plugins()
 
     checked = skipped = 0
     for card in cards:
         slug = card["slug"]
-        if card.get("community") and not have_community:
-            print(f"skip {slug}: Code Snippets is not enabled", flush=True)
+        plugin = card["plugin"]
+        if card.get("community") and plugin not in enabled:
+            print(f"skip {slug}: {plugin} is not enabled", flush=True)
             skipped += 1
             continue
         print(f"== {slug}", flush=True)
@@ -120,7 +121,14 @@ def main():
             # Audio waveform values derive from a lossy export, which may vary slightly
             # between platforms. The audio project is verified by the export smoke test.
             assert project_data(source) == rebuilt, f"Regenerate {source.name}"
-        check_frame(project, card.get("poster_time", seconds / 2), output / f"{slug}.png")
+        poster_time = card.get("poster_time", seconds / 2)
+        poster = output / f"{slug}.png"
+        check_frame(project, poster_time, poster)
+        if card.get("community") and poster_time != seconds / 2:
+            midpoint = output / f"{slug}-midpoint.png"
+            check_frame(project, seconds / 2, midpoint)
+            with Image.open(poster) as a, Image.open(midpoint) as b:
+                assert ImageChops.difference(a.convert("RGB"), b.convert("RGB")).getbbox(), slug
         checked += 1
 
     check_exports(output)

@@ -11,19 +11,19 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from clips import COMMUNITY_ID, registry
+from clips import registry
 from gallery import BACKGROUND, FPS, HEIGHT, HERE, ROOT, TICKS, WIDTH, Builder, Session, cli, run
 
 PROJECTS = HERE / "projects"
 
 
-def community_available():
+def enabled_community_plugins():
     result = subprocess.check_output([cli(), "plugins", "list"], text=True)
     header, _, rows = result.partition("\n")
-    return header.startswith("community plugins: on") and any(
-        line.split("\t")[0:3:2] == [COMMUNITY_ID, "enabled"]
-        for line in rows.splitlines()
-    )
+    if not header.startswith("community plugins: on"):
+        return set()
+    return {row[0] for line in rows.splitlines()
+            if len(row := line.split("\t")) >= 3 and row[2] == "enabled"}
 
 
 def build_project(card, project):
@@ -81,6 +81,7 @@ def render_card(card, project, output):
         )
 
     entry = {key: card[key] for key in ("slug", "title", "kinds", "plugin", "docs", "summary")}
+    entry.update({key: card[key] for key in ("plugin_name", "release") if key in card})
     entry["seconds"] = seconds
     entry.update({key: path.relative_to(output).as_posix() for key, path in (
         ("mp4", mp4), ("webm", webm), ("poster", poster),
@@ -101,14 +102,15 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
 
     selected = [c for c in cards if not args.only or c["slug"] in args.only]
-    have_community = any(c.get("community") for c in selected) and community_available()
+    enabled = enabled_community_plugins() if any(c.get("community") for c in selected) else set()
     entries = []
     for card in selected:
         slug = card["slug"]
-        if card.get("community") and not have_community:
+        plugin = card["plugin"]
+        if card.get("community") and plugin not in enabled:
             if args.only:
-                parser.error(f"install and enable {COMMUNITY_ID} to render {slug}")
-            print(f"skip {slug}: {COMMUNITY_ID} is not enabled", flush=True)
+                parser.error(f"install and enable {plugin} to render {slug}")
+            print(f"skip {slug}: {plugin} is not enabled", flush=True)
             continue
         print(f"== {slug}", flush=True)
         project = PROJECTS / f"{slug}.amio"
