@@ -110,9 +110,8 @@ impl Editor {
         cx.notify();
     }
 
-    /// Keep the engine-owned audio pool and the player's snapshots in lock-step
-    /// with the project. The project snapshot is swapped every edit; the mixer is
-    /// only rebuilt when the set of decoded audio assets actually changed.
+    /// Swap the player's project snapshot after an edit and rebuild the mixer if the
+    /// set of decoded audio assets changed.
     pub(super) fn sync_audio(&mut self, cx: &mut Context<Self>) {
         self.audio_generation = self.audio_generation.wrapping_add(1);
         let generation = self.audio_generation;
@@ -128,13 +127,12 @@ impl Editor {
         let project = self.project.clone();
         let assets = self.assets.clone();
         let mut pool = self.pool.clone();
+        let playback_effects = self.playback_effects.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
                     load_audio(&mut pool, &project, &assets)?;
-                    let mixer = crate::playback::with_audio_effects(
-                        pool.prepare(rate, channels).map_err(|e| e.to_string())?,
-                    );
+                    let mixer = playback_effects.prepare(&pool, rate, channels)?;
                     Ok::<_, String>((pool, mixer))
                 })
                 .await;

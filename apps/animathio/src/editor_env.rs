@@ -16,7 +16,7 @@ use animathio_audio::{AudioPool, CaptureSource, CpalCapture, NullCapture};
 use animathio_core::Project;
 use animathio_render::BackendKind;
 
-use crate::playback::{Clock, MonotonicClock, audio_disabled, make_clock};
+use crate::playback::{Clock, MonotonicClock, PlaybackEffects, audio_disabled, make_clock};
 
 /// Where playback audio goes.
 // `Null` and `Dir` are constructed by the headless test environment only.
@@ -145,9 +145,14 @@ impl EditorEnv {
     }
 
     /// A fresh playback clock on this environment's audio output.
-    pub(crate) fn make_clock(&self, project: &Project, pool: &AudioPool) -> Box<dyn Clock> {
+    pub(crate) fn make_clock(
+        &self,
+        project: &Project,
+        pool: &AudioPool,
+        effects: &PlaybackEffects,
+    ) -> Box<dyn Clock> {
         match self.audio {
-            AudioOutput::Device => make_clock(project, pool),
+            AudioOutput::Device => make_clock(project, pool, effects),
             AudioOutput::Null => Box::new(MonotonicClock::new()),
         }
     }

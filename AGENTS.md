@@ -215,9 +215,12 @@ per-user folder (`ANIMATHIO_USER_PLUGIN_DIR` overrides it). They are off by defa
 loads unless the global switch and the plugin's own flag in `community-plugins.json`
 (`ANIMATHIO_PLUGIN_SETTINGS`, in the editor config dir; one source of truth read through `CommunityStore` by
 the editor, `animathio-cli plugins` and the control handler) are both on. `PluginHost::load_plugin_directory`
-never loads a `PluginDirectory { community: true }`; `PluginHost::sync_community_plugins` reconciles the
-loaded set with the settings and `unload_plugin` drops a plugin's clip source, effects, audio effects, presets
-and importer, which is how the editor hot loads and unloads without a restart. Installs verify a SHA-256
+never loads a `PluginDirectory { community: true }`. The editor reconciles its UI/control host, sends
+the settings to the preview worker before requesting a new frame, and queues reconciliation before the
+next math preview job. Playback shares the editor host's audio-effect registry and starts a fresh mixer
+cache when the loaded set changes. `PluginHost::sync_community_plugins` reconciles the loaded set with
+the settings and `unload_plugin` drops a plugin's clip source, effects, audio effects, presets and
+importer. Installs verify a SHA-256
 before writing, run the normal package/manifest/ABI validation and refuse reserved `org.animathio.*` ids; the
 control protocol only has the read-only `plugins.list`.
 

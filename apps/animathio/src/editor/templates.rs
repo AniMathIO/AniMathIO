@@ -189,7 +189,7 @@ impl Editor {
             self.error = Some(error);
         }
         self.audio_ids = audio_asset_ids(&self.project);
-        self.clock = self.env.make_clock(&self.project, &self.pool);
+        self.clock = self.make_clock();
         self.worker.load(self.assets.clone());
         self.request_render(Time(0));
         Self::fill_template_dialog(template, window, cx);
@@ -215,7 +215,7 @@ impl Editor {
             self.error = Some(error);
         }
         self.audio_ids = audio_asset_ids(&self.project);
-        self.clock = self.env.make_clock(&self.project, &self.pool);
+        self.clock = self.make_clock();
         self.request_render(self.position);
         true
     }

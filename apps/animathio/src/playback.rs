@@ -3,30 +3,41 @@ use std::time::Instant;
 
 use animathio_audio::{AudioPool, EffectWarnings, Mixer, Player, Speed};
 use animathio_core::{AudioEffectProcessor, Project, Rounding, TICKS_PER_SECOND, Time};
-use std::sync::OnceLock;
 
-static AUDIO_EFFECTS: OnceLock<Arc<dyn AudioEffectProcessor>> = OnceLock::new();
-static AUDIO_WARNINGS: OnceLock<EffectWarnings> = OnceLock::new();
-
-/// Warnings from playback mixers whose audio effects could not run (the audio passed
-/// through unprocessed). Drained by the editor, which shows them as toasts.
-pub(crate) fn take_audio_warnings() -> Vec<String> {
-    AUDIO_WARNINGS.get().map_or_default(EffectWarnings::take)
+/// Every mixer in one editor uses the same plugin registry and warning sink.
+#[derive(Clone)]
+pub(crate) struct PlaybackEffects {
+    processor: Option<Arc<dyn AudioEffectProcessor>>,
+    warnings: EffectWarnings,
 }
 
-/// Register the plugin runner that every playback mixer uses for audio effects. The handle
-/// shares the plugin host's registry, so it is installed once at startup.
-pub(crate) fn install_audio_effects(processor: Arc<dyn AudioEffectProcessor>) {
-    let _ = AUDIO_EFFECTS.set(processor);
-}
+impl PlaybackEffects {
+    pub(crate) fn new(processor: Option<Arc<dyn AudioEffectProcessor>>) -> Self {
+        Self {
+            processor,
+            warnings: EffectWarnings::default(),
+        }
+    }
 
-/// Make a freshly prepared playback mixer lenient (a failing audio effect is skipped with a
-/// warning, see `take_audio_warnings`) and attach the registered audio-effect runner, if any.
-pub(crate) fn with_audio_effects(mixer: Mixer) -> Mixer {
-    let mixer = mixer.lenient(AUDIO_WARNINGS.get_or_init(EffectWarnings::default).clone());
-    match AUDIO_EFFECTS.get() {
-        Some(processor) => mixer.with_effect_processor(Arc::clone(processor)),
-        None => mixer,
+    pub(crate) fn take_warnings(&self) -> Vec<String> {
+        self.warnings.take()
+    }
+
+    /// Prepare a lenient playback mixer with an empty processed-block cache.
+    pub(crate) fn prepare(
+        &self,
+        pool: &AudioPool,
+        rate: u32,
+        channels: u16,
+    ) -> Result<Mixer, String> {
+        let mixer = pool
+            .prepare(rate, channels)
+            .map_err(|e| e.to_string())?
+            .lenient(self.warnings.clone());
+        Ok(match &self.processor {
+            Some(processor) => mixer.with_effect_processor(Arc::clone(processor)),
+            None => mixer,
+        })
     }
 }
 
@@ -67,9 +78,13 @@ pub(crate) struct AudioClock {
 
 impl AudioClock {
     /// Open the default output device and prepare a mixer from the decoded pool.
-    pub(crate) fn open(project: &Project, pool: &AudioPool) -> Result<Self, String> {
+    pub(crate) fn open(
+        project: &Project,
+        pool: &AudioPool,
+        effects: &PlaybackEffects,
+    ) -> Result<Self, String> {
         let (rate, channels) = Player::default_output_format().map_err(|e| e.to_string())?;
-        let mixer = with_audio_effects(pool.prepare(rate, channels).map_err(|e| e.to_string())?);
+        let mixer = effects.prepare(pool, rate, channels)?;
         let player =
             Player::new(Arc::new(project.clone()), Arc::new(mixer)).map_err(|e| e.to_string())?;
         Ok(Self {
@@ -186,13 +201,17 @@ impl Clock for MonotonicClock {
 
 /// Choose the audio clock, falling back to a monotonic clock with no device. The
 /// audio clock stays master at every shuttle speed; muted speeds still count.
-pub(crate) fn make_clock(project: &Project, pool: &AudioPool) -> Box<dyn Clock> {
+pub(crate) fn make_clock(
+    project: &Project,
+    pool: &AudioPool,
+    effects: &PlaybackEffects,
+) -> Box<dyn Clock> {
     // `ANIMATHIO_AUDIO=none` (set by scripts/virtual-display.sh) keeps automated
     // runs off the audio device entirely; playback then follows the wall clock.
     if audio_disabled(std::env::var_os("ANIMATHIO_AUDIO").as_deref()) {
         return Box::new(MonotonicClock::new());
     }
-    match AudioClock::open(project, pool) {
+    match AudioClock::open(project, pool, effects) {
         Ok(clock) => Box::new(clock),
         Err(_) => Box::new(MonotonicClock::new()),
     }

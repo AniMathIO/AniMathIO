@@ -115,15 +115,16 @@ handler) load the enabled community plugins like any other plugin.
 
 ### In the editor: no restart
 
-The editor applies the switch live. Turning "Community plugins" on or off in Library → Plugins
-(saving Preferences also re-reads the settings, so changes made with the CLI while the editor
-runs are picked up) loads or unloads plugins in place: `PluginHost::sync_community_plugins`
-registers newly enabled plugins and drops disabled ones (clip sources, effects, audio
-effects, animation presets and importers), the inspector's plugin list refreshes and the
-preview re-renders. Clips of an unloaded or missing plugin render as the usual
-missing-plugin placeholder (and fail an export) until the plugin is enabled again.
-Audio effects of an unloaded plugin are skipped with a warning during playback and fail an
-export.
+Installing, updating, enabling, disabling or removing a plugin in Library → Plugins takes
+effect in the running editor, as does turning "Community plugins" on or off. Saving
+Preferences also picks up changes made with the CLI. `PluginHost::sync_community_plugins`
+updates the inspector and control plugin lists, and the timeline preview re-renders with
+the updated clip sources and effects. Math previews pick up the settings on their next
+render. Playback starts a fresh mixer cache when the loaded plugins change.
+
+Clips of an unloaded or missing plugin show a placeholder in the preview and fail an export.
+Playback skips unloaded audio effects with a warning, and export fails if they are still in
+use.
 `plugins.list` / `list_plugins` (see `docs/mcp.md`) report what is installed and loaded;
 installing and enabling are deliberately not part of the control protocol.
 

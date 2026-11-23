@@ -1,7 +1,11 @@
 //! UI polish for community plugins, Preferences, Export and the launcher.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use animathio_audio::Mixer;
+use animathio_core::{AudioChain, ClipKind, Command, EffectId, EffectInstance, Time, TimeRange};
+use animathio_plugin_api::PluginPackage;
 use animathio_plugin_host::CommunityStore;
 use gpui::TestAppContext;
 use gpui_component::WindowExt;
@@ -11,6 +15,7 @@ use super::{Ui, config_dir, require_plugins};
 use crate::editor::actions::NewProject;
 use crate::editor::dialogs::{export_summary, middle_truncate};
 use crate::editor::{Editor, LeftTab, Project};
+use crate::playback::Clock;
 
 const HELLO: &[u8] =
     include_bytes!("../../../../../crates/plugin-host/tests/fixtures/hello-1.0.0.amplugin");
@@ -422,9 +427,8 @@ fn launcher_status_bar_hides_placeholder_resolution_and_duration(cx: &mut TestAp
     });
 }
 
-/// Community plugins start off. Switching them on and enabling one loads it into the running
-/// editor (its clip source appears in the plugin list); turning the switch off unloads it
-/// again. No restart, and the headless harness uses a private plugin folder and settings.
+/// Community plugins start off. Enabling one exposes its clip source and lets the preview
+/// render it. Turning the switch off replaces the rendered clip with a placeholder.
 #[gpui::test]
 fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
     const HELLO: &[u8] =
@@ -453,14 +457,27 @@ fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
     ui.update(|editor, _, cx| editor.set_community_plugins_enabled(true, cx).unwrap());
     assert!(!has_hello(&ui), "installed but not enabled");
 
-    // Enabling the plugin (the CLI or a future Browse UI) and re-syncing loads it live.
-    store.set_plugin_enabled(ID, true).unwrap();
-    ui.update(|editor, _, cx| editor.sync_community_plugins(cx));
+    ui.update(|editor, _, cx| editor.toggle_community_plugin(ID.into(), true, cx));
     assert!(has_hello(&ui), "enabled plugin is loaded without a restart");
+    ui.update(|editor, _, cx| {
+        editor.add_plugin_clip_by_id(ID, cx);
+        assert!(editor.error.is_none(), "{:?}", editor.error);
+        assert!(!editor.missing_plugin_ids().contains(ID));
+        assert_community_preview(editor, true);
+    });
 
     // Switching the global switch off unloads it, and the project is unaffected.
     let before = ui.read(|editor| editor.project.clone());
-    ui.update(|editor, _, cx| editor.set_community_plugins_enabled(false, cx).unwrap());
+    ui.update(|editor, _, cx| {
+        let generation = editor.request_generation;
+        editor.set_community_plugins_enabled(false, cx).unwrap();
+        assert_ne!(
+            editor.request_generation, generation,
+            "unload requests a frame"
+        );
+        assert!(editor.missing_plugin_ids().contains(ID));
+        assert_community_preview(editor, false);
+    });
     assert!(!has_hello(&ui), "switch off unloads community plugins");
     assert_eq!(ui.read(|editor| editor.project.clone()), before);
     ui.read(|editor| {
@@ -469,6 +486,118 @@ fn community_plugins_load_and_unload_without_restart(cx: &mut TestAppContext) {
     });
 
     store.uninstall(ID).unwrap();
+}
+
+fn assert_community_preview(editor: &Editor, loaded: bool) {
+    let preview = editor.worker.wait_for_result(editor.request_generation);
+    assert!(preview.effect_error.is_none(), "{:?}", preview.effect_error);
+    assert!(preview.image.is_ok(), "{:?}", preview.image.err());
+    let kind = &preview
+        .scene
+        .clips
+        .iter()
+        .find(|clip| Some(clip.id) == editor.selected)
+        .expect("added clip is active at the playhead")
+        .kind;
+    if loaded {
+        assert!(matches!(kind, ClipKind::Vector(_)), "{kind:?}");
+    } else {
+        assert!(
+            matches!(kind, ClipKind::Error(error) if error.contains("plugin not found")),
+            "{kind:?}"
+        );
+    }
+}
+
+/// Exercise mixer replacement through the real editor without opening an output device.
+#[gpui::test]
+fn community_audio_effects_refresh_the_playback_mixer(cx: &mut TestAppContext) {
+    const AUDIO_ID: &str = "com.example.audio-basic";
+    if !require_plugins("community_audio_effects_refresh_the_playback_mixer") {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let store = CommunityStore::new(
+        root.path().join("plugins"),
+        root.path().join("settings.json"),
+    );
+    let mut package = PluginPackage::from_bytes(include_bytes!(
+        "../../../../../crates/plugin-host/tests/fixtures/audio-basic-0.2.2.amplugin"
+    ))
+    .unwrap();
+    // Re-use the frozen gain component under a community id, avoiding the built-in package.
+    package.manifest.id = AUDIO_ID.into();
+    store
+        .install_bytes(&package.create_bytes().unwrap(), None, false)
+        .unwrap();
+    let (mut project, assets) = voice_pair();
+    Command::AddAudioEffect {
+        chain: AudioChain::Clip(PAIR_FIRST),
+        index: 0,
+        effect: EffectInstance::new(
+            EffectId(1),
+            AUDIO_ID,
+            "gain",
+            BTreeMap::from([("gain_db".into(), -6.0)]),
+        ),
+    }
+    .apply(&mut project)
+    .unwrap();
+    let mut ui = Ui::open(cx, project, assets);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(ui.read(|editor| {
+        Arc::new(
+            editor
+                .playback_effects
+                .prepare(&editor.pool, 48_000, 1)
+                .unwrap(),
+        )
+    })));
+    ui.update(|editor, _, cx| {
+        editor.clock = Box::new(TestMixerClock(slot.clone()));
+        editor.community.store = Some(store.clone());
+        editor.set_community_plugins_enabled(true, cx).unwrap();
+    });
+    let range = TimeRange::new(Time(0), Time(50 * MS)).unwrap();
+    let mix = |ui: &Ui| ui.read(|editor| slot.borrow().mix(&editor.project, range).unwrap());
+    let dry = mix(&ui);
+    assert!(dry.iter().any(|sample| sample.abs() > 0.1));
+    ui.update(|editor, _, cx| editor.toggle_community_plugin(AUDIO_ID.into(), true, cx));
+    ui.read(|editor| assert!(editor.error.is_none(), "{:?}", editor.error));
+    let wet = mix(&ui);
+    let gain = 10.0_f32.powf(-6.0 / 20.0);
+    assert_eq!(wet.len(), dry.len());
+    assert!(
+        wet.iter()
+            .zip(&dry)
+            .all(|(wet, dry)| (wet - dry * gain).abs() < 1e-6)
+    );
+
+    // The same range has now been cached. Disabling must discard its processed blocks.
+    ui.update(|editor, _, cx| editor.toggle_community_plugin(AUDIO_ID.into(), false, cx));
+    assert_eq!(mix(&ui), dry);
+}
+
+struct TestMixerClock(std::rc::Rc<std::cell::RefCell<Arc<Mixer>>>);
+
+impl Clock for TestMixerClock {
+    fn now(&self) -> Time {
+        Time(0)
+    }
+    fn play(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    fn pause(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    fn seek(&mut self, _: Time) -> Result<(), String> {
+        Ok(())
+    }
+    fn mixer_format(&self) -> Option<(u32, u16)> {
+        Some((48_000, 1))
+    }
+    fn set_mixer(&mut self, mixer: Arc<Mixer>) {
+        *self.0.borrow_mut() = mixer;
+    }
 }
 
 #[gpui::test]

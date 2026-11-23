@@ -716,7 +716,7 @@ impl Editor {
             self.error = Some(error);
         }
         self.audio_ids = audio_asset_ids(&self.project);
-        self.clock = self.env.make_clock(&self.project, &self.pool);
+        self.clock = self.make_clock();
         self.next_id = next_id(&self.project);
         self.dirty = true;
         self.worker.load(self.assets.clone());

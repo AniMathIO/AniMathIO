@@ -29,7 +29,7 @@ use crate::fades::{self, FadeEdge};
 use crate::icons::{self, IconName};
 use crate::inspector::{self, ParamModel, PluginDescriptor};
 use crate::layout::DockLayout;
-use crate::playback::{Clock, due_frame};
+use crate::playback::{Clock, PlaybackEffects, due_frame};
 use crate::render_worker::{RenderRequest, RenderWorker};
 use crate::ripple::{self, RippleScope};
 use crate::selection;
@@ -616,6 +616,7 @@ pub(crate) struct Editor {
     timeline_scroll: f32,
     gesture: Option<TimelineGesture>,
     plugin_host: Option<PluginHost>,
+    playback_effects: PlaybackEffects,
     community: community_plugins::Browser,
     plugins: Vec<PluginDescriptor>,
     tool: Tool,
@@ -930,12 +931,14 @@ impl Editor {
         if error.is_none() {
             error = plugin_error;
         }
-        if let Some(host) = &plugin_host {
-            crate::playback::install_audio_effects(Arc::new(host.audio_effect_processor()));
-        }
+        let playback_effects = PlaybackEffects::new(
+            plugin_host
+                .as_ref()
+                .map(|host| Arc::new(host.audio_effect_processor()) as _),
+        );
         let audio_ids = audio_asset_ids(&project);
         let initial_next_id = next_id(&project);
-        let clock = env.make_clock(&project, &pool);
+        let clock = env.make_clock(&project, &pool, &playback_effects);
         let worker = match RenderWorker::spawn() {
             Ok(worker) => worker,
             Err(spawn_error) => {
@@ -994,6 +997,7 @@ impl Editor {
             timeline_scroll: 0.0,
             gesture: None,
             plugin_host,
+            playback_effects,
             community: community_plugins::Browser::default(),
             plugins,
             tool: Tool::default(),
