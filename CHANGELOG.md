@@ -6,10 +6,13 @@ git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMa
 
 ## [2.3.1](https://github.com/AniMathIO/AniMathIO/compare/v2.3.0...v2.3.1) - 2026-11-23
 
+### Added
+
+- Reproducible feature gallery projects in `examples/feature-gallery`, including community plugin and audible audio demos ([#379](https://github.com/AniMathIO/AniMathIO/pull/379), [#381](https://github.com/AniMathIO/AniMathIO/pull/381), [#383](https://github.com/AniMathIO/AniMathIO/pull/383))
 
 ### Fixed
 
-- *(editor)* Hot-load community plugins in preview, playback and math hosts ([#385](https://github.com/AniMathIO/AniMathIO/pull/385))
+- Community plugins now load and unload in the preview, audio playback and the Math dialog without restarting the editor ([#385](https://github.com/AniMathIO/AniMathIO/pull/385))
 
 
 ## [2.3.0](https://github.com/AniMathIO/AniMathIO/compare/v2.2.0...v2.3.0) - 2026-11-23
