@@ -300,42 +300,98 @@ class Builder:
         self.session.tool("save_project", path=str(project))
 
 
-def tone_fixture(path, duration, rate=44100):
-    """Deterministic speech-like fixture: noise floor plus tonal syllables.
+AUDIO_HALF = 3
+AUDIO_RATE = 48_000
 
-    Used by the audio card so the audio-basic chain is audible and the waveform
-    visualization bars have something honest to trace. Regenerated on demand;
-    nothing binary is committed.
-    """
+# (Start, length, frequency, peak level) for the voice-like or musical pulses.
+# No noise floor is added to cards whose effect only changes the signal itself.
+AUDIO_NOTES = {
+    "gain": [(0.20, 0.44, 392, 0.11), (0.80, 0.49, 494, 0.105),
+             (1.44, 0.45, 587, 0.12), (2.04, 0.68, 494, 0.115)],
+    "eq3": [(0.20, 0.56, 260, 0.17), (0.93, 0.49, 312, 0.18),
+            (1.58, 0.48, 390, 0.16), (2.23, 0.55, 260, 0.17)],
+    "compressor": [(0.20, 0.46, 440, 0.042), (0.80, 0.46, 440, 0.86),
+                   (1.40, 0.46, 494, 0.038), (2.00, 0.65, 494, 0.80)],
+    "gate": [(0.32, 0.26, 350, 0.51), (1.02, 0.26, 430, 0.54),
+             (1.72, 0.31, 320, 0.48), (2.43, 0.30, 390, 0.56)],
+    "highpass": [(0.35, 0.39, 784, 0.36), (0.97, 0.39, 880, 0.35),
+                 (1.60, 0.39, 988, 0.37), (2.26, 0.47, 880, 0.35)],
+    "voice_cleanup": [(0.26, 0.50, 370, 0.41), (1.63, 0.51, 415, 0.41),
+                      (2.40, 0.44, 330, 0.38)],
+    "denoise": [(0.62, 0.50, 315, 0.45), (1.48, 0.50, 360, 0.46),
+                (2.28, 0.48, 410, 0.43)],
+}
+
+# Leave room for processing and peaks introduced by the delivery codecs.
+AUDIO_FIXTURE_GAIN_DB = -4.5
+
+
+def audio_fixture(path, effect):
+    """Build one three-second mono WAV, repeated unchanged in the two clips."""
     rng = random.Random(20261123)
-    total = round(duration * rate)
-    samples = array.array("h", bytes(total * 2))
-    syllable = round(0.28 * rate)
-    cursor = round(0.36 * rate)
-    while cursor + syllable < total - rate * 0.14:
-        freq = rng.choice([220.0, 277.2, 329.6, 440.0, 554.4])
-        for i in range(syllable):
+    rate = AUDIO_RATE
+    samples = [0.0] * (AUDIO_HALF * rate)
+
+    for start, length, frequency, level in AUDIO_NOTES[effect]:
+        first, count = round(start * rate), round(length * rate)
+        for i in range(count):
             t = i / rate
-            # Voiced pulse with an attack/decay envelope and a soft formant.
-            envelope = math.sin(math.pi * i / syllable) ** 1.5
-            value = (
-                math.sin(2 * math.pi * freq * t)
-                + 0.4 * math.sin(2 * math.pi * freq * 2 * t)
-                + 0.15 * math.sin(2 * math.pi * freq * 3 * t)
-            )
-            sample = round(9000 * envelope * value / 1.55)
-            index = cursor + i
-            if index < total:
-                samples[index] = max(-32768, min(32767, sample))
-        cursor += syllable + round(0.12 * rate)
-    for i in range(total):
-        t = i / rate
-        noise = rng.uniform(-700, 700) + 3000 * math.sin(2 * math.pi * 55 * t)
-        mixed = samples[i] + round(noise)
-        samples[i] = max(-32768, min(32767, mixed))
+            pulse = math.tau * frequency * t
+            envelope = min(1, t / 0.045, (length - t) / 0.07)
+            voiced = (math.sin(pulse) + 0.33 * math.sin(2 * pulse)
+                      + 0.13 * math.sin(3 * pulse)) / 1.46
+            sample = level * voiced
+            if effect == "eq3":
+                # The same 1.56 kHz overtone rings through each changing note.
+                sample += 0.38 * math.sin(math.tau * 1560 * t)
+            samples[first + i] = envelope * sample
+
+    if effect == "voice_cleanup":
+        for start in (0.31, 1.68, 2.45):
+            first, count = round(start * rate), round(0.22 * rate)
+            for i, noise in enumerate(band_noise(rng, count, 7300, 1450)):
+                t = i / rate
+                envelope = min(1, t / 0.022, (0.22 - t) / 0.045)
+                samples[first + i] += 1.40 * envelope * noise
+
+    if effect == "denoise":
+        # Audio starts quietly while the spectral mask settles. The profile
+        # is learned from the steady bed before the first note.
+        for i, noise in enumerate(band_noise(rng, len(samples), 2750, 925)):
+            t = i / rate
+            fade = min(1, t / 0.15, (AUDIO_HALF - t) / 0.06)
+            samples[i] += 0.83 * fade * noise
+
+    if effect in {"gate", "highpass", "voice_cleanup"}:
+        for i in range(len(samples)):
+            t = i / rate
+            fade = min(1, t / 0.035, (AUDIO_HALF - t) / 0.045)
+            if effect == "gate":
+                noise = rng.uniform(-0.074, 0.074)
+            elif effect == "highpass":
+                noise = (0.36 * math.sin(math.tau * 180 * t)
+                         + 0.10 * math.sin(math.tau * 235 * t))
+            else:
+                noise = 0.060 * math.sin(math.tau * 175 * t)
+            samples[i] += fade * noise
+
+    assert max(map(abs, samples)) < 1, f"Clipped {effect} fixture"
+    gain = 10 ** (AUDIO_FIXTURE_GAIN_DB / 20)
+    pcm = array.array("h", (round(sample * gain * 32767) for sample in samples))
     if sys.byteorder != "little":
-        samples.byteswap()
+        pcm.byteswap()
     with wave.open(str(path), "wb") as output:
         output.setparams((1, 2, rate, 0, "NONE", "not compressed"))
-        output.writeframes(samples.tobytes())
+        output.writeframes(pcm.tobytes())
     return path
+
+
+def band_noise(rng, count, center, cutoff):
+    """Two low-pass stages shape white noise before shifting it up to center."""
+    rate = AUDIO_RATE
+    decay = math.exp(-math.tau * cutoff / rate)
+    low = smooth = 0.0
+    for i in range(count):
+        low = decay * low + (1 - decay) * rng.uniform(-1, 1)
+        smooth = decay * smooth + (1 - decay) * low
+        yield smooth * math.cos(math.tau * center * i / rate)
