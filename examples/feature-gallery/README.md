@@ -18,6 +18,10 @@ fixture.
 | Audio effects | `audio-*` plays the same fixture dry and with gain, 3-band EQ, compression, gating, high-pass filtering, voice cleanup or denoise. The waveforms come from the exported mix. |
 | Export | `webm-export` is available in both H.264/AAC MP4 and VP9/Opus WebM. `mp4-chapters` embeds chapter stops at 0, 2 and 4 seconds. |
 | Code Snippets | `code-snippets-reveal` and `code-snippets-morph` use the released community plugin to reveal and morph highlighted Python code. |
+| Molecule Studio | `molecule-caffeine` draws a skeletal structure, and `molecule-esterification` reveals the reactants and products of an esterification reaction. |
+| Ray Optics | `optics-lens` traces three principal rays through a converging lens, and `optics-tir` sweeps the incidence angle through the threshold for total internal reflection. |
+| Net Lab | `network-arp` shows ARP and a subsequent ping on a switched LAN, and `network-dns` follows a recursive DNS lookup. |
+| Physics Play | `physics-projectile` compares launch angles, and `physics-dominoes` follows a ball triggering a chain reaction. |
 
 ## Render and test
 
@@ -45,9 +49,15 @@ representative frames and checks MP4 chapters, the WebM codecs and the gain
 demo's audio. The `export --chapters` text sidecar follows YouTube's 10-second
 minimum, while the embedded MP4 carries all three short chapter stops.
 
-The Code Snippets projects require the
-[0.1.0 bundle](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.code-snippets%400.1.0).
-Install it from the release with its published SHA-256 using the
-[community plugin instructions](../../docs/plugins.md#installing-community-plugins), then
-enable community plugins and Code Snippets. Full gallery runs skip these two
-cards when the bundle is disabled or absent.
+The community projects use these released bundles:
+
+- [Code Snippets 0.1.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.code-snippets%400.1.0)
+- [Molecule Studio 0.1.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.molecule%400.1.0)
+- [Ray Optics 0.1.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.optics%400.1.0)
+- [Net Lab 1.0.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.network%401.0.0)
+- [Physics Play 0.1.0](https://github.com/AniMathIO/plugins/releases/tag/io.github.animathio.physics%400.1.0)
+
+Install each bundle from its release with its published SHA-256 using the
+[community plugin instructions](../../docs/plugins.md#installing-community-plugins),
+then enable community plugins and each installed plugin. Full render and smoke
+runs skip the cards for each absent or disabled plugin.

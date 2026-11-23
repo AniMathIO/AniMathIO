@@ -39,6 +39,12 @@ COMMUNITY_DOCS = (
     "/community/code-snippets"
 )
 COMMUNITY_ID = "io.github.animathio.code-snippets"
+COMMUNITY_PLUGINS = {
+    "molecule": ("Molecule Studio", "0.1.0"),
+    "optics": ("Ray Optics", "0.1.0"),
+    "network": ("Net Lab", "1.0.0"),
+    "physics": ("Physics Play", "0.1.0"),
+}
 RECTANGLE = [(0, 0), (1, 0), (1, 1), (0, 1)]
 
 
@@ -399,6 +405,16 @@ def build_code_snippets(b, output, mode):
     ])
 
 
+def build_community_scene(b, output, plugin, title, subtitle, params, placement, reveal_end):
+    if subtitle:
+        b.heading(title, subtitle)
+    name, _ = COMMUNITY_PLUGINS[plugin]
+    b.clip(name, f"io.github.animathio.{plugin}", params,
+           placement=placement, animations=[
+               curve({"Param": "progress"}, [(0, 0), (0.35, 0), (reveal_end, 1)])
+           ])
+
+
 # -- editor delivery features --------------------------------------------------
 
 
@@ -599,6 +615,54 @@ def registry():
             COMMUNITY_DOCS, summary, 5.0,
             lambda b, o, m=mode: build_code_snippets(b, o, m),
             community=True,
+        ))
+    for plugin, scene, title, subtitle, summary, params, placement, reveal_end, poster in [
+        ("molecule", "caffeine", "Caffeine draws itself", "Molecule Studio · SMILES to structure",
+         "Watch Molecule Studio draw caffeine’s fused rings and atom labels bond by bond.",
+         {"preset": "caffeine", "ink": WHITE, "cpk": False},
+         transform(0.5, 0.61, 0.79, 0.79), 3.8, 4.6),
+        ("molecule", "esterification", "Esterification", "Molecule Studio · Reaction diagram",
+         "Molecule Studio draws acetic acid and ethanol, then reveals ethyl acetate and water.",
+         {"preset": "esterification", "ink": WHITE, "cpk": False, "font_size": 60},
+         transform(0.5, 0.61, 0.94, 0.94), 4.4, 4.8),
+        ("optics", "lens", "Converging lens", "Ray Optics · Principal rays",
+         "Follow three rays through a converging lens to an inverted real image in Ray Optics.",
+         {"setup": "lens-diagram", "object_distance": 45},
+         transform(0.5, 0.61, 0.72, 0.72), 3.8, 4.6),
+        ("optics", "tir", "Total internal reflection", "Ray Optics · Glass to air",
+         "Ray Optics sweeps the incidence angle through the critical angle until only the reflected ray remains.",
+         {"setup": "tir", "index": 1.5, "angle_deg": 68},
+         transform(0.5, 0.61, 0.76, 0.76), 4.5, 4.7),
+        ("network", "arp", "ARP request and reply", None,
+         "Net Lab floods an ARP request across a switch, then uses the learned address to ping a peer.",
+         {"scenario": "arp", "topology": "single-switch", "table": "arp"},
+         transform(), 5.5, 3.8),
+        ("network", "dns", "Recursive DNS lookup", None,
+         "Net Lab follows a query for example.test from the client to its resolver and the authoritative server.",
+         {"scenario": "dns", "topology": "single-switch"},
+         transform(), 5.5, 3.7),
+        ("physics", "projectile", "Projectile trajectories", "Physics Play · Launch angles",
+         "Compare launch angles and follow the velocity arrow along the highlighted trajectory.",
+         {"scene": "projectile", "bodies": 5, "duration_s": 2.0},
+         transform(0.5, 0.60, 0.83, 0.83), 4.6, 2.0),
+        ("physics", "dominoes", "Domino chain reaction", "Physics Play · Contact and restitution",
+         "A rolling ball tips the first domino, and each contact carries the motion down the row.",
+         {"scene": "stack", "bodies": 8, "duration_s": 2.4,
+          "restitution": 0.35, "friction": 0.25},
+         transform(0.5, 0.60, 0.83, 0.83), 4.6, 1.8),
+    ]:
+        name, version = COMMUNITY_PLUGINS[plugin]
+        plugin_id = f"io.github.animathio.{plugin}"
+        tag = f"{plugin_id}%40{version}"
+        upstream = "https://github.com/AniMathIO/plugins"
+        cards.append(_card(
+            f"{plugin}-{scene}", title, ["community"], plugin_id,
+            f"{upstream}/blob/{tag}/community/{plugin}/README.md", summary,
+            6.0 if plugin == "network" else 5.0,
+            lambda b, o, args=(plugin, title, subtitle, params, placement, reveal_end):
+                build_community_scene(b, o, *args),
+            community=True, poster_time=poster, plugin_name=name,
+            release=f"{upstream}/releases/tag/{tag}",
         ))
     cards.append(
         _card(
