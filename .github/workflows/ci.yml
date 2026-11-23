@@ -17,6 +17,16 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Allow room for the capped steps, setup and post-job cleanup.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 210 || 150 }}
+    # Renovate rebases can push the same branch repeatedly while earlier runs
+    # are still going; each superseded run wasted a full runner and raced the
+    # rust-cache save ("another job may be creating this cache"), which is how
+    # the 2026-11-22 cache-miss cascade started. Cancel superseded runs, but
+    # never a run on main (a push there is already sequential).
+    concurrency:
+      group: ci-check-${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}
+      cancel-in-progress: ${{ !startsWith(github.ref, 'refs/heads/main') }}
     env:
       CARGO_BUILD_JOBS: 3
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -156,6 +166,10 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         with:
           workspaces: .
+          # PRs restore only. A failed run on main can still save compiled
+          # dependencies for the next run if the post-job step executes.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - name: Build plugins
         if: steps.changes.outputs.docs_only != 'true'
         shell: bash
@@ -172,21 +186,28 @@ jobs:
       - name: Check formatting
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo fmt --all --check
+      # Run 45050614020 measured Windows Tests at 56 min on a cold cache.
+      # Ubuntu Tests reached 43 min on a cold cache.
       - name: Clippy
+        timeout-minutes: 25
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
+        timeout-minutes: ${{ runner.os == 'Windows' && 85 || 65 }}
         if: steps.changes.outputs.docs_only != 'true'
         run: cargo test --workspace --locked --no-fail-fast
       # The whisper.cpp speech engine (cargo feature `whisper`) needs cmake, a C++ toolchain and
       # libclang, so it is not part of the default workspace build. Build, lint and test it
       # here on both OSes; the model-backed test is #[ignore]d, CI never downloads a model.
+      # The Windows step took about 33.5 min on a cold cache in run 45050614020.
       - name: Speech engine (whisper feature)
+        timeout-minutes: 30
         if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
         run: |
           cargo clippy -p animathio-transcribe -p animathio-cli --features animathio-transcribe/whisper,animathio-cli/whisper --all-targets --locked -- -D warnings
           cargo test -p animathio-transcribe --features whisper --locked
       - name: Speech engine (whisper feature, Windows)
+        timeout-minutes: 51
         if: runner.os == 'Windows' && steps.changes.outputs.docs_only != 'true'
         env:
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
