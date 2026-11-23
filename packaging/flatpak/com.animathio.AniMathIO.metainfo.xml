@@ -25,6 +25,8 @@
   </screenshots>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="2.3.0" date="2026-11-23"><description><p>A redesigned editor, microphone recording, optional natural-language LaTeX authoring, WebM export, embedded MP4 chapters, maintain pitch and clipped and per-character slide presets. The last feature release of AniMathIO 2.</p></description></release>
+    <release version="2.2.0" date="2026-11-17"><description><p>Community plugins, a reorganized Library, inline LaTeX colours and Flatpak build files.</p></description></release>
     <release version="2.1.0" date="2026-11-16"><description><p>Desktop editor improvements and release automation updates.</p></description></release>
     <release version="2.0.0" date="2026-11-16"><description><p>Rust rewrite with a multi-track editor and sandboxed WebAssembly plugins.</p></description></release>
   </releases>
