@@ -599,6 +599,10 @@ authoring surface, CPU golden frames and H.264/AAC export offline. Each includes
 landscape and vertical layouts; the opt-in `scripts/showcase-export.sh` produces
 full deliveries using checksum-pinned public-domain recordings.
 
+The [feature gallery](../examples/feature-gallery/README.md) has short, editable
+projects for individual plugins, effects and animation presets, plus demos of
+WebM export and MP4 chapters.
+
 Scene detection: **Clip → Split at scene changes…** reviews sampled hard cuts with thumbnails and toggles, then splits linked video/audio or adds markers in one undo step. CLI `scenes` and headless MCP expose the same analysis.
 
 ## Update notices
