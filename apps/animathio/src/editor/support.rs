@@ -1582,9 +1582,8 @@ pub(super) fn plugins_cache_dir() -> PathBuf {
     crate::editor_env::plugin_cache_dir()
 }
 
-/// Load every clip-source plugin from the bundled build output and the user
-/// plugins directory. Descriptors are plain data for the UI; the host itself is
-/// kept on the UI thread and drives both preview and control rendering.
+/// Load bundled plugins and any currently enabled community plugins. Each caller owns
+/// its host. Descriptors are plain data for the UI.
 pub(crate) fn load_plugins() -> (Option<PluginHost>, Vec<PluginDescriptor>, Option<String>) {
     let source = crate::editor_env::plugin_source();
     if source == PluginSource::None {

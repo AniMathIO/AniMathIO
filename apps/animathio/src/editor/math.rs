@@ -1,5 +1,7 @@
 //! Math library and a reusable, draft-based object editor. Preview never mutates the project.
 
+use std::sync::{Mutex, OnceLock};
+
 use super::assist::{AssistEvent, AssistPanel};
 use super::*;
 use crate::style::{self, TextRole as _, color, hex};
@@ -8,6 +10,7 @@ use animathio_control::{
     math_object_draft, math_object_range,
 };
 use animathio_core::ParamValue;
+use animathio_plugin_host::CommunityStore;
 use gpui_component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_component::input::{
     Input, InputEvent, InputState, NumberInput, NumberInputEvent, StepAction, Textarea,
@@ -21,25 +24,43 @@ use gpui_component::{Disableable, WindowExt};
 pub(super) struct MathLibrary {
     started: bool,
     images: BTreeMap<usize, Arc<RenderImage>>,
+    pub(super) preview_host: Arc<MathPreviewHost>,
 }
 
-// The preview host is shared across worker jobs, retaining compiled components and
-// bounded plugin output caches while drafts change. Never acquire it on the UI thread.
-fn render_preview(
-    draft: &MathObjectDraft,
-    size: (u32, u32),
-    thumbnail: bool,
-) -> Result<Arc<RenderImage>, String> {
-    static HOST: std::sync::OnceLock<std::sync::Mutex<Option<PluginHost>>> =
-        std::sync::OnceLock::new();
-    let mut guard = HOST
-        .get_or_init(|| std::sync::Mutex::new(load_plugins().0))
-        .lock()
-        .map_err(|e| e.to_string())?;
-    let host = guard
-        .as_mut()
-        .ok_or("Build the first-party plugins to preview math objects")?;
-    preview(draft, size, host, thumbnail)
+/// Retains compiled components and bounded plugin output caches across math preview jobs.
+#[derive(Default)]
+pub(super) struct MathPreviewHost {
+    host: OnceLock<Mutex<Option<PluginHost>>>,
+    pending_community: Mutex<Option<CommunityStore>>,
+}
+
+impl MathPreviewHost {
+    pub(super) fn sync_community_plugins(&self, store: CommunityStore) {
+        // Only the workers hold the host lock. The UI queues the latest store without
+        // waiting for an in-flight typeset or render.
+        *self.pending_community.lock().unwrap() = Some(store);
+    }
+
+    fn render(
+        &self,
+        draft: &MathObjectDraft,
+        size: (u32, u32),
+        thumbnail: bool,
+    ) -> Result<Arc<RenderImage>, String> {
+        let mut guard = self
+            .host
+            .get_or_init(|| Mutex::new(load_plugins().0))
+            .lock()
+            .map_err(|e| e.to_string())?;
+        let host = guard
+            .as_mut()
+            .ok_or("Build the first-party plugins to preview math objects")?;
+        let pending = self.pending_community.lock().unwrap().take();
+        if let Some(store) = pending {
+            host.sync_community_plugins(&store);
+        }
+        preview(draft, size, host, thumbnail)
+    }
 }
 
 /// Drop the host's transport prefixes ("plugin produced an invalid scene: service-failed: ...")
@@ -239,6 +260,7 @@ impl Editor {
     pub(super) fn math_cards(&mut self, rem: gpui::Pixels, cx: &mut Context<Self>) -> Div {
         if !self.math_library.started {
             self.math_library.started = true;
+            let preview_host = self.math_library.preview_host.clone();
             cx.spawn(async move |this, cx| {
                 let images = cx
                     .background_spawn(async move {
@@ -256,7 +278,8 @@ impl Editor {
                                 if k == MathObjectKind::Point {
                                     draft.fields.insert("radius".into(), "0.35".into());
                                 }
-                                render_preview(&draft, (180, 120), true)
+                                preview_host
+                                    .render(&draft, (180, 120), true)
                                     .ok()
                                     .map(|p| (i, p))
                             })
@@ -642,6 +665,7 @@ impl MathEditor {
         self.busy = true;
         self.error = None;
         let draft = self.draft.clone();
+        let editor = self.editor.clone();
         let factor = 480. / f64::from(self.size.0.max(self.size.1));
         let size = (
             (f64::from(self.size.0) * factor).round().max(1.) as u32,
@@ -657,8 +681,13 @@ impl MathEditor {
             {
                 return;
             }
+            let Ok(preview_host) =
+                editor.read_with(cx, |editor, _| editor.math_library.preview_host.clone())
+            else {
+                return;
+            };
             let result = cx
-                .background_spawn(async move { render_preview(&draft, size, false) })
+                .background_spawn(async move { preview_host.render(&draft, size, false) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.generation == generation {

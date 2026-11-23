@@ -3,6 +3,22 @@
 use super::*;
 
 impl Editor {
+    pub(super) fn make_clock(&self) -> Box<dyn Clock> {
+        self.env
+            .make_clock(&self.project, &self.pool, &self.playback_effects)
+    }
+
+    pub(super) fn refresh_playback_effects(&mut self) {
+        if let Some((rate, channels)) = self.clock.mixer_format() {
+            // The handle already sees additions/removals. Replace the cached effect output
+            // and state so the next mixer chunk cannot reuse blocks made by the old plugins.
+            match self.playback_effects.prepare(&self.pool, rate, channels) {
+                Ok(mixer) => self.clock.set_mixer(Arc::new(mixer)),
+                Err(error) => self.error = Some(format!("Audio preparation failed: {error}")),
+            }
+        }
+    }
+
     pub(super) fn request_render(&mut self, time: Time) {
         let size = if self.bench.is_some() {
             BENCH_SIZE
@@ -23,8 +39,7 @@ impl Editor {
         });
     }
 
-    /// Run plugin clips through the plugin host so the render worker only ever
-    /// sees media, vector and error clips.
+    /// Run plugin clips through the editor's host for synchronous control rendering.
     pub(super) fn resolve_scene(&mut self, scene: Scene, size: (u32, u32)) -> Scene {
         match &mut self.plugin_host {
             Some(host) => host.resolve(&scene, size),
@@ -34,7 +49,7 @@ impl Editor {
 
     pub(super) fn pump_results(&mut self, window: &mut Window) -> bool {
         let mut changed = false;
-        for warning in crate::playback::take_audio_warnings() {
+        for warning in self.playback_effects.take_warnings() {
             self.notices.push(crate::style::Toast::warning(format!(
                 "Audio effect unavailable: {warning}"
             )));

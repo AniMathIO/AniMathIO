@@ -78,7 +78,7 @@ impl Editor {
         self.audio_generation = self.audio_generation.wrapping_add(1);
         self.pool = AudioPool::default();
         self.audio_ids.clear();
-        self.clock = self.env.make_clock(&self.project, &self.pool);
+        self.clock = self.make_clock();
         self.path = None;
         self.dirty = false;
         self.position = Time(0);
@@ -212,7 +212,7 @@ impl Editor {
                     self.error = Some(format!("Could not prepare the project audio: {error}"));
                 }
                 self.audio_ids = audio_asset_ids(&self.project);
-                self.clock = self.env.make_clock(&self.project, &self.pool);
+                self.clock = self.make_clock();
                 self.position = Time(0);
                 self.playing = false;
                 self.next_id = next_id(&self.project);

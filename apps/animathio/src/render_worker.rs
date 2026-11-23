@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use animathio_core::{AssetId, Scene};
+use animathio_plugin_host::CommunityStore;
 use animathio_render::{BackendKind, RenderCtx, preview_backend, render_preview};
 use gpui::RenderImage;
 
@@ -23,10 +24,13 @@ pub(crate) struct RenderResult {
     /// failing effects passed through, so the preview never goes black over a missing plugin.
     pub(crate) effect_error: Option<String>,
     pub(crate) image: Result<Arc<RenderImage>, String>,
+    #[cfg(test)]
+    pub(crate) scene: Scene,
 }
 
 pub(crate) enum WorkerMsg {
     Load(Arc<BTreeMap<AssetId, Vec<u8>>>),
+    SyncCommunity(CommunityStore),
     /// Switch the preview backend; GPU falls back to CPU when unavailable.
     Backend(BackendKind),
     Render(RenderRequest),
@@ -112,12 +116,30 @@ impl RenderWorker {
         let _ = self.tx.send(WorkerMsg::Backend(kind));
     }
 
+    pub(crate) fn sync_community_plugins(&self, store: CommunityStore) {
+        let _ = self.tx.send(WorkerMsg::SyncCommunity(store));
+    }
+
     pub(crate) fn request(&self, request: RenderRequest) {
         let _ = self.tx.send(WorkerMsg::Render(request));
     }
 
     pub(crate) fn try_result(&self) -> Option<RenderResult> {
         self.rx.try_recv().ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wait_for_result(&self, generation: u64) -> RenderResult {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let result = self
+                .rx
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("preview worker produced a frame");
+            if result.generation == generation {
+                return result;
+            }
+        }
     }
 }
 
@@ -129,20 +151,26 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>, active: &Ato
     }
     while let Ok(msg) = rx.recv() {
         // Drain whatever is queued now, keep only the newest render, and apply any
-        // asset load before it. Older requests are discarded unrendered.
+        // asset and plugin changes before it. Older requests are discarded unrendered.
         let mut pending = vec![msg];
         while let Ok(next) = rx.try_recv() {
             pending.push(next);
         }
         let mut assets = None;
         let mut backend = None;
+        let mut community = None;
         let mut latest = None;
         for msg in pending {
             match msg {
                 WorkerMsg::Load(loaded) => assets = Some(loaded),
+                WorkerMsg::SyncCommunity(store) => community = Some(store),
                 WorkerMsg::Backend(kind) => backend = Some(kind),
                 WorkerMsg::Render(request) => latest = Some(request),
             }
+        }
+        if let (Some(store), Some(host)) = (community, &mut host) {
+            // The effect processor shares this host's registry.
+            host.sync_community_plugins(&store);
         }
         if let Some(assets) = assets {
             // Rebuilding the context drops resources from the previous project but
@@ -186,6 +214,8 @@ fn worker_loop(rx: &Receiver<WorkerMsg>, tx: &Sender<RenderResult>, active: &Ato
                 generation: request.generation,
                 effect_error,
                 image,
+                #[cfg(test)]
+                scene: request.scene,
             });
         }
     }
