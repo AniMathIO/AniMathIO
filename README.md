@@ -70,6 +70,7 @@ compiler and libclang required). Models download on demand with confirmation.
 - [Architecture](docs/architecture.md) — crate map, time model and engine rules.
 - [Migrating from 1.x](docs/migrating-from-v1.md) — import projects and known gaps.
 - [Math showcases](examples/showcase/README.md) — reproducible offline explainers.
+- [Feature gallery](examples/feature-gallery/README.md) — editable demos of plugins, effects, presets and export formats.
 
 The frozen Electron implementation remains on the
 [`legacy` branch](https://github.com/AniMathIO/AniMathIO/tree/legacy).

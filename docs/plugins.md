@@ -1293,7 +1293,9 @@ uses 256 base intervals with at most four subdivision levels; nonfinite
 evaluations or unresolved discontinuities break the path.
 This remains plugin data and needs no project schema change.
 The [showcase builders](../examples/showcase/README.md) exercise this with a unit
-circle, independent function-chart axes and a subdued grid.
+circle, independent function-chart axes and a subdued grid. The
+[feature gallery](../examples/feature-gallery/README.md) includes a sine plot
+with tick labels and editable examples of the other first-party plugins.
 
 Function plots are clipped to the graph viewport. Adaptive subdivision breaks
 intervals that cannot resolve a discontinuity, so poles are not connected across
