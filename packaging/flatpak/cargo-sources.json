@@ -6398,14 +6398,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/lru/lru-0.19.1.crate",
-        "sha256": "83be4da409554841af087163ad187608824ad8ca8713d8e124c8e0f704a2f92f",
-        "dest": "cargo/vendor/lru-0.19.1"
+        "url": "https://static.crates.io/crates/lru/lru-0.19.2.crate",
+        "sha256": "d4e2a1b977b42ee8b53a2a4adbd1183431c493f1d1960b7ccd893e2f0b9407ba",
+        "dest": "cargo/vendor/lru-0.19.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"83be4da409554841af087163ad187608824ad8ca8713d8e124c8e0f704a2f92f\", \"files\": {}}",
-        "dest": "cargo/vendor/lru-0.19.1",
+        "contents": "{\"package\": \"d4e2a1b977b42ee8b53a2a4adbd1183431c493f1d1960b7ccd893e2f0b9407ba\", \"files\": {}}",
+        "dest": "cargo/vendor/lru-0.19.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {
