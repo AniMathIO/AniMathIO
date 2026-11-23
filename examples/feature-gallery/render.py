@@ -57,6 +57,12 @@ def project_data(project):
         return json.loads(archive.read("project.json"))
 
 
+def export_videos(project, mp4, webm, *, fps=FPS):
+    """Use the CLI encoders' 128 kb/s audio setting in both delivery formats."""
+    run("export", project, "-o", mp4, "--crf", 27, "--fps", fps, "--overwrite")
+    run("export", project, "-o", webm, "--crf", 31, "--fps", fps, "--overwrite")
+
+
 def render_card(card, project, output):
     slug = card["slug"]
     videos = output / "videos"
@@ -65,8 +71,7 @@ def render_card(card, project, output):
     images.mkdir(exist_ok=True)
     mp4 = videos / f"{slug}.mp4"
     webm = videos / f"{slug}.webm"
-    run("export", project, "-o", mp4, "--crf", 27, "--fps", FPS, "--overwrite")
-    run("export", project, "-o", webm, "--crf", 31, "--fps", FPS, "--overwrite")
+    export_videos(project, mp4, webm)
 
     seconds = project_data(project)["duration"] / TICKS
     at = card.get("poster_time", seconds / 2)

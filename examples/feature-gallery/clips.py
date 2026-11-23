@@ -18,6 +18,8 @@ import subprocess
 import sys
 
 from gallery import (
+    AUDIO_HALF,
+    AUDIO_RATE,
     BACKGROUND,
     BLUE,
     GOLD,
@@ -29,7 +31,7 @@ from gallery import (
     curve,
     path_verbs,
     ticks,
-    tone_fixture,
+    audio_fixture,
     transform,
 )
 
@@ -316,29 +318,31 @@ PRESET_CARDS = [
 
 
 AUDIO_EFFECTS = [
-    ("gain", "Gain / trim", "Raise the level by 6 dB.", {"gain_db": 6}),
-    ("eq3", "3-band EQ", "Reduce the low shelf and boost the midrange.",
-     {"low_freq": 300, "low_gain_db": -16, "mid_freq": 500, "mid_gain_db": 9}),
-    ("compressor", "Compressor", "Tame peaks with a lower threshold and 8:1 ratio.",
-     {"threshold_db": -24, "ratio": 8, "makeup_db": 5}),
-    ("gate", "Noise gate", "Attenuate quiet intervals below the threshold.",
-     {"threshold_db": -17, "hold_ms": 12, "release_ms": 35}),
-    ("highpass", "High-pass filter", "Reduce the low-frequency rumble.",
-     {"frequency": 160}),
-    ("voice_cleanup", "Voice cleanup", "Apply high-pass filtering, gating and de-essing.",
-     {"highpass_hz": 140, "gate_threshold_db": -37}),
-    ("denoise", "Denoise", "Reduce the fixture’s steady noise floor.",
-     {"strength": 1, "sensitivity_db": 12}),
+    ("gain", "Gain / trim", "Listen for the whole melody getting louder.",
+     {"gain_db": 16}),
+    ("eq3", "3-band EQ", "Listen for the nasal ring fading out.",
+     {"low_freq": 310, "low_gain_db": 5, "mid_freq": 1560, "mid_gain_db": -18, "mid_q": 0.8}),
+    ("compressor", "Compressor", "Listen for the loud notes getting closer to the quiet ones.",
+     {"threshold_db": -34, "ratio": 12, "attack_ms": 0.5, "release_ms": 60, "makeup_db": 11}),
+    ("gate", "Noise gate", "Listen for the hiss dropping out between pulses.",
+     {"threshold_db": -20, "attack_ms": 2, "hold_ms": 12, "release_ms": 28, "range_db": 48}),
+    ("highpass", "High-pass filter", "Listen for the low buzz disappearing.",
+     {"frequency": 570}),
+    ("voice_cleanup", "Voice cleanup", "Listen for the sharp S sounds getting softer.",
+     {"highpass_hz": 360, "gate_threshold_db": -27,
+      "deess_freq": 4000, "deess_threshold_db": -51, "deess_amount": 1}),
+    ("denoise", "Denoise", "Listen for the steady static fading even during notes.",
+     {"strength": 1, "sensitivity_db": 12, "smoothing": 0.35}),
 ]
 
 
 def audio_samples(path):
-    """Decode the exported mix in mono for the waveform and smoke test."""
+    """Decode the export in mono at its native rate without integer clipping."""
     pcm = subprocess.check_output([
-        "ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1",
-        "-ar", "8000", "-f", "s16le", "-",
+        "ffmpeg", "-v", "error", "-i", str(path), "-vn",
+        "-af", "pan=mono|c0=0.5*c0+0.5*c1", "-ar", str(AUDIO_RATE), "-f", "f32le", "-",
     ])
-    samples = array.array("h")
+    samples = array.array("f")
     samples.frombytes(pcm)
     if sys.byteorder != "little":
         samples.byteswap()
@@ -346,37 +350,45 @@ def audio_samples(path):
 
 
 def build_audio(b, output, effect, title, summary, params):
-    wav = tone_fixture(output / "gallery-tone.wav", 3)
+    wav = audio_fixture(output / f"{effect}.wav", effect)
     dry = b.session.tool("add_media", path=str(wav))["clip_id"]
     wet = b.session.tool("add_media", path=str(wav))["clip_id"]
     b.session.batch([
-        {"TrimClip": {"id": dry, "range": {"start": 0, "end": ticks(3)}, "source_offset": 0}},
-        {"TrimClip": {"id": wet, "range": {"start": ticks(3), "end": ticks(6)}, "source_offset": 0}},
+        {"TrimClip": {"id": clip, "range": {
+            "start": ticks(i * AUDIO_HALF), "end": ticks((i + 1) * AUDIO_HALF),
+        }, "source_offset": 0}}
+        for i, clip in enumerate((dry, wet))
     ])
-    b.session.tool("add_audio_effect", id=str(wet), plugin="org.animathio.audio-basic",
-                   effect=effect, params=params)
+    added = b.session.tool("add_audio_effect", id=str(wet), plugin="org.animathio.audio-basic",
+                           effect=effect, params=params)
+    if effect == "denoise":
+        start_ms = AUDIO_HALF * 1000
+        b.session.tool("learn_noise", clip=wet, effect=added["effect_id"],
+                       from_ms=start_ms + 200, to_ms=start_ms + 550)
 
-    # The waveform comes from the exported mix, so it includes the actual effect.
-    scratch = output / f"waveform-{effect}.amio"
+    # Both waveforms use the same vertical scale and come from the audible mix.
+    scratch = output / "waveform.amio"
     mix = scratch.with_suffix(".mp4")
-    try:
-        b.save(scratch)
-        run("export", scratch, "-o", mix, "--fps", 4, "--crf", 35, "--overwrite")
-        samples = audio_samples(mix)
-    finally:
-        scratch.unlink(missing_ok=True)
-        mix.unlink(missing_ok=True)
+    b.save(scratch)
+    run("export", scratch, "-o", mix, "--fps", 4, "--crf", 35, "--overwrite")
+    samples = audio_samples(mix)
+    bar_count = 64
+    per_bar = AUDIO_RATE * AUDIO_HALF // bar_count
+    levels = []
+    for bar in range(2 * bar_count):
+        window = samples[bar * per_bar:(bar + 1) * per_bar]
+        assert len(window) == per_bar, "Short waveform export"
+        levels.append(math.sqrt(sum(s * s for s in window) / per_bar))
+    scale = 0.110 / max(levels)
 
     b.sync_tracks()
     b.heading(title, summary)
-    for i, (label, color) in enumerate([("Dry", BLUE), ("With effect", MINT)]):
+    for i, (label, color) in enumerate([("Dry · 0–3 s", BLUE), ("With effect · 3–6 s", MINT)]):
         y = 0.47 + i * 0.27
-        b.text(label, 0.5, y - 0.139, 0.044, color)
+        b.text(label, 0.5, y - 0.139, 0.041, color)
         path = []
-        for bar in range(64):
-            start = i * 24000 + bar * 375
-            peak = max((abs(s) for s in samples[start:start + 375]), default=0)
-            h = max(0.002, min(0.115, peak / 130000))
+        for bar in range(bar_count):
+            h = max(0.002, levels[i * bar_count + bar] * scale)
             x = 0.11 + bar * 0.0124
             path.extend(path_verbs([(x, y - h), (x + 0.008, y - h),
                                     (x + 0.008, y + h), (x, y + h)], close=True))
@@ -385,8 +397,9 @@ def build_audio(b, output, effect, title, summary, params):
             "fill": color, "stroke_width": 0,
         })
         b.shape("Playhead", RECTANGLE, WHITE, True, stroke_width=0,
-                start=i * 3, end=(i + 1) * 3, placement=transform(0.11, y, 0.003, 0.18),
-                animations=[curve({"Transform": "X"}, [(0, 0.11), (3, 0.89)])])
+                start=i * AUDIO_HALF, end=(i + 1) * AUDIO_HALF,
+                placement=transform(0.11, y, 0.003, 0.18),
+                animations=[curve({"Transform": "X"}, [(0, 0.11), (AUDIO_HALF, 0.89)])])
 
 
 # -- community ----------------------------------------------------------------
@@ -602,7 +615,7 @@ def registry():
         cards.append(_card(
             f"audio-{effect.replace('_', '-')}", title, ["audio"],
             f"org.animathio.audio-basic / {effect}", f"{DOCS}/plugins",
-            f"{summary} Hear the same fixture dry, then processed.", 6.0,
+            f"{summary} Blue is dry, green is with the effect.", 2 * AUDIO_HALF,
             lambda b, o, args=(effect, title, summary, params): build_audio(b, o, *args),
             audio_effect=effect,
         ))
