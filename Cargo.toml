@@ -24,7 +24,7 @@ proptest = "1"
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-component = "0.10.0"
 # Not re-exported by gpui-component: the editor forces its layout direction (see `style::init_components`).
-gpui-base = "0.10"
+gpui-base = "0.11"
 gpui-kit-assets = "0.10.0"
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "wayland", "x11", "runtime_shaders"] }
 rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
