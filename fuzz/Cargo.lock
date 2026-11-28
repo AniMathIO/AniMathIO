@@ -32,7 +32,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-audio"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "animathio-core",
  "arc-swap",
@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-core"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "blake3",
  "serde",
@@ -56,7 +56,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-format"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "animathio-core",
  "animathio-plugin-api",
@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-import-manim"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "animathio-core",
  "animathio-plugin-api",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-import-v1"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "animathio-core",
  "animathio-plugin-api",
@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-media"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "animathio-audio",
  "animathio-core",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "animathio-plugin-api"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "animathio-core",
  "semver",
