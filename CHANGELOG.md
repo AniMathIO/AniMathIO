@@ -4,6 +4,10 @@ All notable changes to AniMathIO 2.x are documented in this file. It is generate
 from [Conventional Commits](https://www.conventionalcommits.org) by release-plz and
 git-cliff. Changes to 1.x are in the [v1 release notes](https://github.com/AniMathIO/AniMathIO/releases?q=animathio-v1).
 
+## [2.3.2](https://github.com/AniMathIO/AniMathIO/compare/v2.3.1...v2.3.2) - 2026-11-28
+
+
+
 ## [2.3.1](https://github.com/AniMathIO/AniMathIO/compare/v2.3.0...v2.3.1) - 2026-11-23
 
 ### Added
