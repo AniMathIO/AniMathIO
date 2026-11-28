@@ -237,6 +237,6 @@ jobs:
       # never in the docs-only set), so this is skipped on the fast path too.
       - name: Check licenses
         if: runner.os == 'Linux' && steps.changes.outputs.docs_only != 'true'
-        uses: EmbarkStudios/cargo-deny-action@81891abc19297b21343b15ef67dc61e4aea74fda # v2
+        uses: EmbarkStudios/cargo-deny-action@bb119f768ea239e765aeaef5769558d4f21213aa # v2
         with:
           command: check licenses
